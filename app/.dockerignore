@@ -1,0 +1,31 @@
+# Everything the image does not need. Two reasons: a smaller build context, and
+# a guarantee that a stray .env or a local node_modules built for darwin/arm64
+# cannot end up in a container.
+
+node_modules
+npm-debug.log*
+
+# Tests and the bot harness run in CI and on a laptop, never in the container.
+**/*.test.ts
+src/bots
+
+# Local development only.
+docker-compose.yml
+.env
+.env.*
+!.env.example
+data/
+
+# Not code.
+*.md
+.git
+.github
+.gitignore
+infra
+.DS_Store
+
+# tsc never runs in the image — types are stripped, not checked.
+tsconfig.json
+
+Dockerfile
+.dockerignore

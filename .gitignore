@@ -8,7 +8,11 @@ dist/
 .terraform/
 *.tfstate
 *.tfstate.*
-.terraform.lock.hcl
+*.tfvars
+!*.tfvars.example
+
+# .terraform.lock.hcl is deliberately NOT ignored: it pins provider hashes so
+# a run in HCP Terraform resolves what was tested here, not whatever is newest.
 
 # macOS
 .DS_Store

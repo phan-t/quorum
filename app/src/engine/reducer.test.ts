@@ -327,10 +327,13 @@ describe("join", () => {
     assert.equal(participant(r.state, "a").playerNumber, 1);
   });
 
-  test("rejoin under the same pid may rename", () => {
+  // Renaming is host-only (SPEC.md "Kick and rename"). A phone reconnecting
+  // with whatever is in its text box must not rename the participant, or
+  // anyone could rename themselves — including undoing a host's rename.
+  test("rejoin under the same pid keeps the stored nickname", () => {
     const s = accept(lobby(), [join("a", "Ana")]);
     const r = run(s, join("a", "Anastasia"));
-    assert.equal(participant(r.state, "a").nickname, "Anastasia");
+    assert.equal(participant(r.state, "a").nickname, "Ana");
     assert.equal(participant(r.state, "a").playerNumber, 1);
   });
 

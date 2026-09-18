@@ -23,6 +23,8 @@ import { AWAY_AFTER_MS } from "./views.ts";
 const PORT = Number(process.env["PORT"] ?? 3000);
 const ADMIN_KEY = process.env["QUORUM_ADMIN_KEY"] ?? "";
 const VERSION = process.env["QUORUM_VERSION"] ?? "dev";
+/** Set behind a load balancer that appends X-Forwarded-For. */
+const TRUST_PROXY = process.env["QUORUM_TRUST_PROXY"] === "1";
 
 const registry = new SessionRegistry();
 
@@ -139,8 +141,16 @@ interface Pending {
 }
 
 wss.on("connection", (socket: WebSocket, req: IncomingMessage) => {
+  // X-Forwarded-For is client-supplied. Behind the ALB the *last* entry is
+  // the one the load balancer appended and the only one we can believe; the
+  // first is whatever the caller typed, which would let anyone pick their own
+  // rate-limit bucket. Off the ALB, trust the socket.
+  const xff = (req.headers["x-forwarded-for"] as string | undefined)
+    ?.split(",")
+    .map((s) => s.trim())
+    .filter(Boolean);
   const ip =
-    (req.headers["x-forwarded-for"] as string | undefined)?.split(",")[0]?.trim() ??
+    (TRUST_PROXY && xff && xff.length > 0 ? xff[xff.length - 1] : undefined) ??
     req.socket.remoteAddress ??
     "unknown";
 
@@ -192,7 +202,7 @@ wss.on("connection", (socket: WebSocket, req: IncomingMessage) => {
           });
           return;
         }
-        const event = commandToEvent(msg.cmd);
+        const event = msg.cmd ? commandToEvent(msg.cmd) : null;
         if (!event) {
           runtime.send(client, {
             t: "refusedCmd",
@@ -203,6 +213,27 @@ wss.on("connection", (socket: WebSocket, req: IncomingMessage) => {
           return;
         }
         const out = runtime.apply(event, now);
+        // Kicking or releasing has to reach the device, not just the state:
+        // a kicked participant whose socket stays open keeps watching, and a
+        // released name is meant to free the *old* phone.
+        if (
+          out.applied &&
+          (cmd_pid(msg.cmd) !== null)
+        ) {
+          const pid = cmd_pid(msg.cmd)!;
+          for (const c of [...runtime.clients]) {
+            if (c.pid !== pid) continue;
+            runtime.clients.delete(c);
+            runtime.refuse(
+              c.socket,
+              msg.cmd?.name === "participant.kick" ? "kicked" : "not_joinable",
+              msg.cmd?.name === "participant.kick"
+                ? "The host removed you. Rejoin with a different nickname."
+                : "Your nickname was released. Join again to come back.",
+            );
+          }
+          runtime.broadcastRoster(now);
+        }
         if (out.rejection) {
           runtime.send(client, {
             t: "refusedCmd",
@@ -287,7 +318,11 @@ function handleHello(
       nickname_taken: "nickname_taken",
       invalid_nickname: "invalid_nickname",
       joins_locked: "lobby_locked",
-      not_joinable: "not_joinable",
+      kicked: "kicked",
+      // A session that is not open has no live code, so that is what the
+      // phone is told. "malformed" would blame the client for our state.
+      not_joinable: "no_such_code",
+      session_closed: "no_such_code",
     };
     return refuseBare(
       socket,
@@ -307,6 +342,14 @@ function handleHello(
     protocol: PROTOCOL_VERSION,
   });
   return { runtime, client };
+}
+
+/** The pid a command targets, when it targets one. */
+function cmd_pid(cmd: HostCommand | null): string | null {
+  if (!cmd) return null;
+  return cmd.name === "participant.kick" || cmd.name === "participant.release"
+    ? cmd.pid
+    : null;
 }
 
 function commandToEvent(cmd: HostCommand): Event | null {

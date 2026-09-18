@@ -43,6 +43,21 @@ import { spotsRemaining } from "./scoring.ts";
  * describes, and deliberate: near-identical names in a live game are a
  * scorekeeping problem, not a feature.
  */
+/**
+ * Strip control characters and collapse interior whitespace.
+ *
+ * ARCHITECTURE.md requires this at the edge. A tab or a newline in a nickname
+ * breaks every aligned surface — the console roster, the big screen, the CSV
+ * export — and a bidi override can reorder text around it on someone else's
+ * screen. The display string is sanitised, not just the collision key.
+ */
+export function sanitiseNickname(raw: string): string {
+  return raw
+    .replace(/[\p{Cc}\p{Cf}]/gu, "")
+    .replace(/\s+/gu, " ")
+    .trim();
+}
+
 export function nicknameKey(nickname: string): string {
   return nickname
     .normalize("NFKD")
@@ -157,7 +172,7 @@ export function reduce(
         );
       }
 
-      const nickname = event.nickname.trim();
+      const nickname = sanitiseNickname(event.nickname);
       const key = nicknameKey(nickname);
       if (key === "") {
         return unchanged(
@@ -184,6 +199,24 @@ export function reduce(
         );
       }
 
+      // Kicked: they may come back, but not under the name they were kicked
+      // for. SPEC.md — "can rejoin under a different nickname".
+      if (existing?.kicked && existing.nicknameKey === key) {
+        return unchanged(
+          reject(
+            { pid: event.pid },
+            "kicked",
+            "Pick a different nickname to rejoin.",
+          ),
+        );
+      }
+
+      // A kicked name is freed for other people. Burning it forever would
+      // punish a real colleague who happens to share it, and it does not stop
+      // the person who was kicked: without their rejoin token they are
+      // indistinguishable from a new arrival. Nickname-only identity cannot
+      // tell those two apart, and pretending otherwise would be theatre. The
+      // host's actual tool for a determined troll is locking the lobby.
       const clash = Object.values(state.participants).find(
         (p) => p.nicknameKey === key && p.pid !== event.pid && !p.kicked,
       );
@@ -197,13 +230,14 @@ export function reduce(
         );
       }
 
-      // A rejoin keeps the player number and join time, and clears a kick:
-      // the point of kicking an offensive name is to make them pick another.
+      // A rejoin keeps the participant's stored nickname. Renaming is
+      // host-only, and a phone reconnecting with whatever is in its text box
+      // would otherwise be a rename anyone could perform on themselves —
+      // including undoing a rename the host just made.
       const participant: Participant = existing
         ? {
             ...existing,
-            nickname,
-            nicknameKey: key,
+            ...(existing.kicked ? { nickname, nicknameKey: key } : {}),
             connected: true,
             kicked: false,
           }

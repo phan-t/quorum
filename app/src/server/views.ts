@@ -7,7 +7,7 @@
  * and a sealed board would still be sitting in the page's memory.
  */
 
-import { computeStandings, topFive } from "../engine/scoring.ts";
+import { computeStandings, publicStandings, topFive } from "../engine/scoring.ts";
 import type { ParticipantId, SessionState } from "../engine/types.ts";
 import type {
   OwnPoints,
@@ -26,7 +26,10 @@ export function rosterOf(
   now: number,
 ): RosterEntry[] {
   return Object.values(state.participants)
-    .filter((p) => !p.kicked)
+    // Kicked, or released: released clears the collision key, and until the
+    // person rejoins they are not in the room. Their score is kept on the
+    // record so a phone swap does not cost them anything.
+    .filter((p) => !p.kicked && p.nicknameKey !== "")
     .sort((a, b) => a.playerNumber - b.playerNumber)
     .map((p) => {
       const seen = lastSeen.get(p.pid) ?? 0;
@@ -56,14 +59,17 @@ export function renderStateFor(
 
   // The host sees everything: they cannot run the session blind, and sealing
   // is about what the *room* sees.
-  const visible: StandingRow[] =
-    opts.role === "host" || state.seal !== "sealed"
-      ? topFive(all).map((s) => ({
-          rank: s.rank,
-          nickname: s.nickname,
-          total: s.total,
-        }))
-      : [];
+  const rows =
+    opts.role === "host"
+      ? topFive(all) // the console may see an expanded tie
+      : state.seal === "sealed"
+        ? []
+        : publicStandings(all); // the wire never carries more than five
+  const visible: StandingRow[] = rows.map((s) => ({
+    rank: s.rank,
+    nickname: s.nickname,
+    total: s.total,
+  }));
 
   let own: OwnPoints | undefined;
   if (opts.role === "participant" && opts.pid && state.seal !== "sealed") {

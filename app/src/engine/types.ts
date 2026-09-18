@@ -132,6 +132,8 @@ export type Effect =
 export type RejectCode =
   /** The name is in use by someone else. */
   | "nickname_taken"
+  /** Kicked, and trying to come back under the same name. */
+  | "kicked"
   /** The name is unusable: empty, or shorter than two characters. */
   | "invalid_nickname"
   | "joins_locked"

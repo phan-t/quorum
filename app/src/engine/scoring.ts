@@ -191,13 +191,23 @@ export function computeStandings(state: SessionState): Standing[] {
 }
 
 /**
- * Top five only, on every participant-facing surface. See SCORING.md.
+ * Top five, expanding a tie at fifth rather than cutting it alphabetically.
  *
- * A tie at fifth shows every participant tied there rather than cutting
- * alphabetically: "why is Zoe not up there, she has my score" is a worse
- * problem than a six-row board, and the alphabetical cut is arbitrary in a
- * way the room can see.
+ * **Console and export only.** Expanding the tie is fair to show a host, but
+ * it is not safe to send: with everyone on zero — the state of every session
+ * before the first score — "the tie at fifth" is the entire room, and sending
+ * it puts the full ranking on thirty phones. Participant-facing surfaces use
+ * {@link publicStandings}, which caps hard.
  */
+export function publicStandings(standings: readonly Standing[]): Standing[] {
+  // Before anyone has scored there is no leaderboard, only an alphabetical
+  // slice of the room. Show nothing rather than a meaningless five.
+  if (!standings.some((s) => s.total > 0)) return [];
+  // Hard cap: SCORING.md's rule is "top five only, never the full ranking",
+  // and privacy beats the tie-fairness argument that shapes topFive().
+  return topFive(standings).slice(0, 5);
+}
+
 export function topFive(standings: readonly Standing[]): Standing[] {
   if (standings.length <= 5) return [...standings];
   const fifth = standings[4];

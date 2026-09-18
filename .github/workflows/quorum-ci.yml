@@ -1,0 +1,102 @@
+# Pull request checks. Nothing here touches AWS or HCP Terraform, so nothing
+# here needs a credential — note the absence of an `id-token` permission and of
+# any secret. A fork's PR runs these in full.
+#
+# HCP Terraform posts its own speculative plan for quorum-staging and
+# quorum-prod as separate status checks, driven by the VCS connection rather
+# than by this file. Those plus the three jobs below are what should be required
+# to merge.
+
+name: CI
+
+on:
+  pull_request:
+    paths:
+      - "app/**"
+      - "infra/**"
+      - ".github/workflows/**"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lint-test:
+    name: typecheck and test
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: app
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: app/package-lock.json
+
+      - run: npm ci
+
+      # Node strips types without checking them, so this is the only thing in
+      # the whole pipeline that reads them. If it is skipped, type errors reach
+      # production and surface as a runtime failure in front of a room.
+      - name: tsc --noEmit
+        run: npm run typecheck
+
+      - name: unit tests
+        run: npm test
+
+  build-image:
+    name: container builds
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      # Built, never pushed. A PR from a fork cannot assume the ECR role — its
+      # OIDC subject is `pull_request`, and the trust policy names
+      # `ref:refs/heads/main` exactly — so this job proves the Dockerfile still
+      # builds and stops there.
+      - name: docker build (no push)
+        uses: docker/build-push-action@v6
+        with:
+          context: app
+          push: false
+          load: false
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  terraform:
+    name: terraform fmt and validate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "1.15.4"
+          # The wrapper rewrites stdout and is only useful for capturing plan
+          # output, which this job does not do.
+          terraform_wrapper: false
+
+      - name: terraform fmt -check
+        run: terraform fmt -check -recursive -diff infra
+
+      # -backend=false so no HCP Terraform token and no AWS credential is
+      # needed: validate only has to resolve providers and type-check the
+      # configuration. Every directory, including the modules on their own, so a
+      # module breaks its own check rather than only breaking both environments.
+      - name: terraform validate
+        run: |
+          set -euo pipefail
+          for dir in infra/bootstrap infra/envs/* infra/modules/*; do
+            echo "::group::$dir"
+            terraform -chdir="$dir" init -backend=false -input=false -no-color
+            terraform -chdir="$dir" validate -no-color
+            echo "::endgroup::"
+          done

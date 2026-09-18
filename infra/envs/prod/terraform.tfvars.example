@@ -1,0 +1,46 @@
+# infra/envs/prod
+#
+# These are HCP Terraform *Terraform variables* on the quorum-prod workspace,
+# not a file. This example exists so the list is in the repo and reviewable; a
+# real terraform.tfvars here would only be used by a speculative plan from a
+# laptop, and it is gitignored.
+#
+# The two *environment* variables the workspace also needs are not here, because
+# they are auth and not configuration:
+#
+#   TFC_AWS_PROVIDER_AUTH = true
+#   TFC_AWS_RUN_ROLE_ARN  = <tfc_run_role_arn output from infra/bootstrap>
+
+# --- no defaults; the apply fails without them -------------------------------
+
+# Twelve digits. Same account as bootstrap.
+aws_account_id = "000000000000"
+
+aws_region = "ap-southeast-2"
+
+# The Route 53 zone that already owns the parent domain. Starts with Z.
+hosted_zone_id = "Z00000000000000000000"
+
+# The hostname for this environment. ACM issues for exactly this name.
+domain_name = "quorum.example.com"
+
+# Set by the deploy workflow after staging has been released and checked. The
+# prod run then waits in HCP Terraform for a human to confirm the plan. For the
+# very first apply, set it by hand to a tag that exists in ECR.
+image_tag = "sha-0000000"
+
+# --- defaults worth knowing about --------------------------------------------
+
+# Prod runs one task. Never two — the session state is in the process's memory
+# and a second task is a second, disagreeing truth.
+# desired_count = 1
+
+# log_level          = "info"
+# log_retention_days = 30
+# ecr_repository_name = "quorum"
+
+# Optional. Whatever this account's tagging policy requires.
+# additional_tags = {
+#   CostCentre = "..."
+#   Owner      = "..."
+# }

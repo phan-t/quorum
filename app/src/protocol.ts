@@ -50,7 +50,12 @@ export type ClientMessage =
   | { t: "hello"; role: "screen"; screenToken: string }
   | { t: "resync" }
   | { t: "ping"; t0: number }
-  | { t: "host.cmd"; cid: string; cmd: HostCommand };
+  /**
+   * `cmd` is null when the command could not be parsed. The frame still
+   * arrives so the server can answer with `refusedCmd` on that `cid` — a
+   * console that gets silence cannot tell a rejected click from a dropped one.
+   */
+  | { t: "host.cmd"; cid: string; cmd: HostCommand | null };
 
 /** Mirrors the console's buttons one to one. Phase 1 subset. */
 export type HostCommand =
@@ -191,8 +196,8 @@ export function parseClientMessage(raw: string): ClientMessage | null {
       return typeof m["t0"] === "number" ? { t: "ping", t0: m["t0"] } : null;
     case "host.cmd": {
       const cid = str("cid");
-      const cmd = parseHostCommand(m["cmd"]);
-      return cid !== null && cmd !== null ? { t: "host.cmd", cid, cmd } : null;
+      if (cid === null) return null;
+      return { t: "host.cmd", cid, cmd: parseHostCommand(m["cmd"]) };
     }
     default:
       return null;
