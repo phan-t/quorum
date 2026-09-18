@@ -1,0 +1,23 @@
+{
+  // The clients are plain ES modules. `tsc` is the whole build: it strips the
+  // types and rewrites `./foo.ts` imports to `./foo.js`, which is why there is
+  // no bundler in this repo and no dependency to keep current.
+  //
+  // `npm run typecheck` still checks these files under the root config; this
+  // one exists only to emit them.
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "target": "ES2022",
+    "lib": ["ES2023", "DOM", "DOM.Iterable"],
+    "types": [],
+    "noEmit": false,
+    "rootDir": "src",
+    "outDir": "dist",
+    "declaration": false,
+    "sourceMap": true,
+    "removeComments": false
+  },
+  "include": ["src/client/**/*.ts"]
+}

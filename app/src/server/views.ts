@@ -99,9 +99,13 @@ export function renderStateFor(
     standings: visible,
   };
 
+  if (opts.role === "screen") {
+    return { ...base, joinCode: state.joinCode };
+  }
   if (opts.role === "host") {
     return {
       ...base,
+      joinCode: state.joinCode,
       hostExtras: {
         joinCode: state.joinCode,
         participantCount: roster.length,

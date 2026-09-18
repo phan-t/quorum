@@ -1164,7 +1164,11 @@ describe("authorisation", () => {
     await sleep(100);
     for (const f of [...p.conn.all("state"), ...screen.all("state")]) {
       assert.equal(f.msg.state.hostExtras, undefined, `host extras leaked: ${f.raw}`);
-      assert.ok(!f.raw.includes(s.joinCode) || f.msg.state.title.includes(s.joinCode), "join code must not be in non-host state");
+    }
+    // A participant has already used the code and never needs it again. The
+    // screen renders it as a QR on the lobby, which is the point of the screen.
+    for (const f of p.conn.all("state")) {
+      assert.ok(!f.raw.includes(s.joinCode) || f.msg.state.title.includes(s.joinCode), "join code must not reach a participant");
     }
     for (const f of [...screen.all("state"), ...host.all("state")]) {
       assert.equal(f.msg.state.own, undefined, "only participants get an own strip");
@@ -1364,7 +1368,18 @@ describe("lifecycle and commands", () => {
     assert.ok(Array.isArray(v.roster) && v.roster.length === 1);
     assert.ok(Array.isArray(v.standings));
     assert.equal(typeof v.title, "string");
-    assert.equal(st.msg.seq, s.runtime.state.seq, "state carries the current seq");
+    // seq counts frames sent to THIS client, not engine events. Events only
+    // the host hears about (locking the lobby) must not leave a hole in a
+    // participant's stream, because the protocol says a hole means resync and
+    // thirty phones resyncing over a host toggling a switch is a stampede.
+    const seqs = [...p.conn.all("state"), ...p.conn.all("roster")]
+      .map((f: { msg: { seq: number } }) => f.msg.seq)
+      .sort((a: number, b: number) => a - b);
+    assert.deepEqual(
+      seqs,
+      seqs.map((_: number, i: number) => (seqs[0] ?? 0) + i),
+      "a client's frames are consecutive",
+    );
     await host.close();
     await p.conn.close();
   });
@@ -1554,7 +1569,9 @@ describe("disconnects", () => {
     assert.equal(s.runtime.state.phase, "running");
     const health = await fetch(`http://127.0.0.1:${port}/healthz`);
     assert.equal(health.status, 200);
-    const roster = host.latest("roster")!.msg.roster;
+    // The host is sent full state rather than roster deltas, so hostExtras'
+    // counts cannot go stale behind a delta. Its roster is on the state frame.
+    const roster = host.latest("state")!.msg.state.roster;
     const me = roster.find((r: { pid: string }) => r.pid === p.pid);
     assert.ok(me, "a dropped participant stays on the roster");
     assert.equal(me.conn, "away", "the console shows them away, not gone");

@@ -8,6 +8,9 @@
   },
   "scripts": {
     "typecheck": "tsc --noEmit",
+    "build:client": "tsc -p tsconfig.client.json && node scripts/copy-client-assets.mjs",
+    "watch:client": "tsc -p tsconfig.client.json --watch",
+    "client:dev": "npm run build:client && node scripts/serve-client.mjs",
     "test": "node --experimental-strip-types --test 'src/**/*.test.ts'",
     "test:watch": "node --experimental-strip-types --test --watch 'src/**/*.test.ts'",
     "bots": "node --experimental-strip-types src/bots/simulate.ts",

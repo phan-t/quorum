@@ -113,6 +113,11 @@ export interface RenderState {
   readonly standings: readonly StandingRow[];
   /** Participant only, and only while not sealed. */
   readonly own?: OwnPoints;
+  /**
+   * Host and screen only. The screen puts the join URL and a QR on the lobby,
+   * so it needs the code; a participant has already used it.
+   */
+  readonly joinCode?: string;
   /** Host only. */
   readonly hostExtras?: {
     readonly joinCode: string;

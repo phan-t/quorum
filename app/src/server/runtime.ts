@@ -31,6 +31,17 @@ export interface Client {
   readonly pid?: ParticipantId;
   /** Last frame received, for the away/amber indicator. */
   lastSeen: number;
+  /**
+   * Frames sent to *this* client, not engine events.
+   *
+   * The engine's `state.seq` counts every accepted event, including ones only
+   * the host hears about — locking the lobby moves it twice while a phone is
+   * sent nothing. The phone then sees its next frame jump, and the protocol
+   * says a jump means resync, so thirty phones resync at once over a host
+   * toggling a switch. A per-client counter makes consecutive frames true by
+   * construction, so a gap only ever means a genuinely lost frame.
+   */
+  seq: number;
 }
 
 export interface SessionSecrets {
@@ -145,21 +156,24 @@ export class SessionRuntime {
 
   send(client: Client, message: ServerMessage): void {
     if (client.socket.readyState !== 1) return; // OPEN
+    const framed =
+      "seq" in message ? { ...message, seq: ++client.seq } : message;
     try {
-      client.socket.send(JSON.stringify(message));
+      client.socket.send(JSON.stringify(framed));
     } catch {
       // A socket that fails mid-send is already gone; the close handler tidies up.
     }
   }
 
   sendAll(message: ServerMessage): void {
+    // Each send stamps its own per-client seq, so this cannot be hoisted.
     for (const c of this.clients) this.send(c, message);
   }
 
   sendState(client: Client, now: number): void {
     this.send(client, {
       t: "state",
-      seq: this.state.seq,
+      seq: 0, // replaced per-client in send()
       state: this.viewFor(client, now),
     });
   }
@@ -168,9 +182,17 @@ export class SessionRuntime {
     for (const c of this.clients) this.sendState(c, now);
   }
 
-  broadcastRoster(now: number): void {
+  /** `except` is the client that has just been sent a full state already. */
+  broadcastRoster(now: number, except?: Client): void {
     const roster = rosterOf(this.state, this.lastSeenMap(), now);
-    this.sendAll({ t: "roster", seq: this.state.seq, roster });
+    for (const c of this.clients) {
+      if (c === except) continue;
+      // The host's counts live in hostExtras, which a roster frame does not
+      // carry — sending them a delta would leave the console's headcount
+      // stale. They get the whole thing; there is one of them.
+      if (c.role === "host") this.sendState(c, now);
+      else this.send(c, { t: "roster", seq: 0, roster });
+    }
   }
 
   refuse(socket: WebSocket, reason: RefusedReason, message: string): void {

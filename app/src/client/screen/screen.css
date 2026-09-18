@@ -1,0 +1,271 @@
+/*
+ * Big screen — 1920 × 1080, shared into a video call, seen as an 800px tile.
+ *
+ * Rules, all from DESIGN.md and all about compression:
+ *   · minimum type 32px at 1080p; display type 120–200px
+ *   · light type on dark, always — colour is for fills and blocks, never for
+ *     small coloured text, because codecs subsample chroma
+ *   · 5% safe margin all round: screen shares crop and video tiles letterbox
+ *   · nothing glides. Things appear, hold, and cut.
+ */
+
+html,
+body {
+  overflow: hidden;
+}
+
+#app {
+  height: 100dvh;
+  display: flex;
+  flex-direction: column;
+}
+
+/* No motion that depends on frame rate. At 15fps a fade is a smear. */
+* {
+  transition: none !important;
+}
+
+.s-banner {
+  flex: none;
+  background: var(--sealed);
+  color: #2a2205;
+  font-family: var(--mono);
+  font-weight: 600;
+  font-size: 24px;
+  letter-spacing: 0.24em;
+  text-transform: uppercase;
+  text-align: center;
+  padding: 8px;
+}
+.s-banner[hidden] {
+  display: none;
+}
+
+.s-root {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+}
+
+.s-stage {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 2.4vh;
+  padding: 5vh 5vw; /* the safe margin */
+}
+
+.s-kicker {
+  margin: 0;
+  font-size: clamp(20px, 1.7vw, 34px);
+  letter-spacing: 0.22em;
+  display: flex;
+  align-items: center;
+  gap: 0.6em;
+}
+
+.s-title {
+  margin: 0;
+  font-size: clamp(48px, 6.5vw, 140px);
+}
+.s-title-huge {
+  font-size: clamp(64px, 9vw, 190px);
+}
+
+.s-line {
+  margin: 0;
+  font-size: clamp(32px, 2.6vw, 56px);
+  line-height: 1.25;
+  color: var(--muted);
+}
+.s-line-big {
+  font-size: clamp(34px, 3.4vw, 72px);
+  color: var(--ink);
+}
+.s-line[hidden] {
+  display: none;
+}
+
+/* ------------------------------------------------------------- lobby -- */
+
+.s-lobby {
+  flex-direction: row;
+  align-items: center;
+  gap: 4vw;
+}
+.s-lobby-left {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2vh;
+}
+.s-join-url {
+  margin: 0;
+  font-size: clamp(32px, 2.6vw, 52px);
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  word-break: break-all;
+}
+.s-lobby-count {
+  margin: 0;
+  display: flex;
+  align-items: baseline;
+  gap: 0.5em;
+}
+.s-count {
+  font-size: clamp(48px, 5vw, 110px);
+  font-weight: 600;
+}
+.s-names {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5em 0.8em;
+  max-height: 30vh;
+  overflow: hidden;
+  align-content: flex-start;
+}
+.s-name {
+  font-size: clamp(24px, 1.8vw, 36px);
+  color: var(--muted);
+  max-width: 24ch;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* The QR is a light block on dark, which is exactly what survives a codec. */
+.s-qr-wrap {
+  flex: none;
+  padding: 18px;
+  background: #f6f5f3;
+  border-radius: 12px;
+  line-height: 0;
+}
+.s-qr-wrap[hidden] {
+  display: none;
+}
+.s-qr {
+  display: block;
+  image-rendering: pixelated;
+}
+
+/* --------------------------------------------------------- standings -- */
+
+.s-rows {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1.6vh;
+}
+.s-row {
+  display: grid;
+  grid-template-columns: 2.2ch 1fr auto;
+  gap: 1.4vw;
+  align-items: center;
+}
+.s-rank {
+  font-size: clamp(32px, 2.6vw, 54px);
+  color: var(--muted);
+}
+.s-row-main {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.6vh;
+}
+.s-name-big {
+  font-size: clamp(40px, 4.2vw, 88px);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* Bars, not numbers, for anything comparative: the bar is readable at any
+   resolution and the number is a bonus. */
+.s-bar {
+  height: 1.4vh;
+  min-height: 10px;
+  background: var(--panel-2);
+  border-radius: 2px;
+  overflow: hidden;
+}
+.s-bar-fill {
+  height: 100%;
+  background: var(--ttx);
+}
+.s-total {
+  font-size: clamp(36px, 3.4vw, 72px);
+  font-weight: 600;
+}
+
+/* ------------------------------------------------------------ sealed -- */
+
+.s-sealed {
+  align-items: flex-start;
+}
+.s-lock-glyph {
+  width: clamp(72px, 7vw, 150px);
+  height: clamp(72px, 7vw, 150px);
+  color: var(--sealed);
+}
+
+/* ------------------------------------------------------------- final -- */
+
+.s-final-rows {
+  justify-content: flex-end;
+}
+.s-winner {
+  display: flex;
+  flex-direction: column;
+  gap: 1vh;
+  padding-top: 2vh;
+  border-top: 4px solid var(--vault);
+}
+.s-winner[hidden] {
+  display: none;
+}
+.s-winner-name {
+  margin: 0;
+  font-size: clamp(80px, 11vw, 200px);
+}
+.s-winner-total {
+  margin: 0;
+  font-size: clamp(40px, 3.4vw, 76px);
+  color: var(--vault);
+  font-weight: 600;
+}
+
+/* ------------------------------------------------------------ toasts -- */
+
+.s-toast {
+  flex: none;
+  display: flex;
+  align-items: baseline;
+  gap: 1.2em;
+  padding: 2.2vh 5vw;
+  background: var(--panel);
+  border-top: 4px solid var(--line);
+}
+.s-toast[hidden] {
+  display: none;
+}
+.s-toast[data-kind="spot"] {
+  border-top-color: var(--spot);
+}
+.s-toast-kind {
+  font-size: clamp(20px, 1.6vw, 32px);
+  color: var(--spot);
+}
+.s-toast-text {
+  font-size: clamp(32px, 2.6vw, 56px);
+}
+
+/* -------------------------------------------------------------- gate -- */
+
+.s-gate {
+  align-items: flex-start;
+}

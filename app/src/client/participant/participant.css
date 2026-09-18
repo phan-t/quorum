@@ -1,0 +1,374 @@
+/*
+ * Participant — phone first. Designed at 360 × 740, grows from there.
+ *
+ * The hard rule is no scrolling during play: the root is exactly the viewport,
+ * the stage is the only flexible box in it, and everything inside a segment is
+ * sized to fit rather than to look nice at desktop width.
+ */
+
+/* Scoped to the phone page: the host console loads this stylesheet too, for
+   the 180px preview, and must not inherit the phone's page-level rules. */
+body.phone {
+  overflow: hidden;
+  overscroll-behavior: none;
+}
+
+body.phone #app {
+  height: 100dvh;
+  display: flex;
+  flex-direction: column;
+}
+
+/* ---------------------------------------------------------------- join -- */
+
+.join {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  padding: 28px 20px calc(20px + env(safe-area-inset-bottom));
+}
+
+.join-head h1 {
+  margin: 6px 0 0;
+  font-size: 40px;
+}
+
+.join-field {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.field {
+  height: 56px; /* touch target floor */
+  padding: 0 14px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  font-size: 20px;
+  width: 100%;
+}
+.field:focus {
+  border-color: var(--ibm-blue);
+}
+
+.field-code {
+  letter-spacing: 0.3em;
+  text-transform: uppercase;
+  font-weight: 600;
+}
+
+.join-code-chip {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  padding: 12px 14px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+}
+.code-value {
+  font-size: 22px;
+  font-weight: 600;
+  letter-spacing: 0.24em;
+}
+.linky {
+  margin-left: auto;
+  background: none;
+  border: 0;
+  padding: 8px;
+  color: var(--muted);
+  font-family: var(--mono);
+  font-size: 13px;
+  text-decoration: underline;
+}
+
+.join-error {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 12px 14px;
+  border-left: 3px solid var(--miss);
+  background: var(--panel);
+  font-size: 15px;
+  line-height: 1.35;
+}
+.join-error:empty {
+  display: none;
+}
+.join-error strong {
+  font-weight: 600;
+}
+.join-error span {
+  color: var(--muted);
+}
+
+.join-spacer {
+  flex: 1;
+}
+
+/* The primary action is at the bottom. Thumb reach, every time. */
+.primary {
+  min-height: 60px;
+  border: 0;
+  border-radius: 12px;
+  background: var(--nomad);
+  color: #062a20;
+  font-family: var(--display);
+  font-weight: 700;
+  font-size: 22px;
+  letter-spacing: 0.01em;
+}
+.primary:disabled {
+  background: var(--panel-2);
+  color: var(--muted);
+}
+
+.terminal-card {
+  margin: auto;
+  padding: 32px 24px;
+  text-align: center;
+}
+.terminal-card h1 {
+  font-size: 34px;
+  margin: 8px 0 12px;
+}
+
+/* -------------------------------------------------------------- follow -- */
+
+.p-root {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+/* Reconnect is a banner, not a modal: a thin amber strip under the top edge.
+   It goes away by itself and the page beneath it keeps its last state. */
+.p-banner {
+  flex: none;
+  background: var(--sealed);
+  color: #2a2205;
+  font-family: var(--mono);
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  padding: 6px 12px;
+  text-align: center;
+}
+.p-banner[hidden] {
+  display: none;
+}
+
+.p-stage {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  overflow: hidden;
+  padding: 20px;
+}
+
+.v {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.v-note {
+  margin: 0;
+  color: var(--muted);
+  font-size: 16px;
+  line-height: 1.4;
+}
+
+.display.xl {
+  margin: 0;
+  font-size: clamp(34px, 11vw, 56px);
+}
+
+/* lobby */
+.v-lobby {
+  justify-content: flex-start;
+}
+.lobby-you {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.lobby-nick {
+  margin: 0;
+  font-size: 32px;
+  color: var(--nomad);
+}
+.lobby-title {
+  margin: 4px 0 0;
+  font-size: clamp(28px, 9vw, 44px);
+}
+.lobby-prize {
+  margin: 0;
+  font-size: 17px;
+  line-height: 1.35;
+  color: var(--vault);
+}
+.lobby-here {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+.lobby-count {
+  font-size: 30px;
+  font-weight: 600;
+}
+.lobby-chips {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-wrap: wrap;
+  align-content: flex-start;
+  gap: 6px;
+  overflow: hidden;
+}
+.chip {
+  padding: 6px 10px;
+  border-radius: 999px;
+  background: var(--panel-2);
+  border: 1px solid var(--line);
+  font-size: 13px;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.chip-more {
+  background: transparent;
+  border-style: dashed;
+}
+.lobby-wait {
+  flex: none;
+}
+
+/* holding */
+.v-holding {
+  justify-content: center;
+  text-align: left;
+}
+.holding-conn {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.holding-line {
+  margin: 0;
+  font-size: 19px;
+  line-height: 1.4;
+  color: var(--muted);
+}
+.dot.pulse {
+  animation: slow-pulse 3.2s ease-in-out infinite;
+}
+@keyframes slow-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.35; }
+}
+
+/* standings */
+.v-standings .rows {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.row {
+  display: grid;
+  grid-template-columns: 28px 1fr auto;
+  align-items: baseline;
+  gap: 12px;
+  padding: 10px 12px;
+  background: var(--panel);
+  border-radius: 10px;
+  border-left: 3px solid var(--line);
+}
+.row-winner {
+  border-left-color: var(--vault);
+}
+.row .rank {
+  color: var(--muted);
+  font-size: 15px;
+}
+.row .name {
+  font-size: 24px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.row .total {
+  font-size: 20px;
+  font-weight: 600;
+}
+.v-standings .v-note[hidden] {
+  display: none;
+}
+
+/* sealed */
+.v-sealed {
+  justify-content: center;
+  align-items: flex-start;
+  gap: 12px;
+}
+.sealed-lock {
+  width: 44px;
+  height: 44px;
+  color: var(--sealed);
+}
+
+/* points strip — the only persistent chrome */
+.p-strip {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 20px calc(10px + env(safe-area-inset-bottom));
+  border-top: 1px solid var(--line);
+  background: var(--panel);
+  font-size: 13px;
+  letter-spacing: 0.12em;
+}
+.p-strip.frozen {
+  color: var(--muted);
+}
+.strip-lock {
+  width: 13px;
+  height: 13px;
+  color: var(--sealed);
+  margin-left: auto;
+}
+.strip-sealed {
+  font-size: 11px;
+  color: var(--sealed);
+}
+
+/* ------------------------------------------------------- host preview -- */
+
+/* The console renders one of these at 180px. Same code, same truth. */
+.p-root.compact {
+  width: 360px;
+  height: 740px;
+  background: var(--ground);
+  pointer-events: none;
+}
+
+@media (min-width: 720px) {
+  body.phone #app {
+    max-width: 480px;
+    margin: 0 auto;
+    border-left: 1px solid var(--line);
+    border-right: 1px solid var(--line);
+  }
+}

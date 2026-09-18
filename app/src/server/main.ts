@@ -5,7 +5,10 @@
  * persistence behind the same `persist` effect the engine already emits.
  */
 
+import { createReadStream } from "node:fs";
+import { stat } from "node:fs/promises";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
+import { extname, join, normalize, resolve } from "node:path";
 import { WebSocketServer, type WebSocket } from "ws";
 import { newSession, nicknameKey } from "../engine/reducer.ts";
 import type { Event, ParticipantId } from "../engine/types.ts";
@@ -27,6 +30,45 @@ const VERSION = process.env["QUORUM_VERSION"] ?? "dev";
 const TRUST_PROXY = process.env["QUORUM_TRUST_PROXY"] === "1";
 
 const registry = new SessionRegistry();
+
+/* ------------------------------------------------------------------ */
+/* Static client                                                       */
+/* ------------------------------------------------------------------ */
+
+const CLIENT_ROOT = resolve(
+  process.env["QUORUM_CLIENT_ROOT"] ?? new URL("../../dist/client", import.meta.url).pathname,
+);
+
+const MIME: Record<string, string> = {
+  ".html": "text/html; charset=utf-8",
+  ".js": "text/javascript; charset=utf-8",
+  ".css": "text/css; charset=utf-8",
+  ".map": "application/json; charset=utf-8",
+  ".svg": "image/svg+xml",
+  ".png": "image/png",
+  ".woff2": "font/woff2",
+};
+
+async function serveFile(res: ServerResponse, rel: string): Promise<boolean> {
+  // normalize + prefix check: a path like /client/../../etc/passwd must not
+  // escape the client root, and `..` is the whole of that attack.
+  const abs = resolve(join(CLIENT_ROOT, normalize(rel)));
+  if (abs !== CLIENT_ROOT && !abs.startsWith(CLIENT_ROOT + "/")) return false;
+  try {
+    const info = await stat(abs);
+    if (!info.isFile()) return false;
+    res.writeHead(200, {
+      "content-type": MIME[extname(abs)] ?? "application/octet-stream",
+      "content-length": info.size,
+      // Hashed filenames are a later problem; for now never cache the shell.
+      "cache-control": "no-cache",
+    });
+    createReadStream(abs).pipe(res);
+    return true;
+  } catch {
+    return false;
+  }
+}
 
 /* ------------------------------------------------------------------ */
 /* Rate limiting — crude on purpose                                    */
@@ -125,6 +167,31 @@ function handleHttp(req: IncomingMessage, res: ServerResponse): void {
     return;
   }
 
+  // The three client shells. /j/:code serves the same page as / — the client
+  // reads the code off the path, so a QR can point straight at a session.
+  if (req.method === "GET") {
+    const shell =
+      path === "/" || path.startsWith("/j/")
+        ? "participant/index.html"
+        : path === "/host"
+          ? "host/index.html"
+          : path === "/screen"
+            ? "screen/index.html"
+            : null;
+    if (shell) {
+      void serveFile(res, shell).then((ok) => {
+        if (!ok) json(res, 404, { error: "client_not_built" });
+      });
+      return;
+    }
+    if (path.startsWith("/client/")) {
+      void serveFile(res, path.slice("/client/".length)).then((ok) => {
+        if (!ok) json(res, 404, { error: "not_found" });
+      });
+      return;
+    }
+  }
+
   json(res, 404, { error: "not_found" });
 }
 
@@ -176,7 +243,9 @@ wss.on("connection", (socket: WebSocket, req: IncomingMessage) => {
         const { runtime, client } = joined;
         runtime.clients.add(client);
         runtime.sendState(client, now);
-        runtime.broadcastRoster(now);
+        // The new client's own state already carries the roster; sending it
+        // again would give a host two identical frames at connect.
+        runtime.broadcastRoster(now, client);
       }
       return;
     }
@@ -290,7 +359,7 @@ function handleHello(
         ),
       );
     if (!runtime) return refuseBare(socket, "bad_token", "That link is not valid.");
-    const client: Client = { socket, role: msg.role, lastSeen: now };
+    const client: Client = { socket, role: msg.role, lastSeen: now, seq: 0 };
     runtime.send(client, {
       t: "welcome",
       role: msg.role,
@@ -331,7 +400,7 @@ function handleHello(
     );
   }
 
-  const client: Client = { socket, role: "participant", pid, lastSeen: now };
+  const client: Client = { socket, role: "participant", pid, lastSeen: now, seq: 0 };
   runtime.send(client, {
     t: "welcome",
     role: "participant",

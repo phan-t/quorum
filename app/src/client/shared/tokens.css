@@ -1,0 +1,173 @@
+/*
+ * Quorum design tokens. DESIGN.md "Tokens" is the source of truth; this file
+ * is that block, plus the resets every surface needs.
+ *
+ * Dark only, deliberately: a light phone next to a dark big screen in a video
+ * call looks like two products.
+ */
+
+:root {
+  color-scheme: dark;
+
+  /* ground */
+  --ground: #0a0a0f;
+  --panel: #14141d;
+  --panel-2: #1d1d28;
+  --line: #2c2c3a;
+  --ink: #f6f5f3;
+  --muted: #8b8a9c;
+  --dim: #5e5d6e;
+
+  /* product hues — the only saturated colours in the system */
+  --terraform: #7b42bc;
+  --vault: #ffcf25;
+  --consul: #dc477d;
+  --nomad: #00ca8e;
+  --ibm-blue: #0f62fe;
+
+  /* semantic */
+  --hit: var(--nomad);
+  --miss: #ff6b5a;
+  --live: var(--nomad);
+  --sealed: var(--vault);
+  --danger: #ff6b5a;
+
+  /* activity accents — fixed per activity across every surface */
+  --ttx: var(--terraform);
+  --trivia: var(--consul);
+  --arcade: var(--nomad);
+  --spot: var(--vault);
+
+  /* type */
+  --display: "IBM Plex Sans Condensed", "IBM Plex Sans", ui-sans-serif,
+    system-ui, sans-serif;
+  --body: "IBM Plex Sans", ui-sans-serif, system-ui, sans-serif;
+  --mono: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace;
+
+  /* motion — one easing for reveals, 300ms */
+  --pop: cubic-bezier(0.2, 0.9, 0.3, 1.2);
+  --pop-ms: 300ms;
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+  height: 100%;
+  background: var(--ground);
+  color: var(--ink);
+  font-family: var(--body);
+  -webkit-font-smoothing: antialiased;
+  -webkit-text-size-adjust: 100%;
+}
+
+button,
+input,
+select,
+textarea {
+  font: inherit;
+  color: inherit;
+}
+
+button {
+  cursor: pointer;
+}
+
+/* Every number in the product is tabular mono. A timer must not jitter and a
+   points column must line up. */
+.mono,
+.num {
+  font-family: var(--mono);
+  font-variant-numeric: tabular-nums;
+}
+
+.label {
+  font-family: var(--mono);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.18em;
+  color: var(--muted);
+}
+
+.display {
+  font-family: var(--display);
+  font-weight: 700;
+  line-height: 0.94;
+  letter-spacing: -0.02em;
+}
+
+/* Contrast: --dim never carries text that has to be read. */
+.dimmed {
+  color: var(--muted);
+}
+
+/* Focus is visible everywhere, and loud on the console. */
+:focus-visible {
+  outline: 2px solid var(--ibm-blue);
+  outline-offset: 2px;
+}
+
+/* Connection dot: colour AND shape, never colour alone. */
+.dot {
+  display: inline-block;
+  width: 0.6em;
+  height: 0.6em;
+  border-radius: 50%;
+  background: var(--dim);
+  vertical-align: baseline;
+}
+.dot[data-conn="on"] {
+  background: var(--live);
+}
+.dot[data-conn="away"] {
+  background: var(--sealed);
+  border-radius: 1px; /* shape as well as colour */
+}
+.dot[data-conn="gone"] {
+  background: transparent;
+  border: 1px solid var(--dim);
+}
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* Nobody should ever demo the mock by accident. */
+.mock-badge {
+  position: fixed;
+  right: 0;
+  bottom: 0;
+  z-index: 999;
+  padding: 3px 8px;
+  background: var(--consul);
+  color: #23060f;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.2em;
+  border-top-left-radius: 6px;
+  pointer-events: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+  }
+}

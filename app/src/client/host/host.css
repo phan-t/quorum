@@ -1,0 +1,558 @@
+/*
+ * Host console — laptop, landscape, driven under time pressure.
+ *
+ * This is the one surface allowed to look like a terminal: dense, mono,
+ * 13–14px, tabular. Everything is sized so that a host glancing at it for two
+ * seconds knows the phase, the seal, the headcount and what space will do.
+ */
+
+body {
+  font-size: 14px;
+  overflow: hidden;
+}
+
+#app {
+  height: 100dvh;
+  display: flex;
+  flex-direction: column;
+}
+
+/* ----------------------------------------------------------- status -- */
+
+.statusbar {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 0 14px;
+  height: 40px;
+  background: var(--panel);
+  border-bottom: 1px solid var(--line);
+  font-size: 13px;
+  white-space: nowrap;
+}
+
+/* The tab title says DO NOT SHARE and so does the bar. The screen-share
+   picker shows tab titles; this is the cheapest protection there is. */
+.sb-warn {
+  color: var(--danger);
+  font-weight: 600;
+  letter-spacing: 0.16em;
+}
+
+.sb-title {
+  font-weight: 600;
+}
+.sb-code {
+  letter-spacing: 0.22em;
+  color: var(--muted);
+}
+.sb-counts,
+.sb-phase {
+  color: var(--muted);
+  letter-spacing: 0.1em;
+}
+.sb-seal {
+  margin-left: auto;
+  letter-spacing: 0.18em;
+  font-weight: 600;
+  padding: 3px 10px;
+  border-radius: 4px;
+  border: 1px solid var(--line);
+}
+.sb-seal[data-seal="live"] {
+  color: var(--live);
+}
+.sb-seal[data-seal="sealed"] {
+  color: #2a2205;
+  background: var(--sealed);
+  border-color: var(--sealed);
+}
+.sb-seal[data-seal="revealed"] {
+  color: var(--terraform);
+  border-color: var(--terraform);
+}
+/* Sealed is loud. */
+.statusbar.sealed {
+  border-bottom-color: var(--sealed);
+  box-shadow: inset 0 -2px 0 var(--sealed);
+}
+
+.sb-conn {
+  color: var(--sealed);
+  letter-spacing: 0.16em;
+  font-weight: 600;
+}
+.sb-conn[hidden] {
+  display: none;
+}
+
+/* ------------------------------------------------------------ layout -- */
+
+.cols {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: 300px minmax(0, 1fr) 240px;
+}
+
+.rail {
+  border-right: 1px solid var(--line);
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  min-height: 0;
+}
+.rail-block {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-height: 0;
+}
+.rail-grow {
+  flex: 1;
+}
+.rail-count {
+  color: var(--muted);
+  letter-spacing: 0;
+}
+
+.rail-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+.seg {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  background: none;
+  border: 0;
+  border-radius: 4px;
+  text-align: left;
+  color: var(--muted);
+  font-size: 14px;
+}
+.seg:hover:not(:disabled) {
+  background: var(--panel-2);
+  color: var(--ink);
+}
+.seg.current {
+  background: var(--panel-2);
+  color: var(--ink);
+  font-weight: 600;
+}
+.seg:disabled {
+  opacity: 0.45;
+}
+.seg-mark {
+  font-size: 11px;
+}
+.seg.current .seg-mark {
+  color: var(--nomad);
+}
+.seg-phase {
+  margin-left: auto;
+  font-size: 10px;
+  letter-spacing: 0.1em;
+  color: var(--dim);
+  border: 1px solid var(--line);
+  border-radius: 3px;
+  padding: 0 4px;
+}
+
+/* Two columns, so sixty people fit without scrolling at 1440px. */
+.roster {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  min-height: 0;
+  overflow-y: auto;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(132px, 1fr));
+  align-content: start;
+  gap: 0 8px;
+}
+.r-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 4px;
+  border-radius: 3px;
+  height: 22px;
+  font-size: 13px;
+}
+.r-row:hover,
+.r-row:focus-within {
+  background: var(--panel-2);
+}
+.r-row.away .r-name {
+  color: var(--muted);
+}
+.r-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.r-num {
+  margin-left: auto;
+  color: var(--dim);
+  font-size: 11px;
+}
+.r-actions {
+  display: none;
+  gap: 2px;
+}
+.r-row:hover .r-actions,
+.r-row:focus-within .r-actions {
+  display: flex;
+}
+
+/* ------------------------------------------------------------- panel -- */
+
+.panel {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  padding: 12px 16px;
+  gap: 12px;
+}
+.panel-head {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+}
+.panel-sub {
+  color: var(--muted);
+  font-size: 12px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+.panel-body {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+}
+.pb {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.pb-note {
+  margin: 0;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.4;
+}
+.pb-warn {
+  color: var(--sealed);
+}
+
+.kv {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+}
+.kv .label {
+  width: 90px;
+  flex: none;
+  font-size: 11px;
+}
+.join-code {
+  font-size: 34px;
+  font-weight: 600;
+  letter-spacing: 0.26em;
+}
+.join-url {
+  font-size: 14px;
+  color: var(--muted);
+}
+.big-num {
+  font-size: 22px;
+  font-weight: 600;
+}
+.lock-state {
+  letter-spacing: 0.18em;
+  font-weight: 600;
+}
+.lock-state[data-locked="yes"] {
+  color: var(--sealed);
+}
+.lock-state[data-locked="no"] {
+  color: var(--live);
+}
+
+.field-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.field-row .label {
+  width: 90px;
+  flex: none;
+  font-size: 11px;
+}
+.field {
+  flex: 1;
+  height: 32px;
+  padding: 0 10px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  font-size: 14px;
+}
+.field:focus {
+  border-color: var(--ibm-blue);
+}
+.field-actions {
+  display: flex;
+  gap: 8px;
+  padding-left: 102px;
+}
+
+.h-rows {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-width: 520px;
+}
+.h-row {
+  display: grid;
+  grid-template-columns: 24px 1fr auto;
+  gap: 10px;
+  align-items: baseline;
+  padding: 4px 8px;
+  background: var(--panel);
+  border-radius: 3px;
+}
+.h-rank {
+  color: var(--muted);
+  font-size: 12px;
+}
+.h-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.h-total {
+  font-weight: 600;
+}
+
+/* --------------------------------------------------------- the foot -- */
+
+.panel-foot {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding-top: 10px;
+  border-top: 1px solid var(--line);
+}
+.foot-left {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+/* ---------------------------------------------------------- controls -- */
+
+.ctl {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.ctl[hidden] {
+  display: none;
+}
+.ctl-button {
+  background: var(--panel-2);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  padding: 6px 12px;
+  font-size: 13px;
+  color: var(--ink);
+}
+.ctl-button:hover:not(:disabled) {
+  border-color: var(--muted);
+}
+.ctl-button:disabled {
+  color: var(--dim);
+  cursor: default;
+}
+.ctl-danger .ctl-button {
+  color: var(--danger);
+  border-color: color-mix(in srgb, var(--danger) 45%, var(--line));
+}
+.ctl-seal .ctl-button {
+  color: var(--sealed);
+  border-color: color-mix(in srgb, var(--sealed) 45%, var(--line));
+}
+.ctl.on .ctl-button {
+  background: var(--sealed);
+  color: #2a2205;
+  border-color: var(--sealed);
+}
+
+/* The one primary button: same place, same key, says what it will do. */
+.ctl-primary {
+  margin-left: auto;
+}
+.ctl-primary .ctl-button {
+  background: var(--nomad);
+  border-color: var(--nomad);
+  color: #062a20;
+  font-weight: 600;
+  font-size: 15px;
+  padding: 10px 20px;
+  min-width: 260px;
+  justify-content: center;
+}
+.ctl-primary .ctl-button:disabled {
+  background: var(--panel-2);
+  border-color: var(--line);
+  color: var(--dim);
+}
+
+/* Inline confirm. Never a modal: a modal that steals focus during a live
+   question is how a host presses the wrong thing. */
+.ctl-question {
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--sealed);
+  letter-spacing: 0.06em;
+}
+.ctl-yes,
+.ctl-no {
+  background: var(--panel-2);
+  border: 1px solid var(--line);
+  border-radius: 3px;
+  padding: 4px 10px;
+  font-size: 12px;
+  font-family: var(--mono);
+}
+.ctl-yes {
+  border-color: var(--danger);
+  color: var(--danger);
+}
+
+/* Refusals live in the button that caused them, for three seconds. */
+.ctl-flash {
+  font-family: var(--mono);
+  font-size: 12px;
+  padding: 6px 10px;
+  border-radius: 4px;
+  border: 1px solid var(--danger);
+  color: var(--danger);
+  max-width: 340px;
+}
+.ctl-flash-ok {
+  border-color: var(--nomad);
+  color: var(--nomad);
+}
+
+.ctl-row .ctl-button {
+  padding: 1px 5px;
+  font-size: 10px;
+  font-family: var(--mono);
+  letter-spacing: 0.08em;
+  background: transparent;
+}
+.ctl-row .ctl-question {
+  font-size: 10px;
+}
+.ctl-row .ctl-yes,
+.ctl-row .ctl-no {
+  padding: 1px 5px;
+  font-size: 10px;
+}
+
+/* --------------------------------------------------------------- tray -- */
+
+.tray {
+  border-left: 1px solid var(--line);
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  min-height: 0;
+}
+.tray-preview {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+/* 180px wide, live. It answers "what does the room see right now" without
+   the host switching tabs, which is the question the host asks most. */
+.preview-frame {
+  width: 180px;
+  height: 370px;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--ground);
+}
+.preview-frame .p-root.compact {
+  transform: scale(0.5);
+  transform-origin: top left;
+}
+.tray-toasts {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.toasts {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  overflow-y: auto;
+  min-height: 0;
+}
+.toast {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 6px 8px;
+  background: var(--panel);
+  border-left: 2px solid var(--line);
+  border-radius: 3px;
+  font-size: 12px;
+}
+.toast-spot {
+  border-left-color: var(--spot);
+}
+.toast-kind {
+  font-size: 10px;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+/* ---------------------------------------------------------------- gate -- */
+
+.gate {
+  margin: auto;
+  max-width: 560px;
+  padding: 48px 24px;
+}
+.gate h1 {
+  font-size: 40px;
+  margin: 8px 0 12px;
+}
+.gate-note {
+  color: var(--muted);
+  line-height: 1.5;
+}
