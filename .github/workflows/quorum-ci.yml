@@ -2,10 +2,16 @@
 # here needs a credential — note the absence of an `id-token` permission and of
 # any secret. A fork's PR runs these in full.
 #
-# HCP Terraform posts its own speculative plan for quorum-staging and
-# quorum-prod as separate status checks, driven by the VCS connection rather
-# than by this file. Those plus the three jobs below are what should be required
-# to merge.
+# There is no deploy workflow. The AWS account this runs in forbids IAM users
+# and identity providers, so nothing can authenticate there except a human with
+# a current session — see infra/README.md. Deploys are `make deploy`, run by a
+# person. For a service that runs two hours a few times a year that is the right
+# shape, not a consolation: there is no release cadence to automate, and someone
+# has to be present to raise the service before an event anyway.
+#
+# So this file is the whole of CI, and it deliberately needs no credential:
+# note the absence of an `id-token` permission and of any secret. A fork's PR
+# runs it in full.
 
 name: CI
 

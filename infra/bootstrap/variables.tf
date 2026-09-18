@@ -13,26 +13,6 @@ variable "aws_region" {
   type        = string
 }
 
-variable "tfc_organization" {
-  description = "HCP Terraform organization name. Appears verbatim in the quorum-tfc-run trust policy, so a typo here means every run fails to authenticate."
-  type        = string
-}
-
-variable "tfc_project" {
-  description = "HCP Terraform project holding the quorum workspaces. Scoping the trust policy to a project means a workspace created elsewhere in the org cannot assume this role by naming itself quorum-something."
-  type        = string
-}
-
-variable "github_repository" {
-  description = "org/repo for the GitHub Actions trust policy, e.g. phan-t/quorum. Only the main branch of this repository can mint a token for the ECR push role."
-  type        = string
-
-  validation {
-    condition     = can(regex("^[^/]+/[^/]+$", var.github_repository))
-    error_message = "Use the org/repo form, with no leading https:// and no trailing .git."
-  }
-}
-
 variable "ecr_repository_name" {
   description = "Name of the one ECR repository. One repository, not one per environment: staging and prod deploy the same image, and promoting a tag beats rebuilding it."
   type        = string

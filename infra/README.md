@@ -22,146 +22,61 @@ creates. The only stored credential in the whole system is a HCP Terraform team
 token in a GitHub secret, and it can set a variable and queue a run — nothing
 else.
 
+## Why there is no pipeline
+
+This account permits no non-human credentials. `iam:CreateOpenIDConnectProvider`
+and `iam:CreateUser` are both an explicit deny, and the account holds **0 users
+and 0 identity providers** against 46 roles. That is a deliberate policy, not a
+gap: only a human with a current session acts here.
+
+So there is no OIDC, no access key, no machine identity and no deploy workflow.
+CI still runs on every push — typecheck, tests, `fmt`, `validate`, and a
+container build to prove the Dockerfile compiles — and it needs no credential to
+do any of that. The deploy is `make deploy`, run by a person.
+
+For a service that runs two hours a few times a year this is the right shape.
+There is no release cadence to automate, and somebody has to be present to
+raise the service before an event regardless.
+
+**Sessions last eight hours.** Run `awscreds` first. If an apply dies partway
+with `ExpiredToken`, re-run `awscreds` and apply again — Terraform picks up
+where it stopped.
+
 ## What a human has to supply
 
-Terraform cannot invent an account id or a domain, so these are variables with
-no default. An apply without them fails at plan time, which is the correct place
-to find out.
+Terraform variables, per environment. They live in a gitignored
+`terraform.tfvars` because this repo is public.
 
-| | Where | |
-| --- | --- | --- |
-| `aws_account_id` | all three workspaces | Twelve digits. Also the account half of every role ARN |
-| `aws_region` | all three | `ap-southeast-2` in the design |
-| `tfc_organization` | bootstrap | Baked verbatim into the `quorum-tfc-run` trust policy |
-| `tfc_project` | bootstrap | The project the three workspaces live in |
-| `github_repository` | bootstrap | `org/repo`. Only this repo's `main` may push images |
-| `hosted_zone_id` | staging, prod | A Route 53 zone that already exists |
-| `domain_name` | staging, prod | The hostname for that environment |
-| `image_tag` | staging, prod | Set by the deploy workflow; set by hand for the first apply |
-
-`TF_CLOUD_ORGANIZATION` is an environment variable rather than a value in the
-`cloud {}` block, because this repository is public and an org name has no
-business being hardcoded in it. Export it before `terraform init`.
-
-See the `terraform.tfvars.example` in each directory for the annotated list.
-
-## Bootstrap order
-
-It runs in this order because each step creates the thing the next one
-authenticates with. There is no way to shorten it, and it only happens once.
-
-**1. Create the three workspaces in HCP Terraform.** In one project, named
-`quorum-bootstrap`, `quorum-staging`, `quorum-prod`.
-
-| Workspace | Working directory | Execution | Apply | Trigger patterns |
-| --- | --- | --- | --- | --- |
-| `quorum-bootstrap` | `infra/bootstrap` | CLI-driven | manual | — |
-| `quorum-staging` | `infra/envs/staging` | VCS-driven | auto | `infra/envs/staging/**`, `infra/modules/**` |
-| `quorum-prod` | `infra/envs/prod` | VCS-driven | manual | `infra/envs/prod/**`, `infra/modules/**` |
-
-The trigger patterns are what make a module change plan in both environments and
-a staging-only change plan in staging only.
-
-**2. Apply bootstrap, from a laptop, with your own AWS credentials.**
-
-```
-export TF_CLOUD_ORGANIZATION=<your org>
-cd infra/bootstrap
-cp terraform.tfvars.example terraform.tfvars   # fill it in
-terraform init
-terraform apply
-```
-
-This is the one deliberately manual step, and the reason is circular: it creates
-the OIDC providers and the `quorum-tfc-run` role that every other workspace uses
-to authenticate. Nothing can apply it except a human who already has access.
-It is touched again only to change a trust policy.
-
-It also creates the ECR repository. One repository, shared by both
-environments, because staging and prod run the same image and promoting a tag
-beats rebuilding one and hoping the result is identical — which means it cannot
-belong to either environment's workspace, and belongs here with the other things
-that exist before an environment can.
-
-Note the outputs; the next two steps are made of them.
-
-**3. Wire the environment workspaces.** On `quorum-staging` and `quorum-prod`,
-as **environment** variables:
-
-```
-TFC_AWS_PROVIDER_AUTH = true
-TFC_AWS_RUN_ROLE_ARN  = <tfc_run_role_arn output>
-```
-
-That is the whole AWS credential configuration. Every run now mints a
-credential that expires when the run does.
-
-Then the **Terraform** variables from the table above: `aws_account_id`,
-`aws_region`, `hosted_zone_id`, `domain_name`, and `image_tag`.
-
-**4. Wire GitHub.** Repository variables:
-
-| | |
+| Variable | This account |
 | --- | --- |
-| `AWS_REGION` | `ap-southeast-2` |
-| `AWS_ROLE_ARN` | `gha_ecr_push_role_arn` output |
-| `ECR_REPOSITORY` | `quorum` |
-| `TFC_ORGANIZATION` | your org |
-| `TFC_WORKSPACE_STAGING` | `quorum-staging` |
-| `TFC_WORKSPACE_PROD` | `quorum-prod` |
-| `QUORUM_DEPLOY_FREEZE` | unset, normally. See below |
+| `aws_account_id` | in `terraform.tfvars`, not here |
+| `aws_region` | `ap-southeast-2` |
+| `hosted_zone_id` | the zone owning `tphan.aws.hashidemos.io` |
+| `domain_name` | `quorum.tphan.aws.hashidemos.io` |
+| `image_tag` | set by `make deploy`; any existing tag for the first apply |
+| `desired_count` | `0` at rest |
 
-And one repository secret, `TFC_TOKEN`: a HCP Terraform **team token** scoped to
-the two environment workspaces. It is the only stored credential here. HCP
-Terraform does not yet accept GitHub's OIDC tokens for API calls; when it does,
-this goes too.
-
-**5. Build and push one image by hand,** so there is something for the first
-apply to run. After this, the workflow does it.
+## First run, from nothing
 
 ```
-aws ecr get-login-password --region <region> \
-  | docker login --username AWS --password-stdin <account>.dkr.ecr.<region>.amazonaws.com
-docker build -t <account>.dkr.ecr.<region>.amazonaws.com/quorum:sha-$(git rev-parse --short=7 HEAD) app
-docker push <account>.dkr.ecr.<region>.amazonaws.com/quorum:sha-$(git rev-parse --short=7 HEAD)
+awscreds                                  # eight hours
+make check                                # confirms the session and the account
+cd infra/bootstrap && terraform init && terraform apply    # the ECR registry
+make deploy                               # build, push, apply
+make up                                   # raise it and wait for /healthz
 ```
 
-Set that tag as `image_tag` on `quorum-staging`.
+Budget about fifteen minutes for the first apply; most of it is ACM waiting on
+DNS validation. After that an apply is a couple of minutes.
 
-**6. Apply staging.** Queue a run on `quorum-staging`. It will sit for a few
-minutes on the ACM certificate, which cannot be issued until its DNS validation
-record propagates. Expect roughly fifteen minutes end to end on a first apply.
-
-**7. Set the admin key.** The apply created the SSM parameter with a
-placeholder and stopped caring about its value:
+## Day to day
 
 ```
-aws ssm put-parameter --name /quorum/staging/admin_key --type SecureString \
-  --value "$(openssl rand -base64 24)" --overwrite --region <region>
+make up        # before an event
+make url       # is it answering
+make down      # after
+make plan      # what would change
 ```
-
-Terraform never sees the real value. State is encrypted at rest, but plan output
-is visible to anyone who can see a run, and a secret in a Terraform variable is
-a secret in every plan from then on. The task picks the new value up on its
-next start, because ECS resolves `secrets` at task start and not after.
-
-**8. Start it.** Staging's `desired_count` defaults to `0` — parked, so Fargate
-costs nothing between rehearsals. Set it to `1`, queue a run, and the URL in the
-`url` output answers.
-
-Prod is steps 3 and 6 through 8 again, against `quorum-prod`.
-
-## After that, nobody touches a console
-
-A merge to `main` that changes `app/**` builds an image, pushes it, sets
-`image_tag` on the workspace and queues a run. A merge that changes `infra/**`
-queues its own run from the VCS connection and picks up whatever `image_tag` is
-already set. The two are orthogonal inputs to the same owner, which is the point
-of making the image a variable rather than having Actions call `UpdateService`.
-
-A pull request gets `tsc --noEmit`, the tests, a container build that is not
-pushed, `terraform fmt -check` and `validate` — and a speculative plan per
-environment, posted by HCP Terraform itself.
 
 ## Parked at zero between events
 
@@ -237,23 +152,19 @@ twenty seconds with their rejoin tokens. The freeze checks in the deploy
 workflow exist so that this is never a surprise; a rollback done by hand in the
 HCP Terraform UI bypasses them, so check `/healthz` first.
 
-## The deploy freeze
+## Do not deploy during an event
 
-Three things stop a deploy landing in the middle of an event, because "don't
-deploy during the huddle" on its own is a Slack message someone missed:
+There is no job to enforce this any more, so it is a rule you keep rather than
+one the pipeline keeps for you. `make check` before you deploy, and:
 
-1. `/healthz` reports `sessionsLive`. The prod release job reads it and fails,
-   with the count in the message, if it is non-zero.
-2. `QUORUM_DEPLOY_FREEZE`, a repository variable. `1` freezes indefinitely; a
-   `YYYY-MM-DD` date freezes that UTC day and then stops mattering, so nobody
-   has to remember to clear it. Set it the day before — it catches the session
-   that is about to start and does not yet count as live.
-3. Prod applies wait for a human in HCP Terraform. Even if both checks are
-   wrong, someone has to click, and someone clicking at 2:45pm on an event day
-   is a person who can be asked to wait.
+```
+make url        # sessionsLive tells you whether anyone is mid-session
+```
 
-`workflow_dispatch` with `force: true` overrides 1 and 2, for the case where the
-deploy *is* the fix.
+A deploy replaces the running task. One stateful process means every WebSocket
+drops and every phone reconnects into a session that has lost its in-memory
+state — during the arcade that is the whole room, at once. If the deploy *is*
+the fix, do it anyway; otherwise it waits.
 
 ## Things to know before you change something
 
@@ -286,21 +197,15 @@ cannot cross a major version, but patch versions will drift between runs.
 Committing the lock files would remove that drift and is worth doing if a
 provider release ever surprises anyone.
 
-## Running a plan from a laptop
+## Checking the configuration without credentials
 
-```
-export TF_CLOUD_ORGANIZATION=<your org>
-cd infra/envs/staging
-terraform init
-terraform plan
-```
-
-Against a VCS-driven workspace that is a speculative plan: it reads state,
-shows a diff, and cannot apply. Which is all a laptop should be able to do.
-
-To check the configuration without any credential at all — which is what CI
-does:
+What CI does, and what you can do with no session at all:
 
 ```
 terraform init -backend=false && terraform validate
+terraform fmt -check -recursive
 ```
+
+That catches a syntax or type error without touching AWS. It cannot catch a
+permissions problem or a resource that already exists — for those you need
+`make plan`, which needs a session.

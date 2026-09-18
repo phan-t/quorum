@@ -383,199 +383,39 @@ Each `envs/<env>` is an HCP Terraform workspace with that directory as its
 working directory and `modules/**` in its trigger patterns, so a module change
 plans in both and a staging-only change plans in staging only.
 
-## Delivery: HCP Terraform and GitHub Actions
+## Delivery: a person with a session
 
-Terraform state and runs live in HCP Terraform. Container images are built by
-GitHub Actions. Neither holds a long-lived AWS credential.
+The original design here was OIDC federation — HCP Terraform to AWS, GitHub
+Actions to AWS, no stored credential anywhere, the image tag as a Terraform
+variable so a deploy was an apply. It is a good design and it is not the one
+that runs, because the account it deploys into forbids the identities it needs:
+`iam:CreateOpenIDConnectProvider` and `iam:CreateUser` are both an explicit
+deny, and the account holds 0 users and 0 identity providers against 46 roles.
 
-### Workspaces
+That is a deliberate policy — only humans with a current session act in that
+account — and there is no way to satisfy it with a machine identity, including
+the "just store an access key" fallback, because there is no user to hold a key.
 
-| Workspace | Directory | Execution | Apply |
-| --- | --- | --- | --- |
-| `quorum-bootstrap` | `infra/bootstrap` | CLI-driven | Manual, by a human, rarely |
-| `quorum-staging` | `infra/envs/staging` | VCS-driven | Auto-apply |
-| `quorum-prod` | `infra/envs/prod` | VCS-driven | Manual confirm |
+**So the deploy is `make deploy`, run by a person with an eight-hour session.**
+`make up` and `make down` raise and park the service around an event. The image
+tag is still a Terraform variable and the apply is still the deploy, so the task
+definition keeps one owner and a deploy is still a reviewable diff — only the
+thing holding the credential changed.
 
-**VCS-driven for the environments.** Every PR touching `infra/**` gets a
-speculative plan posted as a GitHub status check by HCP Terraform itself;
-every merge to `main` queues a real run. The alternative, CLI-driven, means
-someone applies from a laptop, which means the state of production depends on
-whose laptop and which branch. The repo is the source of truth for the
-infrastructure and VCS-driven is the setting that makes that literally true.
-`terraform plan` from a laptop still works against a VCS workspace as a
-speculative plan, which is all a laptop should do.
+**CI stays, and needs no credential**: typecheck, tests, `terraform fmt` and
+`validate`, and a container build that proves the Dockerfile compiles. That is
+most of what the pipeline was worth, and a fork's PR runs all of it.
 
-**Bootstrap is the exception** because it creates the very roles the other
-workspaces authenticate with. It is applied once with a human's own AWS
-credentials and touched again only to change a trust policy.
+This is a smaller loss than it looks. Quorum runs two hours a few times a year.
+There is no release cadence to automate, and someone has to be present to raise
+the service before an event anyway. Deploy-on-merge was solving a problem this
+service does not have.
 
-### Credentials: dynamic, via OIDC — no stored keys anywhere
+**If the guardrail is ever lifted**, the way back is short: create the two OIDC
+providers and the two roles, and move `make deploy`'s three steps into a
+workflow. Nothing in the application or the Terraform assumes a human.
 
-This is the point of using HCP Terraform for this and it is worth being
-explicit about.
-
-**HCP Terraform → AWS.** The bootstrap workspace creates an IAM OIDC identity
-provider for `app.terraform.io` and a role, `quorum-tfc-run`, whose trust
-policy allows `sts:AssumeRoleWithWebIdentity` only when the token's
-`sub` matches
-`organization:<org>:project:quorum:workspace:quorum-*:run_phase:*`. The
-`quorum-staging` and `quorum-prod` workspaces carry two environment
-variables — `TFC_AWS_PROVIDER_AUTH=true` and `TFC_AWS_RUN_ROLE_ARN` — and
-nothing else. Every run gets a credential minted for that run that expires
-when the run does. If tighter is wanted later, split into a plan role
-(read-only) and an apply role by adding `run_phase:plan` / `run_phase:apply`
-to two trust policies; the mechanism is the same.
-
-**GitHub Actions → AWS.** Same idea, other issuer. Bootstrap creates an OIDC
-provider for `token.actions.githubusercontent.com` and a role,
-`quorum-gha-ecr-push`, trusting `sub =
-repo:<org>/team-building:ref:refs/heads/main` with `aud =
-sts.amazonaws.com`. Its permissions are `ecr:GetAuthorizationToken` and push
-to the one repository. The workflow declares `permissions: id-token: write`
-and uses `aws-actions/configure-aws-credentials` with `role-to-assume`.
-
-**Why no static keys, stated once.** An access key in a GitHub secret or a
-workspace variable does not expire, is not scoped to a branch, survives the
-departure of whoever created it, ends up in a fork's secrets or a debug log,
-and needs a rotation nobody schedules. An OIDC token lives minutes, names the
-exact repository and branch (or workspace and run phase) that minted it, and
-cannot be used from anywhere else. There is no scenario in this design where
-a long-lived AWS key is the right answer, so there is none.
-
-**GitHub Actions → HCP Terraform** is the one place a stored token exists: a
-team token, scoped to the two environment workspaces, held as a GitHub secret
-`TFC_TOKEN`, used only to set a variable and queue a run. HCP Terraform does
-not yet accept GitHub's OIDC tokens for API calls; when it does, this secret
-goes too.
-
-### What lives where
-
-| Kind | Where | Examples |
-| --- | --- | --- |
-| Infrastructure shape | Terraform code in the repo | Everything in `modules/` |
-| Per-environment values | HCP Terraform **Terraform variables** | `image_tag`, `domain_name`, `hosted_zone_id`, `desired_count`, `task_cpu`, `task_memory`, `log_retention_days` |
-| Cloud auth | HCP Terraform **environment variables** | `TFC_AWS_PROVIDER_AUTH`, `TFC_AWS_RUN_ROLE_ARN` |
-| Runtime secrets | **SSM Parameter Store**, SecureString, injected by ECS at task start | `/quorum/prod/admin_key` |
-| Runtime non-secret config | Task definition `environment`, set by Terraform because Terraform knows the values | `QUORUM_TABLE`, `AWS_REGION`, `QUORUM_ENV`, `LOG_LEVEL` |
-
-The rule: **a secret's value never passes through Terraform.** Terraform
-creates the SSM parameter with a placeholder and `lifecycle { ignore_changes
-= [value] }`; a human sets the real value once with the AWS CLI. Terraform
-state is encrypted at rest in HCP Terraform, but plan output is shown to
-anyone who can see a run, and a secret in a variable is a secret in every
-plan. The application reads secrets from its environment at startup, so it
-does not know or care that SSM exists.
-
-### The deploy decision: the image tag is a Terraform variable
-
-Two ways to get a new image into ECS, and mixing them is the mistake:
-
-- **A.** Actions registers a new task definition and calls `UpdateService`.
-  Terraform owns the rest. Requires `ignore_changes = [task_definition]` on
-  the service, two renderers of the task definition (one in HCL, one in the
-  workflow), and a Terraform apply that either fights the deploy or is
-  blindfolded to it.
-- **B.** Actions pushes the image and sets `image_tag` in the workspace; a
-  Terraform run applies it. Terraform is the only thing that ever writes an
-  ECS resource.
-
-**B.** The reasoning:
-
-1. **One owner.** The task definition is HCL, full stop. Environment
-   variables, secrets, CPU, memory and the image are in one place with one
-   diff. There is no `ignore_changes` and no second template.
-2. **The deployed version is in state and in run history.** "What is in prod
-   right now?" is a question HCP Terraform answers, with who changed it and
-   the plan they saw.
-3. **The plan is the review.** A deploy run's plan says: one task definition
-   revision, one service update, image `sha-abc123` → `sha-def456`. If it says
-   anything else, something is wrong and the human confirming prod sees it
-   before it happens. Option A has no equivalent moment.
-4. **Deploy frequency is low.** This ships a few times a month. A plan/apply
-   cycle of two to three minutes is not a cost anyone will feel. The
-   argument for A is deploy speed, and it does not apply here.
-
-The mechanism, so it is concrete: the `release` job calls the HCP Terraform
-API to `PATCH` the workspace variable `image_tag`, then `POST /runs` for that
-workspace with the message `deploy sha-<short> (<commit subject>)`. Updating a
-variable does not itself trigger a run on a VCS workspace, so the explicit run
-is required, and the run uses the tracked branch's current commit — which is
-the same commit that built the image, because the job runs on merge to `main`.
-`hashicorp/tfc-workflows-github` provides actions for both calls.
-
-An infrastructure-only merge (a change under `infra/`) triggers its own
-VCS run and picks up whatever `image_tag` is set. That is exactly why B does
-not fight: the image is a variable, not code, so code changes and image
-changes are orthogonal inputs to the same single owner.
-
-### Workflows
-
-**`quorum-ci.yml` — on pull request** touching `services/quorum/**`:
-
-```
-lint-test:      npm ci · eslint · tsc --noEmit · vitest (reducers, protocol, CSV import)
-build-image:    docker build (no push) — proves the Dockerfile still builds
-terraform:      terraform fmt -check -recursive
-                terraform validate  (init -backend=false; no credentials needed)
-```
-
-HCP Terraform posts the speculative plan for each environment workspace as
-its own status check. All four checks are required to merge.
-
-**`quorum-deploy.yml` — on push to `main`** touching `services/quorum/app/**`
-or the Dockerfile:
-
-```
-build-push:     permissions: { id-token: write, contents: read }
-                configure-aws-credentials (role: quorum-gha-ecr-push, OIDC)
-                docker build · tag sha-<short> and main · push both
-
-release-staging: needs build-push
-                set image_tag = sha-<short> on quorum-staging · create run · wait
-                (auto-apply) · curl https://quorum-staging.<domain>/healthz
-                expect version == sha-<short>
-
-release-prod:   needs release-staging · environment: prod
-                freeze check (below)
-                set image_tag on quorum-prod · create run
-                → the run waits in HCP Terraform for a human to confirm
-```
-
-The prod confirm lives in HCP Terraform, not in a GitHub environment
-approval, because the thing worth a human's eyes is the plan, and the plan is
-in HCP Terraform. A GitHub approval would be a button next to a log; the
-Terraform confirm is a button next to the diff.
-
-### Deploying around a live session
-
-A deploy is a task stop and start. Every WebSocket drops, the room sees a
-reconnect banner for twenty seconds, and any answer sent in the gap is lost.
-The service survives this ([above](#durability-and-restart)); the session
-should never have to.
-
-The policy is **don't**, enforced three ways because "don't" on its own is a
-Slack message someone missed:
-
-1. **The service says whether it is busy.** `/healthz` reports
-   `sessionsLive`. The `release-prod` job fetches it first and fails, loudly,
-   with the session count in the message, if it is non-zero. `force=true` as
-   a manual `workflow_dispatch` input overrides it, for the case where the
-   deploy *is* the fix.
-2. **Event days are frozen.** A repository variable `QUORUM_DEPLOY_FREEZE`
-   (`1` or a date) is checked by the same job. Whoever owns an event sets it
-   the day before and clears it after. This catches the session that is about
-   to start and does not yet count as live.
-3. **Prod applies are manual.** Even if both checks are wrong, the run sits in
-   HCP Terraform until someone clicks, and someone clicking at 2:45pm on an
-   event day is a person who can be asked to wait.
-
-Draining was considered and rejected: ALB connection draining keeps old
-sockets open on the old task while new ones go to the new task, which with
-in-memory state gives two tasks with different ideas of the session. That is
-worse than a clean twenty-second gap. Scaling to two tasks with a shared
-state store would remove the problem and is the first thing to do if this
-ever becomes something other than a tool used two hours at a time — and a
-strong hint that it should not.
+See [infra/README.md](infra/README.md) for the commands.
 
 ## Local development
 

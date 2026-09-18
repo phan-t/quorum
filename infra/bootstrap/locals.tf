@@ -5,7 +5,7 @@ locals {
       Component  = "bootstrap"
       ManagedBy  = "terraform"
       Workspace  = "quorum-bootstrap"
-      Repository = var.github_repository
+      Repository = "phan-t/quorum"
     },
     var.additional_tags,
   )
