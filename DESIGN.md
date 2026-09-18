@@ -139,7 +139,7 @@ seconds between sentences and knows what is happening and what to press.
 │ ─────────     │                                                     │
 │ PARTICIPANTS  ├─────────────────────────────────────────────────────┤
 │ ● Priya   6420│  SPOT AWARDS  trivia 2 left   [ + award ]           │
-│ ● Kenji   5910│  BENCH  Abhijeet (TTX) · Grace (joined late, trivia)│
+│ ● Kenji   5910│  BENCH  Ade (TTX) · Grace (joined late, trivia)│
 │ ◐ Sam     4200│                                                     │
 │ …             │  ┌──────────┐  phone preview                        │
 └───────────────┴──┴──────────┴───────────────────────────────────────┘
@@ -179,7 +179,7 @@ seconds between sentences and knows what is happening and what to press.
 **Manual entry** is a grid: nickname, raw score field, bench toggle, computed
 points in the next column updating as you type, and the top scorer's row
 highlighted so the host sees it land on 100. Paste-mode shows a match list:
-`"A. Lokhande" → Abhijeet Lokhande (92%) [✓] [pick…]`. Publish is two-step.
+`"A. Okafor" → Ade Okafor (92%) [✓] [pick…]`. Publish is two-step.
 
 **Spot Award** is a small form: pick a person (typeahead, mono, like the
 existing award box), a required reason, grant. Participants on bench for

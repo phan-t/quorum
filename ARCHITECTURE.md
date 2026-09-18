@@ -234,7 +234,7 @@ broadcast outbound, which `ws` handles without noticing.
 // C→S
 { "t": "host.cmd", "cid": "h41", "cmd": "trivia.open", "qid": "q07" }
 { "t": "host.cmd", "cid": "h42", "cmd": "segment", "kind": "holding",
-  "title": "Agentic Security TTX", "line": "Abhijeet has the room. Back here at 2:40.", "until": 1790338800000 }
+  "title": "Agentic Security TTX", "line": "Ade has the room. Back here at 2:40.", "until": 1790338800000 }
 { "t": "host.cmd", "cid": "h43", "cmd": "seal" }
 { "t": "host.cmd", "cid": "h44", "cmd": "participant.release", "pid": "p07" }
 { "t": "host.cmd", "cid": "h45", "cmd": "spot", "pid": "p12", "activityId": "trivia", "reason": "best recovery of the afternoon" }
