@@ -42,32 +42,49 @@ raise the service before an event regardless.
 with `ExpiredToken`, re-run `awscreds` and apply again — Terraform picks up
 where it stopped.
 
-## State is remote, execution is local
+## Runs are remote; credentials are pushed, not federated
 
-State, locking and run history live in HCP Terraform. The apply runs on your
-machine, with your session.
+State, locking, run history and the applies themselves all live in HCP
+Terraform.
 
 ```
 export TF_CLOUD_ORGANIZATION=tphan     # the config does not name it: this repo is public
 ```
 
-The token comes from `terraform login`, which writes
-`~/.terraform.d/credentials.tfrc.json`. Nothing in this repo holds it.
+The HCP Terraform token comes from `terraform login`. Nothing in this repo
+holds it.
 
-**Each workspace must be set to Local execution mode.** Remote is the default
-and it will not work here: HCP Terraform would run the apply on its own workers,
-which have no AWS credentials — which is the entire reason this project deploys
-from a laptop. The failure is a provider authentication error partway into a
-run, which reads like an AWS problem and is not one.
+### The AWS credentials, and the eight-hour clock
 
-In the workspace: *Settings → General → Execution Mode → Local*. Both
-`quorum-bootstrap` and `quorum-prod`.
+Remote runs execute on HCP Terraform's workers, which need an AWS session of
+their own. This account issues no static credentials — no IAM users, no
+identity providers — so what the workers get is a copy of *your* STS session,
+pushed into the **AWS Authentication** variable set by doormat:
 
-State lives there rather than on the laptop deliberately. A state file for real
-infrastructure existing in exactly one place, on one machine, is how you end up
-with resources nobody can delete.
+```
+awscreds        # new AWS session locally (8 hours)
+tfawscreds      # push it into the variable set
+```
 
-## What a human has to supply
+**Both, in that order, before any apply.** A session that expired since the
+last push fails the run at the AWS provider, partway in, which reads like a
+permissions problem and is not one. If a run fails that way, re-run both and
+queue it again.
+
+A variable set rather than workspace variables matters: one push covers every
+workspace attached to it. Do not set `AWS_ACCESS_KEY_ID` and friends on a
+workspace directly — workspace variables take precedence over a variable set,
+so stale values there silently shadow the fresh ones and the failure looks
+identical to an expired session.
+
+### Attaching the variable set to a new workspace
+
+A workspace created by `terraform init` has no variable set attached, so its
+first run fails with no credentials at all. Attach **AWS Authentication** to it
+once, in *Workspace → Variables → Variable sets → Apply to this workspace*.
+
+`quorum-bootstrap` is already attached. `quorum-prod` needs it the first time
+it exists.## What a human has to supply
 
 Terraform variables, per environment. They live in a gitignored
 `terraform.tfvars` because this repo is public.
@@ -85,6 +102,7 @@ Terraform variables, per environment. They live in a gitignored
 
 ```
 awscreds                                  # eight hours
+tfawscreds                                # push the session to the variable set
 export TF_CLOUD_ORGANIZATION=tphan
 make check                                # confirms the session and the account
 cd infra/bootstrap && terraform init && terraform apply    # the ECR registry

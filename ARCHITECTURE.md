@@ -397,6 +397,12 @@ account — and there is no way to satisfy it with a machine identity, including
 the "just store an access key" fallback, because there is no user to hold a key.
 
 **So the deploy is `make deploy`, run by a person with an eight-hour session.**
+Runs still execute in HCP Terraform — what changed is how its workers get AWS
+credentials. Rather than federating an identity, doormat pushes a copy of the
+operator's STS session into a variable set (`awscreds`, then `tfawscreds`), and
+it expires with that session. It is a credential refresh before every apply
+instead of no credential at all, which is worse than OIDC and was the only
+option the account left open.
 `make up` and `make down` raise and park the service around an event. The image
 tag is still a Terraform variable and the apply is still the deploy, so the task
 definition keeps one owner and a deploy is still a reviewable diff — only the

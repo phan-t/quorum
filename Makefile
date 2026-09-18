@@ -1,9 +1,14 @@
 # Quorum — local operations.
 #
-# Every target runs as you, with the AWS session already in your shell. There
-# is no machine identity: the account forbids IAM users and identity providers,
-# so nothing can act here except a human with a current session. Run `awscreds`
-# first; the session lasts eight hours.
+# There is no machine identity: the account forbids IAM users and identity
+# providers, so nothing acts here except a human with a current session.
+#
+#   awscreds     a new AWS session locally          (8 hours)
+#   tfawscreds   push that session to HCP Terraform (for the remote apply)
+#
+# Both, in that order, before an apply. The image push uses your local session;
+# the apply uses the copy in the variable set. Either being stale fails the same
+# way, partway in, looking like a permissions problem.
 #
 #   make check     is my session alive, is the org set, what account am I in
 #   make deploy    build, push, and apply the new image
@@ -27,7 +32,7 @@ ENVDIR   = infra/envs/$(ENV)
 ## Fail early and clearly rather than three minutes into an apply.
 check:
 	@aws sts get-caller-identity --query 'Arn' --output text 2>/dev/null \
-	  || { echo "No AWS session. Run: awscreds"; exit 1; }
+	  || { echo "No AWS session. Run: awscreds && tfawscreds"; exit 1; }
 	@test -n "$(TF_CLOUD_ORGANIZATION)" \
 	  || { echo "TF_CLOUD_ORGANIZATION is unset. Run: export TF_CLOUD_ORGANIZATION=tphan"; exit 1; }
 	@echo "region   $(REGION)"
