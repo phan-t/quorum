@@ -1,0 +1,151 @@
+# Quorum — build plan
+
+How to get from [SPEC.md](SPEC.md) to something running, in an order where
+every phase ends with a thing you can show someone.
+
+The sequencing principle: **deploy an almost-empty service first.** The
+pipeline, the WebSocket, the host control loop and the state machine are the
+risky parts, and they are risky together. Games are content on top of a proven
+spine — build the spine first and the rest is additive.
+
+---
+
+## Phase 0 — Foundations
+
+Nothing deployed. Everything after this depends on it.
+
+- Repo scaffolding under `services/quorum/app`: TypeScript, one process,
+  server + three clients built by Vite
+- The **game engine as a pure reducer** — `(state, event) => state`, no I/O.
+  This is the single most important structural decision in the build: it is what
+  makes restart-mid-game recoverable and what makes the rules testable without
+  a browser
+- Unit tests for scoring: normalisation, Bench Credit, Spot Awards, ties
+- `docker compose` for DynamoDB Local; `npm run dev` with hot reload
+- **The bot harness** (`npm run bots -- 30`). Build this in Phase 0, not later.
+  Every phase after this is validated by thirty fake participants, and you will
+  not get thirty humans to test a round for you.
+
+**Done when:** `npm test` proves the scoring rules, and thirty bots can join a
+session in memory.
+
+## Phase 1 — Walking skeleton
+
+The first deploy. Content is deliberately trivial.
+
+- Join with nickname + join code → lobby
+- Host console: start session, switch segment, end session
+- **The holding page** — the simplest possible segment, and the one the TTX
+  needs anyway
+- Participant page follows the host with no navigation
+- WebSocket reconnect with state resync
+- Terraform: bootstrap workspace (OIDC providers, IAM roles), then staging
+  (VPC, ALB, ECS, DynamoDB, ACM, Route53)
+- GitHub Actions: PR checks, and build → push → set image tag → apply
+
+**Done when:** you can open the URL on your phone, join, and watch the page
+change because someone clicked a button on a laptop — and a merge to `main`
+puts a new version there without you touching a console.
+
+This is the phase that de-risks the project. Everything hard about the
+infrastructure is either working or not by the end of it.
+
+## Phase 2 — Scoreboard
+
+Now it is useful even with no games in it.
+
+- Manual score entry for the TTX and anything off-platform
+- Normalisation to Huddle Points, live
+- Seal and reveal as a real state across all three surfaces
+- Spot Awards with a required reason
+- Bench Credit
+- Big screen surface
+- CSV export at the end of a session
+
+**Done when:** you could run the 25 September huddle on it with Kahoot and the
+existing arcade, typing scores in by hand — and it would be better than the
+spreadsheet.
+
+That is a genuine milestone, not a notional one. If the project stalled here it
+would still have been worth building.
+
+## Phase 3 — Trivia
+
+- CSV import in the existing Kahoot shape, plus the optional columns
+- Question flow: open, answer, lock, reveal, leaderboard
+- Speed-weighted scoring with the latency correction
+- Sudden-death mode for a tiebreak
+- The 20-question launch set loads unmodified
+
+**Done when:** thirty bots play a full 20-question round and the scores match a
+hand-computed expectation.
+
+## Phase 4 — The arcade
+
+Iterative, and the order matters. Each round is a day or two, not a week.
+
+1. **Recruitment** (Emoji Decode) — no elimination, proves round scaffolding
+   and hands out player numbers
+2. **The Lounge** — build the drain → back-a-player → score loop *before* the
+   second game. It is the mechanic the whole format rests on, and it is the one
+   most likely to need redesign after you see it with real people
+3. **Plan / Apply** — the first drain round, and the timing-sensitive one
+4. **The Glass Bridge** — reuses Real-or-Fake content
+5. **Unseal**, **Tug of Raft**, **Gganbu** — in whatever order appeals
+
+**Done when:** five rounds run end to end and nobody who gets drained in round
+one is bored in round four. That second clause is the actual acceptance test
+and it needs humans, not bots.
+
+## Phase 5 — Operations
+
+- A runbook: pre-session checklist, what to do when the host's browser dies,
+  how to restore a session
+- Load test at 2× expected headcount
+- The deploy-freeze check wired into the release job
+- A rehearsal with real people who are not you
+
+**Done when:** someone who is not you can host a session from the runbook.
+
+---
+
+## Sequencing notes
+
+**Phase 1 is the risk.** If OIDC federation, the ALB idle timeout or the
+Fargate task fight you, that is where it happens. Budget accordingly and do not
+start Phase 3 until a deploy is boring.
+
+**Phase 2 is the escape hatch.** It is the first point where stopping leaves
+something valuable behind. Worth reaching before the enthusiasm curve dips.
+
+**Phase 4 is where the fun is and where scope grows.** Six rounds are
+specified; five is a standard run. Build three, play them with real people,
+then decide whether the other three are wanted.
+
+**Do not target a live event with the first outing.** Run a throwaway session
+with a handful of colleagues first. The failure modes that matter — someone's
+phone sleeping, a flaky hotel wifi, two people picking the same nickname — do
+not show up in a bot run.
+
+---
+
+## What has to exist before Phase 1 can deploy
+
+These are inputs from a human with the right access, not code. See the
+questions in the handover conversation.
+
+| | Needed for |
+| --- | --- |
+| AWS account ID and region | Every Terraform resource; the OIDC trust policies |
+| Permission to create an IAM OIDC provider and roles | Bootstrap workspace |
+| A hostname, and a Route53 zone or delegated subdomain | ACM certificate, ALB listener |
+| HCP Terraform org name, and a project | Three workspaces |
+| Dynamic provider credentials permitted in that org | The no-stored-keys design |
+| Exact `org/repo` for the GitHub trust policy | Actions → ECR push |
+| Spend approval, ~$40/month | Running it at all |
+| Tagging and cost-centre conventions | Whatever the account requires |
+
+**The bootstrap apply is run once, by a human, with real credentials.** The
+OIDC providers and roles have to exist before any VCS-driven run can
+authenticate, so that workspace is CLI-driven and deliberately outside the
+automated path.
