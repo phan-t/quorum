@@ -129,6 +129,35 @@ not show up in a bot run.
 
 ---
 
+## Where the content ends up
+
+The activity library holds two kinds of thing, and they end up in different
+places. Worth deciding once rather than at each phase.
+
+**Content moves here. Guides do not.**
+
+| | Today | After |
+| --- | --- | --- |
+| Trivia questions | `question-bank.md` + a Kahoot CSV | Ships in this repo as the launch trivia set, loaded into `CONTENT#` at session create |
+| Arcade items | A `ROUNDS` array inside a host-driven HTML page | Ships here as structured round content |
+| Facilitator guides | Activity READMEs | **Stay in the library.** They are about running a session with humans, which is true whatever software is underneath |
+| The existing HTML boards and Kahoot import | Activity folders | **Stay, as the fallback.** Retire them only after this service has run a real session without incident |
+
+The forcing reason is that this repo is public and the library is private: a
+public build cannot pull launch content out of a private repo without awkward
+credentials in CI. Content that ships in the container has to live here.
+
+**Move it at the phase that consumes it** — trivia content in Phase 3, arcade
+content in Phase 4 — not in one upfront migration. Moving content nothing
+consumes yet only creates two copies to keep in step.
+
+**One thing to scrub on the way.** The question bank carries a "Round S"
+template for a round about a person being celebrated, including a note naming a
+specific colleague and their leaving date. The template is worth having; the
+name is not, in a public repo. Generalise it as it moves.
+
+---
+
 ## What has to exist before Phase 1 can deploy
 
 These are inputs from a human with the right access, not code. See the
