@@ -54,6 +54,13 @@ export function nicknameKey(nickname: string): string {
 /** Shortest usable nickname, in code points. See SPEC.md "Identity". */
 export const MIN_NICKNAME_LENGTH = 2;
 
+/**
+ * Longest usable nickname, in code points. ARCHITECTURE.md caps these at 24.
+ * Enforced here rather than in the client: the client can be bypassed, and
+ * every surface would otherwise need its own truncation.
+ */
+export const MAX_NICKNAME_LENGTH = 24;
+
 export interface NewSessionInput {
   readonly sid: string;
   readonly title: string;
@@ -157,12 +164,22 @@ export function reduce(
           reject({ pid: event.pid }, "invalid_nickname", "Pick a nickname."),
         );
       }
-      if ([...nickname].length < MIN_NICKNAME_LENGTH) {
+      const glyphs = [...nickname].length;
+      if (glyphs < MIN_NICKNAME_LENGTH) {
         return unchanged(
           reject(
             { pid: event.pid },
             "invalid_nickname",
             `Nicknames need at least ${MIN_NICKNAME_LENGTH} characters.`,
+          ),
+        );
+      }
+      if (glyphs > MAX_NICKNAME_LENGTH) {
+        return unchanged(
+          reject(
+            { pid: event.pid },
+            "invalid_nickname",
+            `Nicknames are at most ${MAX_NICKNAME_LENGTH} characters.`,
           ),
         );
       }

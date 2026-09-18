@@ -3,15 +3,23 @@
   "version": "0.0.0",
   "private": true,
   "type": "module",
-  "engines": { "node": ">=22" },
+  "engines": {
+    "node": ">=22"
+  },
   "scripts": {
     "typecheck": "tsc --noEmit",
     "test": "node --experimental-strip-types --test 'src/**/*.test.ts'",
     "test:watch": "node --experimental-strip-types --test --watch 'src/**/*.test.ts'",
-    "bots": "node --experimental-strip-types src/bots/simulate.ts"
+    "bots": "node --experimental-strip-types src/bots/simulate.ts",
+    "dev": "node --experimental-strip-types --watch src/server/main.ts",
+    "start": "node --experimental-strip-types src/server/main.ts"
   },
   "devDependencies": {
     "@types/node": "^22.10.2",
+    "@types/ws": "^8.18.1",
     "typescript": "^5.7.2"
+  },
+  "dependencies": {
+    "ws": "^8.21.3"
   }
 }
