@@ -42,6 +42,31 @@ raise the service before an event regardless.
 with `ExpiredToken`, re-run `awscreds` and apply again — Terraform picks up
 where it stopped.
 
+## State is remote, execution is local
+
+State, locking and run history live in HCP Terraform. The apply runs on your
+machine, with your session.
+
+```
+export TF_CLOUD_ORGANIZATION=tphan     # the config does not name it: this repo is public
+```
+
+The token comes from `terraform login`, which writes
+`~/.terraform.d/credentials.tfrc.json`. Nothing in this repo holds it.
+
+**Each workspace must be set to Local execution mode.** Remote is the default
+and it will not work here: HCP Terraform would run the apply on its own workers,
+which have no AWS credentials — which is the entire reason this project deploys
+from a laptop. The failure is a provider authentication error partway into a
+run, which reads like an AWS problem and is not one.
+
+In the workspace: *Settings → General → Execution Mode → Local*. Both
+`quorum-bootstrap` and `quorum-prod`.
+
+State lives there rather than on the laptop deliberately. A state file for real
+infrastructure existing in exactly one place, on one machine, is how you end up
+with resources nobody can delete.
+
 ## What a human has to supply
 
 Terraform variables, per environment. They live in a gitignored
@@ -60,6 +85,7 @@ Terraform variables, per environment. They live in a gitignored
 
 ```
 awscreds                                  # eight hours
+export TF_CLOUD_ORGANIZATION=tphan
 make check                                # confirms the session and the account
 cd infra/bootstrap && terraform init && terraform apply    # the ECR registry
 make deploy                               # build, push, apply

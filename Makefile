@@ -5,7 +5,7 @@
 # so nothing can act here except a human with a current session. Run `awscreds`
 # first; the session lasts eight hours.
 #
-#   make check     is my session alive, and what account am I in
+#   make check     is my session alive, is the org set, what account am I in
 #   make deploy    build, push, and apply the new image
 #   make up        raise the service before an event
 #   make down      park it at zero afterwards
@@ -28,6 +28,8 @@ ENVDIR   = infra/envs/$(ENV)
 check:
 	@aws sts get-caller-identity --query 'Arn' --output text 2>/dev/null \
 	  || { echo "No AWS session. Run: awscreds"; exit 1; }
+	@test -n "$(TF_CLOUD_ORGANIZATION)" \
+	  || { echo "TF_CLOUD_ORGANIZATION is unset. Run: export TF_CLOUD_ORGANIZATION=tphan"; exit 1; }
 	@echo "region   $(REGION)"
 	@echo "env      $(ENV)  ($(ENVDIR))"
 	@echo "image    $(REGISTRY)/$(REPO):$(TAG)"
