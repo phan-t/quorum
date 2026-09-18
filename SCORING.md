@@ -5,6 +5,11 @@ for sessions run on a spreadsheet, and they are reproduced here because the
 spec defers to them constantly and a reader should not have to go and find
 them.
 
+They are also still run by hand. The activity library keeps an operational
+version of the same rules — how to hold the spreadsheet, when to share it, when
+to go dark — and the two are identical by intent. A rule change has to land in
+both.
+
 **Everyone competes as an individual.** There are no teams and, in a typical
 session, exactly one winner.
 
