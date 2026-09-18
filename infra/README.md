@@ -163,6 +163,53 @@ A pull request gets `tsc --noEmit`, the tests, a container build that is not
 pushed, `terraform fmt -check` and `validate` — and a speculative plan per
 environment, posted by HCP Terraform itself.
 
+## Parked at zero between events
+
+Quorum runs for about two hours, a few times a year. It is not a service that
+should be up in between, and it is cheaper and safer parked.
+
+**`desired_count = 0` is the resting state.** Everything else stays: the VPC,
+the ALB, the certificate, the DNS records, the table and its data. There is
+simply no task running, so nothing serves and nothing can leak.
+
+### Before an event
+
+```
+# a day ahead, not an hour: an image build and an apply both take minutes
+set desired_count = 1 on the workspace, queue a run
+curl https://quorum.tphan.aws.hashidemos.io/healthz     # {"ok":true,...}
+```
+
+Then create the session, open the host console, and check the join page loads
+on an actual phone on actual mobile data. The failure you are looking for is a
+certificate or DNS problem, and it looks identical to "it works" from a laptop
+that has the page cached.
+
+### After it
+
+```
+set desired_count = 0, queue a run
+```
+
+Do it the same day. A service nobody is watching, left running with a public
+URL, is the thing that turns up in a quarterly security review.
+
+### What parking still costs
+
+About **$20 a month**, almost all of it the ALB, which bills whether or not a
+task is behind it. Over a year that is roughly $240 to keep a load balancer
+warm for eight hours of actual use.
+
+**If that annoys you, destroy instead of park.** `terraform destroy` on the
+env workspace takes it to near zero — the Route 53 zone and the ECR images are
+outside the env and survive — and a fresh apply takes about fifteen minutes,
+most of it ACM waiting on DNS validation. The table goes with it, so export
+the session first (`/api/sessions/:sid/export.csv`) if the scores still matter.
+
+Parking is the default because fifteen minutes of ACM validation on the morning
+of an event is a bad place to discover a problem. Destroying is the right call
+if the gap between events is months rather than weeks.
+
 ## Rolling back
 
 **A bad image.** Set `image_tag` on the workspace to the previous
