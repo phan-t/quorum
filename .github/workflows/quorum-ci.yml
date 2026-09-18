@@ -15,6 +15,14 @@ on:
       - "app/**"
       - "infra/**"
       - ".github/workflows/**"
+  # Also on main. Work lands here directly as well as through PRs, and a push
+  # that skipped the checks entirely is worse than one that fails them.
+  push:
+    branches: [main]
+    paths:
+      - "app/**"
+      - "infra/**"
+      - ".github/workflows/**"
 
 permissions:
   contents: read
@@ -31,7 +39,7 @@ jobs:
       run:
         working-directory: app
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - uses: actions/setup-node@v4
         with:
@@ -54,7 +62,7 @@ jobs:
     name: container builds
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - uses: docker/setup-buildx-action@v3
 
@@ -75,7 +83,7 @@ jobs:
     name: terraform fmt and validate
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - uses: hashicorp/setup-terraform@v3
         with:

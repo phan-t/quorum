@@ -38,14 +38,54 @@ env:
   TF_CLOUD_ORGANIZATION: ${{ vars.TFC_ORGANIZATION }}
 
 jobs:
+  # Until someone has run the bootstrap apply and set the repo variables, there
+  # is no account to deploy into. Skipping loudly beats failing: a red X on
+  # every push to main is noise, and noise is how a real failure gets ignored.
+  preflight:
+    name: is deploy configured
+    runs-on: ubuntu-latest
+    outputs:
+      configured: ${{ steps.check.outputs.configured }}
+    steps:
+      - id: check
+        env:
+          AWS_REGION: ${{ vars.AWS_REGION }}
+          AWS_ROLE_ARN: ${{ vars.AWS_ROLE_ARN }}
+          ECR_REPOSITORY: ${{ vars.ECR_REPOSITORY }}
+          TFC_ORGANIZATION: ${{ vars.TFC_ORGANIZATION }}
+          TFC_TOKEN: ${{ secrets.TFC_TOKEN }}
+        run: |
+          set -euo pipefail
+          missing=()
+          for v in AWS_REGION AWS_ROLE_ARN ECR_REPOSITORY TFC_ORGANIZATION TFC_TOKEN; do
+            [ -n "${!v:-}" ] || missing+=("$v")
+          done
+          if [ ${#missing[@]} -gt 0 ]; then
+            echo "configured=false" >>"$GITHUB_OUTPUT"
+            {
+              echo "### Deploy skipped"
+              echo
+              echo "This repository has not been bootstrapped yet, so there is"
+              echo "nowhere to deploy to. Missing: \`${missing[*]}\`."
+              echo
+              echo "See [infra/README.md](../blob/main/infra/README.md) for the"
+              echo "bootstrap sequence. Nothing is broken."
+            } >>"$GITHUB_STEP_SUMMARY"
+            echo "::notice title=Deploy skipped::Not bootstrapped. Missing: ${missing[*]}"
+          else
+            echo "configured=true" >>"$GITHUB_OUTPUT"
+          fi
+
   build-push:
     name: build and push image
+    needs: preflight
+    if: needs.preflight.outputs.configured == 'true'
     runs-on: ubuntu-latest
     outputs:
       image_tag: ${{ steps.meta.outputs.image_tag }}
       message: ${{ steps.meta.outputs.message }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: tag and message
         id: meta
@@ -60,7 +100,7 @@ jobs:
             echo "EOF"
           } >>"$GITHUB_OUTPUT"
 
-      - uses: aws-actions/configure-aws-credentials@v4
+      - uses: aws-actions/configure-aws-credentials@v5
         with:
           role-to-assume: ${{ vars.AWS_ROLE_ARN }}
           aws-region: ${{ vars.AWS_REGION }}
@@ -92,7 +132,7 @@ jobs:
     needs: build-push
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: set image_tag and queue a run
         id: run
@@ -140,7 +180,7 @@ jobs:
     needs: [build-push, release-staging]
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       # A deploy is a task stop and start: every WebSocket drops and the room
       # sees a reconnect banner for twenty seconds. The service survives it; the
