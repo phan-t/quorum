@@ -16,7 +16,7 @@ them.
 
 Every seam is a name match done by a person under time pressure. The roster has
 to be identical in Kahoot, on the arcade board and in the CSV, and the
-[roster notes](https://github.com/phan-t/team-building/blob/main/events/2026-09-25-sa-apj-team-huddle/roster.md) say so in
+the roster notes say so in
 bold because it fails every time: someone joins Kahoot as `asdf`, the scorekeeper
 spends the three-minute break doing detective work, and a score goes in the
 wrong row. The arcade needs a second person watching chat and typing names. The
@@ -34,7 +34,7 @@ and the host's attention one thing (a console, not four windows).
   Designing more identity than that would cost more than every problem it
   solves.
 - **No teams.** Everyone scores as an individual, exactly as
-  [huddle-points.md](https://github.com/phan-t/team-building/blob/main/shared/scoring/huddle-points.md) argues. The data
+  [SCORING.md](SCORING.md) argues. The data
   model does not forbid teams later; the product does not build them now.
 - **No content authoring UI.** Trivia comes from a CSV; arcade rounds are
   files in this repo. A form-based question editor is a second product.
@@ -119,7 +119,7 @@ software cannot tell an impostor from a phone swap.
 land on whatever is running. Someone who arrives during question 9 plays from
 question 10. For the activity they missed, the host marks them **bench** (see
 Scoring) — the same treatment as a facilitator, decided in advance as the
-[virtual playbook](https://github.com/phan-t/team-building/blob/main/shared/facilitation/virtual-playbook.md) already says.
+virtual playbook already says.
 
 **Kick and rename.** Host-only. Kicked participants can rejoin under a
 different nickname unless the lobby is locked.
@@ -163,7 +163,7 @@ for the TTX, or the standings between activities.
 
 ## Scoring
 
-Carried over exactly from [huddle-points.md](https://github.com/phan-t/team-building/blob/main/shared/scoring/huddle-points.md).
+Carried over exactly from [SCORING.md](SCORING.md).
 Nothing here changes a rule; it only makes the arithmetic automatic.
 
 **Every activity produces a raw number per person.** Trivia produces its
@@ -283,7 +283,7 @@ wins, the big screen shows the winner's name, no points change.
 
 The Kahoot import file that already exists is the format, so the 20-question
 set in
-[`kahoot-import.csv`](https://github.com/phan-t/team-building/blob/main/activities/hashicorp-ibm-trivia/kahoot-import.csv)
+`kahoot-import.csv`
 loads unchanged.
 
 ```csv

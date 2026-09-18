@@ -22,7 +22,7 @@ huddle — run that one on the existing tools.
 
 ## Three things that carry over unchanged
 
-**Scoring** is [huddle-points.md](https://github.com/phan-t/team-building/blob/main/shared/scoring/huddle-points.md),
+**Scoring** is [SCORING.md](SCORING.md),
 made automatic. Top scorer in each activity gets 100, everyone else scales;
 Spot Awards are 10 points with a required reason; facilitators and late
 joiners get Bench Credit. The service computes it; it does not change it.
@@ -32,9 +32,9 @@ surface shows cumulative standings — not the big screen, not a phone, not a
 running total — until the host reveals.
 
 **The content** is what is already in this repo:
-[`kahoot-import.csv`](https://github.com/phan-t/team-building/blob/main/activities/hashicorp-ibm-trivia/kahoot-import.csv)
+`kahoot-import.csv`
 loads as-is, and the eighteen arcade items in
-[`hashi-arcade/index.html`](https://github.com/phan-t/team-building/blob/main/activities/hashi-arcade/index.html) become
+`hashi-arcade/index.html` become
 rounds 0, 2 and 5.
 
 ## The one new idea
@@ -54,9 +54,9 @@ minutes of watching left was the failure this had to design out.
 ## Where this came from
 
 The activities Quorum automates, and the scoring rules it implements, live in
-[phan-t/team-building](https://github.com/phan-t/team-building) — the trivia
+[phan-t/team-building](https://github.com/phan-t/team-building) (private) — the trivia
 question bank, the arcade rounds, the facilitation notes and
-[Huddle Points](https://github.com/phan-t/team-building/blob/main/shared/scoring/huddle-points.md),
+[the scoring rules](SCORING.md),
 the normalisation rule this service exists to make automatic.
 
 That repo is the activity library and runs sessions today on Kahoot, a
