@@ -1,0 +1,36 @@
+# DynamoDB Local. Nothing is wired to it yet — the engine is a pure reducer and
+# the bot harness runs entirely in memory, so Phase 0 never touches it. It is
+# here because Phase 1 needs it the moment the server starts persisting, and a
+# store you can start with one command is the difference between testing the
+# restart path and hoping.
+#
+#   docker compose up -d     # endpoint on http://localhost:8000
+#   docker compose down      # the named volume survives; add -v to wipe it
+#
+# Local rather than a real table: the service writes a snapshot on every
+# accepted event, and doing that against AWS from a laptop costs credentials, a
+# shared table two people fight over, and a network round trip in the middle of
+# the game loop.
+
+services:
+  dynamodb:
+    image: amazon/dynamodb-local:2.5.2
+    container_name: quorum-dynamodb
+    ports:
+      - "8000:8000"
+    working_dir: /home/dynamodblocal
+    # -sharedDb: one database file whatever credentials or region the SDK is
+    # configured with. Without it, local DynamoDB files are keyed by access key
+    # and region, and a session written under one set of fake credentials is
+    # invisible to a process started with another. That is a confusing hour.
+    command: ["-jar", "DynamoDBLocal.jar", "-sharedDb", "-dbPath", "/home/dynamodblocal/data"]
+    # The image's own user does not own a fresh named volume, so it cannot
+    # create the database file. Root is fine for a throwaway local container.
+    user: root
+    volumes:
+      # Named, not a bind mount: a session survives a restart, which is exactly
+      # the case `replay()` exists for and the only way to rehearse recovery.
+      - quorum-dynamodb-data:/home/dynamodblocal/data
+
+volumes:
+  quorum-dynamodb-data:

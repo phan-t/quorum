@@ -7,7 +7,8 @@
   "scripts": {
     "typecheck": "tsc --noEmit",
     "test": "node --experimental-strip-types --test 'src/**/*.test.ts'",
-    "test:watch": "node --experimental-strip-types --test --watch 'src/**/*.test.ts'"
+    "test:watch": "node --experimental-strip-types --test --watch 'src/**/*.test.ts'",
+    "bots": "node --experimental-strip-types src/bots/simulate.ts"
   },
   "devDependencies": {
     "@types/node": "^22.10.2",
