@@ -373,113 +373,197 @@ body.phone #app {
   }
 }
 
+
 /* ---------------------------------------------------------------- *
- * The join screen, cut like the Vault login.
+ * The join screen, matched to Vault's own login.
  *
- * A centred card, a mark above the heading, the auth method named above
- * the field, and the credential set in mono with wide tracking so it reads
- * as a token rather than as prose. Vault yellow carries the mark and the
- * button; everything else stays on the app's own dark palette, because a
- * white card here would be the only light surface in the product.
+ * Structure taken from ui/app/components/auth/page.hbs and splash-page.hbs:
+ * a centred column, the brand mark and title in a header OUTSIDE a bordered
+ * card, a Method select above the credential, labelled fields with helper
+ * text under each, a full-width dark submit, and grey help below the card.
+ *
+ * Light, because Vault's login is light. The rest of Quorum is dark, so
+ * signing in steps from this page into a dark one — deliberate, and the one
+ * thing here worth a second opinion.
  * ---------------------------------------------------------------- */
 
-.join {
-  max-width: 24rem;
+body.phone:has(.v-splash) {
+  background: #f9f9fa;
+}
+
+.v-splash {
+  --v-ink: #0c0c0e;
+  --v-grey: #656a76;
+  --v-border: #dedfe3;
+  --v-focus: #1563ff;
+
+  max-width: 25rem;
   margin-inline: auto;
+  padding-block: clamp(1.5rem, 6vh, 3rem);
+  font-family: var(--body);
+  color: var(--v-ink);
 }
 
-.join-head {
+.v-splash-head {
   text-align: center;
-  display: grid;
-  justify-items: center;
-  gap: 0.6rem;
+  padding-block: 0.875rem 1.75rem;
 }
 
-.mark-wrap {
-  color: var(--vault);
-  line-height: 0;
-  margin-bottom: 0.15rem;
+/* .brand-icon-large is 62x62 in Vault. */
+.v-brand {
+  width: 62px;
+  height: 62px;
+  margin: 0 auto 1.25rem;
+  color: var(--v-ink);
 }
 .vault-mark {
-  width: 3rem;
-  height: auto;
+  width: 100%;
+  height: 100%;
   display: block;
-  /* The glow is what makes it read as a lock-screen rather than an icon. */
-  filter: drop-shadow(0 0 14px color-mix(in srgb, var(--vault) 35%, transparent));
 }
 
-.join-head h1 {
-  font-size: clamp(1.45rem, 6vw, 1.85rem);
-  letter-spacing: -0.01em;
-}
-
-/* Vault names the auth method above the field. There is one of them. */
-.method-row {
-  display: flex;
-  gap: 0.4rem;
-  justify-content: center;
-  margin-top: 0.1rem;
-}
-.method {
-  font-family: var(--mono);
-  font-size: 0.68rem;
-  letter-spacing: 0.16em;
-  text-transform: uppercase;
-  color: var(--muted);
-  padding: 0.3rem 0.7rem;
-  border: 1px solid var(--line);
-  border-radius: 999px;
-}
-.method.is-on {
-  color: var(--vault);
-  border-color: color-mix(in srgb, var(--vault) 45%, var(--line));
-  background: color-mix(in srgb, var(--vault) 10%, transparent);
-}
-
-/* The credential field. Tracking and case are what make four letters read
-   as a token; the code itself stays a word, because it is read aloud to a
-   room and "RAFT" survives a bad microphone where a hash does not. */
-.field-token {
-  text-align: center;
-  font-size: 1.35rem;
-  letter-spacing: 0.42em;
-  text-indent: 0.42em;
-  text-transform: uppercase;
-  padding-block: 0.85rem;
-  background: var(--ground);
-  border-color: var(--line);
-}
-.field-token:focus-visible {
-  border-color: var(--vault);
-  box-shadow: 0 0 0 3px color-mix(in srgb, var(--vault) 22%, transparent);
-  outline: none;
-}
-.field-token::placeholder {
-  letter-spacing: 0.42em;
-  color: var(--dim);
-}
-
-.field-hint {
-  font-size: 0.75rem;
-  color: var(--dim);
-  line-height: 1.4;
-}
-
-.join-field {
-  gap: 0.35rem;
-}
-
-.join .primary {
-  background: var(--vault);
-  border-color: var(--vault);
-  color: #1a1400;
+/* Bulma `title is-3`. */
+.v-title {
+  font-family: var(--body);
+  font-size: 2rem;
   font-weight: 600;
-}
-.join .primary:disabled {
-  opacity: 0.55;
+  line-height: 1.125;
+  letter-spacing: -0.01em;
+  margin: 0;
+  color: var(--v-ink);
 }
 
-.join-code-chip .code-value {
-  letter-spacing: 0.3em;
-  color: var(--vault);
+/* Hds::Card::Container level=high, hasBorder. */
+.v-card {
+  background: #fff;
+  border: 1px solid var(--v-border);
+  border-radius: 6px;
+  box-shadow:
+    0 2px 3px rgb(101 106 118 / 10%),
+    0 8px 16px -10px rgb(101 106 118 / 20%);
+  padding: 1.5rem;
+  display: grid;
+  gap: 1rem;
 }
+
+.v-field {
+  display: grid;
+  gap: 0.375rem;
+}
+
+.v-label {
+  font-size: 0.875rem;
+  font-weight: 600;
+  color: #3b3d45;
+}
+
+.v-help {
+  margin: 0;
+  font-size: 0.8125rem;
+  color: var(--v-grey);
+  line-height: 1.35;
+}
+
+.v-splash :is(.field, .v-select) {
+  width: 100%;
+  font-family: var(--body);
+  font-size: 0.9375rem;
+  color: var(--v-ink);
+  background: #fff;
+  border: 1px solid #8c909c;
+  border-radius: 5px;
+  padding: 0.5rem 0.75rem;
+  min-height: 2.5rem;
+}
+.v-splash :is(.field, .v-select):focus-visible {
+  outline: none;
+  border-color: var(--v-focus);
+  box-shadow: 0 0 0 2px rgb(21 99 255 / 25%);
+}
+.v-splash .field::placeholder {
+  color: #8c909c;
+}
+
+/* The credential, set like a token: mono and tracked. The value stays a
+   word — it is read aloud to a room, and RAFT survives a bad microphone. */
+.v-splash .field-token {
+  font-family: var(--mono);
+  letter-spacing: 0.3em;
+  text-indent: 0.3em;
+  text-transform: uppercase;
+}
+
+.v-select {
+  appearance: none;
+  background-image: linear-gradient(45deg, transparent 50%, #656a76 50%),
+    linear-gradient(135deg, #656a76 50%, transparent 50%);
+  background-position: calc(100% - 18px) 1.15rem, calc(100% - 13px) 1.15rem;
+  background-size: 5px 5px, 5px 5px;
+  background-repeat: no-repeat;
+}
+
+/* Hds::Button, isFullWidth. Vault's is near-black, not brand yellow. */
+.v-splash .v-submit {
+  width: 100%;
+  margin-top: 0.5rem;
+  padding: 0.6rem 1rem;
+  min-height: 2.5rem;
+  background: var(--v-ink);
+  color: #fff;
+  border: 1px solid var(--v-ink);
+  border-radius: 5px;
+  font-family: var(--body);
+  font-size: 0.9375rem;
+  font-weight: 500;
+  cursor: pointer;
+}
+.v-splash .v-submit:hover:not(:disabled) { background: #26262b; }
+.v-splash .v-submit:disabled { opacity: 0.5; cursor: default; }
+.v-splash .v-submit:focus-visible {
+  outline: 2px solid var(--v-focus);
+  outline-offset: 2px;
+}
+
+/* `help has-text-grey-dark`, under the card. */
+.v-splash-foot {
+  margin: 1rem 0 0;
+  text-align: center;
+  font-size: 0.8125rem;
+  color: var(--v-grey);
+}
+
+.v-chip {
+  display: flex;
+  align-items: baseline;
+  gap: 0.5rem;
+  padding: 0.5rem 0.75rem;
+  border: 1px solid var(--v-border);
+  border-radius: 5px;
+  background: #f9f9fa;
+}
+.v-chip-label { font-size: 0.8125rem; color: var(--v-grey); }
+.v-chip-value { font-weight: 600; letter-spacing: 0.22em; }
+.v-linky {
+  margin-left: auto;
+  background: none;
+  border: 0;
+  padding: 0;
+  color: var(--v-focus);
+  font: inherit;
+  font-size: 0.8125rem;
+  cursor: pointer;
+  text-decoration: underline;
+}
+
+.v-splash .join-error {
+  background: #fdf3f3;
+  border: 1px solid #f7cfcf;
+  border-radius: 5px;
+  padding: 0.625rem 0.75rem;
+  display: grid;
+  gap: 0.15rem;
+  color: #8b1a1a;
+}
+.v-splash .join-error:empty { display: none; }
+.v-splash .join-error strong { font-size: 0.875rem; }
+.v-splash .join-error span { font-size: 0.8125rem; }
