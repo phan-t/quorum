@@ -20,6 +20,7 @@ import type { HostCommand, RefusedReason } from "../protocol.ts";
 import {
   DEFAULT_ACTIVITIES,
   SessionRegistry,
+  recordRtt,
   type Client,
   type SessionRuntime,
 } from "./runtime.ts";
@@ -29,6 +30,7 @@ import { Persister } from "./persist.ts";
 import { openStore } from "./store/index.ts";
 import type { StoredEvent } from "./store/types.ts";
 import { recoverSessions, rehydrate } from "./recovery.ts";
+import { formatErrors, importTriviaCsv } from "../trivia/import.ts";
 import {
   eventsJsonl,
   mergeEventLogs,
@@ -112,6 +114,20 @@ function json(res: ServerResponse, code: number, body: unknown): void {
     "content-length": Buffer.byteLength(text),
   });
   res.end(text);
+}
+
+/** The body as text. Uploads are a CSV, not JSON. */
+async function readText(req: IncomingMessage): Promise<string> {
+  const chunks: Buffer[] = [];
+  let size = 0;
+  for await (const chunk of req) {
+    size += (chunk as Buffer).length;
+    // A twenty-question Kahoot export is a few kilobytes. A megabyte is
+    // already several hundred times the largest real file.
+    if (size > 1_000_000) throw new Error("body too large");
+    chunks.push(chunk as Buffer);
+  }
+  return Buffer.concat(chunks).toString("utf8");
 }
 
 async function readBody(req: IncomingMessage): Promise<unknown> {
@@ -198,6 +214,68 @@ async function serveExport(
   );
 }
 
+/**
+ * The trivia set for one session.
+ *
+ * ARCHITECTURE.md: "CSV upload; validates and replaces the set; returns
+ * line-numbered errors on failure." All or nothing — SPEC is explicit that "a
+ * set with question 14 missing is worse than a set that failed to load in the
+ * dry run" — and *replaces*, because re-uploading is the only way to edit a
+ * set and a host fixing a typo in the green room must not be told the set is
+ * already loaded. The engine draws the line at the first question opening,
+ * with `trivia_already_started`: swapping the set mid-activity would rewrite
+ * questions people have already been scored on.
+ */
+async function loadTriviaCsv(
+  res: ServerResponse,
+  sid: string,
+  presented: string,
+  req: IncomingMessage,
+): Promise<void> {
+  const runtime = registry.bySessionId(sid);
+  // Unknown session and wrong token answer the same way, as they do for the
+  // export: a 404 that only appears for a real sid is a session-id oracle.
+  if (
+    !runtime ||
+    presented === "" ||
+    !tokenMatches(presented, runtime.secrets.hostTokenHash)
+  ) {
+    return json(res, 401, { error: "unauthorized" });
+  }
+
+  let text: string;
+  try {
+    text = await readText(req);
+  } catch {
+    return json(res, 413, { error: "too_large" });
+  }
+
+  const result = importTriviaCsv(text);
+  if (!result.ok) {
+    return json(res, 400, {
+      error: "invalid_csv",
+      // Line-numbered, in the file's own order, so the host can fix the file
+      // rather than guess which row the importer disliked.
+      errors: formatErrors(result.errors),
+      detail: result.errors,
+    });
+  }
+
+  const activity =
+    runtime.state.activities.find((a) => a.kind === "trivia")?.id ?? "trivia";
+  const out = runtime.apply(
+    { type: "loadTrivia", activityId: activity, questions: result.questions },
+    Date.now(),
+  );
+  if (out.rejection) {
+    return json(res, 409, {
+      error: out.rejection.code,
+      message: out.rejection.message,
+    });
+  }
+  return json(res, 200, { activityId: activity, questions: result.questions.length });
+}
+
 function send(
   res: ServerResponse,
   code: number,
@@ -267,6 +345,22 @@ function handleHttp(req: IncomingMessage, res: ServerResponse): void {
     const tail = cut < 0 ? "" : rest.slice(cut + 1);
     if (tail === "export.csv" || tail === "events.jsonl") {
       void serveExport(res, sid, tail, bearer(req));
+      return;
+    }
+  }
+
+  // POST /api/sessions/:sid/content/trivia — the Kahoot CSV, host token only.
+  if (req.method === "POST" && path.startsWith("/api/sessions/")) {
+    const rest = path.slice("/api/sessions/".length);
+    const cut = rest.indexOf("/");
+    if (cut > 0 && rest.slice(cut + 1) === "content/trivia") {
+      let sid = rest.slice(0, cut);
+      try {
+        sid = decodeURIComponent(sid);
+      } catch {
+        /* use it as typed; it will simply not match a session */
+      }
+      void loadTriviaCsv(res, sid, bearer(req), req);
       return;
     }
   }
@@ -350,6 +444,65 @@ interface Pending {
   client: Client;
 }
 
+/* ------------------------------------------------------------------ */
+/* Server-measured latency                                             */
+/* ------------------------------------------------------------------ */
+
+/**
+ * ARCHITECTURE.md: "WebSocket-level ping every 25 s from the server". It is
+ * the keepalive, and it is also the *only* honest source of round-trip time
+ * for a socket — the client's `ping { t0 }` is the client timing the client.
+ */
+const WS_PING_EVERY_MS = 25_000;
+
+/**
+ * Send a WebSocket ping and remember when, so the pong is a measurement.
+ *
+ * One outstanding ping at a time: a pong carries no sequence number, so with
+ * two in flight the second pong would be timed against the first ping and
+ * report a round trip that never happened.
+ */
+/**
+ * How long an unanswered ping is waited on before it is written off.
+ *
+ * Without this the "one outstanding at a time" rule is a trap: a single lost
+ * pong leaves `pingSentAt` set for ever, and this socket then gets no further
+ * round-trip samples *and* no further keepalive pings for the rest of its
+ * life. A WebSocket pong that has not come back in ten seconds is not coming
+ * back.
+ */
+const PING_TIMEOUT_MS = 10_000;
+
+function probe(client: Client, now = Date.now()): void {
+  if (client.socket.readyState !== 1) return; // OPEN
+  if (client.pingSentAt !== null) {
+    if (now - client.pingSentAt < PING_TIMEOUT_MS) return;
+    // Abandoned, and deliberately not recorded: a lost pong is not evidence
+    // of a slow link, and inventing a ten-second round trip would be worse
+    // than having no sample at all.
+    client.pingSentAt = null;
+  }
+  client.pingSentAt = now;
+  try {
+    client.socket.ping();
+  } catch {
+    client.pingSentAt = null;
+  }
+}
+
+/**
+ * Refresh every phone's estimate at the moment it starts to matter.
+ *
+ * A question is open for twenty seconds and the keepalive runs every
+ * twenty-five, so without this a tap could be corrected by a round trip
+ * measured half a minute ago on a connection that has since changed — which
+ * on a phone that just moved from Wi-Fi to 4G is a different connection
+ * entirely. The pongs land in tens of milliseconds; nobody taps that fast.
+ */
+function probeParticipants(runtime: SessionRuntime, now: number): void {
+  for (const c of runtime.clients) if (c.role === "participant") probe(c, now);
+}
+
 wss.on("connection", (socket: WebSocket, req: IncomingMessage) => {
   // X-Forwarded-For is client-supplied. Behind the ALB the *last* entry is
   // the one the load balancer appended and the only one we can believe; the
@@ -370,6 +523,14 @@ wss.on("connection", (socket: WebSocket, req: IncomingMessage) => {
     if (!joined) socket.close(1008, "no_hello");
   }, 10_000);
 
+  // The pong to our own ping, which is the round trip nobody else can forge.
+  socket.on("pong", () => {
+    const client = joined?.client;
+    if (!client || client.pingSentAt === null) return;
+    recordRtt(client, Date.now() - client.pingSentAt);
+    client.pingSentAt = null;
+  });
+
   socket.on("message", (data) => {
     const msg = parseClientMessage(String(data));
     if (!msg) return;
@@ -389,6 +550,9 @@ wss.on("connection", (socket: WebSocket, req: IncomingMessage) => {
         // The new client's own state already carries the roster; sending it
         // again would give a host two identical frames at connect.
         runtime.broadcastRoster(now, client);
+        // First measurement straight away: a phone that rejoins mid-question
+        // would otherwise answer with no estimate and no correction at all.
+        probe(client, now);
       }
       return;
     }
@@ -404,6 +568,32 @@ wss.on("connection", (socket: WebSocket, req: IncomingMessage) => {
       case "resync":
         runtime.sendState(client, now);
         return;
+      case "trivia.answer": {
+        if (client.role !== "participant") {
+          runtime.send(client, {
+            t: "refusedCmd",
+            cid: msg.cid,
+            code: "forbidden",
+            message: "Only a participant can answer.",
+          });
+          return;
+        }
+        // `now` is the timestamp taken at the top of this handler, before any
+        // work: the response time is measured from when the frame arrived,
+        // not from when the server got round to it.
+        const out = runtime.answer(client, msg.index, msg.choice, now);
+        if (out.rejection) {
+          runtime.send(client, {
+            t: "refusedCmd",
+            cid: msg.cid,
+            code: out.rejection.code,
+            message: out.rejection.message,
+          });
+        } else {
+          runtime.send(client, { t: "ack", cid: msg.cid, applied: out.applied });
+        }
+        return;
+      }
       case "host.cmd": {
         if (client.role !== "host") {
           runtime.send(client, {
@@ -425,6 +615,11 @@ wss.on("connection", (socket: WebSocket, req: IncomingMessage) => {
           return;
         }
         const out = runtime.apply(event, now);
+        // A question has just gone up. Take a fresh round trip off every
+        // phone while nobody is tapping yet; see probeParticipants.
+        if (out.applied && msg.cmd?.name === "trivia.open") {
+          probeParticipants(runtime, now);
+        }
         // Kicking or releasing has to reach the device, not just the state:
         // a kicked participant whose socket stays open keeps watching, and a
         // released name is meant to free the *old* phone.
@@ -502,7 +697,7 @@ function handleHello(
         ),
       );
     if (!runtime) return refuseBare(socket, "bad_token", "That link is not valid.");
-    const client: Client = { socket, role: msg.role, lastSeen: now, seq: 0 };
+    const client: Client = { socket, role: msg.role, lastSeen: now, seq: 0, rtt: [], pingSentAt: null };
     runtime.send(client, {
       t: "welcome",
       role: msg.role,
@@ -545,7 +740,15 @@ function handleHello(
     );
   }
 
-  const client: Client = { socket, role: "participant", pid, lastSeen: now, seq: 0 };
+  const client: Client = {
+    socket,
+    role: "participant",
+    pid,
+    lastSeen: now,
+    seq: 0,
+    rtt: [],
+    pingSentAt: null,
+  };
   runtime.send(client, {
     t: "welcome",
     role: "participant",
@@ -609,6 +812,17 @@ function commandToEvent(cmd: HostCommand): Event | null {
       };
     case "spot.revoke":
       return { type: "revokeSpot", seq: cmd.seq };
+    case "trivia.open":
+      return { type: "openQuestion", suddenDeath: cmd.suddenDeath };
+    // The host closing early and the server's timer send the identical event.
+    // One code path, so there is no "closed by the host" state that behaves
+    // differently from "closed by the clock" for anyone downstream.
+    case "trivia.close":
+      return { type: "closeQuestion" };
+    case "trivia.reveal":
+      return { type: "revealQuestion" };
+    case "trivia.next":
+      return { type: "nextQuestion" };
     default:
       return null;
   }
@@ -619,6 +833,16 @@ setInterval(() => {
   const now = Date.now();
   for (const r of registry.all()) if (r.clients.size > 0) r.sweep(now);
 }, AWAY_AFTER_MS / 2).unref();
+
+/**
+ * The WebSocket-level keepalive, which doubles as the latency measurement
+ * every trivia answer is corrected by. A socket with a ping still outstanding
+ * is skipped rather than pinged again — see {@link probe}.
+ */
+setInterval(() => {
+  const now = Date.now();
+  for (const r of registry.all()) for (const c of r.clients) probe(c, now);
+}, WS_PING_EVERY_MS).unref();
 
 /* ------------------------------------------------------------------ */
 /* Boot and shutdown                                                    */
@@ -658,6 +882,10 @@ async function shutdown(signal: string): Promise<void> {
     // that this process had accepted.
     r.persistence.snapshot(r.state, now);
     r.persistence.meta(r.meta(now));
+    // A question that is open stays open in the snapshot, with the same
+    // `closesAt` it always had. The next process re-arms from it; this one
+    // must not fire a `closeQuestion` it will never get to persist.
+    r.clearQuestionTimer();
   }
   await Promise.race([persister.drain(), new Promise((r) => setTimeout(r, 10_000))]);
   for (const r of registry.all()) {

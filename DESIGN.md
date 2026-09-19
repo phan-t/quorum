@@ -82,9 +82,22 @@ the screen. That sets the rules:
 question and its four answers cannot fit, the question shrinks first, the
 answers never. Answer buttons are a 2 × 2 grid taking the bottom 55% of the
 screen, each ≥ 56 px tall, each with a shape glyph (▲ ◆ ● ■) in the corner
-and one of the four product hues as a *fill*, with white text. Kahoot's
-shape-plus-colour pattern is the right one and there is no reason to be
-different from it.
+and one of the four product hues as a *fill*. Kahoot's shape-plus-colour
+pattern is the right one and there is no reason to be different from it.
+
+The ink on those fills is **not** uniformly white. This document earlier sets a
+floor of 4.5:1 for text contrast, and white fails it on three of the four
+product hues — white on `--nomad` measures 1.96:1. So the tile takes light ink
+only on `--terraform` and dark ink on the other three,
+via `--on-fill-light` / `--on-fill-dark`. Those two tokens deliberately do not
+swap between light and dark themes: the hue underneath them does not move, so
+ink that followed `--ink`/`--ground` would become unreadable in one theme. A
+readable tile beats a consistent-looking rule, and the shape glyph carries the
+identity anyway — nothing here is distinguished by colour alone.
+
+Measured from computed styles in the browser, not from the stylesheet:
+terraform with light ink 5.76:1, consul 4.93:1, nomad 9.25:1, vault 13.36:1.
+Consul's margin is thin; anything that darkens that hue needs re-measuring.
 
 **The primary action is at the bottom.** Thumb reach. Tap targets in the top
 third of a phone screen are for things you do once (the join button), not

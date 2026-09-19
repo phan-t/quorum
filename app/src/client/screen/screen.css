@@ -323,3 +323,189 @@ body {
 .s-gate {
   align-items: flex-start;
 }
+
+/* ---------------------------------------------------------------- trivia -- */
+
+/*
+ * DESIGN.md: "Question in display type; answers as four tiles with shapes;
+ * timer; answer count as a bar filling toward '27 of 27'." Then, at the
+ * reveal, "correct tile stays lit, others dim; distribution bars; the note;
+ * then the trivia top five."
+ *
+ * The four rows are the same four rows throughout. During the question they
+ * are tiles; at the reveal a bar grows behind each one in its own hue with
+ * the count at the end. Keeping them in place means the correct answer lights
+ * up where the room is already looking, rather than on a new layout they have
+ * to re-read in four seconds.
+ */
+
+.s-trivia {
+  justify-content: flex-start;
+  gap: 1.8vh;
+}
+
+.s-trivia-head {
+  display: flex;
+  align-items: baseline;
+  gap: 1.5vw;
+}
+
+.s-trivia-round {
+  margin: 0;
+  padding: 0.3vh 0.8vw;
+  border-radius: 999px;
+  background: var(--panel-2);
+  color: var(--ink);
+  font-size: 28px;
+}
+.s-trivia-round[hidden] {
+  display: none;
+}
+
+/* The question is the biggest thing on the screen and gives way first: four
+   long answers still have to fit under it at 1080p. */
+.s-question {
+  margin: 0;
+  font-size: clamp(44px, 5.2vw, 104px);
+  line-height: 0.98;
+  letter-spacing: -0.02em;
+}
+
+.s-answers {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1.4vh 1.4vw;
+}
+.s-answers[data-count="2"] {
+  grid-template-columns: 1fr;
+}
+.s-answers[data-count="3"] > :first-child {
+  grid-column: span 2;
+}
+
+.s-answer {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 1vw;
+  min-height: 11vh;
+  padding: 1.6vh 1.4vw;
+  border-radius: 12px;
+  background: var(--tile);
+  color: var(--tile-ink);
+  font-size: clamp(32px, 2.4vw, 46px);
+  font-weight: 600;
+  overflow: hidden;
+}
+
+/* Before the reveal the bar is zero-width and invisible. After it, it is the
+   distribution — drawn darker over the tile's own hue so the fill reads at
+   any resolution without introducing a colour the family does not own. */
+.s-answer-bar {
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 0;
+  background: rgb(0 0 0 / 28%);
+}
+.s-answer-shape,
+.s-answer-text,
+.s-answer-tally {
+  position: relative;
+}
+.s-answer-shape {
+  flex: 0 0 auto;
+  opacity: 0.85;
+}
+.s-answer-text {
+  flex: 1;
+  min-width: 0;
+}
+.s-answer-tally {
+  flex: 0 0 auto;
+  font-weight: 600;
+}
+
+.s-answer.dim {
+  opacity: 0.38;
+}
+.s-answer.hit {
+  box-shadow: inset 0 0 0 6px var(--ink);
+}
+
+/* The timer is a number and a shrinking bar, both. */
+.s-timer,
+.s-answered {
+  display: flex;
+  align-items: center;
+  gap: 1.2vw;
+}
+.s-timer[hidden],
+.s-answered[hidden] {
+  display: none;
+}
+.s-timer-track,
+.s-count-track {
+  flex: 1;
+  height: 1.6vh;
+  border-radius: 999px;
+  background: var(--panel-2);
+  overflow: hidden;
+}
+.s-timer-fill {
+  height: 100%;
+  width: 100%;
+  background: var(--trivia);
+}
+.s-count-fill {
+  height: 100%;
+  width: 0;
+  background: var(--ink);
+}
+.s-timer-num,
+.s-count-text {
+  flex: 0 0 auto;
+  font-size: 40px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  min-width: 6ch;
+  text-align: right;
+}
+.s-timer.urgent .s-timer-fill {
+  background: var(--miss);
+}
+.s-timer.urgent .s-timer-num {
+  color: var(--miss);
+}
+
+/* "Notes appear on the reveal in >= 36px and the host reads them aloud
+   anyway." Muted rather than coloured: small coloured text is the one thing
+   the codec destroys. */
+.s-note {
+  margin: 0;
+  font-size: clamp(36px, 2vw, 44px);
+  line-height: 1.25;
+  color: var(--muted);
+  max-width: 48ch;
+}
+.s-note[hidden] {
+  display: none;
+}
+
+.s-trivia-podium[hidden] {
+  display: none;
+}
+/* The activity podium is a smaller board than the session standings: it is
+   the last thing on a screen that already has a question on it, and it says
+   who is winning *this activity*, not the afternoon. */
+.s-trivia-podium {
+  gap: 0.8vh;
+}
+.s-trivia-row .s-rank {
+  font-size: clamp(24px, 1.6vw, 34px);
+}
+.s-trivia-row .s-name-big {
+  font-size: clamp(32px, 2.4vw, 48px);
+}
+.s-trivia-row .s-total {
+  font-size: clamp(32px, 2.2vw, 44px);
+}

@@ -135,9 +135,27 @@ export class QuorumClient {
 
   /** Sends a host command and returns the `cid` the ack will carry. */
   command(cmd: HostCommand): string {
-    const cid = `c${++this.#cidSeq}-${Math.random().toString(36).slice(2, 8)}`;
+    const cid = this.#nextCid();
     this.#send({ t: "host.cmd", cid, cmd });
     return cid;
+  }
+
+  /**
+   * One tap at a trivia question, and it is final. Returns the `cid`.
+   *
+   * `index` rides along so a tap sent as the host advances is refused rather
+   * than silently landing on the next question. There is no timestamp on it:
+   * the response time is the server's to measure, and a client that could
+   * send one would be sending a number worth points.
+   */
+  answer(index: number, choice: number): string {
+    const cid = this.#nextCid();
+    this.#send({ t: "trivia.answer", cid, index, choice });
+    return cid;
+  }
+
+  #nextCid(): string {
+    return `c${++this.#cidSeq}-${Math.random().toString(36).slice(2, 8)}`;
   }
 
   /** Ask for a full state. Safe to call at any time. */

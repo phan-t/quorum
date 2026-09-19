@@ -10,6 +10,7 @@ import type { WebSocket } from "ws";
 import { reduce } from "../engine/reducer.ts";
 import type {
   Activity,
+  Audience,
   Effect,
   Event,
   ParticipantId,
@@ -21,7 +22,7 @@ import type {
   Role,
   ServerMessage,
 } from "../protocol.ts";
-import { renderStateFor, rosterOf } from "./views.ts";
+import { renderStateFor, rosterOf, triviaStateOf } from "./views.ts";
 import { hashToken, newToken } from "./tokens.ts";
 import {
   NO_PERSISTENCE,
@@ -53,6 +54,87 @@ export interface Client {
    * construction, so a gap only ever means a genuinely lost frame.
    */
   seq: number;
+  /**
+   * Round trips this process has measured on this socket, newest last.
+   *
+   * The server's own measurement, from WebSocket ping/pong frames it sent
+   * itself — not the client's `ping { t0 }`, which is the client measuring
+   * the client's clock and is a number a phone chooses. See
+   * {@link correctedResponseMs}.
+   */
+  rtt: number[];
+  /** When the outstanding WebSocket ping went out, or null if none is. */
+  pingSentAt: number | null;
+}
+
+/* ------------------------------------------------------------------ */
+/* Response time                                                       */
+/* ------------------------------------------------------------------ */
+
+/**
+ * The cap on the latency correction, from ARCHITECTURE.md "Clocks and
+ * fairness": "without it a client on a bad connection could be *advantaged*
+ * by a large correction, and with it the worst case is a quarter-second gift
+ * that applies equally to everyone on a poor link."
+ *
+ * Concretely: a 4-second round trip would otherwise hand back two seconds of
+ * a twenty-second question, which is worth more than answering fast. Capped,
+ * the worst anyone can extract is 250 ms — and someone in Bengaluru on hotel
+ * Wi-Fi still gets most of their handicap back, which is the point.
+ */
+export const MAX_LATENCY_CORRECTION_MS = 250;
+
+/** How many round trips the median is taken over. Five, as on the client. */
+export const RTT_SAMPLES = 5;
+
+/**
+ * Median, not mean: one packet stuck behind a bufferbloated uplink must not
+ * move this socket's estimate for the rest of the question. Null when nothing
+ * has been measured yet.
+ */
+export function medianRtt(samples: readonly number[]): number | null {
+  if (samples.length === 0) return null;
+  const sorted = [...samples].sort((a, b) => a - b);
+  const mid = sorted.length >> 1;
+  // An even count takes the mean of the two middle samples rather than the
+  // upper one. With two samples — which is the normal state early on, the
+  // probe at hello plus the one at the first question — picking the upper
+  // meant `[40, 4000]` reported 4000, the exact bufferbloat outlier this
+  // function exists to ignore.
+  if (sorted.length % 2 === 1) return sorted[mid] ?? null;
+  const lo = sorted[mid - 1];
+  const hi = sorted[mid];
+  return lo === undefined || hi === undefined ? null : (lo + hi) / 2;
+}
+
+export function recordRtt(client: Client, rttMs: number): void {
+  if (!Number.isFinite(rttMs) || rttMs < 0) return;
+  client.rtt.push(rttMs);
+  while (client.rtt.length > RTT_SAMPLES) client.rtt.shift();
+}
+
+/**
+ * `serverReceivedAt − opensAt − min(rtt ÷ 2, 250 ms)`, floored at zero.
+ *
+ * `rtt` null means this socket has not been measured yet, and the correction
+ * is then **zero** rather than an average of the room: a correction is a gift
+ * of points, and a gift handed out on no evidence is the thing the cap exists
+ * to bound. The unmeasured case is the harsh one on purpose.
+ *
+ * The floor at zero matters for the same reason from the other end. A clock
+ * that jumped backwards, or a correction larger than the elapsed time on a
+ * tap that arrived in under half a round trip, would otherwise produce a
+ * negative `t` — and `round(base × (1 − (t ÷ T) ÷ 2))` with a negative `t` is
+ * *more* than the base points, which is a score no answer can earn.
+ */
+export function correctedResponseMs(
+  receivedAt: number,
+  opensAt: number,
+  rttMs: number | null,
+): number {
+  const correction =
+    rttMs === null ? 0 : Math.min(rttMs / 2, MAX_LATENCY_CORRECTION_MS);
+  return Math.max(0, receivedAt - opensAt - correction);
 }
 
 export interface SessionSecrets {
@@ -79,6 +161,9 @@ export class SessionRuntime {
   /** Where a `persist` effect goes. Writes never block {@link apply}. */
   readonly persistence: SessionPersistence;
   readonly createdAt: number;
+  /** The armed `closeQuestion`, and exactly which question it is armed for. */
+  #closeTimer: ReturnType<typeof setTimeout> | null = null;
+  #closeTimerFor: { index: number; closesAt: number } | null = null;
 
   constructor(
     state: SessionState,
@@ -185,7 +270,7 @@ export class SessionRuntime {
     }
 
     let rejection: { code: string; message: string } | undefined;
-    let sendState = false;
+    const stateTo: Audience[] = [];
     let sendRoster = false;
     let persist = false;
 
@@ -195,6 +280,13 @@ export class SessionRuntime {
           // Any broadcast means somebody's view changed. Rather than encoding
           // which fields moved, resend the projection — it is a few hundred
           // bytes for thirty people and it cannot go subtly stale.
+          //
+          // The *audience* is honoured, though, and that is not an
+          // optimisation. A trivia answer is addressed to the one phone that
+          // sent it, the console and the big screen; fanning it to everyone
+          // would be thirty frames per tap, roughly eight hundred frames over
+          // one question, for a count that twenty-nine of those phones are
+          // not shown anyway.
           if (effect.what === "toast") {
             this.sendAll({
               t: "toast",
@@ -203,8 +295,9 @@ export class SessionRuntime {
               text: effect.detail ?? "",
             });
           } else {
-            sendState = true;
-            if (effect.what === "state") sendRoster = true;
+            stateTo.push(effect.to);
+            // Only a broadcast to the whole room can have moved the roster.
+            if (effect.what === "state" && effect.to === "all") sendRoster = true;
           }
           break;
         case "reject":
@@ -237,9 +330,145 @@ export class SessionRuntime {
       if ("pid" in event) this.persistParticipant(event.pid);
     }
 
-    if (sendState) this.broadcastState(now);
+    if (stateTo.length > 0) this.sendStateTo(stateTo, now);
     if (sendRoster) this.broadcastRoster(now);
+    // Every transition, not just the trivia ones: the timer is a function of
+    // the state, so deriving it here means there is no path — open, close,
+    // reveal, next, a host closing the session out from under an open
+    // question — that can leave one armed for a question that is gone.
+    this.armQuestionTimer(now);
     return rejection ? { applied: result.applied, rejection } : { applied: result.applied };
+  }
+
+  /* ---------------- the question timer ---------------- */
+
+  /**
+   * Fire `closeQuestion` at `closesAt`, because the engine has no clock.
+   *
+   * Idempotent, and keyed on *which* question it is armed for. Three things
+   * fall out of that, and all three are races that would otherwise be real:
+   *
+   * - **The host closes early.** `apply` re-arms at the end of every event,
+   *   sees a question that is no longer open, and clears the timer. The two
+   *   cannot both land.
+   * - **A stale timer from the previous question.** It re-checks the index and
+   *   the deadline it was armed for before doing anything, so a timeout that
+   *   was in flight when the host advanced does not close the *next* question
+   *   a fraction of a second after it opened. Node's loop is single-threaded,
+   *   so this check is not racing anything — by the time the callback runs the
+   *   state is settled, and it either still matches or the timer is moot.
+   * - **Both anyway.** If one did slip through, `closeQuestion` on a question
+   *   that is already closed is a rejection from the reducer, not a second
+   *   transition. The engine stays the only writer of the rule.
+   *
+   * A restart mid-question re-arms from the recovered state: `closesAt` in the
+   * future is scheduled for the instant it always meant, and one in the past
+   * fires immediately, which is ARCHITECTURE.md's "re-arms timers from the
+   * state" and leaves the room on the reveal rather than on a question that
+   * stopped counting down.
+   */
+  armQuestionTimer(now = Date.now()): void {
+    const trivia = triviaStateOf(this.state);
+    const want =
+      trivia && trivia.phase === "open" && trivia.closesAt !== null
+        ? { index: trivia.at, closesAt: trivia.closesAt }
+        : null;
+
+    if (want === null) return this.clearQuestionTimer();
+    if (
+      this.#closeTimerFor !== null &&
+      this.#closeTimerFor.index === want.index &&
+      this.#closeTimerFor.closesAt === want.closesAt
+    ) {
+      return; // already armed for exactly this deadline
+    }
+
+    this.clearQuestionTimer();
+    this.#closeTimerFor = want;
+    const timer = setTimeout(
+      () => {
+        this.#closeTimer = null;
+        this.#closeTimerFor = null;
+        const at = triviaStateOf(this.state);
+        if (
+          !at ||
+          at.phase !== "open" ||
+          at.at !== want.index ||
+          at.closesAt !== want.closesAt
+        ) {
+          return; // the host got there first, or moved on
+        }
+        this.apply({ type: "closeQuestion" }, Date.now());
+      },
+      Math.max(0, want.closesAt - now),
+    );
+    // Never the reason the process stays up: SIGTERM has thirty seconds and
+    // an unfired question timer must not spend any of them.
+    timer.unref?.();
+    this.#closeTimer = timer;
+  }
+
+  clearQuestionTimer(): void {
+    if (this.#closeTimer !== null) clearTimeout(this.#closeTimer);
+    this.#closeTimer = null;
+    this.#closeTimerFor = null;
+  }
+
+  /** The deadline the timer is armed for, for tests and for /status. */
+  get armedCloseAt(): number | null {
+    return this.#closeTimerFor?.closesAt ?? null;
+  }
+
+  /**
+   * A participant's tap, turned into an engine event at the socket boundary.
+   *
+   * This is the only place a response time is computed, and it is computed
+   * from this process's clock and this process's latency estimate for this
+   * socket. The frame carried no timestamp; the engine is handed `ms` and
+   * never learns that a network existed.
+   *
+   * The `index` check is here rather than in the reducer because
+   * `answerQuestion` has no question id on it: the driver is the only layer
+   * that can tell a tap meant for question 7 from one that arrived after the
+   * host advanced to question 8. Everything else — closed, already answered,
+   * choice out of range — is the engine's to refuse, and is left to it.
+   */
+  answer(
+    client: Client,
+    index: number,
+    choice: number,
+    receivedAt: number,
+  ): { applied: boolean; rejection?: { code: string; message: string } } {
+    if (client.pid === undefined) {
+      return {
+        applied: false,
+        rejection: { code: "unknown_participant", message: "Not a participant." },
+      };
+    }
+    const trivia = triviaStateOf(this.state);
+    if (!trivia) {
+      return {
+        applied: false,
+        rejection: { code: "no_questions_loaded", message: "No questions loaded." },
+      };
+    }
+    if (index !== trivia.at) {
+      return {
+        applied: false,
+        rejection: {
+          code: "question_not_open",
+          message: "That question has moved on.",
+        },
+      };
+    }
+    const ms =
+      trivia.opensAt === null
+        ? 0
+        : correctedResponseMs(receivedAt, trivia.opensAt, medianRtt(client.rtt));
+    return this.apply(
+      { type: "answerQuestion", pid: client.pid, choice, ms },
+      receivedAt,
+    );
   }
 
   /* ---------------- sending ---------------- */
@@ -279,6 +508,26 @@ export class SessionRuntime {
 
   broadcastState(now: number): void {
     for (const c of this.clients) this.sendState(c, now);
+  }
+
+  /** Whether one engine audience covers this socket. */
+  private static addressed(to: Audience, client: Client): boolean {
+    if (to === "all") return true;
+    if (to === "host") return client.role === "host";
+    if (to === "screen") return client.role === "screen";
+    return client.pid !== undefined && client.pid === to.pid;
+  }
+
+  /**
+   * One state frame to every client any of these audiences names, and exactly
+   * one: a participant who is also named by `all` must not get two.
+   */
+  sendStateTo(audiences: readonly Audience[], now: number): void {
+    for (const c of this.clients) {
+      if (audiences.some((to) => SessionRuntime.addressed(to, c))) {
+        this.sendState(c, now);
+      }
+    }
   }
 
   /** `except` is the client that has just been sent a full state already. */
@@ -385,6 +634,10 @@ export class SessionRegistry {
     }
     this.bySid.set(state.sid, runtime);
     this.byCode.set(state.joinCode, state.sid);
+    // A restart mid-question: re-arm from the recovered state before anyone
+    // reconnects, so a deadline that passed during the gap closes on the first
+    // tick rather than leaving a question open forever with nobody to close it.
+    runtime.armQuestionTimer();
     return runtime;
   }
 

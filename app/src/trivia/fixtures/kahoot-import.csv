@@ -1,0 +1,21 @@
+Question,Answer 1,Answer 2,Answer 3,Answer 4,Time limit (sec),Correct answer(s)
+In what year was HashiCorp founded?,2008,2010,2012,2015,20,3
+Which was HashiCorp's first product?,Terraform,Vagrant,Vault,Consul,20,2
+Who co-founded HashiCorp with Armon Dadgar?,Mitchell Hashimoto,Solomon Hykes,Kelsey Hightower,Adam Jacob,20,1
+Which HashiCorp product was released first?,Vault,Consul,Nomad,Boundary,30,2
+Which two products were announced together at HashiConf Digital 2020?,Vault & Consul,Boundary & Waypoint,Nomad & Packer,Terraform & Sentinel,30,2
+What is HashiCorp's published product design philosophy called?,The HashiCorp Way,The Tao of HashiCorp,The Blue Book,Infrastructure Manifesto,20,2
+"Which product does secrets management, encryption as a service and dynamic credentials?",Consul,Boundary,Vault,Nomad,20,3
+Which product gives secure remote access to hosts without distributing SSH keys or VPNs?,Consul,Boundary,Vault,Packer,20,2
+"Which product schedules containers, raw binaries, Java and VMs as workloads?",Nomad,Consul,Waypoint,Terraform,20,1
+"Which product does service discovery, health checking and service mesh?",Nomad,Boundary,Consul,Terraform,20,3
+Which product builds identical machine images for many platforms from one config?,Vagrant,Packer,Waypoint,Terraform,20,2
+"Which product creates reproducible dev environments, driven by a Vagrantfile?",Packer,Waypoint,Vagrant,Nomad,20,3
+What is HashiCorp's policy-as-code framework called?,Rego,Gatekeeper,Sentinel,Guardrail,20,3
+Which product scans code and systems for leaked secrets?,Vault Sentinel,Vault Radar,Consul Watch,Vault Scout,30,2
+Which Terraform command previews changes without applying them?,terraform preview,terraform plan,terraform dry-run,terraform diff,20,2
+"By default, what is Terraform's state file called?",state.json,terraform.tfstate,tfstate.lock,main.tfstate,20,2
+What best describes a Vault dynamic secret?,A secret that rotates yearly,"A credential generated on demand, with a lease",An encrypted static value,A secret shared between two apps,30,2
+"Which consensus protocol backs integrated storage in Vault, Consul and Nomad?",Paxos,Raft,Zab,Two-phase commit,20,2
+What is IBM's long-standing nickname?,Big Iron,Big Blue,The Blue Giant,Blue Sky,10,2
+IBM's Deep Blue defeated which world chess champion in 1997?,Anatoly Karpov,Magnus Carlsen,Garry Kasparov,Vladimir Kramnik,20,3

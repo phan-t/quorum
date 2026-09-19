@@ -49,6 +49,13 @@
   --arcade: var(--nomad);
   --spot: var(--vault);
 
+  /* Ink for text sitting *on* a product hue — an answer tile, a distribution
+     bar's label. Fixed in both themes, because the hue underneath is fixed:
+     --ink and --ground swap between light and dark and would take the label
+     with them, off a fill that did not move. */
+  --on-fill-light: #f6f5f3;
+  --on-fill-dark: #0a0a0f;
+
   /* type */
   --display: "IBM Plex Sans Condensed", "IBM Plex Sans", ui-sans-serif,
     system-ui, sans-serif;

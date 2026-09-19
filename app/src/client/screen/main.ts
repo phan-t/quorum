@@ -11,11 +11,26 @@
  * Read-only. Nothing here takes input; the host drives it from the console.
  */
 
-import type { ActivitySummary, RenderState, StandingRow } from "../../protocol.ts";
-import { h, qs, replace, setText } from "../shared/dom.ts";
+import type {
+  ActivitySummary,
+  RenderState,
+  StandingRow,
+  TriviaView,
+} from "../../protocol.ts";
+import { h, qs, replace, setAttr, setClass, setText } from "../shared/dom.ts";
 import { QuorumClient } from "../shared/net.ts";
 import { mockBadge, mockTransport, readMockConfig } from "../shared/mock.ts";
-import { activityHue, resolveView, stackedBar, type ViewKind } from "../shared/view.ts";
+import {
+  activityHue,
+  answerTiles,
+  formatCountdown,
+  questionLabel,
+  remainingMs,
+  resolveView,
+  stackedBar,
+  timerFraction,
+  type ViewKind,
+} from "../shared/view.ts";
 import { drawQr, encodeQr } from "../shared/qr.ts";
 import { lockGlyph } from "../participant/view.ts";
 
@@ -80,6 +95,10 @@ interface Scene {
 
 let kind: ViewKind | null = null;
 let scene: Scene | null = null;
+let client: QuorumClient | null = null;
+
+/** Corrected server time. Every countdown on this surface is drawn off it. */
+const serverNow = (): number => client?.now() ?? Date.now();
 
 function render(state: RenderState): void {
   const next = resolveView(state);
@@ -108,7 +127,7 @@ function build(k: ViewKind): Scene {
     case "waiting":
       return sceneCard("Quorum", "Not open yet.");
     case "trivia":
-      return sceneCard("Trivia", "Coming up.");
+      return sceneTrivia();
     case "arcade":
       return sceneCard("Hashi Arcade", "Coming up.");
   }
@@ -214,6 +233,200 @@ function sceneHolding(): Scene {
     update(state) {
       setText(title, state.holding?.title ?? state.title);
       setText(line, state.holding?.line ?? "");
+    },
+  };
+}
+
+/* ------------------------------------------------------------------ */
+/* Trivia                                                              */
+/* ------------------------------------------------------------------ */
+
+const TRIVIA_TICK_MS = 200;
+
+/**
+ * The question, large, with the answer count climbing — then the reveal.
+ *
+ * The two halves of the segment share the tiles: while the question is open
+ * they are four shape-and-colour tiles, and at the reveal each one grows a
+ * bar behind it in its own hue with the count at the end. DESIGN.md wants
+ * "bars, not numbers, for distributions" and "the correct tile stays lit,
+ * others dim", and keeping the same four rows means the correct answer is in
+ * the place the room was already looking.
+ *
+ * Nothing here glides. The bar widths are set on a state change and the timer
+ * ticks; video compression turns a smooth slide into a smear.
+ */
+function sceneTrivia(): Scene {
+  const kicker = h("p", { class: "s-kicker label" });
+  const round = h("p", { class: "s-trivia-round label", attrs: { hidden: true } });
+  const question = h("h1", { class: "display s-question" });
+  const rows = h("div", { class: "s-answers" });
+
+  const timerNum = h("span", { class: "mono s-timer-num" });
+  const timerFill = h("div", { class: "s-timer-fill" });
+  const timer = h("div", { class: "s-timer" }, [
+    h("div", { class: "s-timer-track" }, [timerFill]),
+    timerNum,
+  ]);
+
+  const countFill = h("div", { class: "s-count-fill" });
+  const countText = h("span", { class: "mono s-count-text" });
+  const count = h("div", { class: "s-answered" }, [
+    h("div", { class: "s-count-track" }, [countFill]),
+    countText,
+  ]);
+
+  const note = h("p", { class: "s-note", attrs: { hidden: true } });
+  const podium = h("ol", { class: "s-rows s-trivia-podium", attrs: { hidden: true } });
+
+  const node = h("section", { class: "s-stage s-trivia" }, [
+    h("div", { class: "s-trivia-head" }, [kicker, round]),
+    question,
+    rows,
+    timer,
+    count,
+    note,
+    podium,
+  ]);
+
+  interface Row {
+    el: HTMLElement;
+    bar: HTMLElement;
+    tally: HTMLElement;
+  }
+  let built = "";
+  let built_rows: Row[] = [];
+  let ticker: ReturnType<typeof setInterval> | null = null;
+
+  const buildRows = (trivia: TriviaView): void => {
+    const signature = `${trivia.index}:${trivia.answers.join("\u0000")}`;
+    if (signature === built) return;
+    built = signature;
+    built_rows = answerTiles(trivia.answers).map((tile) => {
+      const bar = h("div", { class: "s-answer-bar" });
+      const tally = h("span", { class: "mono s-answer-tally" });
+      const el = h(
+        "div",
+        {
+          class: "s-answer",
+          attrs: { style: `--tile:${tile.hue};--tile-ink:${tile.ink}` },
+        },
+        [
+          bar,
+          h("span", { class: "s-answer-shape", attrs: { "aria-hidden": "true" }, text: tile.shape }),
+          h("span", { class: "s-answer-text", text: tile.text }),
+          tally,
+        ],
+      );
+      return { el, bar, tally };
+    });
+    replace(rows, built_rows.map((r) => r.el));
+    rows.dataset["count"] = String(built_rows.length);
+  };
+
+  const paintTimer = (trivia: TriviaView): void => {
+    if (trivia.suddenDeath || trivia.phase !== "open") {
+      timer.hidden = true;
+      return;
+    }
+    const left = remainingMs(trivia.closesAt, serverNow());
+    if (left === null) {
+      timer.hidden = true;
+      return;
+    }
+    timer.hidden = false;
+    setText(timerNum, formatCountdown(left));
+    timerFill.style.width = `${(timerFraction(trivia, serverNow()) ?? 0) * 100}%`;
+    setClass(timer, "urgent", left <= 5_000);
+  };
+
+  let lastState: RenderState | null = null;
+
+  const paint = (state: RenderState): void => {
+    const trivia = state.trivia;
+    if (trivia === undefined || trivia.phase === "idle" || trivia.text === "") {
+      setText(kicker, "Trivia");
+      round.hidden = trivia?.round === null || trivia?.round === undefined;
+      if (trivia?.round) setText(round, trivia.round.name);
+      setText(question, trivia?.round?.startsHere === true ? trivia.round.name : "Coming up");
+      replace(rows, []);
+      built = "";
+      timer.hidden = true;
+      count.hidden = true;
+      note.hidden = true;
+      podium.hidden = true;
+      return;
+    }
+
+    setText(kicker, questionLabel(trivia));
+    round.hidden = trivia.round === null;
+    if (trivia.round) setText(round, trivia.round.name);
+    setText(question, trivia.text);
+    buildRows(trivia);
+    paintTimer(trivia);
+
+    const answered = trivia.answered ?? 0;
+    const eligible = trivia.eligible ?? 0;
+    const revealed = trivia.phase === "revealed";
+    count.hidden = revealed;
+    if (!revealed) {
+      setText(countText, `${answered} of ${eligible}`);
+      countFill.style.width = eligible > 0 ? `${(answered / eligible) * 100}%` : "0%";
+    }
+
+    const distribution = trivia.distribution ?? [];
+    const correct = revealed ? (trivia.correct ?? []) : [];
+    // The widest bar is the full width, so the shape of the room's answer
+    // reads at a glance rather than against an invisible axis.
+    const top = Math.max(1, ...distribution);
+    built_rows.forEach((row, i) => {
+      const n = distribution[i] ?? 0;
+      const isCorrect = correct.includes(i);
+      setClass(row.el, "hit", revealed && isCorrect);
+      setClass(row.el, "dim", revealed && !isCorrect);
+      setAttr(row.el, "data-revealed", revealed ? "yes" : "no");
+      row.bar.style.width = revealed ? `${(n / top) * 100}%` : "0%";
+      setText(row.tally, revealed ? String(n) : "");
+    });
+
+    const text = trivia.note ?? "";
+    note.hidden = !revealed || text === "";
+    setText(note, text);
+
+    const rowsOut = revealed ? (trivia.podium ?? []) : [];
+    podium.hidden = rowsOut.length === 0;
+    replace(
+      podium,
+      rowsOut.map((r) =>
+        h("li", { class: "s-row s-trivia-row" }, [
+          h("span", { class: "mono s-rank", text: String(r.rank) }),
+          h("span", { class: "display s-name-big", text: r.nickname }),
+          h("span", { class: "mono s-total", text: String(r.points) }),
+        ]),
+      ),
+    );
+
+    if (trivia.suddenDeath && trivia.suddenDeathWinner !== null) {
+      // SPEC: sudden death shows the winner's name on the big screen, and
+      // nothing about points, because none moved.
+      setText(question, trivia.suddenDeathWinner);
+      setText(kicker, "Sudden death");
+    }
+  };
+
+  ticker = setInterval(() => {
+    if (lastState?.trivia) paintTimer(lastState.trivia);
+  }, TRIVIA_TICK_MS);
+
+  return {
+    node,
+    update(state) {
+      lastState = state;
+      paint(state);
+    },
+    stop() {
+      if (ticker !== null) clearInterval(ticker);
+      ticker = null;
     },
   };
 }
@@ -469,9 +682,23 @@ function guardPublic(state: RenderState): void {
   if (state.hostExtras !== undefined) {
     console.error("protocol violation: the screen received hostExtras");
   }
+  // The room's screen is in the room. It learns the answer at the reveal and
+  // not before, the same as every phone in front of it.
+  if (state.trivia !== undefined && state.trivia.phase !== "revealed") {
+    if (state.trivia.correct !== undefined) {
+      console.error(
+        "protocol violation: the screen received the correct answer before the reveal",
+      );
+    }
+    if (state.trivia.distribution !== undefined) {
+      console.error(
+        "protocol violation: the screen received the distribution before the reveal",
+      );
+    }
+  }
 }
 
-const client = new QuorumClient({
+client = new QuorumClient({
   hello: () => ({ t: "hello", role: "screen", screenToken }),
   ...(mock ? { transport: mockTransport(mock) } : {}),
 

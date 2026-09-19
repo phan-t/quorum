@@ -10,12 +10,17 @@
  * shows; this renders it.
  */
 
-import type { RenderState } from "../../protocol.ts";
-import { append, h, replace, setText } from "../shared/dom.ts";
+import type { RenderState, TriviaMine, TriviaView } from "../../protocol.ts";
+import { append, h, replace, setAttr, setClass, setText } from "../shared/dom.ts";
 import {
+  answerTiles,
+  formatCountdown,
   pointsStripCells,
   pointsStripText,
+  questionLabel,
+  remainingMs,
   resolveView,
+  timerFraction,
   type ViewKind,
 } from "../shared/view.ts";
 
@@ -23,14 +28,44 @@ export interface ParticipantView {
   readonly root: HTMLElement;
   update(state: RenderState | null, nickname: string | null): void;
   setBanner(text: string | null): void;
+  /** The tap was refused. Drop the optimistic "locked in" and let them retry. */
+  clearPendingAnswer(): void;
+}
+
+export interface ParticipantViewOptions {
+  compact?: boolean;
+  /** Corrected server time. Every countdown on this page is drawn off it. */
+  now?: () => number;
+  /** Absent on the console's preview, which is a picture and not a phone. */
+  onAnswer?: (index: number, choice: number) => void;
+}
+
+/**
+ * The optimistic tap, held until the server's state says otherwise.
+ *
+ * Keyed by question index so it cannot survive into the next question, and
+ * cleared by a refusal. A phone on a slow link must show "locked in" the
+ * instant the thumb comes off the glass — the alternative is a second tap.
+ */
+interface Pending {
+  index: number;
+  choice: number;
 }
 
 interface Scene {
   node: HTMLElement;
   update(state: RenderState, nickname: string | null): void;
+  /** Called a few times a second while mounted. Only the timer needs it. */
+  tick?(state: RenderState): void;
+  stop?(): void;
 }
 
-export function createParticipantView(opts: { compact?: boolean } = {}): ParticipantView {
+/** Fast enough that the number never looks stuck, slow enough to cost nothing. */
+const TICK_MS = 200;
+
+export function createParticipantView(
+  opts: ParticipantViewOptions = {},
+): ParticipantView {
   const banner = h("div", {
     class: "p-banner",
     attrs: { hidden: true, role: "status", "aria-live": "polite" },
@@ -47,6 +82,38 @@ export function createParticipantView(opts: { compact?: boolean } = {}): Partici
 
   let kind: ViewKind | null = null;
   let scene: Scene | null = null;
+  let pending: Pending | null = null;
+  let last: RenderState | null = null;
+  let ticker: ReturnType<typeof setInterval> | null = null;
+
+  const now = opts.now ?? ((): number => Date.now());
+
+  /** Only a scene that asked for it gets a heartbeat, and only while mounted. */
+  const setTicking = (on: boolean): void => {
+    if (on === (ticker !== null)) return;
+    if (!on) {
+      if (ticker !== null) clearInterval(ticker);
+      ticker = null;
+      return;
+    }
+    ticker = setInterval(() => {
+      if (last !== null) scene?.tick?.(last);
+    }, TICK_MS);
+  };
+
+  const ctx: TriviaCtx = {
+    now,
+    pending: () => pending,
+    tap: (index, choice) => {
+      if (opts.onAnswer === undefined) return;
+      // One tap and it is final, so the guard is here as well as on the
+      // server: a double-tap on a laggy phone must not produce two frames.
+      if (pending !== null) return;
+      pending = { index, choice };
+      opts.onAnswer(index, choice);
+      if (last !== null) scene?.update(last, null);
+    },
+  };
 
   /**
    * Their own total and per-activity points — and nothing at all while sealed.
@@ -111,14 +178,32 @@ export function createParticipantView(opts: { compact?: boolean } = {}): Partici
       }
     },
 
+    clearPendingAnswer() {
+      pending = null;
+      if (last !== null) scene?.update(last, null);
+    },
+
     update(state, nickname) {
       if (state === null) return;
+      last = state;
+      // The optimistic tap lives exactly as long as its question. The server's
+      // answer supersedes it; so does the next question.
+      if (
+        pending !== null &&
+        (state.trivia === undefined ||
+          state.trivia.index !== pending.index ||
+          state.triviaMine?.state !== "unanswered")
+      ) {
+        pending = null;
+      }
       const next = resolveView(state);
       if (next !== kind) {
+        scene?.stop?.();
         kind = next;
-        scene = buildScene(next);
+        scene = buildScene(next, ctx);
         replace(stage, [scene.node]);
         stage.dataset["view"] = next;
+        setTicking(scene.tick !== undefined);
       }
       scene?.update(state, nickname);
       renderStrip(state);
@@ -130,7 +215,13 @@ export function createParticipantView(opts: { compact?: boolean } = {}): Partici
 /* Scenes                                                              */
 /* ------------------------------------------------------------------ */
 
-function buildScene(kind: ViewKind): Scene {
+interface TriviaCtx {
+  now(): number;
+  pending(): Pending | null;
+  tap(index: number, choice: number): void;
+}
+
+function buildScene(kind: ViewKind, ctx: TriviaCtx): Scene {
   switch (kind) {
     case "waiting":
       return sceneWaiting();
@@ -145,7 +236,7 @@ function buildScene(kind: ViewKind): Scene {
     case "sealed":
       return sceneSealed();
     case "trivia":
-      return scenePending("Trivia", "The host is setting up.");
+      return sceneTrivia(ctx);
     case "arcade":
       return scenePending("Hashi Arcade", "The host is setting up.");
   }
@@ -290,6 +381,251 @@ function sceneSealed(): Scene {
       setText(line, state.holding?.line ?? "Revealed at the end.");
     },
   };
+}
+
+/* ------------------------------------------------------------------ */
+/* Trivia                                                              */
+/* ------------------------------------------------------------------ */
+
+/**
+ * The phone during trivia. Four states, and the transitions between them are
+ * the whole product:
+ *
+ * - **waiting** — the host has not opened the question, so the phone has not
+ *   been sent it. There is nothing here to read ahead.
+ * - **open** — question, timer, and the answers as 2 × 2 shape-and-colour
+ *   tiles filling the bottom of the screen, where a thumb is.
+ * - **locked** — the chosen tile outlined, the others dimmed, "Locked in."
+ *   and *nothing else*. No tick, no colour, no hint. SPEC: "a phone that
+ *   turns green is visible to the person next to you." The wire does not
+ *   carry the answer at this point, so there is nothing here that could leak
+ *   even by mistake; this state is what the wire's silence looks like.
+ * - **revealed** — the correct tile fills, a wrong choice outlines in
+ *   `--miss`, the points and the streak, the note, then the trivia top five.
+ */
+function sceneTrivia(ctx: TriviaCtx): Scene {
+  const kicker = h("p", { class: "label t-kicker" });
+  const roundCard = h("p", { class: "t-round label", attrs: { hidden: true } });
+  const question = h("h1", { class: "t-question" });
+
+  const timerNum = h("span", { class: "mono t-timer-num" });
+  const timerFill = h("div", { class: "t-timer-fill" });
+  const timer = h("div", { class: "t-timer" }, [
+    h("div", { class: "t-timer-track" }, [timerFill]),
+    timerNum,
+  ]);
+
+  const grid = h("div", { class: "t-grid" });
+  const status = h("p", { class: "t-status label" });
+
+  const verdict = h("p", { class: "display t-verdict" });
+  const points = h("p", { class: "mono t-points" });
+  const streak = h("p", { class: "label t-streak" });
+  const note = h("p", { class: "t-note" });
+  const podium = h("ol", { class: "rows t-podium" });
+  const reveal = h("div", { class: "t-reveal", attrs: { hidden: true } }, [
+    verdict,
+    points,
+    streak,
+    note,
+    podium,
+  ]);
+
+  const node = h("section", { class: "v v-trivia" }, [
+    h("div", { class: "t-head" }, [kicker, roundCard, question, timer]),
+    grid,
+    status,
+    reveal,
+  ]);
+
+  /** Which question's tiles are currently built, so they are not rebuilt. */
+  let builtFor = "";
+  let tiles: HTMLButtonElement[] = [];
+  /** The last points value animated, so a repaint does not replay the count. */
+  let countedFrom: number | null = null;
+
+  const buildTiles = (trivia: TriviaView): void => {
+    const signature = `${trivia.index}:${trivia.answers.join("\u0000")}`;
+    if (signature === builtFor) return;
+    builtFor = signature;
+    tiles = answerTiles(trivia.answers).map((tile) => {
+      const button = h("button", {
+        class: "t-tile",
+        type: "button",
+        attrs: {
+          style: `--tile:${tile.hue};--tile-ink:${tile.ink}`,
+          "data-choice": String(tile.index),
+          // The shape is decoration to a reader; the text is the answer.
+          "aria-label": tile.text,
+        },
+      }, [
+        h("span", { class: "t-shape", attrs: { "aria-hidden": "true" }, text: tile.shape }),
+        h("span", { class: "t-answer", text: tile.text }),
+      ]);
+      button.addEventListener("click", () => ctx.tap(trivia.index, tile.index));
+      return button;
+    });
+    replace(grid, tiles);
+    grid.dataset["count"] = String(tiles.length);
+  };
+
+  const paintTimer = (trivia: TriviaView): void => {
+    // Sudden death has no timer at all, so it shows none rather than a bar
+    // that sits at full and looks broken.
+    if (trivia.suddenDeath || trivia.phase !== "open") {
+      timer.hidden = true;
+      return;
+    }
+    const left = remainingMs(trivia.closesAt, ctx.now());
+    if (left === null) {
+      timer.hidden = true;
+      return;
+    }
+    timer.hidden = false;
+    setText(timerNum, formatCountdown(left));
+    const fraction = timerFraction(trivia, ctx.now()) ?? 0;
+    timerFill.style.width = `${fraction * 100}%`;
+    setClass(timer, "urgent", left <= 5_000);
+  };
+
+  const paint = (state: RenderState): void => {
+    const trivia = state.trivia;
+    if (trivia === undefined || trivia.phase === "idle" || trivia.text === "") {
+      // Either nothing is loaded or the host has not opened it. Same screen:
+      // there is nothing to read ahead, and saying so beats a blank page.
+      setText(kicker, "Trivia");
+      roundCard.hidden = trivia?.round?.startsHere !== true;
+      if (trivia?.round) setText(roundCard, trivia.round.name);
+      setText(question, "Get ready.");
+      timer.hidden = true;
+      replace(grid, []);
+      builtFor = "";
+      setText(status, "The host is about to open the question.");
+      reveal.hidden = true;
+      return;
+    }
+
+    setText(kicker, questionLabel(trivia));
+    roundCard.hidden = trivia.round === null;
+    if (trivia.round) setText(roundCard, trivia.round.name);
+    setText(question, trivia.text);
+    buildTiles(trivia);
+    paintTimer(trivia);
+
+    const mine: TriviaMine | undefined = state.triviaMine;
+    const pending = ctx.pending();
+    const chosen =
+      mine?.state === "locked"
+        ? mine.choice
+        : mine?.state === "revealed"
+          ? mine.choice
+          : pending !== null && pending.index === trivia.index
+            ? pending.choice
+            : null;
+    const revealed = trivia.phase === "revealed" && mine?.state === "revealed";
+    const correct = revealed ? (trivia.correct ?? []) : [];
+
+    tiles.forEach((tile, i) => {
+      const isChosen = chosen === i;
+      const isCorrect = correct.includes(i);
+      setClass(tile, "chosen", isChosen);
+      setClass(tile, "hit", revealed && isCorrect);
+      setClass(tile, "miss", revealed && isChosen && !isCorrect);
+      // Dimmed once a choice is locked, and after the reveal for anything
+      // that is neither the answer nor what they picked.
+      setClass(tile, "dim", chosen !== null && !isChosen && !(revealed && isCorrect));
+      tile.disabled = chosen !== null || trivia.phase !== "open";
+      setAttr(tile, "aria-pressed", isChosen ? "true" : "false");
+    });
+
+    if (revealed) {
+      timer.hidden = true;
+      setText(status, "");
+      status.hidden = true;
+      reveal.hidden = false;
+      const won =
+        trivia.suddenDeath && trivia.suddenDeathWinner !== null
+          ? `${trivia.suddenDeathWinner} took it`
+          : null;
+      setText(
+        verdict,
+        won ?? (mine.correct ? "Correct" : mine.choice === null ? "No answer" : "Not this time"),
+      );
+      setAttr(verdict, "data-verdict", mine.correct ? "hit" : "miss");
+      // Sudden death changes no points, so it shows none rather than a zero
+      // that reads as a penalty.
+      const total = mine.points + mine.streakBonus;
+      points.hidden = trivia.suddenDeath;
+      if (!trivia.suddenDeath) {
+        countUp(points, countedFrom === total ? total : 0, total);
+        countedFrom = total;
+      }
+      streak.hidden = mine.streak < 2 || trivia.suddenDeath;
+      setText(streak, `${mine.streak} in a row · +${mine.streakBonus}`);
+      const text = trivia.note ?? "";
+      note.hidden = text === "";
+      setText(note, text);
+      const rows = trivia.podium ?? [];
+      podium.hidden = rows.length === 0;
+      replace(
+        podium,
+        rows.map((row) =>
+          h("li", { class: "row" }, [
+            h("span", { class: "num rank", text: String(row.rank) }),
+            h("span", { class: "display name", text: row.nickname }),
+            h("span", { class: "num total", text: String(row.points) }),
+          ]),
+        ),
+      );
+      return;
+    }
+
+    reveal.hidden = true;
+    countedFrom = null;
+    status.hidden = false;
+    setText(
+      status,
+      chosen !== null
+        ? "Locked in."
+        : trivia.phase === "open"
+          ? trivia.suddenDeath
+            ? "Sudden death. First correct answer wins."
+            : "Tap one. It is final."
+          : "Time's up.",
+    );
+  };
+
+  return {
+    node,
+    update(state) {
+      paint(state);
+    },
+    tick(state) {
+      if (state.trivia) paintTimer(state.trivia);
+    },
+  };
+}
+
+/**
+ * Count a number up, because DESIGN asks the points to arrive rather than
+ * appear. Honours `prefers-reduced-motion` by not moving.
+ */
+function countUp(el: HTMLElement, from: number, to: number): void {
+  const reduced =
+    typeof matchMedia === "function" &&
+    matchMedia("(prefers-reduced-motion: reduce)").matches;
+  if (reduced || from === to) {
+    setText(el, String(to));
+    return;
+  }
+  const started = Date.now();
+  const DURATION = 700;
+  const step = (): void => {
+    const t = Math.min(1, (Date.now() - started) / DURATION);
+    setText(el, String(Math.round(from + (to - from) * t)));
+    if (t < 1) requestAnimationFrame(step);
+  };
+  step();
 }
 
 function scenePending(name: string, note: string): Scene {

@@ -116,6 +116,38 @@ would still have been worth building.
 **Done when:** thirty bots play a full 20-question round and the scores match a
 hand-computed expectation.
 
+> **Built 19 Sep 2026, with two specified things deliberately not built.**
+> Both are small, both are real, and both are invisible until the moment they
+> matter:
+>
+> - **Re-ask.** ARCHITECTURE promises that after a restart mid-question the
+>   console flags it with "n answers may be missing" and offers a re-ask
+>   button. The restart does the sane half — the question resumes on its
+>   recovered deadline, or closes if that has passed — but nothing tells the
+>   host answers were lost. Needs a `reaskQuestion` event and durable state
+>   marking the gap.
+> - **The per-activity podium toggle.** SPEC says a host can turn off even the
+>   activity top five, "default on", for a last activity that is completely
+>   blind. There is no state for it, so the podium always shows.
+>
+> Also deliberately divergent from ARCHITECTURE as written: there is no
+> `trivia.*` message family. Trivia rides in `RenderState`, projected per role.
+> ARCHITECTURE has been corrected to match, including that its sketch sent the
+> answer distribution to every phone, which DESIGN forbids.
+>
+> **Sudden death cannot serve as SCORING.md's tiebreak as built.** It is a
+> mode on a question, so it consumes one from the loaded set, and after the
+> last question `nextQuestion` refuses with `no_more_questions`. A host who
+> wants to settle a tie has to carry a spare question in the CSV. Either
+> SCORING.md should say that out loud or sudden death needs to work off a
+> question that is not part of the scored set.
+>
+> One engine/mock divergence left standing: the engine does not auto-close a
+> sudden-death question on the first correct tap — the host closes it, and the
+> big screen shows the winner's name as soon as it is known — while the mock
+> closes it automatically. The engine's behaviour is the one to keep; the mock
+> should follow it.
+
 ## Phase 4 — The arcade
 
 Iterative, and the order matters. Each round is a day or two, not a week.

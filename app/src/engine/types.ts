@@ -69,6 +69,77 @@ export interface HoldingCard {
   readonly line: string;
 }
 
+/* ------------------------------------------------------------------ */
+/* Trivia                                                              */
+/* ------------------------------------------------------------------ */
+
+/**
+ * One loaded question. Immutable for the life of the session: SPEC says a
+ * loaded set is re-uploaded rather than edited, so nothing here changes once
+ * `loadTrivia` is accepted.
+ *
+ * `correct` is 0-based here while the CSV is 1-based. The conversion happens
+ * once, in the importer, because an off-by-one that survives into the engine
+ * is an off-by-one nobody sees until a question is revealed to thirty people.
+ */
+export interface Question {
+  readonly text: string;
+  /** Two to four. Blank CSV columns mean a two- or three-answer question. */
+  readonly answers: readonly string[];
+  readonly timeLimitSec: number;
+  /** 0-based. More than one means any of them is correct (Kahoot semantics). */
+  readonly correct: readonly number[];
+  /** Shown on the reveal. This is the bit people learn from. */
+  readonly note: string | null;
+  /** Consecutive questions sharing a value get a round card between them. */
+  readonly round: string | null;
+  /** Base points. 0 makes a question a warm-up that scores nothing. */
+  readonly basePoints: number;
+}
+
+/**
+ * Where the current question is.
+ *
+ * `closed` exists separately from `revealed` because the host closes the
+ * question — or the timer does — and then chooses when to show the answer.
+ * Collapsing the two would reveal the answer the instant the last person
+ * taps, which removes the pause the reveal is for.
+ */
+export type QuestionPhase = "idle" | "open" | "closed" | "revealed";
+
+export interface TriviaAnswer {
+  readonly choice: number;
+  readonly correct: boolean;
+  /**
+   * Response time in ms, server-measured and latency-corrected before it
+   * reaches the engine. The engine never sees a client timestamp: see
+   * ARCHITECTURE.md "Clocks and fairness".
+   */
+  readonly ms: number;
+  readonly points: number;
+  readonly streakBonus: number;
+}
+
+export interface TriviaState {
+  readonly activityId: ActivityId;
+  readonly questions: readonly Question[];
+  /** Index into `questions`. */
+  readonly at: number;
+  readonly phase: QuestionPhase;
+  /** Absolute server epochs, never durations. Null unless `phase` is open. */
+  readonly opensAt: number | null;
+  readonly closesAt: number | null;
+  /** Sudden death: no timer, first correct answer wins, no points change. */
+  readonly suddenDeath: boolean;
+  readonly suddenDeathWinner: ParticipantId | null;
+  /** Answers to the *current* question only. Cleared by `nextQuestion`. */
+  readonly answers: Readonly<Record<ParticipantId, TriviaAnswer>>;
+  /** Cumulative across the set. This is the raw score the scoreboard reads. */
+  readonly totals: Readonly<Record<ParticipantId, number>>;
+  /** Consecutive correct answers, for the streak bonus. Reset by a miss. */
+  readonly streaks: Readonly<Record<ParticipantId, number>>;
+}
+
 export interface SessionState {
   readonly sid: string;
   readonly title: string;
@@ -84,6 +155,15 @@ export interface SessionState {
   readonly scores: Readonly<Record<ActivityId, Readonly<Record<ParticipantId, RawScore>>>>;
   readonly spots: readonly SpotAward[];
   readonly holding: HoldingCard | null;
+  /**
+   * The loaded question set and where it is. Null until `loadTrivia`.
+   *
+   * Trivia lives *inside* the session state rather than beside it so that one
+   * snapshot and one event log restore the whole session: a crash between
+   * `openQuestion` and `closeQuestion` has to come back with the same answers
+   * in it, and a second store would have a second consistency problem.
+   */
+  readonly trivia: TriviaState | null;
   /** Joins refused while true, even in lobby/running. */
   readonly joinsLocked: boolean;
   /** Monotonic, bumped on every accepted event. */
@@ -115,7 +195,21 @@ export type Event =
   | { type: "revokeSpot"; seq: number }
   | { type: "kick"; pid: ParticipantId }
   /** Frees a nickname so a reconnecting participant can retake it. */
-  | { type: "releaseNickname"; pid: ParticipantId };
+  | { type: "releaseNickname"; pid: ParticipantId }
+  // trivia
+  | { type: "loadTrivia"; activityId: ActivityId; questions: readonly Question[] }
+  | { type: "openQuestion"; suddenDeath: boolean }
+  /**
+   * `ms` is the corrected response time, computed at the socket boundary
+   * before this event is built. The engine is pure and has no clock, so it
+   * cannot derive it — and must not, because deriving it from `now` would
+   * silently reintroduce network time into the score.
+   */
+  | { type: "answerQuestion"; pid: ParticipantId; choice: number; ms: number }
+  /** Host closing early, or the server's timer firing. Same event either way. */
+  | { type: "closeQuestion" }
+  | { type: "revealQuestion" }
+  | { type: "nextQuestion" };
 
 /* ------------------------------------------------------------------ */
 /* Effects                                                             */
@@ -149,7 +243,17 @@ export type RejectCode =
   | "bench_cannot_receive_spot"
   /** A raw score was typed into a cell the host has since benched. */
   | "bench_cannot_be_scored"
-  | "spot_cap_reached";
+  | "spot_cap_reached"
+  // trivia
+  | "no_questions_loaded"
+  | "questions_already_loaded"
+  /** A second `loadTrivia` after the first question has been opened. */
+  | "trivia_already_started"
+  | "wrong_question_phase"
+  | "already_answered"
+  | "invalid_choice"
+  | "question_not_open"
+  | "no_more_questions";
 
 export interface ReduceResult {
   readonly state: SessionState;

@@ -150,32 +150,52 @@ One socket per client. Role is fixed at `hello`: participant, host, or screen.
 
 ### Trivia
 
+**There is no `trivia.*` message family.** This section used to sketch one —
+`trivia.open`, `trivia.count`, `trivia.reveal`, `trivia.mine` — and it was not
+built, for two reasons worth keeping.
+
+The first is that Phase 1 already decided a broadcast means "re-send the
+projection for that role". Four delta message types alongside that would be a
+second, parallel way for a surface to go stale, and the surfaces that go stale
+are the ones nobody notices until a live session.
+
+The second is that the sketch broadcast too widely. `trivia.open` and
+`trivia.count` were `S→all`, and `trivia.reveal` carried `distribution` to
+everyone — but DESIGN says the distribution is a big-screen thing, and SPEC
+says a phone must reveal nothing about correctness until the reveal, because a
+phone that turns green is visible to the person sitting next to you.
+
+So trivia rides in `RenderState`, projected per role, as one `trivia` block
+plus a participant-only `triviaMine`. What each role is sent:
+
+| field | participant | screen | host |
+| --- | --- | --- | --- |
+| `text`, `answers` | on open | on open | always |
+| `correct` | reveal | reveal | always |
+| `distribution` | never | reveal | always |
+| `note` | reveal | reveal | always |
+| `podium` | reveal | reveal | reveal |
+| `answered` / `eligible` | never | always | always |
+| `answeredBy` | never | never | always |
+
+The rule is enforced by **omission, not by nulling**: a field a role may not
+see is absent from the object, so `JSON.stringify` never writes the key and the
+word does not appear in the bytes on that socket. That turns "was it sent?"
+into a property of the wire that a test can assert against a raw frame, rather
+than a discipline a renderer has to keep.
+
+`triviaMine` is a three-state union — `unanswered`, `locked`, `revealed` —
+so the locked state has no correctness field to forget to strip.
+
+Client to server is one message:
+
 ```jsonc
-// S→all
-{ "t": "trivia.open", "seq": 412,
-  "qid": "q07", "index": 7, "of": 20,
-  "question": "Which product does secrets management…?",
-  "answers": [{ "i": 1, "text": "Consul" }, { "i": 2, "text": "Boundary" },
-              { "i": 3, "text": "Vault" },  { "i": 4, "text": "Nomad" }],
-  "opensAt": 1790337171200, "closesAt": 1790337191200, "base": 1000 }
-
 // C→S
-{ "t": "trivia.answer", "cid": "a8f2", "qid": "q07", "choice": 3 }
-
-// S→C
-{ "t": "ack", "cid": "a8f2", "ok": true }
-
-// S→all, every 500 ms while open, and on every change past 90% answered
-{ "t": "trivia.count", "qid": "q07", "answered": 24, "of": 27 }
-
-// S→all
-{ "t": "trivia.reveal", "seq": 431, "qid": "q07", "correct": [3],
-  "distribution": [2, 1, 21, 3], "note": "Dynamic credentials are the bit people forget.",
-  "top5": [{ "pid": "p12", "nickname": "Priya", "points": 6420 }, …] }
-
-// S→C, private, after reveal
-{ "t": "trivia.mine", "qid": "q07", "correct": true, "points": 874, "streak": 3 }
+{ "t": "trivia.answer", "cid": "a8f2", "index": 7, "choice": 2 }
 ```
+
+No timestamp: the server times the tap itself and corrects it for that
+socket's measured round trip. See "Clocks and fairness" above.
 
 The `state` for a participant mid-question includes whether they have
 answered, so a reload during a question shows "locked in", not the answers.
@@ -248,9 +268,10 @@ that would be destructive from the wrong state are rejected with a
 `refused` explaining why, not silently ignored — the console shows the
 refusal inline.
 
-The host and screen receive everything participants receive plus
-`trivia.count`, per-participant answer state, and (host only) correctness
-before reveal.
+The host and screen receive everything participants receive plus the answered
+count, and the host alone receives per-participant answer state and correctness
+before the reveal. The per-role table under "Trivia" above is the authority on
+which is which.
 
 ### Clocks and fairness
 

@@ -13,6 +13,7 @@ import type {
   OwnPoints,
   RefusedReason,
   RenderState,
+  TriviaView,
 } from "../../protocol.ts";
 import type { Segment } from "../../engine/types.ts";
 
@@ -66,7 +67,7 @@ export const SEGMENT_LABEL: Readonly<Record<Segment, string>> = {
   final: "Final",
 };
 
-/** Not built in Phase 1. The console still offers them; they say so. */
+/** The phase that builds each segment's surface. */
 export const SEGMENT_PHASE: Readonly<Record<Segment, number>> = {
   lobby: 1,
   holding: 1,
@@ -77,21 +78,122 @@ export const SEGMENT_PHASE: Readonly<Record<Segment, number>> = {
 };
 
 /**
- * The run of show the primary button walks. Trivia and the arcade are not in
- * it until they exist — the space bar must never land on a segment that shows
- * the room a placeholder.
+ * Whether the segment has a real surface behind it yet.
+ *
+ * Not `SEGMENT_PHASE[s] === 1` — trivia is Phase 3 and it is built, and the
+ * console has to be able to say which of those two facts it means. The arcade
+ * is the only thing left that puts a placeholder in front of the room.
+ */
+export const SEGMENT_BUILT: Readonly<Record<Segment, boolean>> = {
+  lobby: true,
+  holding: true,
+  trivia: true,
+  arcade: false,
+  standings: true,
+  final: true,
+};
+
+/**
+ * The run of show the primary button walks. A segment joins it when its
+ * surface exists — the space bar must never land on a segment that shows the
+ * room a placeholder, which is why the arcade is still not in here.
  */
 export const RUN_OF_SHOW: readonly Segment[] = [
   "lobby",
   "holding",
+  "trivia",
   "standings",
   "final",
 ];
 
 export function nextSegment(current: Segment): Segment | null {
   const i = RUN_OF_SHOW.indexOf(current);
-  if (i === -1) return "standings"; // off-piste (trivia/arcade): come back
+  if (i === -1) return "standings"; // off-piste (the arcade): come back
   return RUN_OF_SHOW[i + 1] ?? null;
+}
+
+/* ------------------------------------------------------------------ */
+/* Trivia                                                              */
+/* ------------------------------------------------------------------ */
+
+/**
+ * The four answer tiles: shape, fill, and the ink that reads on that fill.
+ *
+ * DESIGN.md fixes the pattern — "a shape glyph (▲ ◆ ● ■) in the corner and
+ * one of the four product hues as a *fill*" — and it is Kahoot's, which is
+ * the right one to copy. The shape is not decoration: "every answer has a
+ * shape as well as a colour", so the tile is identifiable to someone who
+ * cannot tell the pink one from the purple one on a compressed video tile.
+ *
+ * The ink is per hue and not white. DESIGN used to say white text on all four
+ * tiles, which failed its own 4.5:1 floor — white on `--nomad` measures
+ * 1.96:1 — so the light hues take dark ink instead. DESIGN.md has since been
+ * corrected to match, and carries the measured figures: 5.76 / 4.93 / 9.25 /
+ * 13.36. Consul's 4.93 is the thin one; darkening that hue means measuring
+ * again.
+ */
+export interface AnswerTile {
+  /** 0-based, which is what goes on the wire. The glyph is what people say. */
+  readonly index: number;
+  readonly text: string;
+  readonly shape: string;
+  readonly hue: string;
+  readonly ink: string;
+}
+
+const TILE_SHAPES = ["▲", "◆", "●", "■"] as const;
+const TILE_HUES = ["--terraform", "--consul", "--nomad", "--vault"] as const;
+/** Light ink only where it clears 4.5:1. `--terraform` is 6.4:1; the rest are not. */
+const TILE_LIGHT_INK = [true, false, false, false] as const;
+
+export function answerTiles(answers: readonly string[]): AnswerTile[] {
+  return answers.map((text, i) => ({
+    index: i,
+    text,
+    shape: TILE_SHAPES[i % TILE_SHAPES.length] ?? "●",
+    hue: `var(${TILE_HUES[i % TILE_HUES.length] ?? "--terraform"})`,
+    ink: TILE_LIGHT_INK[i % TILE_LIGHT_INK.length]
+      ? "var(--on-fill-light)"
+      : "var(--on-fill-dark)",
+  }));
+}
+
+/**
+ * Milliseconds left, from the absolute epoch the server sent and the client's
+ * corrected clock. Never a duration off the wire: a phone that received the
+ * frame two seconds late still counts down to the same instant.
+ */
+export function remainingMs(closesAt: number | null, now: number): number | null {
+  if (closesAt === null) return null;
+  return Math.max(0, closesAt - now);
+}
+
+/** `00:14`. Ceiling, so the last second is shown as 1 and not as 0. */
+export function formatCountdown(ms: number): string {
+  const total = Math.ceil(ms / 1000);
+  const m = Math.floor(total / 60);
+  const s = total % 60;
+  return `${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
+}
+
+/**
+ * How much of the question's time is left, 0–1, for the shrinking bar.
+ *
+ * Drawn from `opensAt`/`closesAt` rather than the time limit, because the
+ * time limit is what the CSV asked for and these two are what actually
+ * happened — a question opened a second late still empties its bar exactly
+ * when it closes.
+ */
+export function timerFraction(trivia: TriviaView, now: number): number | null {
+  const { opensAt, closesAt } = trivia;
+  if (opensAt === null || closesAt === null || closesAt <= opensAt) return null;
+  const left = (closesAt - now) / (closesAt - opensAt);
+  return Math.min(1, Math.max(0, left));
+}
+
+/** `Q7 of 20`, the line every surface puts above the question. */
+export function questionLabel(trivia: TriviaView): string {
+  return `Q${trivia.index + 1} of ${trivia.of}`;
 }
 
 export function connectedCount(state: RenderState): number {

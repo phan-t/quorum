@@ -23,7 +23,7 @@ import type { AddressInfo } from "node:net";
 import WebSocket from "ws";
 
 import { newSession } from "../engine/reducer.ts";
-import type { Event, ParticipantId } from "../engine/types.ts";
+import type { Event, ParticipantId, Question } from "../engine/types.ts";
 import { DEFAULT_ACTIVITIES, type SessionRuntime } from "./runtime.ts";
 
 const ADMIN_KEY = "test-admin-key-" + Math.random().toString(36).slice(2);
@@ -1640,5 +1640,304 @@ describe("disconnects", () => {
     const res = await fetch(`http://127.0.0.1:${port}/healthz`);
     assert.equal(((await res.json()) as { socketsOpen: number }).socketsOpen >= 1, true);
     await p.conn.close();
+  });
+});
+
+/* ------------------------------------------------------------------ */
+/* Trivia                                                              */
+/* ------------------------------------------------------------------ */
+
+/**
+ * The same property as `trivia.test.ts`, asserted end to end on the bytes a
+ * real socket receives rather than on a projection called directly. The unit
+ * test proves the projection is right; this proves nothing between the
+ * projection and the wire puts it back.
+ *
+ * `ZIRCON-RIGHT` is the correct answer's text and appears nowhere else, so
+ * finding it in a frame is unambiguous — and so is finding `"correct"`.
+ */
+const WIRE_QUESTIONS: readonly Question[] = [
+  {
+    text: "Which of these is the right one?",
+    answers: ["ZIRCON-WRONG-1", "ZIRCON-RIGHT", "ZIRCON-WRONG-3", "ZIRCON-WRONG-4"],
+    timeLimitSec: 20,
+    correct: [1],
+    note: "OSMIUM-NOTE: read this out.",
+    round: "Materials",
+    basePoints: 1000,
+  },
+  {
+    text: "And the second one?",
+    answers: ["A", "B"],
+    timeLimitSec: 10,
+    correct: [0],
+    note: null,
+    round: "Materials",
+    basePoints: 1000,
+  },
+];
+
+function loadQuestions(s: TestSession): void {
+  applyEvent(s, {
+    type: "loadTrivia",
+    activityId: "trivia",
+    questions: WIRE_QUESTIONS,
+  });
+}
+
+describe("trivia over the wire", () => {
+  it("never sends a participant the answer while the question is open", async () => {
+    const s = makeSession("running");
+    loadQuestions(s);
+    const host = await connectHost(s);
+    const right = await join(s.joinCode, "Priya");
+    const wrong = await join(s.joinCode, "Kenji");
+    await ackOk(host, { name: "segment", kind: "trivia" });
+
+    right.conn.mark();
+    wrong.conn.mark();
+    await ackOk(host, { name: "trivia.open", suddenDeath: false });
+
+    // Both phones have the question and the answers, and neither has a hint.
+    // Waited for by phase, not by position: the `segment` broadcast may still
+    // be in flight, and a test that assumed the next frame was the open one
+    // would fail on the server being fast rather than on it being wrong.
+    for (const p of [right, wrong]) {
+      const frame = await p.conn.next(
+        (f) => f.msg?.t === "state" && f.msg.state.trivia?.phase === "open",
+      );
+      assert.ok(frame.raw.includes("ZIRCON-RIGHT"), "the answers did not arrive");
+      assert.ok(!frame.raw.includes('"correct"'), `correctness leaked: ${frame.raw}`);
+      assert.ok(!frame.raw.includes("OSMIUM-NOTE"), "the note leaked");
+      assert.equal(frame.msg.state.triviaMine.state, "unanswered");
+    }
+
+    right.conn.send({ t: "trivia.answer", cid: "a1", index: 0, choice: 1 });
+    wrong.conn.send({ t: "trivia.answer", cid: "a2", index: 0, choice: 0 });
+    assert.equal((await right.conn.expect("ack")).msg.applied, true);
+    assert.equal((await wrong.conn.expect("ack")).msg.applied, true);
+
+    // "Locked in" and nothing else — and the right and wrong answers are told
+    // exactly the same thing.
+    for (const [p, choice] of [[right, 1], [wrong, 0]] as const) {
+      const frame = await p.conn.next(
+        (f) => f.msg?.t === "state" && f.msg.state.triviaMine?.state === "locked",
+      );
+      assert.deepEqual(frame.msg.state.triviaMine, { state: "locked", choice });
+      const keys = keysDeep(frame.msg.state.trivia);
+      assert.ok(!keys.has("correct"), [...keys].join(","));
+      assert.ok(!keys.has("distribution"), [...keys].join(","));
+      assert.ok(!frame.raw.includes("OSMIUM-NOTE"));
+      // Not even the count: the climbing number is a big-screen thing.
+      assert.equal(frame.msg.state.trivia.answered, undefined);
+    }
+
+    // The console, meanwhile, has everything: it is reading the answer out.
+    const hostFrame = host.latest("state")!;
+    assert.deepEqual(hostFrame.msg.state.trivia.correct, [1]);
+    assert.deepEqual(hostFrame.msg.state.trivia.distribution, [1, 1, 0, 0]);
+    assert.equal(hostFrame.msg.state.trivia.answered, 2);
+    assert.equal(hostFrame.msg.state.trivia.eligible, 2);
+
+    await Promise.all([host.close(), right.conn.close(), wrong.conn.close()]);
+  });
+
+  it("closing settles the points and revealing hands them over", async () => {
+    const s = makeSession("running");
+    loadQuestions(s);
+    const host = await connectHost(s);
+    const p = await join(s.joinCode, "Priya");
+    await ackOk(host, { name: "segment", kind: "trivia" });
+    await ackOk(host, { name: "trivia.open", suddenDeath: false });
+    await p.conn.expect("state");
+    p.conn.send({ t: "trivia.answer", cid: "a1", index: 0, choice: 1 });
+    await p.conn.expect("ack");
+
+    p.conn.mark();
+    await ackOk(host, { name: "trivia.close" });
+    // Closed, not revealed: the host chooses the moment, and until they do
+    // the phone still says nothing.
+    const closed = await p.conn.next(
+      (f) => f.msg?.t === "state" && f.msg.state.trivia?.phase === "closed",
+    );
+    assert.equal(closed.msg.state.triviaMine.state, "locked");
+    assert.ok(!closed.raw.includes('"correct"'), closed.raw);
+
+    await ackOk(host, { name: "trivia.reveal" });
+    const revealed = await p.conn.next(
+      (f) => f.msg?.t === "state" && f.msg.state.trivia?.phase === "revealed",
+    );
+    const mine = revealed.msg.state.triviaMine;
+    assert.equal(mine.state, "revealed");
+    assert.equal(mine.correct, true);
+    assert.ok(mine.points > 500, "a correct answer is worth more than half the base");
+    assert.ok(mine.points <= 1000);
+    assert.equal(mine.streak, 1);
+    assert.deepEqual(revealed.msg.state.trivia.correct, [1]);
+    assert.equal(revealed.msg.state.trivia.note, "OSMIUM-NOTE: read this out.");
+    assert.equal(revealed.msg.state.trivia.podium[0].nickname, "Priya");
+    // Still not the distribution: DESIGN.md keeps that on the big screen.
+    assert.equal(revealed.msg.state.trivia.distribution, undefined);
+
+    await Promise.all([host.close(), p.conn.close()]);
+  });
+
+  it("refuses a tap once the question has moved on, rather than moving it", async () => {
+    const s = makeSession("running");
+    loadQuestions(s);
+    const host = await connectHost(s);
+    const p = await join(s.joinCode, "Priya");
+    await ackOk(host, { name: "segment", kind: "trivia" });
+    await ackOk(host, { name: "trivia.open", suddenDeath: false });
+    await ackOk(host, { name: "trivia.close" });
+    await ackOk(host, { name: "trivia.reveal" });
+    await ackOk(host, { name: "trivia.next" });
+    await ackOk(host, { name: "trivia.open", suddenDeath: false });
+
+    // A tap that was in flight when the host advanced. It names question 0;
+    // question 1 is open. It must not land on question 1.
+    p.conn.send({ t: "trivia.answer", cid: "late", index: 0, choice: 0 });
+    const refusal = await p.conn.next((f) => f.msg?.cid === "late");
+    assert.equal(refusal.msg.t, "refusedCmd");
+    assert.equal(refusal.msg.code, "question_not_open");
+    assert.equal(s.runtime.state.trivia?.answers[p.pid], undefined);
+
+    await Promise.all([host.close(), p.conn.close()]);
+  });
+
+  it("refuses an answer from the host socket and a trivia command from a phone", async () => {
+    const s = makeSession("running");
+    loadQuestions(s);
+    const host = await connectHost(s);
+    const p = await join(s.joinCode, "Priya");
+    await ackOk(host, { name: "trivia.open", suddenDeath: false });
+
+    host.send({ t: "trivia.answer", cid: "h1", index: 0, choice: 1 });
+    const refusedAnswer = await host.next((f) => f.msg?.cid === "h1");
+    assert.equal(refusedAnswer.msg.t, "refusedCmd");
+    assert.equal(refusedAnswer.msg.code, "forbidden");
+
+    p.conn.send({ t: "host.cmd", cid: "p1", cmd: { name: "trivia.reveal" } });
+    const refusedCmd = await p.conn.next((f) => f.msg?.cid === "p1");
+    assert.equal(refusedCmd.msg.t, "refusedCmd");
+    assert.equal(refusedCmd.msg.code, "forbidden");
+
+    await Promise.all([host.close(), p.conn.close()]);
+  });
+
+  it("sends absolute epochs, never durations", async () => {
+    // ARCHITECTURE.md "Clocks and fairness": a client that receives the
+    // message late still counts down to the right instant.
+    const s = makeSession("running");
+    loadQuestions(s);
+    const host = await connectHost(s);
+    const p = await join(s.joinCode, "Priya");
+    await ackOk(host, { name: "segment", kind: "trivia" });
+    p.conn.mark();
+    await ackOk(host, { name: "trivia.open", suddenDeath: false });
+    const frame = await p.conn.next(
+      (f) => f.msg?.t === "state" && f.msg.state.trivia?.phase === "open",
+    );
+    const trivia = frame.msg.state.trivia;
+    assert.ok(trivia.opensAt > 1_600_000_000_000, "opensAt is not an epoch");
+    assert.equal(trivia.closesAt, trivia.opensAt + 20_000);
+    const keys = keysDeep(trivia);
+    for (const banned of ["remaining", "remainingMs", "secondsLeft", "duration"]) {
+      assert.ok(!keys.has(banned), `${banned} is a duration on the wire`);
+    }
+    await Promise.all([host.close(), p.conn.close()]);
+  });
+
+  it("closes the question by itself when the timer runs out", async () => {
+    const s = makeSession("running");
+    applyEvent(s, {
+      type: "loadTrivia",
+      activityId: "trivia",
+      // The engine's floor is 5 seconds; this test does not wait for it.
+      questions: [{ ...WIRE_QUESTIONS[0]!, timeLimitSec: 5 }],
+    });
+    const host = await connectHost(s);
+    await ackOk(host, { name: "segment", kind: "trivia" });
+    await ackOk(host, { name: "trivia.open", suddenDeath: false });
+    assert.equal(s.runtime.state.trivia?.phase, "open");
+
+    // Pull the deadline into the past and re-arm, which is exactly what a
+    // restart mid-question does with a `closesAt` that has already passed.
+    s.runtime.state = {
+      ...s.runtime.state,
+      trivia: { ...s.runtime.state.trivia!, closesAt: Date.now() - 1 },
+    };
+    s.runtime.armQuestionTimer();
+    await host.next((f) => f.msg?.t === "state" && f.msg.state.trivia?.phase === "closed");
+    assert.equal(s.runtime.state.trivia?.phase, "closed");
+    assert.equal(s.runtime.armedCloseAt, null);
+    await host.close();
+  });
+});
+
+describe("the trivia CSV upload", () => {
+  const CSV = [
+    "Question,Answer 1,Answer 2,Answer 3,Answer 4,Time limit (sec),Correct answer(s),Note,Round,Points",
+    "In what year was HashiCorp founded?,2008,2010,2012,2015,20,2,,History,",
+    '"Which product does secrets management, encryption as a service and dynamic credentials?",Consul,Boundary,Vault,Nomad,20,3,"Dynamic credentials are the bit people forget.",Name that product,',
+  ].join("\n");
+
+  async function upload(s: TestSession, body: string, token?: string): Promise<Response> {
+    return fetch(`http://127.0.0.1:${port}/api/sessions/${s.runtime.state.sid}/content/trivia`, {
+      method: "POST",
+      headers: {
+        "content-type": "text/csv",
+        ...(token === undefined ? {} : { authorization: `Bearer ${token}` }),
+      },
+      body,
+    });
+  }
+
+  it("loads a Kahoot export unchanged", async () => {
+    const s = makeSession("running");
+    const res = await upload(s, CSV, s.hostToken);
+    assert.equal(res.status, 200);
+    assert.deepEqual(await res.json(), { activityId: "trivia", questions: 2 });
+    assert.equal(s.runtime.state.trivia?.questions.length, 2);
+    // 1-based in the CSV, 0-based in the engine, converted once.
+    assert.deepEqual(s.runtime.state.trivia?.questions[0]?.correct, [1]);
+  });
+
+  it("rejects the whole file with line-numbered errors", async () => {
+    // SPEC.md: "a set with question 14 missing is worse than a set that
+    // failed to load in the dry run."
+    const s = makeSession("running");
+    const bad = CSV + "\nA question with no time limit,a,b,,,,1,,,";
+    const res = await upload(s, bad, s.hostToken);
+    assert.equal(res.status, 400);
+    const body = (await res.json()) as { error: string; errors: string[] };
+    assert.equal(body.error, "invalid_csv");
+    assert.ok(body.errors.length > 0);
+    assert.ok(body.errors.every((e) => /^Line \d+/.test(e)), body.errors.join(" | "));
+    assert.equal(s.runtime.state.trivia, null, "half a set was loaded");
+  });
+
+  it("replaces the set during prep and refuses once a question has opened", async () => {
+    const s = makeSession("running");
+    assert.equal((await upload(s, CSV, s.hostToken)).status, 200);
+    // Re-uploading is the only way to edit a set, so a fix in the green room
+    // has to work.
+    assert.equal((await upload(s, CSV, s.hostToken)).status, 200);
+
+    applyEvent(s, { type: "openQuestion", suddenDeath: false });
+    const res = await upload(s, CSV, s.hostToken);
+    assert.equal(res.status, 409);
+    assert.equal(((await res.json()) as { error: string }).error, "trivia_already_started");
+  });
+
+  it("answers an unknown session and a wrong token the same way", async () => {
+    const s = makeSession("running");
+    assert.equal((await upload(s, CSV, "not-the-token")).status, 401);
+    assert.equal((await upload(s, CSV)).status, 401);
+    const missing = await fetch(
+      `http://127.0.0.1:${port}/api/sessions/ses_does_not_exist/content/trivia`,
+      { method: "POST", headers: { authorization: `Bearer ${s.hostToken}` }, body: CSV },
+    );
+    assert.equal(missing.status, 401);
   });
 });

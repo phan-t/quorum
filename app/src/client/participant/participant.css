@@ -396,6 +396,243 @@ body.phone #app {
   color: var(--sealed);
 }
 
+/* ---------------------------------------------------------------- trivia -- */
+
+/*
+ * DESIGN.md: "Answer buttons are a 2 x 2 grid taking the bottom 55% of the
+ * screen, each >= 56px tall, each with a shape glyph in the corner and one of
+ * the four product hues as a fill." The question shrinks first and the tiles
+ * never do, because the tiles are what a thumb has to hit under a timer.
+ */
+
+.v-trivia {
+  gap: 12px;
+}
+
+.t-head {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  flex: 0 0 auto;
+}
+
+.t-kicker {
+  margin: 0;
+  color: var(--muted);
+}
+
+.t-round {
+  margin: 0;
+  align-self: flex-start;
+  padding: 3px 8px;
+  border-radius: 999px;
+  background: var(--panel-2);
+  color: var(--trivia);
+}
+.t-round[hidden] {
+  display: none;
+}
+
+.t-question {
+  margin: 0;
+  font-family: var(--body);
+  font-weight: 600;
+  /* Three lines at most, and it is the thing that gives way when the
+     viewport is short: the answers never shrink. */
+  font-size: clamp(17px, 5.2vw, 23px);
+  line-height: 1.25;
+  max-height: 3.75em;
+  overflow: hidden;
+}
+
+/* The timer is a number and a shrinking bar, both: the number for people who
+   can read it, the bar for people who cannot. It ticks; it does not animate,
+   so a repaint never slides it somewhere it has not got to yet. */
+.t-timer {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.t-timer[hidden] {
+  display: none;
+}
+.t-timer-track {
+  flex: 1;
+  height: 8px;
+  border-radius: 4px;
+  background: var(--panel-2);
+  overflow: hidden;
+}
+.t-timer-fill {
+  height: 100%;
+  width: 100%;
+  background: var(--trivia);
+}
+.t-timer-num {
+  font-size: 17px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  min-width: 3.4em;
+  text-align: right;
+}
+.t-timer.urgent .t-timer-fill {
+  background: var(--miss);
+}
+.t-timer.urgent .t-timer-num {
+  color: var(--miss);
+}
+
+.t-grid {
+  flex: 1 1 55%;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+/* Two- and three-answer questions are allowed, and a lone tile in a 2-column
+   grid looks like a bug. Two answers become two full-width rows. */
+.t-grid[data-count="2"] {
+  grid-template-columns: 1fr;
+}
+.t-grid[data-count="3"] > :first-child {
+  grid-column: span 2;
+}
+
+.t-tile {
+  min-height: 56px; /* touch target floor */
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  border: 2px solid transparent;
+  border-radius: 12px;
+  background: var(--tile);
+  color: var(--tile-ink);
+  font: inherit;
+  font-weight: 600;
+  font-size: clamp(15px, 4.4vw, 19px);
+  text-align: left;
+  cursor: pointer;
+  transition: opacity var(--pop-ms) var(--pop);
+}
+.t-tile:focus-visible {
+  outline: 3px solid var(--ink);
+  outline-offset: 2px;
+}
+.t-tile[disabled] {
+  cursor: default;
+}
+.t-shape {
+  font-size: 18px;
+  line-height: 1;
+  flex: 0 0 auto;
+  opacity: 0.85;
+}
+.t-answer {
+  min-width: 0;
+  overflow: hidden;
+}
+
+/* Locked in: the chosen tile outlined, the others dimmed. No colour change
+   and no tick — nothing on this screen may say whether it was right. */
+.t-tile.dim {
+  opacity: 0.32;
+}
+.t-tile.chosen {
+  border-color: var(--ink);
+}
+/* Reveal, and only reveal.
+ *
+ * The ring is drawn in --ink, not --hit. --hit is the nomad green, and one of
+ * the four tiles is filled with that same green, so a green ring on it was
+ * invisible — and the correct answer is answer 3 on six of the twenty
+ * questions in the launch set. --ink reads on every hue. The big screen
+ * already did this; the phone did not. */
+.t-tile.hit {
+  box-shadow: inset 0 0 0 3px var(--ink);
+}
+.t-tile.miss {
+  border-color: var(--miss);
+}
+
+.t-status {
+  margin: 0;
+  flex: 0 0 auto;
+  color: var(--muted);
+  text-align: center;
+}
+.t-status[hidden] {
+  display: none;
+}
+
+.t-reveal {
+  flex: 0 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.t-reveal[hidden] {
+  display: none;
+}
+.t-verdict {
+  margin: 0;
+  font-size: 30px;
+}
+.t-verdict[data-verdict="hit"] {
+  color: var(--hit);
+}
+.t-verdict[data-verdict="miss"] {
+  color: var(--miss);
+}
+.t-points {
+  margin: 0;
+  font-size: 40px;
+  font-weight: 600;
+  line-height: 1;
+}
+.t-points[hidden],
+.t-streak[hidden],
+.t-note[hidden],
+.t-podium[hidden] {
+  display: none;
+}
+.t-streak {
+  margin: 0;
+  color: var(--spot);
+}
+.t-note {
+  margin: 0;
+  color: var(--muted);
+  font-size: 15px;
+  line-height: 1.4;
+}
+.t-podium {
+  list-style: none;
+  margin: 4px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.t-podium .row {
+  padding: 6px 10px;
+  border-left-color: var(--trivia);
+}
+.t-podium .row .name {
+  font-size: 18px;
+}
+.t-podium .row .total {
+  font-size: 15px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .t-tile {
+    transition: none;
+  }
+}
+
 /* ------------------------------------------------------- host preview -- */
 
 /* The console renders one of these at 180px. Same code, same truth. */

@@ -17,12 +17,18 @@ import type {
   Effect,
   Event,
   Participant,
+  ParticipantId,
   RawScore,
   ReduceResult,
   RejectCode,
   SessionState,
+  TriviaAnswer,
+  TriviaState,
 } from "./types.ts";
 import { spotsRemaining } from "./scoring.ts";
+import { clampMs, idleQuestion, isCorrect, settleQuestion,
+  triviaHasBegun,
+} from "./trivia.ts";
 
 /**
  * Fold a nickname for collision detection.
@@ -98,6 +104,7 @@ export function newSession(input: NewSessionInput): SessionState {
     scores: Object.fromEntries(input.activities.map((a) => [a.id, {}])),
     spots: [],
     holding: null,
+    trivia: null,
     joinsLocked: false,
     seq: 0,
     nextPlayerNumber: 1,
@@ -116,6 +123,34 @@ const BROADCAST_STANDINGS: Effect[] = [
   { kind: "broadcast", to: "all", what: "standings" },
   { kind: "broadcast", to: "host", what: "standings" },
 ];
+
+/**
+ * Write the trivia totals into the session's per-activity scores.
+ *
+ * The trivia total *is* the raw score, stored exactly as `setScore` stores a
+ * typed one — `{ raw, status: "played" }` — so the Phase 2 scoreboard
+ * normalises it with no special case for where the number came from. That is
+ * also why nothing here touches the normalisation: SCORING.md's one rule
+ * applies to trivia because trivia hands it an ordinary raw.
+ */
+function withTriviaScores(
+  state: SessionState,
+  trivia: TriviaState,
+): SessionState["scores"] {
+  const bucket: Record<ParticipantId, RawScore> = {
+    ...(state.scores[trivia.activityId] ?? {}),
+  };
+  for (const [pid, raw] of Object.entries(trivia.totals)) {
+    const prev = bucket[pid];
+    // Bench credit is a statement about a person, not a score. A facilitator
+    // who plays along from the bench must not be scored back onto the board —
+    // `setScore` refuses the same thing for the same reason.
+    if (prev?.status === "bench") continue;
+    if (prev?.status === "played" && prev.raw === raw) continue;
+    bucket[pid] = { raw, status: "played" };
+  }
+  return { ...state.scores, [trivia.activityId]: bucket };
+}
 
 export function reduce(
   state: SessionState,
@@ -576,6 +611,309 @@ export function reduce(
         { ...state, spots: state.spots.filter((sp) => sp.seq !== event.seq) },
         [...BROADCAST_STANDINGS, PERSIST],
       );
+    }
+
+    /* ---------------- trivia ---------------- */
+
+    case "loadTrivia": {
+      const activity = state.activities.find((a) => a.id === event.activityId);
+      if (!activity) {
+        return unchanged(
+          reject("host", "unknown_activity", `No activity ${event.activityId}.`),
+        );
+      }
+      // An empty set is not a set. Accepting it would leave the host with a
+      // trivia activity that can never open a question and no error to read.
+      if (event.questions.length === 0) {
+        return unchanged(
+          reject("host", "no_questions_loaded", "That file has no questions."),
+        );
+      }
+      // Replace freely until the first question opens, refuse afterwards.
+      //
+      // SPEC.md says "editing a loaded set means re-uploading" and
+      // ARCHITECTURE.md's REST table says the endpoint "validates and replaces
+      // the set", so a flat refusal is wrong: the overwhelmingly likely reason
+      // to load twice is that the first CSV was the wrong file, noticed in the
+      // dry run. But once a question has been opened, a swap silently rewrites
+      // the meaning of every total already banked — the raws survive, the
+      // questions that produced them do not — so at that point a new session
+      // is the only honest answer.
+      if (state.trivia && triviaHasBegun(state.trivia)) {
+        return unchanged(
+          reject(
+            "host",
+            "trivia_already_started",
+            "A question has already been asked. Re-uploading now would not match the scores already banked.",
+          ),
+        );
+      }
+      return applied(
+        {
+          ...state,
+          trivia: {
+            activityId: event.activityId,
+            questions: event.questions,
+            at: 0,
+            phase: "idle",
+            opensAt: null,
+            closesAt: null,
+            suddenDeath: false,
+            suddenDeathWinner: null,
+            answers: {},
+            totals: {},
+            streaks: {},
+          },
+        },
+        [BROADCAST_STATE, PERSIST],
+      );
+    }
+
+    case "openQuestion": {
+      const trivia = state.trivia;
+      if (!trivia) {
+        return unchanged(
+          reject("host", "no_questions_loaded", "Load a question set first."),
+        );
+      }
+      if (state.phase !== "running") {
+        return unchanged(
+          reject("host", "wrong_phase", "Start the session first."),
+        );
+      }
+      if (trivia.phase !== "idle") {
+        return unchanged(
+          reject(
+            "host",
+            "wrong_question_phase",
+            "This question is already in play.",
+          ),
+        );
+      }
+      const question = trivia.questions[trivia.at];
+      if (!question) {
+        return unchanged(
+          reject("host", "no_more_questions", "That was the last question."),
+        );
+      }
+      return applied(
+        {
+          ...state,
+          trivia: {
+            ...trivia,
+            phase: "open",
+            opensAt: now,
+            // Sudden death has no timer: it ends when someone is right, not
+            // when a clock runs out, so there is no instant to count down to.
+            closesAt: event.suddenDeath
+              ? null
+              : now + question.timeLimitSec * 1000,
+            suddenDeath: event.suddenDeath,
+            suddenDeathWinner: null,
+            answers: {},
+          },
+        },
+        [BROADCAST_STATE, PERSIST],
+      );
+    }
+
+    case "answerQuestion": {
+      const trivia = state.trivia;
+      const question = trivia?.questions[trivia.at];
+      if (!trivia || !question || trivia.phase !== "open") {
+        return unchanged(
+          reject(
+            { pid: event.pid },
+            "question_not_open",
+            "That question is closed.",
+          ),
+        );
+      }
+      const p = state.participants[event.pid];
+      if (!p || p.kicked) {
+        return unchanged(
+          reject(
+            { pid: event.pid },
+            "unknown_participant",
+            `No participant ${event.pid}.`,
+          ),
+        );
+      }
+      // One tap, final. SPEC.md is unambiguous, and the refusal is what stops
+      // a double-tap on a laggy phone from being read as a change of mind.
+      if (trivia.answers[event.pid]) {
+        return unchanged(
+          reject(
+            { pid: event.pid },
+            "already_answered",
+            "You are locked in.",
+          ),
+        );
+      }
+      if (
+        !Number.isInteger(event.choice) ||
+        event.choice < 0 ||
+        event.choice >= question.answers.length
+      ) {
+        return unchanged(
+          reject({ pid: event.pid }, "invalid_choice", "No such answer."),
+        );
+      }
+
+      const correct = isCorrect(question, event.choice);
+      const answer: TriviaAnswer = {
+        choice: event.choice,
+        correct,
+        // Sudden death has no limit to clamp against — the whole point is that
+        // it runs until someone is right — so only the floor applies there.
+        ms: clampMs(
+          event.ms,
+          trivia.suddenDeath ? Infinity : question.timeLimitSec * 1000,
+        ),
+        // Points are settled at close, not here: see settleQuestion() for why
+        // a participant's own state must carry no correctness signal yet.
+        points: 0,
+        streakBonus: 0,
+      };
+
+      return applied(
+        {
+          ...state,
+          trivia: {
+            ...trivia,
+            answers: { ...trivia.answers, [event.pid]: answer },
+            // First correct answer wins, and only the first: a later correct
+            // tap does not overwrite the winner.
+            suddenDeathWinner:
+              trivia.suddenDeath && correct && trivia.suddenDeathWinner === null
+                ? event.pid
+                : trivia.suddenDeathWinner,
+          },
+        },
+        // Not `to: "all"`. The answer count belongs on the host console and
+        // the big screen; the only participant who learns anything is the one
+        // who just tapped, and what they learn is "locked in".
+        [
+          { kind: "broadcast", to: { pid: event.pid }, what: "state" },
+          { kind: "broadcast", to: "host", what: "state" },
+          { kind: "broadcast", to: "screen", what: "state" },
+          // Persist: the runtime only writes the event log when the engine
+          // asks it to, so an unpersisted answer is an answer that a restart
+          // mid-question loses.
+          PERSIST,
+        ],
+      );
+    }
+
+    case "closeQuestion": {
+      const trivia = state.trivia;
+      if (!trivia) {
+        return unchanged(
+          reject("host", "no_questions_loaded", "Load a question set first."),
+        );
+      }
+      if (trivia.phase !== "open") {
+        return unchanged(
+          reject("host", "wrong_question_phase", "No question is open."),
+        );
+      }
+      const settled = settleQuestion(trivia);
+      const next: TriviaState = {
+        ...trivia,
+        phase: "closed",
+        // types.ts: these are null unless the question is open. A closed
+        // question has no instant left to count down to, and a sudden death
+        // never had one — leaving a stale `closesAt` on either is how a phone
+        // ends up rendering a countdown to a moment in the past.
+        opensAt: null,
+        closesAt: null,
+        answers: settled.answers,
+        totals: settled.totals,
+        streaks: settled.streaks,
+      };
+      // The settled points live on `trivia` and go no further yet.
+      //
+      // Writing them into `scores` here is what an earlier version did, and it
+      // leaked the answer: the participant's own points strip is projected from
+      // `scores`, so at the close — before the reveal — a right answer made the
+      // strip jump and a wrong one left it flat. No field said "correct" and
+      // the phone turned green anyway, which is precisely what SPEC forbids,
+      // because the person sitting next to you can read a number as easily as
+      // a colour. The scores land at `revealQuestion`, when the answer is
+      // public regardless.
+      return applied({ ...state, trivia: next }, [BROADCAST_STATE, PERSIST]);
+    }
+
+    case "revealQuestion": {
+      const trivia = state.trivia;
+      if (!trivia) {
+        return unchanged(
+          reject("host", "no_questions_loaded", "Load a question set first."),
+        );
+      }
+      // Reveal follows close, never replaces it. Revealing an open question
+      // would put the answer on the big screen while people are still tapping.
+      if (trivia.phase !== "closed") {
+        return unchanged(
+          reject(
+            "host",
+            "wrong_question_phase",
+            trivia.phase === "open"
+              ? "Close the question before revealing it."
+              : "There is nothing to reveal.",
+          ),
+        );
+      }
+      const revealed: TriviaState = { ...trivia, phase: "revealed" };
+      // Sudden death changes no points at all, so it moves no standings.
+      return applied(
+        {
+          ...state,
+          trivia: revealed,
+          // Deferred from `closeQuestion` on purpose — see the note there.
+          ...(trivia.suddenDeath ? {} : { scores: withTriviaScores(state, revealed) }),
+        },
+        [
+          BROADCAST_STATE,
+          // The reveal ends with the activity's top five, which is standings.
+          ...BROADCAST_STANDINGS,
+          PERSIST,
+        ],
+      );
+    }
+
+    case "nextQuestion": {
+      const trivia = state.trivia;
+      if (!trivia) {
+        return unchanged(
+          reject("host", "no_questions_loaded", "Load a question set first."),
+        );
+      }
+      // Advancing past an open question would drop answers already given and
+      // score nobody. Everything else is allowed — advancing from `idle` is
+      // how a host skips a question they do not want to ask, which the ⚠️
+      // VERIFY discipline in the question bank makes a real need.
+      if (trivia.phase === "open") {
+        return unchanged(
+          reject(
+            "host",
+            "wrong_question_phase",
+            "Close the question before moving on.",
+          ),
+        );
+      }
+      const at = trivia.at + 1;
+      if (at >= trivia.questions.length) {
+        return unchanged(
+          reject("host", "no_more_questions", "That was the last question."),
+        );
+      }
+      // idleQuestion() clears the per-question answers. Totals and streaks
+      // are the set's running state and survive.
+      return applied({ ...state, trivia: idleQuestion(trivia, at) }, [
+        BROADCAST_STATE,
+        PERSIST,
+      ]);
     }
   }
 }

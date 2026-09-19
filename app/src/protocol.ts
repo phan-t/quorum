@@ -6,12 +6,13 @@
  * `resync` and gets a full `state` back. Client messages carry `cid`, echoed
  * in `ack`, so a client can reconcile an optimistic update.
  *
- * Phase 1 covers connection, segments, roster, seal and host control. Trivia
- * and arcade messages arrive in Phase 3 and 4.
+ * Phase 1 covers connection, segments, roster, seal and host control. Phase 3
+ * adds trivia; arcade messages arrive in Phase 4.
  */
 
 import type {
   ParticipantId,
+  QuestionPhase,
   Seal,
   ScoreStatus,
   Segment,
@@ -52,6 +53,19 @@ export type ClientMessage =
   | { t: "resync" }
   | { t: "ping"; t0: number }
   /**
+   * One tap, and it is final. Participants only.
+   *
+   * There is deliberately no timestamp on this frame. The response time is
+   * measured at the socket boundary from the server's own clock and its own
+   * latency estimate for this socket — a client-supplied `at` would be a
+   * number worth points, which is a number worth forging.
+   *
+   * `index` is the question the tap was meant for. A tap sent as the host
+   * closes and advances would otherwise land on the *next* question, which is
+   * the one race a phone can lose without anyone noticing.
+   */
+  | { t: "trivia.answer"; cid: string; index: number; choice: number }
+  /**
    * `cmd` is null when the command could not be parsed. The frame still
    * arrives so the server can answer with `refusedCmd` on that `cid` — a
    * console that gets silence cannot tell a rejected click from a dropped one.
@@ -87,7 +101,23 @@ export type HostCommand =
       activityId: string;
       reason: string;
     }
-  | { name: "spot.revoke"; seq: number };
+  | { name: "spot.revoke"; seq: number }
+  /* ---- trivia (phase 3) ---- */
+  /**
+   * Open the current question. The timer starts on the server and every
+   * surface counts down to the same absolute `closesAt`.
+   *
+   * `suddenDeath` rides on the open rather than being its own command because
+   * the engine has no event for arming it: `openQuestion` carries it, so the
+   * console's toggle is a pre-arm and the mode is fixed for the question at
+   * the moment it opens. Flipping it mid-question would change the rules
+   * under people who have already answered.
+   */
+  | { name: "trivia.open"; suddenDeath: boolean }
+  /** Close early. The server's timer sends the identical event at `closesAt`. */
+  | { name: "trivia.close" }
+  | { name: "trivia.reveal" }
+  | { name: "trivia.next" };
 
 /* ------------------------------------------------------------------ */
 /* Server → client                                                     */
@@ -143,6 +173,116 @@ export interface ActivitySummary {
   readonly spotsLeft: number;
 }
 
+/* ------------------------------------------------------------------ */
+/* Trivia                                                              */
+/* ------------------------------------------------------------------ */
+
+/**
+ * A run of consecutive questions sharing a CSV `Round` value.
+ *
+ * SPEC: "Consecutive questions with the same value get a round card between
+ * them." So the card belongs to the *first* question of a run, and the run is
+ * computed once, on the server, rather than three times by three surfaces
+ * looking at a question list two of them are never sent.
+ */
+export interface TriviaRound {
+  readonly name: string;
+  /** 1-based position of this question within the run. */
+  readonly position: number;
+  readonly size: number;
+  /** True on the first question of the run: the console offers the card. */
+  readonly startsHere: boolean;
+}
+
+/** One line of the activity's own podium. Five at most, on every surface. */
+export interface TriviaPodiumRow {
+  readonly rank: number;
+  readonly nickname: string;
+  readonly points: number;
+}
+
+/**
+ * The question, as the room may see it *right now*.
+ *
+ * The optional fields are the whole point of this type. They are absent —
+ * not null — for a role that may not have them yet, so the word never appears
+ * in the JSON on that socket and "was it sent?" is a question about the wire
+ * rather than about a renderer's discipline:
+ *
+ * | field | participant | screen | host |
+ * | --- | --- | --- | --- |
+ * | `correct` | reveal | reveal | always |
+ * | `distribution` | never | reveal | always |
+ * | `note` | reveal | reveal | always |
+ * | `podium` | reveal | reveal | reveal |
+ * | `answered` / `eligible` | never | always | always |
+ *
+ * A phone that learns the correct answer while the question is open has lost
+ * the game for the person sitting next to its owner, and a phone that learns
+ * the distribution is showing a big-screen thing on a 360px surface. The host
+ * sees everything, always, because they are reading the answer out.
+ */
+export interface TriviaView {
+  readonly activityId: string;
+  /** 0-based index into the loaded set. */
+  readonly index: number;
+  readonly of: number;
+  readonly phase: QuestionPhase;
+  readonly text: string;
+  /** Two to four. A blank CSV column is a question with fewer answers. */
+  readonly answers: readonly string[];
+  /**
+   * Absolute server epochs, never durations: a client that receives this late
+   * still counts down to the right instant. `closesAt` is null in sudden
+   * death, which has no timer at all.
+   */
+  readonly opensAt: number | null;
+  readonly closesAt: number | null;
+  readonly timeLimitSec: number;
+  readonly basePoints: number;
+  readonly suddenDeath: boolean;
+  /** A nickname, once someone has taken it. Sudden death only. */
+  readonly suddenDeathWinner: string | null;
+  readonly round: TriviaRound | null;
+  /** 0-based, Kahoot semantics: more than one means any of them counts. */
+  readonly correct?: readonly number[];
+  /** Counts per answer index, same length as `answers`. */
+  readonly distribution?: readonly number[];
+  readonly note?: string;
+  readonly podium?: readonly TriviaPodiumRow[];
+  readonly answered?: number;
+  /** Everyone in the room who could have answered — the "of 27". */
+  readonly eligible?: number;
+}
+
+/**
+ * The participant's own standing in the current question. Participants only.
+ *
+ * Three states and no fourth, because the middle one is a security property:
+ * while the question is open the phone is told that it is locked in and
+ * **nothing else**. There is no `correct` field on `locked` to forget to
+ * strip, no `points` to render by accident, and nothing in the JSON for
+ * someone with devtools to read out to the room. SPEC: "the phone shows
+ * 'locked in' and nothing else … a phone that turns green is visible to the
+ * person next to you."
+ */
+export type TriviaMine =
+  | { readonly state: "unanswered" }
+  | { readonly state: "locked"; readonly choice: number }
+  | {
+      readonly state: "revealed";
+      /** Null when they did not answer at all. */
+      readonly choice: number | null;
+      readonly correct: boolean;
+      /** For this question. Zero when wrong, absent, or a warm-up. */
+      readonly points: number;
+      readonly streakBonus: number;
+      /** Consecutive correct answers *including* this one. */
+      readonly streak: number;
+      /** Their running trivia total, which is the raw score for the activity. */
+      readonly total: number;
+    };
+
 /**
  * What a client renders. The server sends the view for that role — a
  * participant is never sent the full ranking, because the rule is that only
@@ -169,6 +309,10 @@ export interface RenderState {
   readonly joinCode?: string;
   /** Every surface needs the activity list to label a breakdown. */
   readonly activities: readonly ActivitySummary[];
+  /** Absent until a question set is loaded. Projected per role: {@link TriviaView}. */
+  readonly trivia?: TriviaView;
+  /** Participant only, and only while a question set is loaded. */
+  readonly triviaMine?: TriviaMine;
   /** Host only. */
   readonly hostExtras?: {
     readonly joinCode: string;
@@ -182,6 +326,17 @@ export interface RenderState {
       readonly activityId: string;
       readonly reason: string;
     }[];
+    /**
+     * Per-participant answer state, which ARCHITECTURE gives the host and
+     * nobody else. *Who* has answered, never *what* they answered: the
+     * console's job is to decide whether to wait, and a grid of choices would
+     * be the answer key on a screen the host sometimes shares by accident.
+     */
+    readonly trivia?: {
+      readonly answeredBy: readonly ParticipantId[];
+      /** How many questions are loaded. Zero means the CSV has not landed. */
+      readonly loaded: number;
+    };
   };
 }
 
@@ -258,6 +413,26 @@ export function parseClientMessage(raw: string): ClientMessage | null {
       return { t: "resync" };
     case "ping":
       return typeof m["t0"] === "number" ? { t: "ping", t0: m["t0"] } : null;
+    case "trivia.answer": {
+      const cid = str("cid");
+      const index = m["index"];
+      const choice = m["choice"];
+      // Non-negative integers or nothing. The engine refuses an out-of-range
+      // choice as well, but a fractional index that reached the boundary's
+      // `===` comparison would simply never match, which is a silent drop.
+      if (
+        cid === null ||
+        typeof index !== "number" ||
+        !Number.isInteger(index) ||
+        index < 0 ||
+        typeof choice !== "number" ||
+        !Number.isInteger(choice) ||
+        choice < 0
+      ) {
+        return null;
+      }
+      return { t: "trivia.answer", cid, index, choice };
+    }
     case "host.cmd": {
       const cid = str("cid");
       if (cid === null) return null;
@@ -353,6 +528,18 @@ function parseHostCommand(v: unknown): HostCommand | null {
         ? { name: "spot.revoke", seq }
         : null;
     }
+    case "trivia.open":
+      // Explicit, never defaulted: "sudden death was off, wasn't it?" is not a
+      // question anyone should be asking after the question is on the wall.
+      return typeof c["suddenDeath"] === "boolean"
+        ? { name: "trivia.open", suddenDeath: c["suddenDeath"] }
+        : null;
+    case "trivia.close":
+      return { name: "trivia.close" };
+    case "trivia.reveal":
+      return { name: "trivia.reveal" };
+    case "trivia.next":
+      return { name: "trivia.next" };
     default:
       return null;
   }

@@ -9,7 +9,12 @@
  * space; refusals inline in the button that caused them.
  */
 
-import type { HostCommand, RenderState, RosterEntry } from "../../protocol.ts";
+import type {
+  HostCommand,
+  RenderState,
+  RosterEntry,
+  TriviaView,
+} from "../../protocol.ts";
 import { initTheme, themeToggle } from "../shared/theme.ts";
 import type { Segment } from "../../engine/types.ts";
 import { h, keyedList, qs, replace, setAttr, setText } from "../shared/dom.ts";
@@ -17,9 +22,14 @@ import { QuorumClient } from "../shared/net.ts";
 import { mockBadge, mockTransport, readMockConfig } from "../shared/mock.ts";
 import {
   SEGMENTS,
+  SEGMENT_BUILT,
   SEGMENT_LABEL,
   SEGMENT_PHASE,
+  answerTiles,
+  formatCountdown,
   nextSegment,
+  questionLabel,
+  remainingMs,
 } from "../shared/view.ts";
 import { bindEscape, bindSpace, control, primaryControl, type Control } from "./controls.ts";
 import { createScoringPanel } from "./scoring.ts";
@@ -120,7 +130,12 @@ const panel = h("main", { class: "panel" }, [
   h("div", { class: "panel-foot" }, [footLeft, primary.el]),
 ]);
 
-const preview = createParticipantView({ compact: true });
+const preview = createParticipantView({
+  compact: true,
+  // No `onAnswer`: the preview is a picture of a phone, not one. It must not
+  // be able to answer the question the host is running.
+  now: () => client?.now() ?? Date.now(),
+});
 const toastList = h("ul", { class: "toasts" });
 const tray = h("aside", { class: "tray" }, [
   h("div", { class: "tray-preview" }, [
@@ -186,9 +201,9 @@ for (const seg of SEGMENTS) {
   const button = h("button", { class: "seg", type: "button" }, [
     h("span", { class: "seg-mark", text: "○" }),
     h("span", { class: "seg-name", text: SEGMENT_LABEL[seg] }),
-    SEGMENT_PHASE[seg] > 1
-      ? h("span", { class: "seg-phase mono", text: `P${SEGMENT_PHASE[seg]}` })
-      : null,
+    SEGMENT_BUILT[seg]
+      ? null
+      : h("span", { class: "seg-phase mono", text: `P${SEGMENT_PHASE[seg]}` }),
   ]);
   button.addEventListener("click", () => issue({ name: "segment", kind: seg }, null));
   const li = h("li", {}, [button]);
@@ -340,12 +355,126 @@ const bodyPending = h("section", { class: "pb" }, [
   h("p", { class: "pb-note pb-warn" }),
 ]);
 
+/* ---- trivia ---- */
+
+/**
+ * Sudden death is armed here and rides out on the next `trivia.open`, because
+ * that is the only event the engine has for it. It is a property of the
+ * question, fixed the instant it opens: flipping it mid-question would change
+ * the rules under people who have already answered.
+ */
+let suddenDeathArmed = false;
+
+const triviaHead = h("p", { class: "mono t-head-line" });
+const triviaQuestion = h("p", { class: "t-q" });
+const triviaRound = h("p", { class: "t-round-card", attrs: { hidden: true } });
+const triviaAnswers = h("ul", { class: "t-answers" });
+const triviaCounts = h("p", { class: "mono t-counts" });
+const triviaNote = h("p", { class: "pb-note t-note", attrs: { hidden: true } });
+const triviaWaiting = h("p", { class: "mono t-waiting", attrs: { hidden: true } });
+
+/**
+ * The question set. SPEC: "Questions load per session. Editing a loaded set
+ * means re-uploading; there is no in-app editor by design."
+ *
+ * Errors are line-numbered and listed here rather than flashed in a button,
+ * because a button shows one line for three seconds and a rejected CSV has
+ * four things wrong with it on four different rows.
+ */
+const triviaUpload = h("input", {
+  class: "field t-upload",
+  type: "file",
+  attrs: { accept: ".csv,text/csv", "aria-label": "Trivia question CSV" },
+}) as HTMLInputElement;
+const triviaUploadNote = h("p", { class: "pb-note" });
+const triviaErrors = h("ul", { class: "t-errors", attrs: { hidden: true } });
+
+triviaUpload.addEventListener("change", () => {
+  const file = triviaUpload.files?.[0];
+  if (!file || lastState === null) return;
+  const sid = lastState.sid;
+  setText(triviaUploadNote, `Loading ${file.name}…`);
+  triviaErrors.hidden = true;
+  void file
+    .text()
+    .then((text) =>
+      fetch(`/api/sessions/${encodeURIComponent(sid)}/content/trivia`, {
+        method: "POST",
+        // The token travels in a header, never a query string: the whole
+        // reason it lives in the URL fragment is to stay out of access logs.
+        headers: { authorization: `Bearer ${hostToken}`, "content-type": "text/csv" },
+        body: text,
+      }),
+    )
+    .then(async (res) => {
+      const body = (await res.json().catch(() => ({}))) as {
+        questions?: number;
+        errors?: string[];
+        message?: string;
+        error?: string;
+      };
+      if (res.ok) {
+        setText(triviaUploadNote, `${body.questions ?? 0} questions loaded.`);
+        triviaErrors.hidden = true;
+        return;
+      }
+      setText(triviaUploadNote, body.message ?? "That file was not loaded.");
+      const lines = body.errors ?? [body.error ?? "Upload failed."];
+      triviaErrors.hidden = lines.length === 0;
+      replace(triviaErrors, lines.map((line) => h("li", { text: line })));
+    })
+    .catch(() => setText(triviaUploadNote, "Upload failed. Check the connection."))
+    .finally(() => {
+      // Cleared so re-uploading the same corrected file still fires `change`.
+      triviaUpload.value = "";
+    });
+});
+
+const closeEarly = control({
+  label: "Close early",
+  className: "ctl-secondary",
+  title: "Stop the question now. The timer would do this at closesAt.",
+  onFire: (c) => issue({ name: "trivia.close" }, c),
+});
+
+const suddenDeath = control({
+  label: "Sudden death: off",
+  className: "ctl-secondary",
+  title:
+    "No timer, first correct answer wins, no points change. Applies to the next question you open.",
+  onFire: (c) => {
+    suddenDeathArmed = !suddenDeathArmed;
+    c.setLabel(`Sudden death: ${suddenDeathArmed ? "on" : "off"}`);
+    c.el.classList.toggle("on", suddenDeathArmed);
+    if (lastState) render(lastState);
+  },
+});
+
+const triviaLoad = h("div", { class: "t-load" }, [
+  h("label", { class: "label", text: "Question set (CSV)" }),
+  triviaUpload,
+  triviaUploadNote,
+  triviaErrors,
+]);
+
+const bodyTrivia = h("section", { class: "pb pb-trivia" }, [
+  triviaHead,
+  triviaRound,
+  triviaQuestion,
+  triviaAnswers,
+  triviaCounts,
+  triviaNote,
+  triviaWaiting,
+  h("div", { class: "field-actions" }, [closeEarly.el, suddenDeath.el]),
+  triviaLoad,
+]);
+
 const bodies: Record<string, HTMLElement> = {
   lobby: bodyLobby,
   holding: bodyHolding,
   standings: bodyStandings,
   final: bodyStandings,
-  trivia: bodyPending,
+  trivia: bodyTrivia,
   arcade: bodyPending,
 };
 
@@ -373,6 +502,27 @@ function primaryPlan(): { label: string; cmd: HostCommand | null } {
   }
   if (s.phase === "lobby") {
     return { label: "Start the session", cmd: { name: "start" } };
+  }
+  // Inside trivia the primary button walks the question rather than the run of
+  // show: open, close, reveal, next. That is the whole activity on the space
+  // bar, which is what the host is holding while they read the question out.
+  if (s.segment === "trivia" && s.trivia !== undefined) {
+    const t = s.trivia;
+    switch (t.phase) {
+      case "idle":
+        return {
+          label: `Open ${questionLabel(t)}${suddenDeathArmed ? " — sudden death" : ""}`,
+          cmd: { name: "trivia.open", suddenDeath: suddenDeathArmed },
+        };
+      case "open":
+        return { label: "Close the question", cmd: { name: "trivia.close" } };
+      case "closed":
+        return { label: "Reveal the answer", cmd: { name: "trivia.reveal" } };
+      case "revealed":
+        return t.index + 1 < t.of
+          ? { label: "Next question", cmd: { name: "trivia.next" } }
+          : { label: "Show standings", cmd: { name: "segment", kind: "standings" } };
+    }
   }
   const next = nextSegment(s.segment);
   if (next === null) return { label: "Nothing queued", cmd: null };
@@ -474,6 +624,8 @@ function render(s: RenderState): void {
     standingsNote.classList.toggle("pb-warn", s.seal === "sealed");
   }
 
+  if (body === bodyTrivia) renderTrivia(s);
+
   if (body === bodyPending) {
     const note = bodyPending.firstElementChild;
     if (note instanceof HTMLElement) {
@@ -481,6 +633,7 @@ function render(s: RenderState): void {
         note,
         `${SEGMENT_LABEL[s.segment]} is not built yet (Phase ${SEGMENT_PHASE[s.segment]}). The room is looking at a placeholder.`,
       );
+
     }
   }
 
@@ -498,12 +651,162 @@ function render(s: RenderState): void {
 }
 
 /**
+ * The live question: what it is, who has answered, and the four counts.
+ *
+ * The console is the one surface that sees the correct answer and the
+ * distribution while the question is still open, because the host is the one
+ * about to read it out and the one deciding whether to wait. Everything here
+ * comes from `hostExtras` or from the host's own projection of `trivia`; none
+ * of it exists on the wire to a phone.
+ */
+function renderTrivia(s: RenderState): void {
+  const t = s.trivia;
+  if (t === undefined) {
+    setText(triviaHead, "NO QUESTIONS LOADED");
+    setText(
+      triviaQuestion,
+      "Upload the Kahoot CSV for this session before opening trivia.",
+    );
+    triviaRound.hidden = true;
+    replace(triviaAnswers, []);
+    setText(triviaCounts, "");
+    triviaNote.hidden = true;
+    triviaWaiting.hidden = true;
+    closeEarly.setDisabled(true);
+    suddenDeath.setDisabled(true);
+    triviaLoad.hidden = false;
+    return;
+  }
+
+  // Re-uploading is allowed right up until the first question opens; after
+  // that the engine refuses it, so the console stops offering it.
+  triviaLoad.hidden = t.phase !== "idle" || t.index > 0;
+
+  const left = remainingMs(t.closesAt, client?.now() ?? Date.now());
+  setText(
+    triviaHead,
+    [
+      questionLabel(t).toUpperCase(),
+      t.phase.toUpperCase(),
+      t.suddenDeath ? "SUDDEN DEATH" : null,
+      t.phase === "open" && left !== null ? formatCountdown(left) : null,
+      t.basePoints === 0 ? "WARM-UP · 0 POINTS" : `BASE ${t.basePoints}`,
+    ]
+      .filter((x) => x !== null)
+      .join(" · "),
+  );
+
+  // The round card: SPEC gives one to the first question of a run of
+  // consecutive questions sharing a `Round`. The console is where it appears
+  // first, because the host announces it before opening the question.
+  triviaRound.hidden = t.round === null;
+  if (t.round) {
+    setText(
+      triviaRound,
+      t.round.startsHere
+        ? `Round card — ${t.round.name} · ${t.round.size} questions`
+        : `${t.round.name} · ${t.round.position} of ${t.round.size}`,
+    );
+    triviaRound.classList.toggle("is-card", t.round.startsHere);
+  }
+
+  setText(triviaQuestion, t.text);
+
+  const distribution = t.distribution ?? [];
+  const correct = t.correct ?? [];
+  const top = Math.max(1, ...distribution);
+  replace(
+    triviaAnswers,
+    answerTiles(t.answers).map((tile) => {
+      const n = distribution[tile.index] ?? 0;
+      return h(
+        "li",
+        {
+          class: correct.includes(tile.index) ? "t-answer is-correct" : "t-answer",
+          attrs: { style: `--tile:${tile.hue}` },
+        },
+        [
+          h("span", { class: "mono t-answer-i", text: String(tile.index + 1) }),
+          h("span", { class: "t-answer-shape", attrs: { "aria-hidden": "true" }, text: tile.shape }),
+          h("span", { class: "t-answer-text", text: tile.text }),
+          h("span", {
+            class: "t-answer-bar",
+            attrs: { style: `width:${(n / top) * 100}%`, "aria-hidden": "true" },
+          }),
+          h("span", { class: "mono t-answer-n", text: String(n) }),
+        ],
+      );
+    }),
+  );
+
+  const answered = t.answered ?? 0;
+  const eligible = t.eligible ?? 0;
+  setText(triviaCounts, `${answered} of ${eligible} answered`);
+  triviaCounts.classList.toggle("all-in", eligible > 0 && answered >= eligible);
+
+  const note = t.note ?? "";
+  triviaNote.hidden = note === "";
+  setText(triviaNote, note);
+
+  // Who is still out. The host's decision is "wait or close", and three names
+  // is a different decision from eleven.
+  const answeredBy = new Set(s.hostExtras?.trivia?.answeredBy ?? []);
+  const waiting = s.roster.filter((r) => !answeredBy.has(r.pid)).map((r) => r.nickname);
+  triviaWaiting.hidden = t.phase !== "open" || waiting.length === 0;
+  setText(
+    triviaWaiting,
+    waiting.length <= 6
+      ? `waiting on ${waiting.join(", ")}`
+      : `waiting on ${waiting.length} people`,
+  );
+
+  closeEarly.setDisabled(t.phase !== "open");
+  // Arming it mid-question would be a promise the engine cannot keep.
+  suddenDeath.setDisabled(t.phase === "open");
+}
+
+/**
  * The console is shown everything; the room is not. The preview has to be the
  * room's view or it is worse than no preview at all.
+ *
+ * The trivia block is the sharp end of that: the host's copy carries the
+ * correct answer and the distribution from the moment the question loads, and
+ * a preview that rendered those would be showing the host a phone that does
+ * not exist — and putting the answer key in the corner of a console people
+ * screen-share by accident.
  */
 function roomView(s: RenderState): RenderState {
-  const { hostExtras: _hostExtras, own: _own, ...rest } = s;
-  return { ...rest, standings: s.seal === "sealed" ? [] : s.standings };
+  const { hostExtras: _hostExtras, own: _own, trivia, ...rest } = s;
+  // Fields are *removed*, not set to undefined, so the preview is fed the
+  // same shape a phone is: the participant's copy has no `correct` key at all
+  // before the reveal, and a preview that carried one would be a phone that
+  // does not exist.
+  let roomTrivia: TriviaView | undefined;
+  if (trivia !== undefined) {
+    const {
+      correct,
+      distribution: _distribution,
+      note,
+      podium,
+      answered: _answered,
+      eligible: _eligible,
+      ...shared
+    } = trivia;
+    const revealed = trivia.phase === "revealed";
+    roomTrivia = {
+      ...shared,
+      // The room has not been sent the question until it is open.
+      ...(trivia.phase === "idle" ? { text: "", answers: [] } : {}),
+      ...(revealed && correct !== undefined ? { correct } : {}),
+      ...(revealed && note !== undefined ? { note } : {}),
+      ...(revealed && podium !== undefined ? { podium } : {}),
+    };
+  }
+  return {
+    ...rest,
+    ...(roomTrivia !== undefined ? { trivia: roomTrivia } : {}),
+    standings: s.seal === "sealed" ? [] : s.standings,
+  };
 }
 
 function addToast(kind: "spot" | "text", text: string): void {
@@ -562,6 +865,17 @@ client = new QuorumClient({
     target.flash(result.message || "refused");
   },
 });
+
+/**
+ * The console's own countdown. The state does not arrive once a second — it
+ * arrives when something happens — so the one number on this page that has to
+ * move by itself gets a heartbeat of its own.
+ */
+setInterval(() => {
+  if (lastState?.segment !== "trivia") return;
+  if (lastState.trivia?.phase !== "open") return;
+  renderTrivia(lastState);
+}, 250);
 
 bindSpace(primary);
 bindEscape(() => [
