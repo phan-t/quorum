@@ -93,7 +93,7 @@ Terraform variables, per environment. They live in a gitignored
 | `aws_account_id` | in `terraform.tfvars`, not here |
 | `aws_region` | `ap-southeast-2` |
 | `hosted_zone_id` | the zone owning `tphan.aws.hashidemos.io` |
-| `domain_name` | `quorum.tphan.aws.hashidemos.io` |
+| `domain_name` | `quorum.tphan.sbx.hashidemos.io` |
 | `image_tag` | set by `make deploy`; any existing tag for the first apply |
 | `desired_count` | `0` at rest |
 
@@ -141,7 +141,7 @@ simply no task running, so nothing serves and nothing can leak.
 ```
 # a day ahead, not an hour: an image build and an apply both take minutes
 set desired_count = 1 on the workspace, queue a run
-curl https://quorum.tphan.aws.hashidemos.io/healthz     # {"ok":true,...}
+curl https://quorum.tphan.sbx.hashidemos.io/healthz     # {"ok":true,...}
 ```
 
 Then create the session, open the host console, and check the join page loads

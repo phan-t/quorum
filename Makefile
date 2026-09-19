@@ -23,7 +23,7 @@ REPO    ?= quorum
 ACCOUNT  = $(shell aws sts get-caller-identity --query Account --output text 2>/dev/null)
 TAG     ?= sha-$(shell git rev-parse --short=7 HEAD)
 REGISTRY = $(ACCOUNT).dkr.ecr.$(REGION).amazonaws.com
-HOST    ?= quorum.tphan.aws.hashidemos.io
+HOST    ?= quorum.tphan.sbx.hashidemos.io
 INFRA    = infra
 
 .PHONY: check deploy build push apply up down url plan fmt

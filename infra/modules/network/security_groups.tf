@@ -75,8 +75,11 @@ resource "aws_security_group" "tasks" {
 }
 
 resource "aws_vpc_security_group_ingress_rule" "tasks_from_alb" {
-  security_group_id            = aws_security_group.tasks.id
-  description                  = "The ALB, by security group rather than by CIDR: the ALB's addresses change and a CIDR rule would drift into either a hole or an outage."
+  security_group_id = aws_security_group.tasks.id
+  # No apostrophe, and no quotes: AWS restricts rule descriptions to
+  # a-zA-Z0-9 and . _-:/()#,@[]+=&;{}!$* — an apostrophe fails the apply with
+  # InvalidParameterValue, which reads like a permissions problem.
+  description                  = "The ALB, by security group rather than by CIDR. ALB addresses change and a CIDR rule would drift into either a hole or an outage."
   referenced_security_group_id = aws_security_group.alb.id
   from_port                    = var.container_port
   to_port                      = var.container_port
