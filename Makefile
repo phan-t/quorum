@@ -38,8 +38,16 @@ check:
 	@echo "infra    $(INFRA)  (workspace: quorum)"
 	@echo "image    $(REGISTRY)/$(REPO):$(TAG)"
 
+## --platform is not optional. This is built on whatever laptop or runner is to
+## hand — an Apple Silicon Mac produces arm64, a GitHub runner amd64 — while
+## the Fargate task definition asks for linux/amd64. Without pinning it, the
+## image builds, pushes and passes every local test, then fails in Fargate with
+## "Manifest does not contain descriptor matching platform", which names the
+## problem but not the cause. Pinning makes the artifact identical wherever it
+## is built.
 build:
-	docker build -t $(REGISTRY)/$(REPO):$(TAG) -t $(REGISTRY)/$(REPO):latest app
+	docker build --platform linux/amd64 \
+	  -t $(REGISTRY)/$(REPO):$(TAG) -t $(REGISTRY)/$(REPO):latest app
 
 push: check
 	aws ecr get-login-password --region $(REGION) \
