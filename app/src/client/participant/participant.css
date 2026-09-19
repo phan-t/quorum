@@ -372,3 +372,114 @@ body.phone #app {
     border-right: 1px solid var(--line);
   }
 }
+
+/* ---------------------------------------------------------------- *
+ * The join screen, cut like the Vault login.
+ *
+ * A centred card, a mark above the heading, the auth method named above
+ * the field, and the credential set in mono with wide tracking so it reads
+ * as a token rather than as prose. Vault yellow carries the mark and the
+ * button; everything else stays on the app's own dark palette, because a
+ * white card here would be the only light surface in the product.
+ * ---------------------------------------------------------------- */
+
+.join {
+  max-width: 24rem;
+  margin-inline: auto;
+}
+
+.join-head {
+  text-align: center;
+  display: grid;
+  justify-items: center;
+  gap: 0.6rem;
+}
+
+.mark-wrap {
+  color: var(--vault);
+  line-height: 0;
+  margin-bottom: 0.15rem;
+}
+.vault-mark {
+  width: 3rem;
+  height: auto;
+  display: block;
+  /* The glow is what makes it read as a lock-screen rather than an icon. */
+  filter: drop-shadow(0 0 14px color-mix(in srgb, var(--vault) 35%, transparent));
+}
+
+.join-head h1 {
+  font-size: clamp(1.45rem, 6vw, 1.85rem);
+  letter-spacing: -0.01em;
+}
+
+/* Vault names the auth method above the field. There is one of them. */
+.method-row {
+  display: flex;
+  gap: 0.4rem;
+  justify-content: center;
+  margin-top: 0.1rem;
+}
+.method {
+  font-family: var(--mono);
+  font-size: 0.68rem;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--muted);
+  padding: 0.3rem 0.7rem;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+}
+.method.is-on {
+  color: var(--vault);
+  border-color: color-mix(in srgb, var(--vault) 45%, var(--line));
+  background: color-mix(in srgb, var(--vault) 10%, transparent);
+}
+
+/* The credential field. Tracking and case are what make four letters read
+   as a token; the code itself stays a word, because it is read aloud to a
+   room and "RAFT" survives a bad microphone where a hash does not. */
+.field-token {
+  text-align: center;
+  font-size: 1.35rem;
+  letter-spacing: 0.42em;
+  text-indent: 0.42em;
+  text-transform: uppercase;
+  padding-block: 0.85rem;
+  background: var(--ground);
+  border-color: var(--line);
+}
+.field-token:focus-visible {
+  border-color: var(--vault);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--vault) 22%, transparent);
+  outline: none;
+}
+.field-token::placeholder {
+  letter-spacing: 0.42em;
+  color: var(--dim);
+}
+
+.field-hint {
+  font-size: 0.75rem;
+  color: var(--dim);
+  line-height: 1.4;
+}
+
+.join-field {
+  gap: 0.35rem;
+}
+
+.join .primary {
+  background: var(--vault);
+  border-color: var(--vault);
+  color: #1a1400;
+  font-weight: 600;
+}
+.join .primary:disabled {
+  opacity: 0.55;
+}
+
+.join-code-chip .code-value {
+  letter-spacing: 0.3em;
+  color: var(--vault);
+}
