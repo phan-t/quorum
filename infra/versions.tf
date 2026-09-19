@@ -14,7 +14,7 @@ terraform {
   # repo does not name someone's org.
   cloud {
     workspaces {
-      name = "quorum-prod"
+      name = "quorum"
     }
   }
 }

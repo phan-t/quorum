@@ -18,19 +18,20 @@ resource "aws_acm_certificate" "this" {
   }
 }
 
+# One record, not a for_each over domain_validation_options.
+#
+# That idiom is everywhere, and it only works once the certificate exists: the
+# map's keys come from a resource attribute, so on an empty environment — or
+# during an import — Terraform refuses with "for_each ... cannot be determined
+# until apply". There are no subject alternative names here, so there is
+# exactly one validation record and `one()` says so directly. Add a SAN and
+# this has to become a for_each over the *configured* names, never over the
+# certificate's output.
 resource "aws_route53_record" "certificate_validation" {
-  for_each = {
-    for dvo in aws_acm_certificate.this.domain_validation_options : dvo.domain_name => {
-      name   = dvo.resource_record_name
-      record = dvo.resource_record_value
-      type   = dvo.resource_record_type
-    }
-  }
-
   zone_id = var.hosted_zone_id
-  name    = each.value.name
-  type    = each.value.type
-  records = [each.value.record]
+  name    = one(aws_acm_certificate.this.domain_validation_options).resource_record_name
+  type    = one(aws_acm_certificate.this.domain_validation_options).resource_record_type
+  records = [one(aws_acm_certificate.this.domain_validation_options).resource_record_value]
   ttl     = 60
 
   # ACM leaves the old validation record behind on renewal; without this, a
@@ -42,7 +43,7 @@ resource "aws_route53_record" "certificate_validation" {
 # never created pointing at a PENDING_VALIDATION certificate.
 resource "aws_acm_certificate_validation" "this" {
   certificate_arn         = aws_acm_certificate.this.arn
-  validation_record_fqdns = [for r in aws_route53_record.certificate_validation : r.fqdn]
+  validation_record_fqdns = [aws_route53_record.certificate_validation.fqdn]
 }
 
 # Alias records, not CNAMEs: an alias resolves to the ALB's current addresses,

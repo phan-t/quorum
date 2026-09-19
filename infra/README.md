@@ -83,8 +83,7 @@ A workspace created by `terraform init` has no variable set attached, so its
 first run fails with no credentials at all. Attach **AWS Authentication** to it
 once, in *Workspace → Variables → Variable sets → Apply to this workspace*.
 
-`quorum-bootstrap` is already attached. `quorum-prod` needs it the first time
-it exists.## What a human has to supply
+`quorum` is already attached. Any new workspace would need it too.## What a human has to supply
 
 Terraform variables, per environment. They live in a gitignored
 `terraform.tfvars` because this repo is public.
@@ -104,11 +103,17 @@ Terraform variables, per environment. They live in a gitignored
 awscreds                                  # eight hours
 tfawscreds                                # push the session to the variable set
 export TF_CLOUD_ORGANIZATION=tphan
-make check                                # confirms the session and the account
-cd infra/bootstrap && terraform init && terraform apply    # the ECR registry
-make deploy                               # build, push, apply
+make check
+make deploy                               # build, push, apply — creates everything
 make up                                   # raise it and wait for /healthz
 ```
+
+One workspace, `quorum`, and one apply. There was a second workspace for the
+registry and the OIDC providers; the providers are gone and a registry alone
+did not justify a second apply, a second variable set and a cross-workspace
+lookup. The trade is that `terraform destroy` now takes the ECR images with it,
+so a rebuild precedes the next apply — which matters only if you destroy rather
+than park.
 
 Budget about fifteen minutes for the first apply; most of it is ACM waiting on
 DNS validation. After that an apply is a couple of minutes.

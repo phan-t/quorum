@@ -29,6 +29,12 @@ locals {
   azs = slice(data.aws_availability_zones.available.names, 0, 2)
 }
 
+locals {
+  # AZ name -> ordinal. Known at plan time, which is what lets everything that
+  # fans out over subnets be planned before any of them exist.
+  subnet_index = { for i, az in local.azs : az => i }
+}
+
 resource "aws_vpc" "this" {
   cidr_block           = var.vpc_cidr
   enable_dns_support   = true
@@ -49,7 +55,7 @@ resource "aws_internet_gateway" "this" {
 }
 
 resource "aws_subnet" "public" {
-  for_each = { for i, az in local.azs : az => i }
+  for_each = local.subnet_index
 
   vpc_id = aws_vpc.this.id
   # /24 out of the /20: 251 usable addresses per subnet, which is 250 more than
@@ -93,8 +99,13 @@ resource "aws_route" "default_ipv6" {
 }
 
 resource "aws_route_table_association" "public" {
-  for_each = aws_subnet.public
+  # Iterate the same known input the subnets do, not the subnet resource
+  # itself. `for_each = aws_subnet.public` reads naturally but makes the key
+  # set unknown until the subnets exist, so the first plan of an empty
+  # environment fails with "for_each ... cannot be determined until apply" —
+  # which is every first apply, and every import.
+  for_each = local.subnet_index
 
-  subnet_id      = each.value.id
+  subnet_id      = aws_subnet.public[each.key].id
   route_table_id = aws_route_table.public.id
 }

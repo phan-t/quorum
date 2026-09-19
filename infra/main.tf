@@ -1,27 +1,28 @@
+# One environment, one workspace. There was a second workspace for the registry
+# and the OIDC providers; the providers are gone, and a registry alone did not
+# justify a second apply, a second variable set and a cross-workspace lookup.
+#
+# The trade that bought: `terraform destroy` now takes the ECR images with it,
+# so a rebuild-and-push precedes the next apply. Given the service is parked at
+# zero rather than destroyed, that is a cost that rarely comes due.
 locals {
+  name_prefix = "quorum"
+  # The modules take this for naming, tagging and log retention. There is only
+  # one of them now, and it is the real one.
   environment = "prod"
-  name_prefix = "quorum-prod"
 
   tags = merge(
     {
-      Project     = "quorum"
-      Environment = local.environment
-      ManagedBy   = "terraform"
-      Workspace   = "quorum-prod"
+      Project   = "quorum"
+      ManagedBy = "terraform"
+      Workspace = "quorum"
     },
     var.additional_tags,
   )
 }
 
-# Created once by infra/bootstrap, shared by both environments. One repository,
-# because staging and prod run the same image and promoting a tag beats
-# rebuilding it and hoping the result is identical.
-data "aws_ecr_repository" "quorum" {
-  name = var.ecr_repository_name
-}
-
 module "network" {
-  source = "../../modules/network"
+  source = "./modules/network"
 
   name_prefix = local.name_prefix
   vpc_cidr    = var.vpc_cidr
@@ -29,7 +30,7 @@ module "network" {
 }
 
 module "data" {
-  source = "../../modules/data"
+  source = "./modules/data"
 
   name_prefix = local.name_prefix
   environment = local.environment
@@ -37,7 +38,7 @@ module "data" {
 }
 
 module "service" {
-  source = "../../modules/service"
+  source = "./modules/service"
 
   name_prefix = local.name_prefix
   environment = local.environment
@@ -51,7 +52,7 @@ module "service" {
   alb_security_group_id  = module.network.alb_security_group_id
   task_security_group_id = module.network.task_security_group_id
 
-  image_repository_url = data.aws_ecr_repository.quorum.repository_url
+  image_repository_url = aws_ecr_repository.quorum.repository_url
   image_tag            = var.image_tag
 
   desired_count      = var.desired_count

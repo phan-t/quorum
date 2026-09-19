@@ -16,7 +16,6 @@
 #   make down      park it at zero afterwards
 #   make url       the health endpoint, so you can see it answer
 
-ENV     ?= prod
 REGION  ?= ap-southeast-2
 REPO    ?= quorum
 # Derived from the live session rather than written down: this repo is public,
@@ -25,7 +24,7 @@ ACCOUNT  = $(shell aws sts get-caller-identity --query Account --output text 2>/
 TAG     ?= sha-$(shell git rev-parse --short=7 HEAD)
 REGISTRY = $(ACCOUNT).dkr.ecr.$(REGION).amazonaws.com
 HOST    ?= quorum.tphan.aws.hashidemos.io
-ENVDIR   = infra/envs/$(ENV)
+INFRA    = infra
 
 .PHONY: check deploy build push apply up down url plan fmt
 
@@ -36,7 +35,7 @@ check:
 	@test -n "$(TF_CLOUD_ORGANIZATION)" \
 	  || { echo "TF_CLOUD_ORGANIZATION is unset. Run: export TF_CLOUD_ORGANIZATION=tphan"; exit 1; }
 	@echo "region   $(REGION)"
-	@echo "env      $(ENV)  ($(ENVDIR))"
+	@echo "infra    $(INFRA)  (workspace: quorum)"
 	@echo "image    $(REGISTRY)/$(REPO):$(TAG)"
 
 build:
@@ -51,19 +50,19 @@ push: check
 ## The apply is the deploy: the image tag is a Terraform variable, so the task
 ## definition has one owner and the plan of a deploy is a reviewable diff.
 apply: check
-	cd $(ENVDIR) && terraform init -input=false && \
+	cd $(INFRA) && terraform init -input=false && \
 	  terraform apply -var="image_tag=$(TAG)"
 
 deploy: build push apply
 
 plan: check
-	cd $(ENVDIR) && terraform init -input=false && \
+	cd $(INFRA) && terraform init -input=false && \
 	  terraform plan -var="image_tag=$(TAG)"
 
 ## Before an event. Do this a day ahead, not an hour: a certificate or DNS
 ## problem looks exactly like success from a laptop with the page cached.
 up: check
-	cd $(ENVDIR) && terraform apply -var="image_tag=$(TAG)" -var="desired_count=1"
+	cd $(INFRA) && terraform apply -var="image_tag=$(TAG)" -var="desired_count=1"
 	@echo "Waiting for the service to answer..."
 	@for i in $$(seq 1 60); do \
 	  if curl -fsS https://$(HOST)/healthz >/dev/null 2>&1; then \
@@ -74,7 +73,7 @@ up: check
 ## After it. Same day — a service nobody is watching, on a public URL, is what
 ## turns up in a security review.
 down: check
-	cd $(ENVDIR) && terraform apply -var="image_tag=$(TAG)" -var="desired_count=0"
+	cd $(INFRA) && terraform apply -var="image_tag=$(TAG)" -var="desired_count=0"
 	@echo "Parked. The ALB stays up; that is the ~\$$20/month floor."
 
 url:

@@ -1,11 +1,11 @@
-# Everything here is an HCP Terraform *Terraform variable* on the quorum-staging
+# Everything here is an HCP Terraform *Terraform variable* on the quorum-prod
 # workspace. Nothing in this file is a secret, and nothing in this file has a
 # default it should not have — the four identifiers at the top have no defaults
 # because guessing them would produce an apply against the wrong account or the
 # wrong domain.
 
 variable "aws_account_id" {
-  description = "The AWS account this environment lives in. Guards against applying to the wrong one."
+  description = "The AWS account this runs in. Guards against applying to the wrong one."
   type        = string
 
   validation {
@@ -25,12 +25,12 @@ variable "hosted_zone_id" {
 }
 
 variable "domain_name" {
-  description = "Fully qualified hostname for this environment, e.g. quorum-staging.example.com."
+  description = "Fully qualified hostname, e.g. quorum.example.com."
   type        = string
 }
 
 variable "image_tag" {
-  description = "Container tag to run, e.g. sha-a1b2c3d. The deploy workflow PATCHes this on the workspace and then creates a run; that run is the deploy. No default: an environment should never quietly run whatever `latest` happens to mean."
+  description = "Container tag to run, e.g. sha-a1b2c3d. `make deploy` passes it. No default: the service should never quietly run whatever `latest` happens to mean."
   type        = string
 }
 
@@ -43,9 +43,9 @@ variable "ecr_repository_name" {
 }
 
 variable "desired_count" {
-  description = "0 or 1. Staging sits at 0 between rehearsals: set it to 1, run the bots, set it back. That takes Fargate to zero and leaves the ALB as the floor."
+  description = "0 or 1. Prod runs one task. Never two: the session state is in the process's memory."
   type        = number
-  default     = 0
+  default     = 1
 }
 
 variable "task_cpu" {
@@ -60,7 +60,7 @@ variable "task_memory" {
 
 variable "log_level" {
   type    = string
-  default = "debug"
+  default = "info"
 }
 
 variable "log_retention_days" {
@@ -69,9 +69,9 @@ variable "log_retention_days" {
 }
 
 variable "vpc_cidr" {
-  description = "Distinct per environment so the two could ever be peered without renumbering."
+  description = "Only one VPC exists, but keeping this a variable costs nothing."
   type        = string
-  default     = "10.40.0.0/20"
+  default     = "10.50.0.0/20"
 }
 
 variable "alarm_actions" {
@@ -84,4 +84,10 @@ variable "additional_tags" {
   description = "Cost centre, owner, whatever this account's tagging policy requires."
   type        = map(string)
   default     = {}
+}
+
+variable "image_retention_count" {
+  description = "Images kept in ECR. A rollback never needs to reach further back than this."
+  type        = number
+  default     = 20
 }
