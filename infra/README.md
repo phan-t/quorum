@@ -186,9 +186,11 @@ It is also worth doing from the HCP Terraform UI rather than from git. Reverting
 the commit works too, but it rebuilds — a slower path to an image you already
 have, and a different digest.
 
-**A bad infrastructure change.** Revert the commit and let the VCS run apply it.
-For prod, a human confirms the plan, which is the moment to check that the
-revert is actually a revert.
+**A bad infrastructure change.** Revert the commit, then apply it yourself —
+`awscreds`, `tfawscreds`, `make apply`. There is no VCS run to pick it up: the
+workspace is CLI-driven, for the reasons set out in `versions.tf`. Read the
+plan before confirming; that is the moment to check the revert is actually a
+revert, and it is the only gate there is.
 
 **Something worse.** The state is in HCP Terraform with full run history;
 "what changed, who applied it, what plan did they see" is answerable without
