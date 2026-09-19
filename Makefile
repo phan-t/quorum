@@ -59,10 +59,22 @@ plan: check
 	cd $(INFRA) && terraform init -input=false && \
 	  terraform plan -var="image_tag=$(TAG)"
 
+## The tag currently deployed, read from state. `up` and `down` must not change
+## which image runs — TAG follows git HEAD, so raising the service after a
+## commit would otherwise try to deploy an image nobody has built, and the task
+## would fail to pull. Changing the image is what `deploy` is for.
+DEPLOYED = $(shell cd $(INFRA) && terraform output -raw image 2>/dev/null | sed 's/.*://')
+
 ## Before an event. Do this a day ahead, not an hour: a certificate or DNS
 ## problem looks exactly like success from a laptop with the page cached.
 up: check
-	cd $(INFRA) && terraform apply -var="image_tag=$(TAG)" -var="desired_count=1"
+	@test -n "$(DEPLOYED)" || { echo "Nothing deployed yet. Run: make deploy"; exit 1; }
+	@# Fail here rather than in Fargate. A tag in state that is not in ECR
+	@# surfaces as CannotPullContainerError in the service events, minutes
+	@# later, while /healthz just never answers — a slow way to learn it.
+	@aws ecr describe-images --repository-name $(REPO) --image-ids imageTag=$(DEPLOYED) 	  --region $(REGION) >/dev/null 2>&1 	  || { echo "$(DEPLOYED) is not in ECR. Run: make deploy"; exit 1; }
+	@echo "raising $(DEPLOYED)"
+	cd $(INFRA) && terraform apply -auto-approve -var="image_tag=$(DEPLOYED)" -var="desired_count=1"
 	@echo "Waiting for the service to answer..."
 	@for i in $$(seq 1 60); do \
 	  if curl -fsS https://$(HOST)/healthz >/dev/null 2>&1; then \
@@ -73,7 +85,8 @@ up: check
 ## After it. Same day — a service nobody is watching, on a public URL, is what
 ## turns up in a security review.
 down: check
-	cd $(INFRA) && terraform apply -var="image_tag=$(TAG)" -var="desired_count=0"
+	@test -n "$(DEPLOYED)" || { echo "Nothing deployed."; exit 1; }
+	cd $(INFRA) && terraform apply -auto-approve -var="image_tag=$(DEPLOYED)" -var="desired_count=0"
 	@echo "Parked. The ALB stays up; that is the ~\$$20/month floor."
 
 url:
