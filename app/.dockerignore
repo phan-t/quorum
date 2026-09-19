@@ -24,8 +24,8 @@ data/
 infra
 .DS_Store
 
-# tsc never runs in the image — types are stripped, not checked.
-tsconfig.json
+# tsconfig stays: the `client` stage runs tsc to compile the browser code. The
+# runtime stage never sees it, because it only copies node_modules and dist.
 
 Dockerfile
 .dockerignore

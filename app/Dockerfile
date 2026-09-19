@@ -1,11 +1,10 @@
 # Quorum — the service image.
 #
-# Node runs the TypeScript directly (it strips the types and executes the
-# result), so there is no compile step and nothing to copy out of a builder.
-# That removes the usual reason for a multi-stage build, so the stages here do
-# the one job that is left: resolve production dependencies with the lockfile
-# in a throwaway layer, and copy only `node_modules` into an image that never
-# sees npm, the lockfile, or a dev dependency.
+# The server runs its TypeScript directly (Node strips the types and executes
+# the result), so it needs no compile step. The three browser clients do: a
+# browser cannot run .ts, so tsc emits them to dist/client and the server serves
+# that directory. An image without it starts, answers /healthz, and returns 404
+# for every page — which is exactly how this was found.
 #
 # Types are stripped, not checked. `npm run typecheck` in CI is the only thing
 # that reads them, which is why the PR workflow blocks on it.
@@ -22,6 +21,22 @@ COPY package.json package-lock.json ./
 # --ignore-scripts: nothing in this tree needs a postinstall, and a build script
 # in a transitive dependency is arbitrary code running as root at image build.
 RUN npm ci --omit=dev --ignore-scripts && npm cache clean --force
+
+# ---- client -----------------------------------------------------------------
+# The browser code, compiled. Separate from `deps` because it needs the dev
+# dependencies (tsc) that the runtime image must never contain.
+FROM node:24-alpine AS client
+
+WORKDIR /srv/quorum
+
+COPY package.json package-lock.json ./
+RUN npm ci --ignore-scripts && npm cache clean --force
+
+COPY tsconfig.json tsconfig.client.json ./
+COPY scripts ./scripts
+COPY src ./src
+
+RUN npm run build:client
 
 # ---- runtime ----------------------------------------------------------------
 FROM node:24-alpine AS runtime
@@ -42,6 +57,9 @@ COPY --from=deps --chown=node:node /srv/quorum/node_modules ./node_modules
 # read at runtime.
 COPY --chown=node:node package.json ./
 COPY --chown=node:node src ./src
+# The compiled clients. main.ts resolves QUORUM_CLIENT_ROOT to ../../dist/client
+# relative to itself, so this path is not arbitrary.
+COPY --from=client --chown=node:node /srv/quorum/dist ./dist
 
 USER node
 
