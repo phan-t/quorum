@@ -421,11 +421,33 @@ describe("connection and identity", () => {
     await p.conn.close();
   });
 
-  it("join codes are matched case-insensitively and ignoring surrounding whitespace", async () => {
+  it("join codes ignore surrounding whitespace, because they arrive pasted from chat", async () => {
     const s = makeSession("lobby");
-    const p = await join(` ${s.joinCode.toLowerCase()} `, "Kenji");
+    const p = await join(`  ${s.joinCode}  `, "Kenji");
     assert.equal(p.welcome.msg.sid, s.runtime.state.sid);
     await p.conn.close();
+  });
+
+  // Case matters now. The codes were words and folded to upper case; they are
+  // base62 tokens, so folding would map distinct codes onto each other and
+  // silently break every link.
+  it("join codes are case-sensitive", async () => {
+    const s = makeSession("lobby");
+    const flipped = [...s.joinCode]
+      .map((c) => (c === c.toLowerCase() ? c.toUpperCase() : c.toLowerCase()))
+      .join("");
+    assert.notEqual(flipped, s.joinCode, "the code should contain letters");
+    const r = await refusedJoin(flipped, "Kenji");
+    assert.equal(r.msg.reason, "no_such_code");
+  });
+
+  // Via the API, because makeSession mints its own fixture code and would be
+  // testing the helper rather than the generator.
+  it("a minted join code looks like a Vault token", async () => {
+    const res = await post("/api/sessions", { title: "Shape" }, ADMIN_KEY);
+    assert.equal(res.status, 201);
+    const created = (await res.json()) as { joinCode: string };
+    assert.match(created.joinCode, /^hvs\.[0-9A-Za-z]{24}$/);
   });
 
   it("hello with an unknown code is refused with no_such_code and the socket is closed", async () => {

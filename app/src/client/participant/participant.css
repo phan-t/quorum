@@ -484,13 +484,18 @@ body.phone:has(.v-splash) {
   color: #8c909c;
 }
 
-/* The credential, set like a token: mono and tracked. The value stays a
-   word — it is read aloud to a room, and RAFT survives a bad microphone. */
+/* The credential is a Vault-shaped token: hvs. and 24 base62 characters.
+   Mono, small, and left-aligned — it is pasted, not typed, so it has to be
+   scannable rather than ceremonial. No tracking (28 characters would wrap on
+   a phone) and no text-transform (base62 is case-sensitive; upper-casing it
+   would quietly break every code). */
 .v-splash .field-token {
   font-family: var(--mono);
-  letter-spacing: 0.3em;
-  text-indent: 0.3em;
-  text-transform: uppercase;
+  font-size: 0.8125rem;
+  letter-spacing: 0;
+  text-transform: none;
+  overflow-x: auto;
+  text-overflow: ellipsis;
 }
 
 .v-select {
@@ -542,7 +547,15 @@ body.phone:has(.v-splash) {
   background: #f9f9fa;
 }
 .v-chip-label { font-size: 0.8125rem; color: var(--v-grey); }
-.v-chip-value { font-weight: 600; letter-spacing: 0.22em; }
+.v-chip-value {
+  font-weight: 600;
+  font-size: 0.8125rem;
+  letter-spacing: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
 .v-linky {
   margin-left: auto;
   background: none;

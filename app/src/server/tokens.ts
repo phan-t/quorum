@@ -44,21 +44,38 @@ export function tokenMatches(presented: string, storedHash: string): boolean {
 }
 
 /**
- * Join codes are four-letter words from the stack, not random strings:
- * they get read out over a bad microphone to a room, and "RAFT" survives
- * that in a way "X7K2" does not.
+ * Join codes, shaped like a Vault root token: `hvs.` and 24 base62
+ * characters.
+ *
+ * They were four-letter words while the plan was to read them to a room —
+ * "RAFT" survives a bad microphone where a hash does not. The plan is now to
+ * paste them into Slack or Teams, where length costs nothing and nobody
+ * transcribes anything, so the code can look like what it is standing in for.
+ *
+ * Case matters, which is the thing to be careful about: base62 is
+ * case-sensitive and the old codes were folded to upper case everywhere they
+ * were compared. Nothing may fold these.
  */
-const JOIN_WORDS = [
-  "RAFT", "SEAL", "VAULT", "PLAN", "DRIFT", "MESH", "NOMAD", "GOSSIP",
-  "LEASE", "QUORUM", "TOKEN", "APPLY", "STATE", "AGENT", "CONSUL", "PACKER",
-] as const;
+const BASE62 = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
+const JOIN_CODE_BODY = 24;
+export const JOIN_CODE_PREFIX = "hvs.";
 
+/** `hvs.` plus 24 base62 characters, from the system CSPRNG. */
 export function newJoinCode(taken: ReadonlySet<string>): string {
-  const free = JOIN_WORDS.filter((w) => !taken.has(w));
-  const pool = free.length > 0 ? free : JOIN_WORDS;
-  const pick = pool[randomBytes(1)[0]! % pool.length]!;
-  // Every word is in use: fall back to a suffix rather than refusing to start.
-  return free.length > 0 ? pick : `${pick}${randomBytes(1)[0]! % 100}`;
+  for (let attempt = 0; attempt < 8; attempt += 1) {
+    const bytes = randomBytes(JOIN_CODE_BODY);
+    let body = "";
+    for (const b of bytes) body += BASE62[b % 62];
+    const code = JOIN_CODE_PREFIX + body;
+    if (!taken.has(code)) return code;
+  }
+  // 62^24 is large enough that this is unreachable; throwing beats looping.
+  throw new Error("could not mint an unused join code");
+}
+
+/** Shape check only — whether a session exists is a separate question. */
+export function looksLikeJoinCode(v: string): boolean {
+  return new RegExp(`^${JOIN_CODE_PREFIX.replace(".", "\\.")}[0-9A-Za-z]{8,64}$`).test(v.trim());
 }
 
 export function newId(prefix: string): string {

@@ -14,7 +14,7 @@
 import type { RenderState, StandingRow } from "../../protocol.ts";
 import { h, qs, replace, setText } from "../shared/dom.ts";
 import { QuorumClient } from "../shared/net.ts";
-import { mockBadge, mockTransport, readMockConfig } from "../shared/mock.ts";
+import { mockBadge, mockTransport, readMockConfig , sampleJoinCode} from "../shared/mock.ts";
 import { resolveView, type ViewKind } from "../shared/view.ts";
 import { drawQr, encodeQr } from "../shared/qr.ts";
 import { lockGlyph } from "../participant/view.ts";
@@ -42,7 +42,7 @@ function joinUrl(): string | null {
   const q = new URLSearchParams(location.search);
   const explicit = q.get("join");
   if (explicit) return explicit;
-  const code = (q.get("code") ?? (mock ? "RAFT" : "")).toUpperCase();
+  const code = (q.get("code") ?? (mock ? sampleJoinCode() : "")).trim();
   if (!/^[A-Z]{2,8}$/.test(code)) return null;
   return `${location.origin}/j/${code}`;
 }

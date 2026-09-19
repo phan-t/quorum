@@ -231,7 +231,8 @@ export class SessionRegistry {
       screenTokenHash: hashToken(screenToken),
     });
     this.bySid.set(state.sid, runtime);
-    this.byCode.set(state.joinCode.toUpperCase(), state.sid);
+    // No case folding: the code is base62 and case is significant.
+    this.byCode.set(state.joinCode, state.sid);
     return { runtime, hostToken, screenToken };
   }
 
@@ -240,7 +241,7 @@ export class SessionRegistry {
   }
 
   byJoinCode(code: string): SessionRuntime | undefined {
-    const sid = this.byCode.get(code.trim().toUpperCase());
+    const sid = this.byCode.get(code.trim());
     return sid ? this.bySid.get(sid) : undefined;
   }
 
