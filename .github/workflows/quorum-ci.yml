@@ -103,14 +103,39 @@ jobs:
 
       # -backend=false so no HCP Terraform token and no AWS credential is
       # needed: validate only has to resolve providers and type-check the
-      # configuration. Every directory, including the modules on their own, so a
-      # module breaks its own check rather than only breaking both environments.
+      # configuration. The root and every module on its own, so a module breaks
+      # its own check rather than only breaking the root that calls it.
+      #
+      # The directory list is found rather than written out. It used to name
+      # `infra/bootstrap` and `infra/envs/*` from the old three-workspace
+      # layout, and went on failing on the first missing directory for every
+      # push after that was consolidated into the single `quorum` workspace.
+      # Now a glob matching nothing is what fails, and it says so.
       - name: terraform validate
         run: |
           set -euo pipefail
-          for dir in infra/bootstrap infra/envs/* infra/modules/*; do
+          shopt -s nullglob
+          dirs=(infra infra/modules/*/)
+          if [ ${#dirs[@]} -lt 2 ]; then
+            echo "::error::no Terraform modules found under infra/modules — has the layout moved again?"
+            exit 1
+          fi
+          # The root carries a `cloud` block, which `init` resolves against HCP
+          # Terraform even with -backend=false. CI has no token for that, and
+          # giving it one would mean naming the org in this public repo. Validate
+          # needs neither, so the root is checked as a throwaway copy with the
+          # block stripped; infra/ on disk is never touched.
+          strip='import re,sys;p=sys.argv[1];s=open(p).read();o=re.sub(r"\n  cloud \{(?:[^{}]|\{[^{}]*\})*\}\n","\n",s,count=1);assert o!=s,"cloud block not found in "+p;open(p,"w").write(o)'
+          for dir in "${dirs[@]}"; do
             echo "::group::$dir"
-            terraform -chdir="$dir" init -backend=false -input=false -no-color
-            terraform -chdir="$dir" validate -no-color
+            target="$dir"
+            if [ "$dir" = "infra" ]; then
+              target="$(mktemp -d)/infra"
+              cp -R infra "$target"
+              rm -rf "$target/.terraform"
+              python3 -c "$strip" "$target/versions.tf"
+            fi
+            terraform -chdir="$target" init -backend=false -input=false -no-color
+            terraform -chdir="$target" validate -no-color
             echo "::endgroup::"
           done
