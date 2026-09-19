@@ -374,84 +374,66 @@ body.phone #app {
 }
 
 
+
+
 /* ---------------------------------------------------------------- *
- * The join screen, matched to Vault's own login.
+ * The join screen, cut from the Vault login as it ships today.
  *
- * Structure taken from ui/app/components/auth/page.hbs and splash-page.hbs:
- * a centred column, the brand mark and title in a header OUTSIDE a bordered
- * card, a Method select above the credential, labelled fields with helper
- * text under each, a full-width dark submit, and grey help below the card.
+ * Title above the card and aligned to its left edge; a bordered white card
+ * holding Method as a select, the credential with a reveal toggle, and a
+ * full-width blue Sign in; grey help text beneath.
  *
- * Light, because Vault's login is light. The rest of Quorum is dark, so
- * signing in steps from this page into a dark one — deliberate, and the one
- * thing here worth a second opinion.
+ * Light, because that login is light. Quorum behind it is dark, so signing
+ * in steps from one to the other.
  * ---------------------------------------------------------------- */
 
 body.phone:has(.v-splash) {
-  background: #f9f9fa;
+  background: #fff;
 }
 
 .v-splash {
+  --v-blue: #1563ff;
   --v-ink: #0c0c0e;
   --v-grey: #656a76;
-  --v-border: #dedfe3;
-  --v-focus: #1563ff;
+  --v-line: #dedfe3;
 
-  max-width: 25rem;
+  max-width: 28rem;
   margin-inline: auto;
-  padding-block: clamp(1.5rem, 6vh, 3rem);
+  padding-block: clamp(1.5rem, 8vh, 4.5rem);
   font-family: var(--body);
   color: var(--v-ink);
 }
 
-.v-splash-head {
-  text-align: center;
-  /* No mark above the title any more, so the header carries its own top space
-     rather than inheriting it from a 62px icon that is gone. */
-  padding-block: 1.5rem 1.75rem;
-}
-
-
-/* Bulma `title is-3`. */
 .v-title {
   font-family: var(--body);
-  font-size: 2rem;
-  font-weight: 600;
-  line-height: 1.125;
-  letter-spacing: -0.01em;
-  margin: 0;
-  color: var(--v-ink);
+  font-size: 1.75rem;
+  font-weight: 700;
+  line-height: 1.15;
+  letter-spacing: -0.015em;
+  margin: 0 0 1.25rem;
 }
 
-/* Hds::Card::Container level=high, hasBorder. */
 .v-card {
   background: #fff;
-  border: 1px solid var(--v-border);
+  border: 1px solid var(--v-line);
   border-radius: 6px;
-  box-shadow:
-    0 2px 3px rgb(101 106 118 / 10%),
-    0 8px 16px -10px rgb(101 106 118 / 20%);
   padding: 1.5rem;
   display: grid;
-  gap: 1rem;
+  gap: 1.1rem;
 }
 
-.v-field {
-  display: grid;
-  gap: 0.375rem;
-}
+.v-field { display: grid; gap: 0.4rem; }
 
 .v-label {
   font-size: 0.875rem;
   font-weight: 600;
-  color: #3b3d45;
+  color: var(--v-ink);
 }
 
 .v-help {
   margin: 0;
   font-size: 0.8125rem;
   color: var(--v-grey);
-  line-height: 1.35;
 }
 
 .v-splash :is(.field, .v-select) {
@@ -467,26 +449,43 @@ body.phone:has(.v-splash) {
 }
 .v-splash :is(.field, .v-select):focus-visible {
   outline: none;
-  border-color: var(--v-focus);
+  border-color: var(--v-blue);
   box-shadow: 0 0 0 2px rgb(21 99 255 / 25%);
 }
-.v-splash .field::placeholder {
-  color: #8c909c;
-}
+.v-splash .field::placeholder { color: #8c909c; }
 
-/* The credential is a Vault-shaped token: hvs. and 24 base62 characters.
-   Mono, small, and left-aligned — it is pasted, not typed, so it has to be
-   scannable rather than ceremonial. No tracking (28 characters would wrap on
-   a phone) and no text-transform (base62 is case-sensitive; upper-casing it
-   would quietly break every code). */
+/* The credential: mono, untracked, case preserved. */
 .v-splash .field-token {
   font-family: var(--mono);
   font-size: 0.8125rem;
   letter-spacing: 0;
   text-transform: none;
-  overflow-x: auto;
-  text-overflow: ellipsis;
+  padding-right: 3.5rem;
 }
+/* Masked by default, like Vault's Token field. -webkit-text-security keeps
+   the value a real string, so paste and form submission are unaffected. */
+.v-splash .field-token.is-masked {
+  -webkit-text-security: disc;
+  text-security: disc;
+}
+
+.v-input-wrap { position: relative; display: block; }
+.v-reveal {
+  position: absolute;
+  right: 0.4rem;
+  top: 50%;
+  transform: translateY(-50%);
+  background: none;
+  border: 0;
+  padding: 0.25rem 0.4rem;
+  font: inherit;
+  font-size: 0.75rem;
+  color: var(--v-grey);
+  cursor: pointer;
+  text-decoration: underline;
+}
+.v-reveal:hover { color: var(--v-ink); }
+.v-reveal:focus-visible { outline: 2px solid var(--v-blue); outline-offset: 1px; }
 
 .v-select {
   appearance: none;
@@ -497,65 +496,29 @@ body.phone:has(.v-splash) {
   background-repeat: no-repeat;
 }
 
-/* Hds::Button, isFullWidth. Vault's is near-black, not brand yellow. */
+/* Full width, blue. */
 .v-splash .v-submit {
   width: 100%;
-  margin-top: 0.5rem;
+  margin-top: 0.4rem;
   padding: 0.6rem 1rem;
   min-height: 2.5rem;
-  background: var(--v-ink);
+  background: var(--v-blue);
   color: #fff;
-  border: 1px solid var(--v-ink);
+  border: 1px solid var(--v-blue);
   border-radius: 5px;
   font-family: var(--body);
   font-size: 0.9375rem;
-  font-weight: 500;
+  font-weight: 600;
   cursor: pointer;
 }
-.v-splash .v-submit:hover:not(:disabled) { background: #26262b; }
+.v-splash .v-submit:hover:not(:disabled) { background: #0d4fd6; }
 .v-splash .v-submit:disabled { opacity: 0.5; cursor: default; }
-.v-splash .v-submit:focus-visible {
-  outline: 2px solid var(--v-focus);
-  outline-offset: 2px;
-}
+.v-splash .v-submit:focus-visible { outline: 2px solid var(--v-blue); outline-offset: 2px; }
 
-/* `help has-text-grey-dark`, under the card. */
 .v-splash-foot {
   margin: 1rem 0 0;
-  text-align: center;
   font-size: 0.8125rem;
   color: var(--v-grey);
-}
-
-.v-chip {
-  display: flex;
-  align-items: baseline;
-  gap: 0.5rem;
-  padding: 0.5rem 0.75rem;
-  border: 1px solid var(--v-border);
-  border-radius: 5px;
-  background: #f9f9fa;
-}
-.v-chip-label { font-size: 0.8125rem; color: var(--v-grey); }
-.v-chip-value {
-  font-weight: 600;
-  font-size: 0.8125rem;
-  letter-spacing: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  min-width: 0;
-}
-.v-linky {
-  margin-left: auto;
-  background: none;
-  border: 0;
-  padding: 0;
-  color: var(--v-focus);
-  font: inherit;
-  font-size: 0.8125rem;
-  cursor: pointer;
-  text-decoration: underline;
 }
 
 .v-splash .join-error {
@@ -570,3 +533,34 @@ body.phone:has(.v-splash) {
 .v-splash .join-error:empty { display: none; }
 .v-splash .join-error strong { font-size: 0.875rem; }
 .v-splash .join-error span { font-size: 0.8125rem; }
+
+.v-chip {
+  display: flex;
+  align-items: baseline;
+  gap: 0.5rem;
+  padding: 0.5rem 0.75rem;
+  border: 1px solid var(--v-line);
+  border-radius: 5px;
+  background: #f9f9fa;
+  min-width: 0;
+}
+.v-chip-label { font-size: 0.8125rem; color: var(--v-grey); }
+.v-chip-value {
+  font-size: 0.8125rem;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+.v-linky {
+  margin-left: auto;
+  background: none;
+  border: 0;
+  padding: 0;
+  color: var(--v-blue);
+  font: inherit;
+  font-size: 0.8125rem;
+  cursor: pointer;
+  text-decoration: underline;
+}
