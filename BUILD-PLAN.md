@@ -39,13 +39,33 @@ The first deploy. Content is deliberately trivial.
   needs anyway
 - Participant page follows the host with no navigation
 - WebSocket reconnect with state resync
-- Terraform: bootstrap workspace (OIDC providers, IAM roles), then staging
-  (VPC, ALB, ECS, DynamoDB, ACM, Route53)
-- GitHub Actions: PR checks, and build → push → set image tag → apply
+- Terraform: one workspace, `quorum` (VPC, ALB, ECS, DynamoDB, ACM, Route53,
+  ECR), HCP Terraform remote execution
+- GitHub Actions: PR and push checks only — typecheck, test, container build,
+  `terraform fmt`/`validate`
 
 **Done when:** you can open the URL on your phone, join, and watch the page
-change because someone clicked a button on a laptop — and a merge to `main`
-puts a new version there without you touching a console.
+change because someone clicked a button on a laptop.
+
+> **Amended during Phase 1.** This phase was planned around OIDC federation, a
+> separate bootstrap workspace, and a merge to `main` deploying itself. None of
+> that survived contact with the account, and the original acceptance criterion
+> ("a merge to `main` puts a new version there without you touching a console")
+> is not achievable here — it was dropped deliberately, not left unfinished:
+>
+> - **No OIDC, no CI/CD.** The AWS account denies all non-human credentials —
+>   `CreateOpenIDConnectProvider` and `CreateUser` are both explicit denies, and
+>   the account has zero IAM users and zero identity providers. There is no way
+>   for GitHub Actions to obtain AWS credentials, so there is no deploy job.
+>   Deploys are `make deploy`, run by a human holding 8-hour credentials, with
+>   HCP Terraform executing the apply remotely against `tfawscreds`.
+> - **One workspace, not three.** `quorum-bootstrap` and the per-environment
+>   split were consolidated into a single `quorum` workspace; the existing ECR
+>   repository was imported rather than recreated.
+>
+> Both changes are load-bearing for anyone reading this later: a stale
+> directory list left over from the three-workspace layout kept CI red for
+> several days while every other job passed.
 
 This is the phase that de-risks the project. Everything hard about the
 infrastructure is either working or not by the end of it.
@@ -68,6 +88,18 @@ spreadsheet.
 
 That is a genuine milestone, not a notional one. If the project stalled here it
 would still have been worth building.
+
+> **Status.** Everything on the list above is built, tested and merged. The
+> acceptance criterion is *not* met yet, and the distinction matters: it is a
+> claim about running a real event, and the service has never been in front of
+> anyone. Two things stand between here and true:
+>
+> - **A deploy.** Code on `main` is not code on the URL.
+> - **A rehearsal with real people.** See the sequencing note below — the
+>   failure modes that matter do not appear in a bot run.
+>
+> The 25 September huddle is deliberately *not* the first outing. It runs on
+> Kahoot and the existing arcade artifacts; Quorum targets the huddle after it.
 
 ## Phase 3 — Trivia
 
@@ -111,8 +143,9 @@ and it needs humans, not bots.
 
 ## Sequencing notes
 
-**Phase 1 is the risk.** If OIDC federation, the ALB idle timeout or the
-Fargate task fight you, that is where it happens. Budget accordingly and do not
+**Phase 1 is the risk.** If credentials, the ALB idle timeout or the Fargate
+task fight you, that is where it happens — and credentials did, which is why
+there is no CI/CD. Budget accordingly and do not
 start Phase 3 until a deploy is boring.
 
 **Phase 2 is the escape hatch.** It is the first point where stopping leaves
@@ -163,18 +196,20 @@ name is not, in a public repo. Generalise it as it moves.
 These are inputs from a human with the right access, not code. See the
 questions in the handover conversation.
 
-| | Needed for |
-| --- | --- |
-| AWS account ID and region | Every Terraform resource; the OIDC trust policies |
-| Permission to create an IAM OIDC provider and roles | Bootstrap workspace |
-| A hostname, and a Route53 zone or delegated subdomain | ACM certificate, ALB listener |
-| HCP Terraform org name, and a project | Three workspaces |
-| Dynamic provider credentials permitted in that org | The no-stored-keys design |
-| Exact `org/repo` for the GitHub trust policy | Actions → ECR push |
-| Spend approval, ~$40/month | Running it at all |
-| Tagging and cost-centre conventions | Whatever the account requires |
+All of these were settled during Phase 1. Kept as the record of what an
+equivalent deployment needs, with what it resolved to here.
 
-**The bootstrap apply is run once, by a human, with real credentials.** The
-OIDC providers and roles have to exist before any VCS-driven run can
-authenticate, so that workspace is CLI-driven and deliberately outside the
-automated path.
+| | Needed for | Resolved to |
+| --- | --- | --- |
+| AWS account ID and region | Every Terraform resource | `ap-southeast-2`; the account id lives in gitignored `terraform.tfvars`, not here |
+| A hostname, and a Route53 zone or delegated subdomain | ACM certificate, ALB listener | `quorum.tphan.sbx.hashidemos.io` — note `tphan.aws.hashidemos.io` has no NS delegation and will hang ACM validation |
+| HCP Terraform org name, and a project | The workspace | org from `TF_CLOUD_ORGANIZATION`; one workspace, `quorum` |
+| Dynamic provider credentials permitted in that org | The no-stored-keys design | the `AWS Authentication` varset (`tfawscreds`), remote execution |
+| Spend approval, ~$40/month | Running it at all | parked at `desired_count = 0` between events |
+| Tagging and cost-centre conventions | Whatever the account requires | — |
+
+**There is no bootstrap apply and no OIDC provider.** Both were planned and
+neither is possible: the account denies non-human credentials outright. A
+deploy is a human running `make deploy` with short-lived credentials, and HCP
+Terraform performs the apply. Nothing in GitHub Actions can reach AWS, by
+design and by the account's policy.
