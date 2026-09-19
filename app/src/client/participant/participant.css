@@ -406,21 +406,11 @@ body.phone:has(.v-splash) {
 
 .v-splash-head {
   text-align: center;
-  padding-block: 0.875rem 1.75rem;
+  /* No mark above the title any more, so the header carries its own top space
+     rather than inheriting it from a 62px icon that is gone. */
+  padding-block: 1.5rem 1.75rem;
 }
 
-/* .brand-icon-large is 62x62 in Vault. */
-.v-brand {
-  width: 62px;
-  height: 62px;
-  margin: 0 auto 1.25rem;
-  color: var(--v-ink);
-}
-.vault-mark {
-  width: 100%;
-  height: 100%;
-  display: block;
-}
 
 /* Bulma `title is-3`. */
 .v-title {
