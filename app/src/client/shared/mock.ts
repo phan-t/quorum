@@ -14,6 +14,7 @@
  *
  *   ?mock=1          scripted session: bots arrive, the host advances, it loops
  *   ?mock=manual     same session, no director — you drive it from the console
+ *                    (an empty grid, and the scoring is yours to type)
  *   &speed=2         run the script at 2×
  *   &drop=1          kill the socket once, 14s in, to show the banner
  *   &gap=1           skip a `seq` once, to force a resync
@@ -22,18 +23,33 @@
  * One deliberate detail: one of the bots is named with a fragment of HTML. If
  * a surface ever renders a nickname as markup, that bot makes it obvious on
  * the first run rather than in front of thirty people.
+ *
+ * The scripted session runs the whole of Phase 2 scoring, so every surface can
+ * be watched without a backend: a judged activity out of 20 with its
+ * facilitator on bench, a trivia activity in the thousands with a different
+ * one, two Spot Awards with reasons, then the seal and the reveal. The
+ * arithmetic here is SCORING.md's, implemented a second time on purpose — the
+ * mock is a stand-in for the server and must not borrow the engine to agree
+ * with it.
  */
 
 import type {
+  ActivitySummary,
   ClientMessage,
   HostCommand,
   RenderState,
   RosterEntry,
+  ScoreRow,
   ServerMessage,
   Role,
   StandingRow,
 } from "../../protocol.ts";
-import type { Seal, Segment, SessionPhase } from "../../engine/types.ts";
+import type {
+  Seal,
+  ScoreStatus,
+  Segment,
+  SessionPhase,
+} from "../../engine/types.ts";
 import type { Transport, TransportFactory, TransportHandlers } from "./transport.ts";
 
 export interface MockConfig {
@@ -72,10 +88,42 @@ interface MockParticipant {
   nicknameKey: string;
   playerNumber: number;
   conn: "on" | "away";
-  ttx: number | null;
-  spots: number;
+  /**
+   * activityId -> what the host typed. Benching clears it, exactly as the
+   * reducer does: a raw score that is no longer meaningful must not reappear
+   * if the status flips back.
+   */
+  raw: Record<string, number>;
+  status: Record<string, ScoreStatus>;
   bot: boolean;
 }
+
+interface MockSpot {
+  seq: number;
+  pid: string;
+  activityId: string;
+  reason: string;
+}
+
+/** One participant's line of the board, before it is projected to a role. */
+interface MockRow {
+  p: MockParticipant;
+  /** Normalised points, or the bench credit, per activity. Null for unset. */
+  points: Record<string, number | null>;
+  bench: string[];
+  spot: number;
+  total: number;
+  rank: number;
+}
+
+/** The three the server ships with — `DEFAULT_ACTIVITIES` in runtime.ts. */
+const ACTIVITIES: readonly Omit<ActivitySummary, "spotsLeft">[] = [
+  { id: "ttx", title: "Agentic Security TTX", kind: "manual", spotCap: 2 },
+  { id: "trivia", title: "Trivia", kind: "trivia", spotCap: 2 },
+  { id: "arcade", title: "Hashi Arcade", kind: "arcade", spotCap: 2 },
+];
+
+const SPOT_AWARD_POINTS = 10;
 
 const BOT_NAMES = [
   "Kenji",
@@ -110,7 +158,9 @@ class MockSession {
   joinsLocked = false;
   seq = 0;
   participants: MockParticipant[] = [];
+  spots: MockSpot[] = [];
   #nextNumber = 1;
+  #nextSpotSeq = 1;
 
   reset(): void {
     this.phase = "draft";
@@ -118,9 +168,10 @@ class MockSession {
     this.seal = "live";
     this.holding = null;
     this.joinsLocked = false;
+    this.spots = [];
     for (const p of this.participants) {
-      p.ttx = null;
-      p.spots = 0;
+      p.raw = {};
+      p.status = {};
     }
     this.participants = this.participants.filter((p) => !p.bot);
   }
@@ -141,16 +192,119 @@ class MockSession {
       nicknameKey: this.key(nickname),
       playerNumber: this.#nextNumber++,
       conn: "on",
-      ttx: null,
-      spots: 0,
+      raw: {},
+      status: {},
       bot,
     };
     this.participants.push(p);
     return p;
   }
 
-  total(p: MockParticipant): number {
-    return (p.ttx ?? 0) + p.spots * 10;
+  find_pid(pid: string): MockParticipant | undefined {
+    return this.participants.find((p) => p.pid === pid);
+  }
+
+  activity(id: string): (typeof ACTIVITIES)[number] | undefined {
+    return ACTIVITIES.find((a) => a.id === id);
+  }
+
+  grantSpot(pid: string, activityId: string, reason: string): MockSpot {
+    const spot: MockSpot = {
+      seq: this.#nextSpotSeq++,
+      pid,
+      activityId,
+      reason: reason.trim(),
+    };
+    this.spots.push(spot);
+    return spot;
+  }
+
+  spotsLeft(activityId: string): number {
+    const cap = this.activity(activityId)?.spotCap ?? 0;
+    return Math.max(0, cap - this.spots.filter((s) => s.activityId === activityId).length);
+  }
+
+  /* ---- scoring: SCORING.md, and nothing else ---- */
+
+  /**
+   * Normalise one activity: the top raw among `played` becomes 100, everyone
+   * else `round(100 × raw ÷ top)`. Bench is excluded from the top — a
+   * facilitator's absence must not set the ceiling for the room.
+   */
+  #normalise(activityId: string): Map<string, number> {
+    let top = 0;
+    for (const p of this.participants) {
+      if (p.status[activityId] !== "played") continue;
+      top = Math.max(top, p.raw[activityId] ?? 0);
+    }
+    const out = new Map<string, number>();
+    for (const p of this.participants) {
+      if (p.status[activityId] !== "played") continue;
+      // A top of 0 means nobody scored: everyone gets 0, never NaN.
+      out.set(p.pid, top > 0 ? Math.round((100 * (p.raw[activityId] ?? 0)) / top) : 0);
+    }
+    return out;
+  }
+
+  /** The whole board, ranked. Ties share a rank and the next rank skips. */
+  board(): MockRow[] {
+    const normalised = new Map<string, Map<string, number>>();
+    for (const a of ACTIVITIES) normalised.set(a.id, this.#normalise(a.id));
+
+    const rows = this.participants.map((p) => {
+      const played: number[] = [];
+      for (const a of ACTIVITIES) {
+        const pts = normalised.get(a.id)?.get(p.pid);
+        if (pts !== undefined) played.push(pts);
+      }
+      // Bench Credit: the mean of their own normalised points where they
+      // played in full. Null — not zero — before they have played anything.
+      const credit =
+        played.length === 0
+          ? null
+          : Math.round(played.reduce((x, y) => x + y, 0) / played.length);
+
+      const points: Record<string, number | null> = {};
+      const bench: string[] = [];
+      for (const a of ACTIVITIES) {
+        const pts = normalised.get(a.id)?.get(p.pid);
+        if (pts !== undefined) {
+          points[a.id] = pts;
+        } else if (p.status[a.id] === "bench") {
+          points[a.id] = credit;
+          bench.push(a.id);
+        } else {
+          points[a.id] = null;
+        }
+      }
+      // An award for an activity they are now benched for does not count:
+      // benching after a grant would otherwise be a back door to keeping it.
+      const spot =
+        this.spots.filter(
+          (s) => s.pid === p.pid && p.status[s.activityId] !== "bench",
+        ).length * SPOT_AWARD_POINTS;
+      const total =
+        ACTIVITIES.reduce((n, a) => n + (points[a.id] ?? 0), 0) + spot;
+      return { p, points, bench, spot, total };
+    });
+
+    rows.sort(
+      (a, b) => b.total - a.total || a.p.nickname.localeCompare(b.p.nickname),
+    );
+
+    const out: MockRow[] = [];
+    let rank = 0;
+    let seen = 0;
+    let prev: number | null = null;
+    for (const r of rows) {
+      seen += 1;
+      if (prev === null || r.total !== prev) {
+        rank = seen;
+        prev = r.total;
+      }
+      out.push({ ...r, rank });
+    }
+    return out;
   }
 
   roster(): RosterEntry[] {
@@ -162,15 +316,60 @@ class MockSession {
     }));
   }
 
-  standings(): StandingRow[] {
-    return [...this.participants]
-      .sort((a, b) => this.total(b) - this.total(a))
-      .slice(0, 5)
-      .map((p, i) => ({
-        rank: i + 1,
-        nickname: p.nickname,
-        total: this.total(p),
-      }));
+  #row(r: MockRow): StandingRow {
+    return {
+      rank: r.rank,
+      nickname: r.p.nickname,
+      total: r.total,
+      perActivity: { ...r.points },
+      bench: [...r.bench],
+      spot: r.spot,
+    };
+  }
+
+  /** Top five, expanding a tie at fifth. Console and export only. */
+  #topFive(board: readonly MockRow[]): MockRow[] {
+    if (board.length <= 5) return [...board];
+    const fifth = board[4];
+    if (!fifth) return [...board];
+    return board.filter((r) => r.total >= fifth.total);
+  }
+
+  /**
+   * What may go on the wire to a phone or the big screen: a hard five, and
+   * nothing at all before anyone has scored — an unscored board is an
+   * alphabetical slice of the room, not a leaderboard.
+   */
+  #publicRows(board: readonly MockRow[]): MockRow[] {
+    if (!board.some((r) => r.total > 0)) return [];
+    return this.#topFive(board).slice(0, 5);
+  }
+
+  #scoreRows(board: readonly MockRow[]): ScoreRow[] {
+    return board.map((r) => {
+      const raw: Record<string, number | null> = {};
+      const status: Record<string, ScoreStatus> = {};
+      for (const a of ACTIVITIES) {
+        const st = r.p.status[a.id] ?? "unset";
+        status[a.id] = st;
+        raw[a.id] = st === "played" ? (r.p.raw[a.id] ?? 0) : null;
+      }
+      return {
+        pid: r.p.pid,
+        nickname: r.p.nickname,
+        playerNumber: r.p.playerNumber,
+        raw,
+        status,
+        points: { ...r.points },
+        spot: r.spot,
+        total: r.total,
+        rank: r.rank,
+      };
+    });
+  }
+
+  activities(): ActivitySummary[] {
+    return ACTIVITIES.map((a) => ({ ...a, spotsLeft: this.spotsLeft(a.id) }));
   }
 
   /**
@@ -180,6 +379,7 @@ class MockSession {
    */
   render(role: Role, pid: string | null): RenderState {
     const sealed = this.seal === "sealed";
+    const board = this.board();
     const base = {
       sid: this.sid,
       title: this.title,
@@ -189,32 +389,44 @@ class MockSession {
       holding: this.holding,
       roster: this.roster(),
       joinsLocked: this.joinsLocked,
+      activities: this.activities(),
     };
 
     if (role === "host") {
       return {
         ...base,
-        // The console shows everything. The host has to know what is sealed.
-        standings: this.standings(),
+        // The console shows everything. Sealing is about what the *room* sees,
+        // and a host cannot run the session blind.
+        standings: this.#topFive(board).map((r) => this.#row(r)),
+        joinCode: this.joinCode,
         hostExtras: {
           joinCode: this.joinCode,
           participantCount: this.participants.length,
           awayCount: this.participants.filter((p) => p.conn === "away").length,
+          scores: this.#scoreRows(board),
+          spots: this.spots.map((s) => ({
+            seq: s.seq,
+            pid: s.pid,
+            activityId: s.activityId,
+            reason: s.reason,
+          })),
         },
       };
     }
 
-    const standings = sealed ? [] : this.standings();
-    if (role === "screen") return { ...base, standings };
+    const standings = sealed ? [] : this.#publicRows(board).map((r) => this.#row(r));
+    if (role === "screen") return { ...base, standings, joinCode: this.joinCode };
 
-    const me = pid === null ? null : this.participants.find((p) => p.pid === pid);
+    const me = pid === null ? null : board.find((r) => r.p.pid === pid);
+    // Sealed omits `own` entirely. The phone has nothing to fall back on, by
+    // design: a total it kept through the seal is a sealed total on screen.
     if (me === null || me === undefined || sealed) {
       return { ...base, standings };
     }
     return {
       ...base,
       standings,
-      own: { total: this.total(me), byActivity: { ttx: me.ttx } },
+      own: { total: me.total, byActivity: { ...me.points } },
     };
   }
 }
@@ -328,10 +540,15 @@ class MockHub {
       }
     }
 
-    if (!/^[A-Z]{4}$/.test(code)) {
+    // The shape the join form produces, and any code of that shape is this
+    // session: the mock has exactly one. (It used to insist on four capitals,
+    // which no join link has produced since the codes became `hvs.` tokens —
+    // it refused every participant who tried to join the mock.)
+    if (!/^hvs\.[0-9A-Za-z]{8,64}$/.test(code)) {
       return this.#refuse(conn, "no_such_code", `No session with the code ${code}.`);
     }
-    if (code === "LOCK") {
+    // …except one, kept so the locked-lobby refusal is still demonstrable.
+    if (/lock$/i.test(code)) {
       return this.#refuse(conn, "lobby_locked", "The host has locked the lobby.");
     }
     if (this.session.joinsLocked) {
@@ -395,6 +612,10 @@ class MockHub {
     const reject = (code: string, message: string): void => {
       this.#send(conn, { t: "refusedCmd", cid, code, message });
     };
+    /** Understood, allowed, and changed nothing. The engine acks these false. */
+    const noop = (): void => {
+      this.#send(conn, { t: "ack", cid, applied: false });
+    };
 
     switch (cmd.name) {
       case "open":
@@ -453,6 +674,84 @@ class MockHub {
         p.nicknameKey = "";
         break;
       }
+
+      /* ---- scoring ---- */
+
+      case "score.set": {
+        const activity = s.activity(cmd.activityId);
+        if (!activity) return reject("unknown_activity", `No activity ${cmd.activityId}.`);
+        const p = s.find_pid(cmd.pid);
+        if (!p) return reject("unknown_participant", "No such participant.");
+        if (!Number.isFinite(cmd.raw) || cmd.raw < 0) {
+          return reject(
+            "invalid_score",
+            "A raw score must be a finite number, zero or above.",
+          );
+        }
+        // Scoring someone on bench credit is refused rather than stored: the
+        // raw would reappear if they were ever un-benched.
+        if (p.status[cmd.activityId] === "bench") {
+          return reject(
+            "bench_cannot_be_scored",
+            `${p.nickname} is on bench credit for ${activity.title}.`,
+          );
+        }
+        if (p.status[cmd.activityId] === "played" && p.raw[cmd.activityId] === cmd.raw) {
+          return noop();
+        }
+        p.raw[cmd.activityId] = cmd.raw;
+        p.status[cmd.activityId] = "played";
+        break;
+      }
+
+      case "score.status": {
+        const activity = s.activity(cmd.activityId);
+        if (!activity) return reject("unknown_activity", `No activity ${cmd.activityId}.`);
+        const p = s.find_pid(cmd.pid);
+        if (!p) return reject("unknown_participant", "No such participant.");
+        if ((p.status[cmd.activityId] ?? "unset") === cmd.status) return noop();
+        // Benching discards the raw, exactly as the reducer does.
+        if (cmd.status === "played") p.raw[cmd.activityId] = p.raw[cmd.activityId] ?? 0;
+        else p.raw[cmd.activityId] = 0;
+        p.status[cmd.activityId] = cmd.status;
+        break;
+      }
+
+      case "spot.grant": {
+        const activity = s.activity(cmd.activityId);
+        if (!activity) return reject("unknown_activity", `No activity ${cmd.activityId}.`);
+        const p = s.find_pid(cmd.pid);
+        if (!p) return reject("unknown_participant", "No such participant.");
+        // The console must never send this, but the server refuses it anyway:
+        // a field that may be blank will be blank.
+        if (cmd.reason.trim() === "") {
+          return reject(
+            "reason_required",
+            "A Spot Award needs a reason — it gets read out.",
+          );
+        }
+        if (p.status[cmd.activityId] === "bench") {
+          return reject(
+            "bench_cannot_receive_spot",
+            "They are on bench credit for this activity.",
+          );
+        }
+        if (s.spotsLeft(cmd.activityId) <= 0) {
+          return reject("spot_cap_reached", `No Spot Awards left for ${activity.title}.`);
+        }
+        const spot = s.grantSpot(cmd.pid, cmd.activityId, cmd.reason);
+        this.#send(conn, { t: "ack", cid, applied: true });
+        this.#broadcastState();
+        this.#toast("spot", `Spot Award — ${p.nickname} — ${spot.reason}`);
+        return;
+      }
+
+      case "spot.revoke": {
+        const before = s.spots.length;
+        s.spots = s.spots.filter((sp) => sp.seq !== cmd.seq);
+        if (s.spots.length === before) return noop();
+        break;
+      }
     }
     this.#send(conn, { t: "ack", cid, applied: true });
     this.#broadcastState();
@@ -498,6 +797,18 @@ class MockHub {
     const roster = this.session.roster();
     for (const conn of this.#conns) {
       if (conn.role === null) continue;
+      // The host's counts and the whole scoring grid live in `hostExtras`,
+      // which a roster frame does not carry: a delta would leave the console
+      // one joiner behind. They get the whole thing; there is one of them.
+      // This is what the real server does — see runtime.ts broadcastRoster.
+      if (conn.role === "host") {
+        this.#send(conn, {
+          t: "state",
+          seq,
+          state: this.session.render("host", conn.pid),
+        });
+        continue;
+      }
       this.#send(conn, { t: "roster", seq, roster });
     }
   }
@@ -575,20 +886,61 @@ class MockHub {
       this.#broadcastRoster();
     });
 
-    this.#at(20, () => {
-      // Scores land, so the standings have something to show.
-      let n = 100;
-      for (const p of this.session.participants) {
-        p.ttx = n;
-        n = Math.max(12, n - 6 - Math.floor(Math.random() * 9));
-      }
-      const star = this.session.participants[1];
-      if (star) star.spots = 1;
+    // The TTX: a judged rubric out of 20, and the facilitator who ran it on
+    // bench. Raw units differ wildly from the trivia below on purpose — that
+    // is the whole reason SCORING.md normalises instead of adding.
+    this.#at(18, () => {
+      const people = this.session.participants;
+      people.forEach((p, i) => {
+        if (i === 3) {
+          // Ade ran this one. Bench Credit, not a zero.
+          p.status["ttx"] = "bench";
+          p.raw["ttx"] = 0;
+          return;
+        }
+        p.raw["ttx"] = Math.max(4, 20 - i - Math.floor(Math.random() * 3));
+        p.status["ttx"] = "played";
+      });
       this.session.segment = "standings";
       this.#broadcastState();
-      if (star) {
-        this.#toast("spot", `Spot Award — ${star.nickname} — best question of the day`);
-      }
+    });
+
+    this.#at(22, () => {
+      const star = this.session.participants[1];
+      if (!star) return;
+      const spot = this.session.grantSpot(star.pid, "ttx", "best question of the day");
+      this.#broadcastState();
+      this.#toast("spot", `Spot Award — ${star.nickname} — ${spot.reason}`);
+    });
+
+    // Trivia: speed-weighted, in the thousands, and a different facilitator.
+    this.#at(26, () => {
+      const people = this.session.participants;
+      people.forEach((p, i) => {
+        if (i === 1) {
+          p.status["trivia"] = "bench";
+          p.raw["trivia"] = 0;
+          return;
+        }
+        p.raw["trivia"] = Math.max(
+          800,
+          18_400 - i * 900 - Math.floor(Math.random() * 700),
+        );
+        p.status["trivia"] = "played";
+      });
+      this.#broadcastState();
+    });
+
+    this.#at(30, () => {
+      const p = this.session.participants[4];
+      if (!p) return;
+      const spot = this.session.grantSpot(
+        p.pid,
+        "trivia",
+        "drew out someone who had not spoken",
+      );
+      this.#broadcastState();
+      this.#toast("spot", `Spot Award — ${p.nickname} — ${spot.reason}`);
     });
 
     this.#at(32, () => {

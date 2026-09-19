@@ -22,6 +22,7 @@ import {
   nextSegment,
 } from "../shared/view.ts";
 import { bindEscape, bindSpace, control, primaryControl, type Control } from "./controls.ts";
+import { createScoringPanel } from "./scoring.ts";
 import { createParticipantView } from "../participant/view.ts";
 
 initTheme();
@@ -104,9 +105,18 @@ const primary = primaryControl((c) => {
   issue(plan.cmd, c);
 });
 
+/**
+ * Scoring is not a segment. Manual entry and Spot Awards happen from the
+ * console while whatever segment is up stays up — typically the holding card
+ * during the TTX, or the standings between activities — so the grid lives
+ * below the segment body rather than replacing it.
+ */
+const scoring = createScoringPanel({ issue: (cmd, from) => issue(cmd, from) });
+
 const panel = h("main", { class: "panel" }, [
   h("div", { class: "panel-head" }, [panelKind, panelSub]),
   panelBody,
+  scoring.el,
   h("div", { class: "panel-foot" }, [footLeft, primary.el]),
 ]);
 
@@ -456,7 +466,7 @@ function render(s: RenderState): void {
     setText(
       standingsNote,
       s.standings.length === 0
-        ? "No scores yet. Scoring arrives in Phase 2."
+        ? "No scores yet. Type them into the grid below, or press G."
         : s.seal === "sealed"
           ? "Sealed: the console still shows this. No other surface does."
           : "The room sees exactly this.",
@@ -473,6 +483,10 @@ function render(s: RenderState): void {
       );
     }
   }
+
+  /* scoring — the grid is the host's, sealed or not: sealing is about what
+     the room sees, and a host who cannot see the scores cannot score. */
+  scoring.update(s);
 
   /* primary */
   const plan = primaryPlan();
@@ -540,9 +554,12 @@ client = new QuorumClient({
     pending.delete(cid);
     if (!target) return;
     if (result.ok) return; // the state change is the feedback
-    target.flash(
-      "code" in result ? result.message : "refused",
-    );
+    // `not_applied` is the server saying it understood and there was nothing
+    // to do — re-committing a score it already holds, revoking an award that
+    // is already gone. That is not a refusal, and three seconds of red in a
+    // grid cell over it would train the host to ignore the red.
+    if (result.code === "not_applied") return;
+    target.flash(result.message || "refused");
   },
 });
 
@@ -554,6 +571,22 @@ bindEscape(() => [
   closeControl,
   primary,
 ]);
+
+/**
+ * `G` puts the cursor in the scoring grid, from anywhere that is not already
+ * a field. Keyboard-first means reachable without a mouse, and the grid is
+ * the one part of the console with real typing in it.
+ */
+document.addEventListener("keydown", (ev) => {
+  if (ev.key !== "g" && ev.key !== "G") return;
+  if (ev.metaKey || ev.ctrlKey || ev.altKey) return;
+  const el = ev.target as HTMLElement | null;
+  const tag = el?.tagName;
+  if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
+  if (el?.isContentEditable) return;
+  ev.preventDefault();
+  scoring.focusFirst();
+});
 
 // The holding fields stop being "dirty" once the host applies or leaves them.
 document.addEventListener("click", (ev) => {

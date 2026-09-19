@@ -91,9 +91,12 @@ third of a phone screen are for things you do once (the join button), not
 things you do under a timer.
 
 **A points strip sits at the bottom edge**, mono, small: `YOU 143 · TRIVIA 80
-· ARCADE 63`. It is the only persistent chrome. While sealed it freezes,
-dims, and gains a lock glyph — it does not disappear, because a strip that
-vanishes reads as a bug.
+· ARCADE 63`. It is the only persistent chrome. While sealed it keeps its
+place — a strip that vanishes reads as a bug — but it loses every number and
+shows only the lock and *points sealed*. It must not freeze and keep showing
+the last figures: SCORING.md seals a participant's own total too, and a
+frozen strip leaks precisely what the seal exists to hide. Nothing is
+cached; the numbers come back at reveal.
 
 **Reconnect is a banner, not a modal.** A thin amber strip under the top
 edge: *reconnecting…*. It goes away by itself. The page beneath it keeps

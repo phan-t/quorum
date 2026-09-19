@@ -10,9 +10,14 @@
  * shows; this renders it.
  */
 
-import type { OwnPoints, RenderState } from "../../protocol.ts";
+import type { RenderState } from "../../protocol.ts";
 import { append, h, replace, setText } from "../shared/dom.ts";
-import { pointsStrip, resolveView, type ViewKind } from "../shared/view.ts";
+import {
+  pointsStripCells,
+  pointsStripText,
+  resolveView,
+  type ViewKind,
+} from "../shared/view.ts";
 
 export interface ParticipantView {
   readonly root: HTMLElement;
@@ -31,7 +36,9 @@ export function createParticipantView(opts: { compact?: boolean } = {}): Partici
     attrs: { hidden: true, role: "status", "aria-live": "polite" },
   });
   const stage = h("main", { class: "p-stage" });
-  const strip = h("div", { class: "p-strip mono" });
+  // A group, so the `aria-label` below is honoured: the visual is a row of
+  // swatches and numbers, and the label is the sentence they add up to.
+  const strip = h("div", { class: "p-strip mono", role: "group" });
   const root = h("div", { class: opts.compact ? "p-root compact" : "p-root" }, [
     banner,
     stage,
@@ -40,18 +47,55 @@ export function createParticipantView(opts: { compact?: boolean } = {}): Partici
 
   let kind: ViewKind | null = null;
   let scene: Scene | null = null;
-  /** The last points seen before the seal. It freezes; it never disappears. */
-  let lastOwn: OwnPoints | null = null;
 
+  /**
+   * Their own total and per-activity points — and nothing at all while sealed.
+   *
+   * The server omits `own` when the standings are sealed, and the strip takes
+   * that literally: no numbers, nothing remembered from before the seal,
+   * nothing derived from the standings. SCORING.md's seal is "no surface shows
+   * cumulative standings", and a participant's own total is one of the
+   * surfaces it names. The strip itself stays — a chrome that vanishes reads
+   * as a bug — wearing the lock instead of the numbers.
+   */
   const renderStrip = (state: RenderState): void => {
     const sealed = state.seal === "sealed";
-    if (state.own) lastOwn = state.own;
+    const own = sealed ? null : (state.own ?? null);
+    const cells = pointsStripCells(own, state.activities);
     replace(strip, [
-      h("span", { class: "strip-points", text: pointsStrip(sealed ? lastOwn : state.own ?? null) }),
+      sealed
+        ? null
+        : h("span", { class: "strip-you mono" }, [
+            h("span", { class: "strip-you-label", text: "YOU" }),
+            h("span", {
+              class: "strip-you-total",
+              text: own === null ? "—" : String(own.total),
+            }),
+          ]),
+      ...cells.map((cell) =>
+        h("span", { class: "strip-cell mono" }, [
+          h("span", {
+            class: "strip-swatch",
+            attrs: { style: `background:${cell.hue}`, "aria-hidden": "true" },
+          }),
+          h("span", { class: "strip-cell-label", text: cell.label }),
+          h("span", {
+            class: "strip-cell-value",
+            text: cell.value === null ? "—" : String(cell.value),
+          }),
+        ]),
+      ),
       sealed ? lockGlyph("strip-lock") : null,
-      sealed ? h("span", { class: "strip-sealed label", text: "sealed" }) : null,
+      sealed
+        ? h("span", { class: "strip-sealed label", text: "points sealed" })
+        : null,
     ]);
     strip.classList.toggle("frozen", sealed);
+    // The visual is a row of swatches and numbers; the label is the sentence.
+    strip.setAttribute(
+      "aria-label",
+      sealed ? "Your points are sealed" : pointsStripText(own, state.activities),
+    );
   };
 
   return {

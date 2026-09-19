@@ -897,6 +897,13 @@ describe("grantSpot", () => {
     assertRefused(s, run(s, { type: "grantSpot", activityId: "ttx", pid: "p1", reason: "r" }), "bench_cannot_receive_spot");
   });
 
+  // Its own code, not the Spot Award one: a host typing into a cell someone
+  // else just benched should not be told about awards they never mentioned.
+  test("scoring a benched cell is refused under its own code", () => {
+    const s = accept(running(), [{ type: "setStatus", activityId: "ttx", pid: "p1", status: "bench" }]);
+    assertRefused(s, run(s, { type: "setScore", activityId: "ttx", pid: "p1", raw: 12 }), "bench_cannot_be_scored");
+  });
+
   test("a bench participant can still receive another activity's award", () => {
     const s = accept(running(), [{ type: "setStatus", activityId: "ttx", pid: "p1", status: "bench" }]);
     const r = run(s, { type: "grantSpot", activityId: "trivia", pid: "p1", reason: "r" });

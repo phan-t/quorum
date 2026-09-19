@@ -328,12 +328,17 @@ body.phone #app {
   color: var(--sealed);
 }
 
-/* points strip — the only persistent chrome */
+/* points strip — the only persistent chrome.
+
+   Their own total and their own per-activity points, in the session's
+   activity order. While sealed it carries the lock and no numbers: the server
+   stops sending `own`, and nothing here remembers what it used to say. */
 .p-strip {
   flex: none;
   display: flex;
   align-items: center;
-  gap: 8px;
+  flex-wrap: wrap;
+  gap: 4px 12px;
   padding: 10px 20px calc(10px + env(safe-area-inset-bottom));
   border-top: 1px solid var(--line);
   background: var(--panel);
@@ -343,11 +348,48 @@ body.phone #app {
 .p-strip.frozen {
   color: var(--muted);
 }
+
+.strip-you {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 6px;
+  font-weight: 600;
+}
+.strip-you-label {
+  font-size: 11px;
+  letter-spacing: 0.18em;
+  color: var(--muted);
+}
+.strip-you-total {
+  font-size: 16px;
+}
+
+.strip-cell {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--muted);
+  font-size: 12px;
+}
+.strip-cell-value {
+  color: var(--ink);
+  font-weight: 600;
+}
+.p-strip.frozen .strip-cell-value {
+  color: var(--muted);
+}
+/* Colour AND shape: the swatch says which activity, the label says it again. */
+.strip-swatch {
+  width: 8px;
+  height: 8px;
+  border-radius: 2px;
+  display: inline-block;
+}
+
 .strip-lock {
   width: 13px;
   height: 13px;
   color: var(--sealed);
-  margin-left: auto;
 }
 .strip-sealed {
   font-size: 11px;

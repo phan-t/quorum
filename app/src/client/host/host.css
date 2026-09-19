@@ -347,6 +347,358 @@ body {
   font-weight: 600;
 }
 
+/* ------------------------------------------------------------ scoring -- */
+
+/* The grid, and the Spot Award box. Dense, mono, tabular: this is the one
+   surface in the product allowed to look like a terminal, and it is read at a
+   glance between sentences. Scoring is not a segment — it sits under whatever
+   segment is up, because manual entry happens while the holding card or the
+   standings are in front of the room. */
+
+.scoring {
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-height: 0;
+  padding-top: 10px;
+  border-top: 1px solid var(--line);
+}
+
+.sc-head {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+}
+.sc-hint {
+  font-size: 11px;
+  color: var(--dim);
+  letter-spacing: 0.04em;
+}
+
+.sc-grid-wrap {
+  max-height: 46vh;
+  overflow: auto;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+}
+.sc-grid-wrap[hidden] {
+  display: none;
+}
+
+/* Sized to its contents, not to the panel: a cell a third of the screen wide
+   is a cell the host's eye has to travel across on every one of thirty rows. */
+.sc-grid {
+  width: auto;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+/* The header stays put: thirty rows scroll under it and the host has to know
+   which column they are typing into. */
+.sc-th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: var(--panel);
+  border-bottom: 1px solid var(--line);
+  text-align: left;
+  padding: 5px 8px;
+  font-family: var(--mono);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--muted);
+  white-space: nowrap;
+}
+.sc-th-name,
+.sc-cell-name {
+  min-width: 150px;
+  max-width: 200px;
+}
+.sc-th-spot,
+.sc-th-total,
+.sc-th-rank {
+  padding-left: 18px;
+}
+.sc-th-swatch {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 2px;
+  margin-right: 6px;
+}
+.sc-th-spot,
+.sc-th-total,
+.sc-th-rank {
+  text-align: right;
+}
+
+.sc-row:nth-child(even) {
+  background: color-mix(in srgb, var(--panel) 55%, transparent);
+}
+.sc-row:hover,
+.sc-row:focus-within {
+  background: var(--panel-2);
+}
+
+.sc-grid td {
+  padding: 1px 6px;
+  border-bottom: 1px solid color-mix(in srgb, var(--line) 50%, transparent);
+  vertical-align: middle;
+}
+.sc-num {
+  color: var(--dim);
+  font-size: 11px;
+}
+.sc-cell-name {
+  max-width: 180px;
+}
+.sc-name {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ---- one cell: the raw field, the points it became, two small actions -- */
+
+.sc-cell {
+  position: relative;
+  white-space: nowrap;
+}
+.sc-raw {
+  width: 62px;
+  height: 22px;
+  padding: 0 6px;
+  background: var(--ground);
+  border: 1px solid var(--line);
+  border-radius: 3px;
+  font-family: var(--mono);
+  font-variant-numeric: tabular-nums;
+  font-size: 12px;
+  text-align: right;
+}
+.sc-raw:focus {
+  border-color: var(--ibm-blue);
+  outline: none;
+}
+.sc-raw:disabled {
+  background: transparent;
+  border-style: dashed;
+  color: var(--dim);
+}
+
+/* The points the raw became, live, as you type down the column. */
+.sc-pts {
+  display: inline-block;
+  min-width: 30px;
+  margin-left: 6px;
+  font-size: 12px;
+  color: var(--muted);
+  text-align: right;
+}
+/* The top scorer lands on 100. Seeing it land is the check that the column
+   went in against the right people. */
+.sc-pts-top {
+  color: var(--nomad);
+  font-weight: 600;
+}
+/* Bench Credit shows the credited number — never a blank — and says so. */
+.sc-pts-bench {
+  color: var(--vault);
+}
+.sc-pts-bench::after {
+  content: " B";
+  font-size: 9px;
+  letter-spacing: 0.12em;
+}
+.sc-cell[data-status="bench"] {
+  background-image: repeating-linear-gradient(
+    -45deg,
+    color-mix(in srgb, var(--vault) 10%, transparent) 0,
+    color-mix(in srgb, var(--vault) 10%, transparent) 3px,
+    transparent 3px,
+    transparent 8px
+  );
+}
+
+.sc-acts {
+  display: none;
+  gap: 2px;
+  margin-left: 4px;
+}
+.sc-cell:hover .sc-acts,
+.sc-cell:focus-within .sc-acts {
+  display: inline-flex;
+}
+.sc-mini {
+  background: transparent;
+  border: 1px solid var(--line);
+  border-radius: 3px;
+  color: var(--muted);
+  font-family: var(--mono);
+  font-size: 10px;
+  line-height: 1;
+  padding: 2px 4px;
+}
+.sc-mini:hover {
+  color: var(--ink);
+  border-color: var(--muted);
+}
+.sc-mini.on {
+  background: var(--sealed);
+  border-color: var(--sealed);
+  color: #2a2205;
+}
+
+/* A refusal belongs in the thing that caused it. This one is a bubble under
+   the cell: inline, three seconds, and it never takes focus. */
+.sc-flash {
+  position: absolute;
+  left: 4px;
+  top: 100%;
+  z-index: 3;
+  padding: 3px 6px;
+  background: var(--ground);
+  border: 1px solid var(--danger);
+  border-radius: 3px;
+  color: var(--danger);
+  font-size: 11px;
+  white-space: nowrap;
+}
+.sc-flash[hidden] {
+  display: none;
+}
+.sc-refused .sc-raw {
+  border-color: var(--danger);
+}
+
+.sc-cell-spot,
+.sc-cell-total,
+.sc-cell-rank {
+  text-align: right;
+}
+.sc-spot-cell {
+  color: var(--dim);
+  font-size: 12px;
+}
+.sc-has-spot {
+  color: var(--spot);
+  font-weight: 600;
+}
+.sc-total {
+  font-weight: 600;
+}
+.sc-rank {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.sc-bench-line {
+  margin: 0;
+  font-size: 11px;
+  color: var(--muted);
+  letter-spacing: 0.06em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ---- the Spot Award box ---- */
+
+.sc-spot {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.sc-spot-form {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.sc-spot-form .label {
+  font-size: 11px;
+}
+.sc-select {
+  height: 26px;
+  max-width: 220px;
+  padding: 0 6px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 3px;
+  font-size: 12px;
+}
+.sc-reason {
+  flex: 1;
+  min-width: 200px;
+  height: 26px;
+  font-size: 13px;
+}
+.ctl-spot .ctl-button {
+  color: var(--spot);
+  border-color: color-mix(in srgb, var(--spot) 45%, var(--line));
+}
+.sc-spot-left {
+  font-size: 11px;
+  color: var(--muted);
+}
+.sc-spot-note {
+  font-size: 11px;
+  color: var(--dim);
+  letter-spacing: 0.04em;
+}
+/* The reason is mandatory, so the state of "you cannot send this yet" is
+   said in words, not by a button that silently does nothing. */
+.sc-spot-note-warn {
+  color: var(--sealed);
+}
+
+.sc-spot-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-height: 84px;
+  overflow-y: auto;
+}
+.sc-spot-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  padding: 2px 4px;
+  border-left: 2px solid var(--spot);
+  background: var(--panel);
+  border-radius: 2px;
+}
+.sc-spot-activity {
+  font-size: 10px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--muted);
+  flex: none;
+}
+.sc-spot-who {
+  font-weight: 600;
+  max-width: 140px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.sc-spot-reason {
+  flex: 1;
+  min-width: 0;
+  color: var(--muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 /* --------------------------------------------------------- the foot -- */
 
 .panel-foot {

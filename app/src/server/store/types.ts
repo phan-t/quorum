@@ -1,0 +1,119 @@
+/**
+ * The persistence seam.
+ *
+ * The engine emits a `persist` effect and knows nothing else about storage.
+ * The runtime sees that effect and hands the new state to a `SessionStore`.
+ * Everything AWS-shaped lives behind this interface, which is why the tests
+ * and `npm run dev` can run without credentials, a container, or a network.
+ *
+ * Item shapes follow ARCHITECTURE.md's "Data model" table. The deviations are
+ * recorded next to the item they affect.
+ */
+
+import type { Event, SessionState } from "../../engine/types.ts";
+
+/** Bumped if the snapshot shape ever stops being readable by the old code. */
+export const SNAPSHOT_VERSION = 1;
+
+/** 90 days, per ARCHITECTURE.md "Retention". */
+export const RETENTION_MS = 90 * 24 * 60 * 60 * 1000;
+
+/**
+ * `SESSION#<sid>` / `META`.
+ *
+ * The token hashes are the reason this item is not just a slice of the
+ * snapshot: they live in the runtime, not in `SessionState`, because the
+ * engine is pure and has no business holding secrets. Without them a restart
+ * would come back with the scores intact and no way for the host to log in.
+ */
+export interface SessionMeta {
+  readonly sid: string;
+  readonly title: string;
+  readonly joinCode: string;
+  readonly phase: SessionState["phase"];
+  readonly seal: SessionState["seal"];
+  readonly hostTokenHash: string;
+  readonly screenTokenHash: string;
+  readonly createdAt: number;
+  readonly updatedAt: number;
+}
+
+/**
+ * `SESSION#<sid>` / `PARTICIPANT#<pid>`.
+ *
+ * Carries the rejoin token hashes, which are the other thing the snapshot
+ * cannot hold. A phone gets a fresh token on every `hello`, so a participant
+ * accumulates them; the list is capped because only the recent ones are on a
+ * device anybody still has.
+ */
+export interface StoredParticipant {
+  readonly pid: string;
+  readonly nickname: string;
+  readonly nicknameKey: string;
+  readonly playerNumber: number;
+  readonly joinedAt: number;
+  readonly kicked: boolean;
+  readonly rejoinTokenHashes: readonly string[];
+}
+
+/** `SESSION#<sid>` / `EVENT#<seq:010d>` — append-only, the audit trail. */
+export interface StoredEvent {
+  readonly seq: number;
+  readonly event: Event;
+  readonly at: number;
+}
+
+/** Everything one session needs to come back. */
+export interface LoadedSession {
+  readonly meta: SessionMeta;
+  /** The fast path. Null means the slow path: replay the log from scratch. */
+  readonly snapshot: { readonly seq: number; readonly state: SessionState } | null;
+  /** Ordered by seq. On recovery only those past the snapshot are replayed. */
+  readonly events: readonly StoredEvent[];
+  readonly participants: readonly StoredParticipant[];
+}
+
+export interface SessionStore {
+  /** For `/healthz` and the log line at boot. */
+  readonly kind: "memory" | "dynamodb";
+
+  /** Local development creates the table here; production is Terraform's job. */
+  init(): Promise<void>;
+
+  putMeta(meta: SessionMeta): Promise<void>;
+  putSnapshot(sid: string, state: SessionState, at: number): Promise<void>;
+  appendEvent(sid: string, record: StoredEvent): Promise<void>;
+  putParticipant(sid: string, participant: StoredParticipant): Promise<void>;
+
+  /** `CODE#<joinCode>` / `ACTIVE` — exists only while the session is joinable. */
+  putJoinCode(joinCode: string, sid: string): Promise<void>;
+  deleteJoinCode(joinCode: string): Promise<void>;
+
+  /** Sessions in `lobby` or `running`: what a restart has to bring back. */
+  loadRecoverable(): Promise<LoadedSession[]>;
+  /** One session by id, whatever its phase — the export path after a restart. */
+  loadSession(sid: string): Promise<LoadedSession | null>;
+
+  close(): Promise<void>;
+}
+
+/** Sort key for an event. Zero-padded so lexical order is numeric order. */
+export function eventSortKey(seq: number): string {
+  return `EVENT#${String(seq).padStart(10, "0")}`;
+}
+
+export function sessionPk(sid: string): string {
+  return `SESSION#${sid}`;
+}
+
+export function codePk(joinCode: string): string {
+  return `CODE#${joinCode}`;
+}
+
+/** Expiry stamp, in whole seconds, as DynamoDB's TTL wants it. */
+export function ttlAt(now: number): number {
+  return Math.floor((now + RETENTION_MS) / 1000);
+}
+
+/** The most recent rejoin tokens worth keeping for one participant. */
+export const MAX_REJOIN_TOKENS = 8;

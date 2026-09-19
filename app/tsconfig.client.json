@@ -19,5 +19,8 @@
     "sourceMap": true,
     "removeComments": false
   },
-  "include": ["src/client/**/*.ts"]
+  "include": ["src/client/**/*.ts"],
+  // Client tests are `node:test`, and nothing about them belongs in a browser
+  // bundle. `npm run typecheck` still checks them under the root config.
+  "exclude": ["src/client/**/*.test.ts"]
 }

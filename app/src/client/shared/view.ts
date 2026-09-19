@@ -8,7 +8,12 @@
  * both of them a worse version of the other's constraints.
  */
 
-import type { RefusedReason, RenderState } from "../../protocol.ts";
+import type {
+  ActivitySummary,
+  OwnPoints,
+  RefusedReason,
+  RenderState,
+} from "../../protocol.ts";
 import type { Segment } from "../../engine/types.ts";
 
 export type ViewKind =
@@ -164,14 +169,173 @@ export function refusalCopy(
   }
 }
 
-/** `YOU 143 · TRIVIA 80 · ARCADE 63` */
-export function pointsStrip(
-  own: { total: number; byActivity: Readonly<Record<string, number | null>> } | null,
+/* ------------------------------------------------------------------ */
+/* Activity colour                                                     */
+/* ------------------------------------------------------------------ */
+
+/**
+ * The accent for an activity, as a CSS value.
+ *
+ * DESIGN.md fixes the assignment by activity — "once a participant learns that
+ * pink is trivia, pink is trivia on the phone, on the screen and in the
+ * console" — so the id wins, the kind is the fallback for a session that names
+ * its activities something else, and after that it cycles the product hues so
+ * a fourth activity is never invisible.
+ *
+ * The accent is not on the wire; see the report. Until it is, this function is
+ * the single place the three surfaces agree.
+ */
+const HUE_BY_ID: Readonly<Record<string, string>> = {
+  ttx: "--ttx",
+  trivia: "--trivia",
+  arcade: "--arcade",
+};
+
+const HUE_BY_KIND: Readonly<Record<string, string>> = {
+  manual: "--ttx",
+  trivia: "--trivia",
+  arcade: "--arcade",
+};
+
+const HUE_CYCLE: readonly string[] = [
+  "--terraform",
+  "--consul",
+  "--nomad",
+  "--ibm-blue",
+];
+
+/** Spot Awards are gold on every surface, and never an activity's hue. */
+export const SPOT_HUE = "var(--spot)";
+
+export function activityHue(
+  activity: { readonly id: string; readonly kind: string },
+  index = 0,
+): string {
+  const named = HUE_BY_ID[activity.id] ?? HUE_BY_KIND[activity.kind];
+  const cycled = HUE_CYCLE[index % HUE_CYCLE.length] ?? "--terraform";
+  return `var(${named ?? cycled})`;
+}
+
+/**
+ * The short, tabular name of an activity: `TTX`, `TRIVIA`, `ARCADE`.
+ *
+ * The title is what the console and the big screen legend use; this is for
+ * the places that have a phone's width to spend, which is the points strip.
+ */
+export function activityLabel(activity: { readonly id: string }): string {
+  return activity.id.toUpperCase().slice(0, 8);
+}
+
+/* ------------------------------------------------------------------ */
+/* The points strip                                                    */
+/* ------------------------------------------------------------------ */
+
+export interface StripCell {
+  readonly label: string;
+  /** Null renders as an em dash: nothing scored there yet. */
+  readonly value: number | null;
+  readonly hue: string;
+}
+
+/**
+ * `YOU 143 · TTX 80 · TRIVIA 63`, as cells.
+ *
+ * `own` is absent whenever the standings are sealed — the server omits it —
+ * and the strip shows no numbers at all in that case. It is never remembered
+ * from before the seal: a total kept through the seal is a sealed total on
+ * screen, which is the one thing the seal exists to prevent.
+ *
+ * The order is the session's activity order, not the key order of an object
+ * that arrived over a socket.
+ */
+export function pointsStripCells(
+  own: OwnPoints | null,
+  activities: readonly ActivitySummary[],
+): StripCell[] {
+  if (own === null) return [];
+  return activities.map((a, i) => ({
+    label: activityLabel(a),
+    value: own.byActivity[a.id] ?? null,
+    hue: activityHue(a, i),
+  }));
+}
+
+/* ------------------------------------------------------------------ */
+/* The stacked bar                                                     */
+/* ------------------------------------------------------------------ */
+
+export interface BarSegment {
+  /** An activity id, or `spot`. */
+  readonly key: string;
+  readonly label: string;
+  readonly points: number;
+  readonly hue: string;
+  /** This activity was credited, not played. Drawn hatched as well as dimmed. */
+  readonly bench: boolean;
+  /** Width as a percentage of the widest row, so rows compare to each other. */
+  readonly percent: number;
+}
+
+/** A positive contribution narrower than this is a bar nobody can see. */
+const MIN_VISIBLE_PERCENT = 1;
+
+/**
+ * One standings row as contributions in activity hues, plus the Spot Awards
+ * in gold. `scale` is the top total on the board, so the leader's bar fills
+ * the width and everyone else reads against it.
+ *
+ * Only what arrived is drawn. There is no inference here about activities the
+ * server did not send, and no total is recomputed from the parts — the server
+ * does the arithmetic and `total` is what it said.
+ */
+export function stackedBar(
+  row: {
+    readonly perActivity: Readonly<Record<string, number | null>>;
+    readonly bench: readonly string[];
+    readonly spot: number;
+  },
+  activities: readonly ActivitySummary[],
+  scale: number,
+): BarSegment[] {
+  const out: BarSegment[] = [];
+  const pct = (points: number): number => {
+    if (scale <= 0 || points <= 0) return 0;
+    return Math.max(MIN_VISIBLE_PERCENT, (points / scale) * 100);
+  };
+  activities.forEach((a, i) => {
+    const points = row.perActivity[a.id] ?? 0;
+    if (points <= 0) return;
+    out.push({
+      key: a.id,
+      label: a.title,
+      points,
+      hue: activityHue(a, i),
+      bench: row.bench.includes(a.id),
+      percent: pct(points),
+    });
+  });
+  if (row.spot > 0) {
+    out.push({
+      key: "spot",
+      label: "Spot Awards",
+      points: row.spot,
+      hue: SPOT_HUE,
+      bench: false,
+      percent: pct(row.spot),
+    });
+  }
+  return out;
+}
+
+/** The same thing as one line of text, for the screen reader and for tests. */
+export function pointsStripText(
+  own: OwnPoints | null,
+  activities: readonly ActivitySummary[],
 ): string {
   if (own === null) return "YOU —";
   const parts = [`YOU ${own.total}`];
-  for (const [id, value] of Object.entries(own.byActivity)) {
-    parts.push(`${id.toUpperCase()} ${value === null ? "—" : value}`);
+  for (const cell of pointsStripCells(own, activities)) {
+    parts.push(`${cell.label} ${cell.value === null ? "—" : cell.value}`);
   }
   return parts.join(" · ");
 }

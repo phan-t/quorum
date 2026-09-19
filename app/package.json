@@ -14,7 +14,8 @@
     "test": "node --experimental-strip-types --test 'src/**/*.test.ts'",
     "test:watch": "node --experimental-strip-types --test --watch 'src/**/*.test.ts'",
     "bots": "node --experimental-strip-types src/bots/simulate.ts",
-    "dev": "node --experimental-strip-types --watch src/server/main.ts",
+    "dev": "QUORUM_ENV=local node --experimental-strip-types --watch src/server/main.ts",
+    "dev:memory": "QUORUM_STORE=memory node --experimental-strip-types --watch src/server/main.ts",
     "start": "node --experimental-strip-types src/server/main.ts"
   },
   "devDependencies": {
@@ -23,6 +24,8 @@
     "typescript": "^5.7.2"
   },
   "dependencies": {
+    "@aws-sdk/client-dynamodb": "^3.1136.0",
+    "@aws-sdk/lib-dynamodb": "^3.1136.0",
     "ws": "^8.21.3"
   }
 }

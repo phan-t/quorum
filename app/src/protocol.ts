@@ -13,6 +13,7 @@
 import type {
   ParticipantId,
   Seal,
+  ScoreStatus,
   Segment,
   SessionPhase,
 } from "./engine/types.ts";
@@ -68,7 +69,25 @@ export type HostCommand =
   | { name: "seal"; state: Seal }
   | { name: "lobby.lock"; locked: boolean }
   | { name: "participant.kick"; pid: ParticipantId }
-  | { name: "participant.release"; pid: ParticipantId };
+  | { name: "participant.release"; pid: ParticipantId }
+  /* ---- scoring (phase 2) ---- */
+  /** Raw score for one person in one activity. Whatever it scored out of. */
+  | { name: "score.set"; activityId: string; pid: ParticipantId; raw: number }
+  /** played / bench / unset. Bench is what triggers Bench Credit. */
+  | {
+      name: "score.status";
+      activityId: string;
+      pid: ParticipantId;
+      status: ScoreStatus;
+    }
+  /** 10 points, and the reason is required — it gets read out. */
+  | {
+      name: "spot.grant";
+      pid: ParticipantId;
+      activityId: string;
+      reason: string;
+    }
+  | { name: "spot.revoke"; seq: number };
 
 /* ------------------------------------------------------------------ */
 /* Server → client                                                     */
@@ -92,6 +111,36 @@ export interface StandingRow {
   readonly rank: number;
   readonly nickname: string;
   readonly total: number;
+  /**
+   * Points per activity, so the big screen can draw the stacked bar in
+   * activity hues. Null where nothing has been scored yet; a bench credit
+   * reads as a number like any other, with `bench` saying where it came from.
+   */
+  readonly perActivity: Readonly<Record<string, number | null>>;
+  readonly bench: readonly string[];
+  readonly spot: number;
+}
+
+/** One row of the console's scoring grid. Host only. */
+export interface ScoreRow {
+  readonly pid: ParticipantId;
+  readonly nickname: string;
+  readonly playerNumber: number;
+  /** activityId -> what was typed, and whether they played it. */
+  readonly raw: Readonly<Record<string, number | null>>;
+  readonly status: Readonly<Record<string, ScoreStatus>>;
+  readonly points: Readonly<Record<string, number | null>>;
+  readonly spot: number;
+  readonly total: number;
+  readonly rank: number;
+}
+
+export interface ActivitySummary {
+  readonly id: string;
+  readonly title: string;
+  readonly kind: string;
+  readonly spotCap: number;
+  readonly spotsLeft: number;
 }
 
 /**
@@ -118,11 +167,21 @@ export interface RenderState {
    * so it needs the code; a participant has already used it.
    */
   readonly joinCode?: string;
+  /** Every surface needs the activity list to label a breakdown. */
+  readonly activities: readonly ActivitySummary[];
   /** Host only. */
   readonly hostExtras?: {
     readonly joinCode: string;
     readonly participantCount: number;
     readonly awayCount: number;
+    /** The full grid, unsealed — the host cannot run the session blind. */
+    readonly scores: readonly ScoreRow[];
+    readonly spots: readonly {
+      readonly seq: number;
+      readonly pid: ParticipantId;
+      readonly activityId: string;
+      readonly reason: string;
+    }[];
   };
 }
 
@@ -256,6 +315,43 @@ function parseHostCommand(v: unknown): HostCommand | null {
     case "participant.release": {
       const pid = str("pid");
       return pid === null ? null : { name: "participant.release", pid };
+    }
+    case "score.set": {
+      const activityId = str("activityId");
+      const pid = str("pid");
+      const raw = c["raw"];
+      // Finite and non-negative is the engine's rule too; refusing here keeps
+      // a NaN off the wire rather than relying on the reducer to catch it.
+      return activityId !== null &&
+        pid !== null &&
+        typeof raw === "number" &&
+        Number.isFinite(raw) &&
+        raw >= 0
+        ? { name: "score.set", activityId, pid, raw }
+        : null;
+    }
+    case "score.status": {
+      const activityId = str("activityId");
+      const pid = str("pid");
+      const st = c["status"];
+      const OK: readonly ScoreStatus[] = ["played", "bench", "unset"];
+      return activityId !== null && pid !== null && OK.includes(st as ScoreStatus)
+        ? { name: "score.status", activityId, pid, status: st as ScoreStatus }
+        : null;
+    }
+    case "spot.grant": {
+      const pid = str("pid");
+      const activityId = str("activityId");
+      const reason = str("reason");
+      return pid !== null && activityId !== null && reason !== null
+        ? { name: "spot.grant", pid, activityId, reason }
+        : null;
+    }
+    case "spot.revoke": {
+      const seq = c["seq"];
+      return typeof seq === "number" && Number.isInteger(seq)
+        ? { name: "spot.revoke", seq }
+        : null;
     }
     default:
       return null;

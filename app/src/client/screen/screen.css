@@ -185,17 +185,71 @@ body {
   white-space: nowrap;
 }
 /* Bars, not numbers, for anything comparative: the bar is readable at any
-   resolution and the number is a bonus. */
+   resolution and the number is a bonus.
+
+   Stacked, in the activity hues, so the breakdown is the bar rather than a
+   second row of figures. Colour is a fill here, never small coloured text —
+   which is the one thing a video codec reliably destroys. */
 .s-bar {
-  height: 1.4vh;
-  min-height: 10px;
+  display: flex;
+  height: 1.8vh;
+  min-height: 12px;
   background: var(--panel-2);
   border-radius: 2px;
   overflow: hidden;
 }
-.s-bar-fill {
+.s-seg {
   height: 100%;
-  background: var(--ttx);
+  flex-grow: 0;
+  flex-shrink: 1;
+  min-width: 0;
+  /* A hairline between blocks, so two adjacent hues are still two blocks
+     after chroma subsampling has blurred the boundary. */
+  box-shadow: inset -1px 0 0 var(--ground);
+}
+/* Bench Credit: hatched as well as dimmer. Never colour alone, and a credited
+   block is not the same claim as a played one. */
+.s-seg-bench {
+  opacity: 0.75;
+  background-image: repeating-linear-gradient(
+    -45deg,
+    rgba(10, 10, 15, 0.55) 0,
+    rgba(10, 10, 15, 0.55) 4px,
+    transparent 4px,
+    transparent 9px
+  );
+}
+
+/* Which hue is which activity, in words — the bar is only honest if the key
+   is on the same screen. */
+.s-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.6em 2.4vw;
+  align-items: center;
+}
+.s-legend[hidden] {
+  display: none;
+}
+.s-legend-item {
+  display: flex;
+  align-items: center;
+  gap: 0.5em;
+}
+.s-legend-swatch {
+  width: clamp(18px, 1.3vw, 28px);
+  height: clamp(18px, 1.3vw, 28px);
+  border-radius: 3px;
+  flex: none;
+}
+.s-legend-label {
+  font-size: clamp(22px, 1.7vw, 34px);
+  color: var(--muted);
+}
+
+.s-winner-bar {
+  height: 2.2vh;
+  min-height: 16px;
 }
 .s-total {
   font-size: clamp(36px, 3.4vw, 72px);

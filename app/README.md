@@ -9,9 +9,10 @@ proves it. There is no server, no client and no database yet.
 - **Node 24.** Node runs TypeScript directly by stripping the types, so there
   is no build step and no bundler in the loop. Node 22 works with the same
   `--experimental-strip-types` flag the scripts already pass.
-- **Docker**, eventually. Only for DynamoDB Local, and nothing uses it yet.
+- **Docker**, for DynamoDB Local. Optional: without it the server runs with an
+  in-memory store and says so.
 
-No AWS credentials. Nothing here talks to AWS.
+No AWS credentials, ever, locally. See [Persistence](#persistence).
 
 ```
 app$ npm install
@@ -26,10 +27,46 @@ app$ npm run bots -- 30
 | `npm test` | The engine's unit tests, on Node's own test runner |
 | `npm run test:watch` | The same, re-run on save |
 | `npm run typecheck` | `tsc --noEmit`. Node strips types without checking them, so this is the only thing that does |
+| `npm run dev` | The server on `:3000`, hot-reloading, persisting to DynamoDB Local |
+| `npm run dev:memory` | The same with no store at all, for when you do not want a container |
 
-`docker compose up -d` starts DynamoDB Local on `:8000`. Phase 1 uses it; right
-now it is there so the first commit that needs a store does not also have to
-invent one.
+## Persistence
+
+The in-memory state is the truth while the process runs. The store is what
+makes a restart survivable: every accepted event rewrites the session's
+`SNAPSHOT` and appends an `EVENT#`, and on boot the process recovers every
+session in `lobby` or `running` before it opens its port.
+
+```
+app$ docker compose up -d     # DynamoDB Local on :8000
+app$ npm run dev              # creates the table, then serves
+```
+
+Which store is used comes from the environment, and the default is the one that
+needs nothing:
+
+| | |
+| --- | --- |
+| *(nothing set)* | In-memory. What `npm test` and the bot harness run against |
+| `QUORUM_STORE=memory` | In-memory, explicitly |
+| `QUORUM_ENV=local` | DynamoDB Local on `:8000`, table `quorum-local`, **created on boot** |
+| `QUORUM_TABLE=<name>` | DynamoDB, resolved normally. Production: the table is Terraform's, the credentials are the task role's |
+
+`QUORUM_DYNAMO_ENDPOINT` overrides the endpoint if DynamoDB Local is not on
+`:8000`. There are no credentials in the code; the local path signs with a pair
+of throwaway values because DynamoDB Local rejects an unsigned request.
+
+A store that will not answer at boot is logged and the process falls back to
+memory rather than refusing to start. A write that fails mid-session is
+counted, logged once per streak, and shown on `/healthz` — the session keeps
+playing, because losing durability is better than losing someone's answer.
+
+**The host's two exports**, both `Authorization: Bearer <host token>`:
+
+```
+GET /api/sessions/:sid/export.csv      Name, <Activity> Raw, <Activity> Pts, …, Spot Awards, TOTAL
+GET /api/sessions/:sid/events.jsonl    the event log, for settling a dispute
+```
 
 ### The bot harness is the test that matters
 
@@ -58,6 +95,14 @@ src/
 │   │                 # Spot Awards, ranking, the tiebreak
 │   ├── reducer.ts    # reduce(state, event, now) -> {state, effects}, and replay
 │   └── *.test.ts     # the rules, with a fake clock
+├── server/
+│   ├── main.ts       # HTTP + WebSocket, boot, recovery-before-listen, exports
+│   ├── runtime.ts    # the driver: sockets in, effects out. No game rules
+│   ├── persist.ts    # the `persist` effect's write path: per-session, in order,
+│   │                 # never on the game's critical path
+│   ├── recovery.ts   # snapshot + replay on boot, and everyone marked away
+│   ├── export.ts     # the scoresheet and the event log
+│   └── store/        # memory and DynamoDB behind one interface
 └── bots/
     └── simulate.ts   # the harness. The engine's first consumer
 ```

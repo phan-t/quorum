@@ -7,13 +7,21 @@
  * and a sealed board would still be sitting in the page's memory.
  */
 
-import { computeStandings, publicStandings, topFive } from "../engine/scoring.ts";
+import {
+  computeStandings,
+  publicStandings,
+  spotsRemaining,
+  topFive,
+  type Standing,
+} from "../engine/scoring.ts";
 import type { ParticipantId, SessionState } from "../engine/types.ts";
 import type {
+  ActivitySummary,
   OwnPoints,
   RenderState,
   Role,
   RosterEntry,
+  ScoreRow,
   StandingRow,
 } from "../protocol.ts";
 
@@ -50,6 +58,50 @@ export interface ViewOptions {
   readonly now: number;
 }
 
+function toRow(state: SessionState, s: Standing): StandingRow {
+  const perActivity: Record<string, number | null> = {};
+  const bench: string[] = [];
+  for (const a of state.activities) {
+    const cell = s.perActivity[a.id];
+    perActivity[a.id] = cell?.points ?? null;
+    if (cell?.source === "bench") bench.push(a.id);
+  }
+  return {
+    rank: s.rank,
+    nickname: s.nickname,
+    total: s.total,
+    perActivity,
+    bench,
+    spot: s.spotPoints,
+  };
+}
+
+/** The console's grid: raw, status, points and totals for everyone. */
+function scoreRows(state: SessionState, all: readonly Standing[]): ScoreRow[] {
+  return all.map((s) => {
+    const raw: Record<string, number | null> = {};
+    const status: Record<string, "played" | "bench" | "unset"> = {};
+    const points: Record<string, number | null> = {};
+    for (const a of state.activities) {
+      const cell = state.scores[a.id]?.[s.pid];
+      raw[a.id] = cell && cell.status === "played" ? cell.raw : null;
+      status[a.id] = cell?.status ?? "unset";
+      points[a.id] = s.perActivity[a.id]?.points ?? null;
+    }
+    return {
+      pid: s.pid,
+      nickname: s.nickname,
+      playerNumber: state.participants[s.pid]?.playerNumber ?? 0,
+      raw,
+      status,
+      points,
+      spot: s.spotPoints,
+      total: s.total,
+      rank: s.rank,
+    };
+  });
+}
+
 export function renderStateFor(
   state: SessionState,
   opts: ViewOptions,
@@ -65,10 +117,14 @@ export function renderStateFor(
       : state.seal === "sealed"
         ? []
         : publicStandings(all); // the wire never carries more than five
-  const visible: StandingRow[] = rows.map((s) => ({
-    rank: s.rank,
-    nickname: s.nickname,
-    total: s.total,
+  const visible: StandingRow[] = rows.map((s) => toRow(state, s));
+
+  const activities: ActivitySummary[] = state.activities.map((a) => ({
+    id: a.id,
+    title: a.title,
+    kind: a.kind,
+    spotCap: a.spotCap,
+    spotsLeft: spotsRemaining(state, a),
   }));
 
   let own: OwnPoints | undefined;
@@ -97,6 +153,7 @@ export function renderStateFor(
     roster,
     joinsLocked: state.joinsLocked,
     standings: visible,
+    activities,
   };
 
   if (opts.role === "screen") {
@@ -110,6 +167,13 @@ export function renderStateFor(
         joinCode: state.joinCode,
         participantCount: roster.length,
         awayCount: roster.filter((r) => r.conn === "away").length,
+        scores: scoreRows(state, all),
+        spots: state.spots.map((sp) => ({
+          seq: sp.seq,
+          pid: sp.pid,
+          activityId: sp.activityId,
+          reason: sp.reason,
+        })),
       },
     };
   }

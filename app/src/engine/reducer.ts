@@ -441,7 +441,7 @@ export function reduce(
         return unchanged(
           reject(
             "host",
-            "bench_cannot_receive_spot",
+            "bench_cannot_be_scored",
             `${p.nickname} is on bench credit for ${activity.title}.`,
           ),
         );

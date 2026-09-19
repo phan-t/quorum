@@ -147,6 +147,8 @@ export type RejectCode =
   | "invalid_score"
   | "reason_required"
   | "bench_cannot_receive_spot"
+  /** A raw score was typed into a cell the host has since benched. */
+  | "bench_cannot_be_scored"
   | "spot_cap_reached";
 
 export interface ReduceResult {

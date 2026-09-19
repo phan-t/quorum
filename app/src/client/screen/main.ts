@@ -11,11 +11,11 @@
  * Read-only. Nothing here takes input; the host drives it from the console.
  */
 
-import type { RenderState, StandingRow } from "../../protocol.ts";
+import type { ActivitySummary, RenderState, StandingRow } from "../../protocol.ts";
 import { h, qs, replace, setText } from "../shared/dom.ts";
 import { QuorumClient } from "../shared/net.ts";
-import { mockBadge, mockTransport, readMockConfig , sampleJoinCode} from "../shared/mock.ts";
-import { resolveView, type ViewKind } from "../shared/view.ts";
+import { mockBadge, mockTransport, readMockConfig } from "../shared/mock.ts";
+import { activityHue, resolveView, stackedBar, type ViewKind } from "../shared/view.ts";
 import { drawQr, encodeQr } from "../shared/qr.ts";
 import { lockGlyph } from "../participant/view.ts";
 
@@ -34,17 +34,20 @@ function readToken(): string {
 const screenToken = readToken() || (mock ? "mock-screen-token" : "");
 
 /**
- * The join URL. `RenderState` carries the join code for the host only, so the
- * screen is told where to point people by its own URL: `/screen#tok?join=…` or
- * `?code=RAFT`. See the report — this wants to be on the wire.
+ * The join URL, from the join code the server sends this screen in
+ * `RenderState`. `?join=` still wins, so a screen can be pointed at a short
+ * vanity link or a projector-friendly host name.
+ *
+ * There is deliberately no format check on the code: it used to be tested
+ * against `[A-Z]{2,8}`, which stopped matching the day join codes became
+ * Vault-shaped `hvs.` tokens and silently left the QR off the wall.
  */
-function joinUrl(): string | null {
-  const q = new URLSearchParams(location.search);
-  const explicit = q.get("join");
+function joinUrl(joinCode: string | undefined): string | null {
+  const explicit = new URLSearchParams(location.search).get("join");
   if (explicit) return explicit;
-  const code = (q.get("code") ?? (mock ? sampleJoinCode() : "")).trim();
-  if (!/^[A-Z]{2,8}$/.test(code)) return null;
-  return `${location.origin}/j/${code}`;
+  const code = (joinCode ?? "").trim();
+  if (code === "") return null;
+  return `${location.origin}/j/${encodeURIComponent(code)}`;
 }
 
 if (screenToken === "") {
@@ -138,16 +141,30 @@ function sceneLobby(): Scene {
   const count = h("span", { class: "mono s-count" });
   const names = h("div", { class: "s-names" });
 
-  const link = joinUrl();
-  setText(url, link ?? "Ask the host for the join link");
-  if (link) {
+  // The code arrives with the first state, so the link is drawn in update()
+  // rather than here. `drawn` keeps the canvas from being re-encoded on every
+  // roster change — the QR only changes if the code does.
+  let drawn: string | null = null;
+  setText(url, "Ask the host for the join link");
+  qrWrap.hidden = true;
+
+  function showJoin(link: string | null): void {
+    setText(url, link ?? "Ask the host for the join link");
+    if (link === drawn) return;
+    drawn = link;
+    if (link === null) {
+      qrWrap.hidden = true;
+      return;
+    }
     const code = encodeQr(link);
     // A QR survives compression surprisingly well if it is large enough, and
     // not at all if it is not. 360px is the floor.
-    if (code) drawQr(canvas, code, { targetPx: 420 });
-    else qrWrap.hidden = true;
-  } else {
-    qrWrap.hidden = true;
+    if (code) {
+      drawQr(canvas, code, { targetPx: 420 });
+      qrWrap.hidden = false;
+    } else {
+      qrWrap.hidden = true;
+    }
   }
 
   const node = h("section", { class: "s-stage s-lobby" }, [
@@ -167,6 +184,7 @@ function sceneLobby(): Scene {
   return {
     node,
     update(state) {
+      showJoin(joinUrl(state.joinCode));
       setText(title, state.title);
       setText(count, String(state.roster.length));
       // Nicknames as they arrive. Text, never markup.
@@ -200,41 +218,91 @@ function sceneHolding(): Scene {
   };
 }
 
-/** Rank, name, total, and a bar. The bar is readable at any resolution. */
-function standingRow(row: StandingRow, top: number): HTMLElement {
-  const width = top > 0 ? Math.max(2, Math.round((row.total / top) * 100)) : 0;
+/**
+ * Rank, name, total, and the contributions as one stacked bar in the activity
+ * hues — the thing DESIGN.md asks the standings to keep from the live
+ * scoreboard. A bar is readable at any resolution; the number is the bonus.
+ *
+ * Bench Credit is drawn hatched as well as dimmed, because nothing on this
+ * surface may be conveyed by colour alone and a credited block is not the
+ * same claim as a played one.
+ */
+function standingRow(
+  row: StandingRow,
+  top: number,
+  activities: readonly ActivitySummary[],
+): HTMLElement {
+  const segments = stackedBar(row, activities, top);
   return h("li", { class: "s-row" }, [
     h("span", { class: "mono s-rank", text: String(row.rank) }),
     h("div", { class: "s-row-main" }, [
       h("span", { class: "display s-name-big", text: row.nickname }),
-      h("div", { class: "s-bar" }, [
-        h("div", {
-          class: "s-bar-fill",
-          attrs: { style: `width:${width}%` },
-        }),
-      ]),
+      h(
+        "div",
+        { class: "s-bar" },
+        segments.map((seg) =>
+          h("div", {
+            class: seg.bench ? "s-seg s-seg-bench" : "s-seg",
+            attrs: {
+              style: `flex-basis:${seg.percent}%;background:${seg.hue}`,
+              // Not read aloud anywhere, but it keeps the DOM honest about
+              // what each block is when someone inspects a recording.
+              "data-activity": seg.key,
+            },
+          }),
+        ),
+      ),
     ]),
     h("span", { class: "mono s-total", text: String(row.total) }),
   ]);
 }
 
+/** Which hue is which activity, in words. Three chips, ≥ 32px, no legend key. */
+function activityLegend(activities: readonly ActivitySummary[]): HTMLElement[] {
+  const chips = activities.map((a, i) =>
+    h("span", { class: "s-legend-item" }, [
+      h("span", {
+        class: "s-legend-swatch",
+        attrs: { style: `background:${activityHue(a, i)}`, "aria-hidden": "true" },
+      }),
+      h("span", { class: "s-legend-label", text: a.title }),
+    ]),
+  );
+  chips.push(
+    h("span", { class: "s-legend-item" }, [
+      h("span", {
+        class: "s-legend-swatch",
+        attrs: { style: "background:var(--spot)", "aria-hidden": "true" },
+      }),
+      h("span", { class: "s-legend-label", text: "Spot Awards" }),
+    ]),
+  );
+  return chips;
+}
+
 function sceneStandings(): Scene {
   const list = h("ol", { class: "s-rows" });
+  const legend = h("div", { class: "s-legend" });
   const empty = h("p", { class: "s-line", text: "No scores yet." });
   const node = h("section", { class: "s-stage s-standings" }, [
     h("p", { class: "s-kicker label", text: "Standings · top five" }),
     list,
+    legend,
     empty,
   ]);
   return {
     node,
     update(state) {
+      // Exactly what arrived. The top five and the seal are the server's
+      // rules; a screen that trimmed the list would be enforcing them twice.
       empty.hidden = state.standings.length > 0;
+      legend.hidden = state.standings.length === 0;
       const top = state.standings[0]?.total ?? 0;
       replace(
         list,
-        state.standings.map((row) => standingRow(row, top)),
+        state.standings.map((row) => standingRow(row, top, state.activities)),
       );
+      replace(legend, activityLegend(state.activities));
     },
   };
 }
@@ -271,25 +339,33 @@ function sceneFinal(): Scene {
   const list = h("ol", { class: "s-rows s-final-rows" });
   const winnerName = h("p", { class: "display s-winner-name" });
   const winnerTotal = h("p", { class: "mono s-winner-total" });
+  const winnerBar = h("div", { class: "s-bar s-winner-bar" });
   const winner = h("div", { class: "s-winner", attrs: { hidden: true } }, [
     h("p", { class: "s-kicker label", text: "The winner" }),
     winnerName,
     winnerTotal,
+    winnerBar,
   ]);
+  const legend = h("div", { class: "s-legend" });
   const node = h("section", { class: "s-stage s-final" }, [
     h("p", { class: "s-kicker label", text: "Final standings" }),
     list,
     winner,
+    legend,
   ]);
 
   let timers: ReturnType<typeof setTimeout>[] = [];
   let signature = "";
 
-  const play = (rows: readonly StandingRow[]): void => {
+  const play = (
+    rows: readonly StandingRow[],
+    activities: readonly ActivitySummary[],
+  ): void => {
     for (const t of timers) clearTimeout(t);
     timers = [];
     replace(list, []);
     winner.hidden = true;
+    replace(legend, rows.length === 0 ? [] : activityLegend(activities));
 
     if (rows.length === 0) {
       replace(list, [h("p", { class: "s-line", text: "No scores were recorded." })]);
@@ -302,7 +378,7 @@ function sceneFinal(): Scene {
     climb.forEach((row, i) => {
       timers.push(
         setTimeout(() => {
-          list.insertBefore(standingRow(row, top), list.firstChild);
+          list.insertBefore(standingRow(row, top, activities), list.firstChild);
         }, i * DWELL_MS),
       );
     });
@@ -313,6 +389,20 @@ function sceneFinal(): Scene {
         () => {
           setText(winnerName, first.nickname);
           setText(winnerTotal, String(first.total));
+          // The winner gets the breakdown too: how they got there is the
+          // thing the host talks over while it is on screen.
+          replace(
+            winnerBar,
+            stackedBar(first, activities, top).map((seg) =>
+              h("div", {
+                class: seg.bench ? "s-seg s-seg-bench" : "s-seg",
+                attrs: {
+                  style: `flex-basis:${seg.percent}%;background:${seg.hue}`,
+                  "data-activity": seg.key,
+                },
+              }),
+            ),
+          );
           winner.hidden = false;
         },
         climb.length * DWELL_MS + EMPTY_FIRST_HOLD_MS,
@@ -324,10 +414,12 @@ function sceneFinal(): Scene {
     node,
     update(state) {
       // Replay only when the result actually changes, never on every broadcast.
-      const sig = state.standings.map((r) => `${r.rank}:${r.nickname}:${r.total}`).join("|");
+      const sig = state.standings
+        .map((r) => `${r.rank}:${r.nickname}:${r.total}:${JSON.stringify(r.perActivity)}:${r.spot}`)
+        .join("|");
       if (sig === signature) return;
       signature = sig;
-      play(state.standings);
+      play(state.standings, state.activities);
     },
     stop() {
       for (const t of timers) clearTimeout(t);
@@ -357,11 +449,36 @@ function showToast(kind: "spot" | "text", text: string): void {
 
 /* ------------------------------------------------------------------ */
 
+/**
+ * The top five and the seal are the server's rules. The screen renders what
+ * arrives, so if more than five rows — or any row at all while sealed — ever
+ * turn up, that is a bug to fix on the wire and not something to quietly
+ * paper over here. Shout, render honestly.
+ */
+function guardPublic(state: RenderState): void {
+  if (state.standings.length > 5) {
+    console.error(
+      `protocol violation: the screen received ${state.standings.length} standings rows; the wire must carry at most 5`,
+    );
+  }
+  if (state.seal === "sealed" && state.standings.length > 0) {
+    console.error(
+      "protocol violation: standings arrived while sealed; sealed means no surface shows them",
+    );
+  }
+  if (state.hostExtras !== undefined) {
+    console.error("protocol violation: the screen received hostExtras");
+  }
+}
+
 const client = new QuorumClient({
   hello: () => ({ t: "hello", role: "screen", screenToken }),
   ...(mock ? { transport: mockTransport(mock) } : {}),
 
-  onState: render,
+  onState(state) {
+    guardPublic(state);
+    render(state);
+  },
 
   onStatus(status) {
     // Never a modal, and never anything about the network unless it is wrong.

@@ -1,11 +1,15 @@
-# DynamoDB Local. Nothing is wired to it yet — the engine is a pure reducer and
-# the bot harness runs entirely in memory, so Phase 0 never touches it. It is
-# here because Phase 1 needs it the moment the server starts persisting, and a
-# store you can start with one command is the difference between testing the
-# restart path and hoping.
+# DynamoDB Local — the store behind `npm run dev`.
 #
 #   docker compose up -d     # endpoint on http://localhost:8000
+#   npm run dev              # QUORUM_ENV=local: points here, creates the table
 #   docker compose down      # the named volume survives; add -v to wipe it
+#
+# The table is created by the server on boot, but only in local development:
+# the task role in production has no CreateTable, deliberately, because
+# Terraform owns the schema. `npm run dev` with nothing listening on :8000
+# still starts — it logs that it fell back to memory and that nothing will
+# survive a restart, which is a working server with a loud caveat rather than
+# a stack trace. `npm run dev:memory` asks for that on purpose.
 #
 # Local rather than a real table: the service writes a snapshot on every
 # accepted event, and doing that against AWS from a laptop costs credentials, a
