@@ -388,10 +388,12 @@ function handleHello(
       invalid_nickname: "invalid_nickname",
       joins_locked: "lobby_locked",
       kicked: "kicked",
-      // A session that is not open has no live code, so that is what the
-      // phone is told. "malformed" would blame the client for our state.
-      not_joinable: "no_such_code",
-      session_closed: "no_such_code",
+      // Not "no_such_code". The code is real and the session exists — it has
+      // not been opened, or it has finished. Saying "no session with that
+      // code" sends someone to check a code that is perfectly correct, which
+      // is exactly the wrong place to look.
+      not_joinable: "not_joinable",
+      session_closed: "not_joinable",
     };
     return refuseBare(
       socket,

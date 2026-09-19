@@ -43,7 +43,7 @@ let ipCounter = 0;
 let codeCounter = 0;
 
 /** Refused reasons the protocol documents for `hello`. */
-const DOCUMENTED_REFUSALS = ["nickname_taken", "invalid_nickname", "lobby_locked", "no_such_code", "kicked"];
+const DOCUMENTED_REFUSALS = ["nickname_taken", "invalid_nickname", "lobby_locked", "no_such_code", "kicked", "not_joinable"];
 
 const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms));
 

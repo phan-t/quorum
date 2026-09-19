@@ -133,7 +133,7 @@ One socket per client. Role is fixed at `hello`: participant, host, or screen.
 | --- | --- | --- |
 | `hello` | C→S | `role`, then one of: `{ joinCode, nickname }`, `{ rejoinToken }`, `{ hostToken }`, `{ screenToken }` |
 | `welcome` | S→C | `pid`, `rejoinToken` (participant), `sid`, `serverTime` |
-| `refused` | S→C | `reason` (`nickname_taken`, `invalid_nickname`, `lobby_locked`, `no_such_code`, `kicked`, `bad_token`, `rate_limited`, `malformed`), `message` |
+| `refused` | S→C | `reason` (`nickname_taken`, `invalid_nickname`, `lobby_locked`, `no_such_code`, `not_joinable`, `kicked`, `bad_token`, `rate_limited`, `malformed`), `message` |
 | `state` | S→C | full render state for that role, `seq` |
 | `resync` | C→S | — |
 | `ping` / `pong` | C↔S | `t0`, `t1` — see [clocks](#clocks-and-fairness) |

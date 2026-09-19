@@ -376,15 +376,21 @@ body.phone #app {
 
 
 
+
 /* ---------------------------------------------------------------- *
- * The join screen, cut from the Vault login as it ships today.
+ * The join screen, measured off the running Vault UI rather than
+ * guessed at. Every value below was read from getComputedStyle on a
+ * live cluster's /ui/ login:
  *
- * Title above the card and aligned to its left edge; a bordered white card
- * holding Method as a select, the credential with a reveal toggle, and a
- * full-width blue Sign in; grey help text beneath.
+ *   card    461px, radius 6px, NO border — a three-layer shadow
+ *   title   27.43px / 700 / #353535
+ *   label   14px / 600 / #0c0c0e
+ *   input   36px tall, 14px text, fill #f1f2f3, border rgba(101,106,118,.1)
+ *   button  #1060ff, 36px tall, 13.33px / 600, radius 5px
+ *   type    the system stack, not IBM Plex
  *
- * Light, because that login is light. Quorum behind it is dark, so signing
- * in steps from one to the other.
+ * The system font matters more than it sounds: HDS uses it, and setting
+ * this in Plex was most of why the page read as "not Vault".
  * ---------------------------------------------------------------- */
 
 body.phone:has(.v-splash) {
@@ -392,78 +398,83 @@ body.phone:has(.v-splash) {
 }
 
 .v-splash {
-  --v-blue: #1563ff;
+  --v-blue: #1060ff;
   --v-ink: #0c0c0e;
+  --v-title: #353535;
   --v-grey: #656a76;
-  --v-line: #dedfe3;
+  --v-field: #f1f2f3;
+  --v-hairline: rgb(101 106 118 / 10%);
 
-  max-width: 28rem;
+  max-width: 461px;
   margin-inline: auto;
   padding-block: clamp(1.5rem, 8vh, 4.5rem);
-  font-family: var(--body);
-  color: var(--v-ink);
+  padding-inline: 1rem;
+  font-family: -apple-system, system-ui, "Segoe UI", Helvetica, Arial,
+    sans-serif;
+  color: rgb(59 61 69);
 }
 
 .v-title {
-  font-family: var(--body);
-  font-size: 1.75rem;
+  font-family: inherit;
+  font-size: 27.43px;
   font-weight: 700;
-  line-height: 1.15;
-  letter-spacing: -0.015em;
+  line-height: 1.2;
+  color: var(--v-title);
   margin: 0 0 1.25rem;
 }
 
 .v-card {
   background: #fff;
-  border: 1px solid var(--v-line);
+  border: 0;
   border-radius: 6px;
+  box-shadow:
+    rgb(101 106 118 / 25%) 0 0 0 1px,
+    rgb(101 106 118 / 15%) 0 2px 3px 0,
+    rgb(101 106 118 / 20%) 0 16px 16px -10px;
   padding: 1.5rem;
   display: grid;
-  gap: 1.1rem;
+  gap: 1rem;
 }
 
-.v-field { display: grid; gap: 0.4rem; }
+.v-field { display: grid; gap: 0.375rem; }
 
 .v-label {
-  font-size: 0.875rem;
+  font-size: 14px;
   font-weight: 600;
   color: var(--v-ink);
 }
 
 .v-help {
   margin: 0;
-  font-size: 0.8125rem;
+  font-size: 13px;
   color: var(--v-grey);
 }
 
 .v-splash :is(.field, .v-select) {
   width: 100%;
-  font-family: var(--body);
-  font-size: 0.9375rem;
-  color: var(--v-ink);
-  background: #fff;
-  border: 1px solid #8c909c;
+  height: 36px;
+  font-family: inherit;
+  font-size: 14px;
+  color: rgb(59 61 69);
+  background: var(--v-field);
+  border: 1px solid var(--v-hairline);
   border-radius: 5px;
-  padding: 0.5rem 0.75rem;
-  min-height: 2.5rem;
+  padding: 0 0.625rem;
 }
 .v-splash :is(.field, .v-select):focus-visible {
   outline: none;
   border-color: var(--v-blue);
-  box-shadow: 0 0 0 2px rgb(21 99 255 / 25%);
+  box-shadow: 0 0 0 2px rgb(16 96 255 / 25%);
 }
 .v-splash .field::placeholder { color: #8c909c; }
 
-/* The credential: mono, untracked, case preserved. */
 .v-splash .field-token {
   font-family: var(--mono);
-  font-size: 0.8125rem;
+  font-size: 12.5px;
   letter-spacing: 0;
   text-transform: none;
-  padding-right: 3.5rem;
+  padding-right: 3.25rem;
 }
-/* Masked by default, like Vault's Token field. -webkit-text-security keeps
-   the value a real string, so paste and form submission are unaffected. */
 .v-splash .field-token.is-masked {
   -webkit-text-security: disc;
   text-security: disc;
@@ -472,14 +483,14 @@ body.phone:has(.v-splash) {
 .v-input-wrap { position: relative; display: block; }
 .v-reveal {
   position: absolute;
-  right: 0.4rem;
+  right: 0.3rem;
   top: 50%;
   transform: translateY(-50%);
   background: none;
   border: 0;
   padding: 0.25rem 0.4rem;
   font: inherit;
-  font-size: 0.75rem;
+  font-size: 12px;
   color: var(--v-grey);
   cursor: pointer;
   text-decoration: underline;
@@ -491,63 +502,63 @@ body.phone:has(.v-splash) {
   appearance: none;
   background-image: linear-gradient(45deg, transparent 50%, #656a76 50%),
     linear-gradient(135deg, #656a76 50%, transparent 50%);
-  background-position: calc(100% - 18px) 1.15rem, calc(100% - 13px) 1.15rem;
+  background-position: calc(100% - 17px) 15px, calc(100% - 12px) 15px;
   background-size: 5px 5px, 5px 5px;
   background-repeat: no-repeat;
 }
 
-/* Full width, blue. */
 .v-splash .v-submit {
   width: 100%;
-  margin-top: 0.4rem;
-  padding: 0.6rem 1rem;
-  min-height: 2.5rem;
+  height: 36px;
+  margin-top: 0.25rem;
+  padding: 9px 15px;
   background: var(--v-blue);
   color: #fff;
-  border: 1px solid var(--v-blue);
+  border: 0;
   border-radius: 5px;
-  font-family: var(--body);
-  font-size: 0.9375rem;
+  font-family: inherit;
+  font-size: 13.33px;
   font-weight: 600;
   cursor: pointer;
 }
-.v-splash .v-submit:hover:not(:disabled) { background: #0d4fd6; }
+.v-splash .v-submit:hover:not(:disabled) { background: #0b4fd6; }
 .v-splash .v-submit:disabled { opacity: 0.5; cursor: default; }
 .v-splash .v-submit:focus-visible { outline: 2px solid var(--v-blue); outline-offset: 2px; }
 
 .v-splash-foot {
   margin: 1rem 0 0;
-  font-size: 0.8125rem;
+  font-size: 13px;
   color: var(--v-grey);
 }
 
 .v-splash .join-error {
   background: #fdf3f3;
-  border: 1px solid #f7cfcf;
+  border: 1px solid rgb(193 40 40 / 25%);
   border-radius: 5px;
   padding: 0.625rem 0.75rem;
   display: grid;
-  gap: 0.15rem;
+  gap: 0.1rem;
   color: #8b1a1a;
 }
 .v-splash .join-error:empty { display: none; }
-.v-splash .join-error strong { font-size: 0.875rem; }
-.v-splash .join-error span { font-size: 0.8125rem; }
+.v-splash .join-error strong { font-size: 14px; font-weight: 600; }
+.v-splash .join-error span { font-size: 13px; }
 
 .v-chip {
   display: flex;
-  align-items: baseline;
+  align-items: center;
   gap: 0.5rem;
-  padding: 0.5rem 0.75rem;
-  border: 1px solid var(--v-line);
+  height: 36px;
+  padding: 0 0.625rem;
+  border: 1px solid var(--v-hairline);
   border-radius: 5px;
-  background: #f9f9fa;
+  background: var(--v-field);
   min-width: 0;
 }
-.v-chip-label { font-size: 0.8125rem; color: var(--v-grey); }
+.v-chip-label { font-size: 13px; color: var(--v-grey); }
 .v-chip-value {
-  font-size: 0.8125rem;
-  font-weight: 600;
+  font-family: var(--mono);
+  font-size: 12.5px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -560,7 +571,7 @@ body.phone:has(.v-splash) {
   padding: 0;
   color: var(--v-blue);
   font: inherit;
-  font-size: 0.8125rem;
+  font-size: 13px;
   cursor: pointer;
   text-decoration: underline;
 }

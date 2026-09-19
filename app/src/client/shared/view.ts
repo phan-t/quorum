@@ -131,8 +131,10 @@ export function refusalCopy(
       };
     case "not_joinable":
       return {
-        title: "Not open yet",
-        detail: serverMessage || "This session has not started. Try again shortly.",
+        // Neutral, because the server message distinguishes a session that
+        // has not opened yet from one that has finished.
+        title: "Can't join this session",
+        detail: serverMessage || "It is not open.",
         retry: true,
       };
     case "kicked":
