@@ -3,10 +3,19 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <meta name="color-scheme" content="dark" />
+    <meta name="color-scheme" content="dark light" />
     <meta name="robots" content="noindex, nofollow" />
     <!-- The screen-share picker shows tab titles. This is the cheapest
          possible protection against sharing the answers. -->
+    <script>
+      // Before first paint: a viewer who chose light must not see a dark
+      // frame first. Mirrors shared/theme.ts; keep the key in step.
+      try {
+        var t = localStorage.getItem("quorum.theme.v1");
+        if (t === "light" || t === "dark")
+          document.documentElement.setAttribute("data-theme", t);
+      } catch (e) {}
+    </script>
     <title>DO NOT SHARE · Quorum host</title>
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />

@@ -2,8 +2,19 @@
  * Quorum design tokens. DESIGN.md "Tokens" is the source of truth; this file
  * is that block, plus the resets every surface needs.
  *
- * Dark only, deliberately: a light phone next to a dark big screen in a video
- * call looks like two products.
+ * Two themes. Dark is the product's native look and the default when nothing
+ * says otherwise; light exists because the sign-in page is cut from the Vault
+ * UI, which is light, and stepping from a light page into a dark one at sign
+ * in looked like two products.
+ *
+ * Three states, in this order, each beating the last:
+ *   :root                            dark, the default
+ *   @media (prefers-color-scheme:light)  the viewer's OS, when they have not chosen
+ *   :root[data-theme="..."]          an explicit choice, which wins either way
+ *
+ * Product hues do not move between themes — they are brand colours and they
+ * are used as fills. The semantic tokens drawn as *text* do move, because
+ * Vault yellow on white is unreadable.
  */
 
 :root {
@@ -48,6 +59,81 @@
   --pop: cubic-bezier(0.2, 0.9, 0.3, 1.2);
   --pop-ms: 300ms;
 }
+/* ---- light ---------------------------------------------------------- */
+
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme="dark"]) {
+    color-scheme: light;
+
+    --ground: #ffffff;
+    --panel: #f9f9fa;
+    --panel-2: #f1f2f3;
+    --line: #dedfe3;
+    --ink: #0c0c0e;
+    --muted: #656a76;
+    --dim: #8c909c;
+
+    /* Drawn as text, so they need to hold on white. The fills above keep the
+       brand hues; these are the readable counterparts. */
+    --hit: #007a58;
+    --live: #007a58;
+    --miss: #c02a1b;
+    --danger: #c02a1b;
+    --sealed: #8a6d00;
+  }
+}
+
+:root[data-theme="light"] {
+  color-scheme: light;
+
+  --ground: #ffffff;
+  --panel: #f9f9fa;
+  --panel-2: #f1f2f3;
+  --line: #dedfe3;
+  --ink: #0c0c0e;
+  --muted: #656a76;
+  --dim: #8c909c;
+
+  --hit: #007a58;
+  --live: #007a58;
+  --miss: #c02a1b;
+  --danger: #c02a1b;
+  --sealed: #8a6d00;
+}
+
+:root[data-theme="dark"] {
+  color-scheme: dark;
+
+  --ground: #0a0a0f;
+  --panel: #14141d;
+  --panel-2: #1d1d28;
+  --line: #2c2c3a;
+  --ink: #f6f5f3;
+  --muted: #8b8a9c;
+  --dim: #5e5d6e;
+
+  --hit: var(--nomad);
+  --live: var(--nomad);
+  --miss: #ff6b5a;
+  --danger: #ff6b5a;
+  --sealed: var(--vault);
+}
+
+/* The big screen is shared to a room over compressed video, where light text
+   on dark survives chroma subsampling and dark-on-light does not. It does not
+   follow the switch. */
+:root[data-surface="screen"] {
+  color-scheme: dark;
+
+  --ground: #0a0a0f;
+  --panel: #14141d;
+  --panel-2: #1d1d28;
+  --line: #2c2c3a;
+  --ink: #f6f5f3;
+  --muted: #8b8a9c;
+  --dim: #5e5d6e;
+}
+
 
 *,
 *::before,
@@ -171,3 +257,22 @@ button {
     transition-duration: 0.001ms !important;
   }
 }
+
+/* ---- theme toggle --------------------------------------------------- */
+
+.theme-toggle {
+  appearance: none;
+  background: none;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  color: var(--muted);
+  font-family: var(--mono);
+  font-size: 11px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  padding: 0.3rem 0.7rem;
+  cursor: pointer;
+  line-height: 1;
+}
+.theme-toggle:hover { color: var(--ink); border-color: var(--dim); }
+.theme-toggle:focus-visible { outline: 2px solid var(--ink); outline-offset: 2px; }

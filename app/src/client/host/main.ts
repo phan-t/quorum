@@ -10,6 +10,7 @@
  */
 
 import type { HostCommand, RenderState, RosterEntry } from "../../protocol.ts";
+import { initTheme, themeToggle } from "../shared/theme.ts";
 import type { Segment } from "../../engine/types.ts";
 import { h, keyedList, qs, replace, setAttr, setText } from "../shared/dom.ts";
 import { QuorumClient } from "../shared/net.ts";
@@ -22,6 +23,8 @@ import {
 } from "../shared/view.ts";
 import { bindEscape, bindSpace, control, primaryControl, type Control } from "./controls.ts";
 import { createParticipantView } from "../participant/view.ts";
+
+initTheme();
 
 document.title = "DO NOT SHARE · Quorum host";
 
@@ -60,7 +63,10 @@ const elCode = h("span", { class: "sb-code mono" });
 const elCounts = h("span", { class: "sb-counts mono" });
 const elSeal = h("span", { class: "sb-seal mono" });
 const elPhase = h("span", { class: "sb-phase mono" });
+
 const elConn = h("span", { class: "sb-conn mono", attrs: { hidden: true } });
+
+const elTheme = themeToggle();
 
 const statusBar = h("header", { class: "statusbar" }, [
   h("span", { class: "sb-warn mono", text: "⚠ DO NOT SHARE" }),
@@ -70,6 +76,7 @@ const statusBar = h("header", { class: "statusbar" }, [
   elPhase,
   elConn,
   elSeal,
+  elTheme,
 ]);
 
 const railSegments = h("ul", { class: "rail-list" });

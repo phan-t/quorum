@@ -391,19 +391,38 @@ body.phone #app {
  *
  * The system font matters more than it sounds: HDS uses it, and setting
  * this in Plex was most of why the page read as "not Vault".
+ *
+ * It follows the theme switch. Vault's own UI is light, and those measured
+ * values are the light set; the dark set keeps the same structure, weights
+ * and proportions and only moves the greys, so signing in no longer steps
+ * from a light page into a dark product.
  * ---------------------------------------------------------------- */
 
+/* --ground, not --v-page: the login's own tokens are declared on .v-splash,
+   so a body rule cannot see them — custom properties inherit down, not up,
+   and var(--v-page) here resolved to nothing and left the body transparent.
+   --ground is on :root and already moves with the theme. */
 body.phone:has(.v-splash) {
-  background: #fff;
+  background: var(--ground);
 }
 
 .v-splash {
+  /* light — the measured Vault values */
+  --v-card: #ffffff;
   --v-blue: #1060ff;
   --v-ink: #0c0c0e;
   --v-title: #353535;
   --v-grey: #656a76;
   --v-field: #f1f2f3;
   --v-hairline: rgb(101 106 118 / 10%);
+  --v-body: rgb(59 61 69);
+  --v-shadow:
+    rgb(101 106 118 / 25%) 0 0 0 1px,
+    rgb(101 106 118 / 15%) 0 2px 3px 0,
+    rgb(101 106 118 / 20%) 0 16px 16px -10px;
+  --v-error-bg: #fdf3f3;
+  --v-error-line: rgb(193 40 40 / 25%);
+  --v-error-ink: #8b1a1a;
 
   max-width: 461px;
   margin-inline: auto;
@@ -411,8 +430,47 @@ body.phone:has(.v-splash) {
   padding-inline: 1rem;
   font-family: -apple-system, system-ui, "Segoe UI", Helvetica, Arial,
     sans-serif;
-  color: rgb(59 61 69);
+  color: var(--v-body);
 }
+/* Dark, for viewers on the dark theme. Same structure, greys moved. */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) .v-splash {
+    --v-card: #14141d;
+    --v-blue: #4d8bff;
+    --v-ink: #f6f5f3;
+    --v-title: #f6f5f3;
+    --v-grey: #8b8a9c;
+    --v-field: #1d1d28;
+    --v-hairline: rgb(246 245 243 / 12%);
+    --v-body: #e6e5e3;
+    --v-shadow:
+      rgb(0 0 0 / 55%) 0 0 0 1px,
+      rgb(0 0 0 / 40%) 0 2px 3px 0,
+      rgb(0 0 0 / 45%) 0 16px 16px -10px;
+    --v-error-bg: #2a1414;
+    --v-error-line: rgb(255 107 90 / 35%);
+    --v-error-ink: #ff9d90;
+  }
+}
+
+:root[data-theme="dark"] .v-splash {
+  --v-card: #14141d;
+  --v-blue: #4d8bff;
+  --v-ink: #f6f5f3;
+  --v-title: #f6f5f3;
+  --v-grey: #8b8a9c;
+  --v-field: #1d1d28;
+  --v-hairline: rgb(246 245 243 / 12%);
+  --v-body: #e6e5e3;
+  --v-shadow:
+    rgb(0 0 0 / 55%) 0 0 0 1px,
+    rgb(0 0 0 / 40%) 0 2px 3px 0,
+    rgb(0 0 0 / 45%) 0 16px 16px -10px;
+  --v-error-bg: #2a1414;
+  --v-error-line: rgb(255 107 90 / 35%);
+  --v-error-ink: #ff9d90;
+}
+
 
 .v-title {
   font-family: inherit;
@@ -424,13 +482,10 @@ body.phone:has(.v-splash) {
 }
 
 .v-card {
-  background: #fff;
+  background: var(--v-card);
   border: 0;
   border-radius: 6px;
-  box-shadow:
-    rgb(101 106 118 / 25%) 0 0 0 1px,
-    rgb(101 106 118 / 15%) 0 2px 3px 0,
-    rgb(101 106 118 / 20%) 0 16px 16px -10px;
+  box-shadow: var(--v-shadow);
   padding: 1.5rem;
   display: grid;
   gap: 1rem;
@@ -455,7 +510,7 @@ body.phone:has(.v-splash) {
   height: 36px;
   font-family: inherit;
   font-size: 14px;
-  color: rgb(59 61 69);
+  color: var(--v-body);
   background: var(--v-field);
   border: 1px solid var(--v-hairline);
   border-radius: 5px;
@@ -466,7 +521,7 @@ body.phone:has(.v-splash) {
   border-color: var(--v-blue);
   box-shadow: 0 0 0 2px rgb(16 96 255 / 25%);
 }
-.v-splash .field::placeholder { color: #8c909c; }
+.v-splash .field::placeholder { color: var(--v-grey); }
 
 .v-splash .field-token {
   font-family: var(--mono);
@@ -521,7 +576,7 @@ body.phone:has(.v-splash) {
   font-weight: 600;
   cursor: pointer;
 }
-.v-splash .v-submit:hover:not(:disabled) { background: #0b4fd6; }
+.v-splash .v-submit:hover:not(:disabled) { filter: brightness(0.92); }
 .v-splash .v-submit:disabled { opacity: 0.5; cursor: default; }
 .v-splash .v-submit:focus-visible { outline: 2px solid var(--v-blue); outline-offset: 2px; }
 
@@ -532,13 +587,13 @@ body.phone:has(.v-splash) {
 }
 
 .v-splash .join-error {
-  background: #fdf3f3;
-  border: 1px solid rgb(193 40 40 / 25%);
+  background: var(--v-error-bg);
+  border: 1px solid var(--v-error-line);
   border-radius: 5px;
   padding: 0.625rem 0.75rem;
   display: grid;
   gap: 0.1rem;
-  color: #8b1a1a;
+  color: var(--v-error-ink);
 }
 .v-splash .join-error:empty { display: none; }
 .v-splash .join-error strong { font-size: 14px; font-weight: 600; }
@@ -574,4 +629,16 @@ body.phone:has(.v-splash) {
   font-size: 13px;
   cursor: pointer;
   text-decoration: underline;
+}
+
+.v-splash-foot-row {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  margin-top: 1rem;
+}
+.v-splash-foot-row .v-splash-foot { margin: 0; flex: 1 1 auto; }
+.v-splash-foot-row .theme-toggle {
+  border-color: var(--v-hairline);
+  color: var(--v-grey);
 }
