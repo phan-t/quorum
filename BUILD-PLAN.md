@@ -98,6 +98,10 @@ would still have been worth building.
 > - **A rehearsal with real people.** See the sequencing note below — the
 >   failure modes that matter do not appear in a bot run.
 >
+> A single-handed smoke test against the live service is the smaller first
+> step and is listed under Phase 5. Deferred on purpose on 19 Sep 2026, not
+> forgotten.
+>
 > The 25 September huddle is deliberately *not* the first outing. It runs on
 > Kahoot and the existing arcade artifacts; Quorum targets the huddle after it.
 
@@ -136,6 +140,14 @@ and it needs humans, not bots.
 - Load test at 2× expected headcount
 - The deploy-freeze check wired into the release job
 - A rehearsal with real people who are not you
+
+**Deferred here from Phase 2 (19 Sep 2026): the first live smoke test.** Every
+surface so far has only ever run against the mock. Against the deployed
+service, by hand: create a session, join it from a phone, type scores into the
+console, seal, reveal, and pull `export.csv`. It is deliberately not a bot run
+— the point is the things bots do not do. Do this *before* the rehearsal, not
+as part of it; a rehearsal that spends its first ten minutes on a bug nobody
+had looked for is a wasted room of people.
 
 **Done when:** someone who is not you can host a session from the runbook.
 
