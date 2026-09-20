@@ -539,16 +539,31 @@ reveal note for each pane reads out why the fake was fake.
 | Round | Floor max | Lounge max |
 | --- | --- | --- |
 | Recruitment | 90 | — |
-| Plan / Apply | 40 | 25 |
+| Plan / Apply | 40 | 15 |
 | Unseal | 60 | 25 |
 | Tug of Raft | 45 | — |
 | Gganbu | 50 | 25 |
 | Glass Bridge | 63 | 25 |
 
 The raw arcade score is the sum. It is normalised like any other activity, so
-the absolute numbers only matter relative to each other: the tuning target is
-that surviving a Floor is always worth more than a perfect Lounge, and a
-perfect Lounge is always worth having.
+the absolute numbers only matter relative to each other. The tuning target is
+that **crossing the line always beats a perfect Lounge**, and that a perfect
+Lounge is always worth having.
+
+That is a deliberate narrowing of what this used to say, which was "surviving a
+Floor is always worth more than a perfect Lounge". That cannot be made true by
+any choice of constants: a player who is never drained but never reaches a
+checkpoint banks nothing, and nothing is less than a perfect Lounge. The Floor
+pays for *progress*, not for standing still, so a backer who picked the winner
+has out-played someone who neither progressed nor got caught.
+
+It also means the Lounge awards do not stack. Backing a runner who crosses pays
+10, backing the winner pays 15, and a perfect Lounge round is the larger of the
+two rather than their sum. Adding them made 25, which tied the 25 a player
+scores for crossing the line in fourth place, and let a player drained at 90
+resources who backed the winner finish on 40 — dead level with the player who
+actually won the Floor. The rounds still to be built should be tuned against
+the same rule.
 
 The Front-End Man's lines, the round cards and every piece of copy are in
 [DESIGN.md](DESIGN.md#the-arcade-register), because how they are said is most

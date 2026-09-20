@@ -1078,3 +1078,108 @@ body {
 .t-errors[hidden] {
   display: none;
 }
+
+/* ---- arcade --------------------------------------------------------- */
+
+.pb-arcade {
+  display: flex;
+  flex-direction: column;
+  gap: 0.7rem;
+}
+
+.a-picker {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}
+.a-pick {
+  appearance: none;
+  display: inline-flex;
+  align-items: baseline;
+  gap: 0.4rem;
+  padding: 0.35rem 0.7rem;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--panel-2);
+  color: var(--ink);
+  font-size: 13px;
+}
+/* Selected is filled and ticked — the console is the one surface a host
+   glances at for two seconds, and a border colour is not a glance. */
+.a-pick.on {
+  background: var(--nomad);
+  color: var(--on-fill-dark);
+  border-color: #00996c;
+  font-weight: 600;
+}
+.a-pick.on::after {
+  content: "✓";
+}
+.a-pick.is-unbuilt {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.a-pick-todo {
+  color: var(--muted);
+}
+
+.a-cfg {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+.field-num {
+  width: 7rem;
+}
+
+.a-item {
+  margin: 0;
+  font-size: 15px;
+}
+.a-note {
+  margin: 0;
+}
+
+.a-split-bar {
+  display: flex;
+  height: 12px;
+  border-radius: 999px;
+  overflow: hidden;
+  background: var(--panel-2);
+}
+.a-split-floor {
+  background: var(--nomad);
+}
+.a-split-lounge {
+  background: var(--vault);
+}
+.a-split-text {
+  margin: 0.3rem 0 0;
+  color: var(--muted);
+  font-size: 12px;
+}
+.a-floor-list {
+  margin: 0;
+  color: var(--arc-lounge);
+  font-size: 12px;
+  word-break: break-all;
+}
+.a-backing {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  max-height: 9rem;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+}
+.a-backing-row {
+  display: flex;
+  align-items: baseline;
+  gap: 0.45rem;
+  font-size: 12px;
+}
+.a-backing-name {
+  color: var(--muted);
+}

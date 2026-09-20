@@ -164,12 +164,142 @@ export interface SessionState {
    * in it, and a second store would have a second consistency problem.
    */
   readonly trivia: TriviaState | null;
+  /**
+   * The arcade register: player numbers, who is on the Floor, what is banked.
+   * Null until `enterArcade`.
+   *
+   * Here for the same reason `trivia` is here and not beside it: one snapshot
+   * and one event log have to restore the whole session. A crash between
+   * `beginPlay` and `endRound` must come back with the same people drained and
+   * the same points banked, and a second store would be a second thing for the
+   * first one to disagree with.
+   */
+  readonly arcade: ArcadeState | null;
   /** Joins refused while true, even in lobby/running. */
   readonly joinsLocked: boolean;
   /** Monotonic, bumped on every accepted event. */
   readonly seq: number;
   readonly nextPlayerNumber: number;
 }
+
+/* ------------------------------------------------------------------ */
+/* Hashi Arcade                                                        */
+/* ------------------------------------------------------------------ */
+
+/**
+ * What a round needs to start. The host sets these; SPEC calls the resource
+ * target "a host setting" and 120 is only a tuning default.
+ */
+export type ArcadeRoundConfig =
+  | { readonly kind: "recruitment"; readonly items: readonly EmojiItem[]; readonly secondsPerItem: number }
+  | { readonly kind: "plan_apply"; readonly target: number; readonly seconds: number };
+
+export type ArcadeRoundKind =
+  | "recruitment"
+  | "plan_apply"
+  | "unseal"
+  | "tug_of_raft"
+  | "gganbu"
+  | "glass_bridge";
+
+/**
+ * Round 0, Recruitment: two emoji, one product, typed.
+ *
+ * The answer is matched after folding, with an accept list, because "tf" is a
+ * reasonable thing to type for Terraform under a twenty-second timer and
+ * refusing it would be the game being clever at the player's expense.
+ */
+export interface EmojiItem {
+  readonly cue: string;
+  readonly answer: string;
+  readonly accept: readonly string[];
+  /** Shown at the reveal. The bit people actually learn from. */
+  readonly note: string;
+}
+
+/**
+ * Where a person is this round.
+ *
+ * `drained` is not elimination and lasts exactly one round — SPEC is emphatic
+ * about both. The Lounge is where a drained player goes, and they are still
+ * scoring there, which is the whole design.
+ */
+export type ArcadeStanding = "floor" | "drained";
+
+export interface LoungeSeat {
+  /** Who they are backing, changeable until the Floor locks. */
+  readonly backing: ParticipantId | null;
+  /** The instant they were drained, for the big screen's ordering. */
+  readonly at: number;
+}
+
+export type ArcadePhase = "idle" | "card" | "running" | "reveal";
+
+/**
+ * State shared by every round, plus whichever round is being played.
+ *
+ * `banked` is per round and `totals` is the arcade raw score. They are
+ * separate because SPEC banks progress at checkpoints *before* a drain — being
+ * caught at 75% keeps what you banked at 50% — so a drain must not be able to
+ * take away points already earned this round.
+ */
+export interface ArcadeState {
+  readonly activityId: ActivityId;
+  /** Three digits, roster order, assigned once on entering the arcade. */
+  readonly playerNumbers: Readonly<Record<ParticipantId, number>>;
+  readonly round: ArcadeRoundKind | null;
+  /** Which round of the run this is, from 0. For the round card. */
+  readonly roundIndex: number;
+  readonly phase: ArcadePhase;
+  readonly standing: Readonly<Record<ParticipantId, ArcadeStanding>>;
+  readonly lounge: Readonly<Record<ParticipantId, LoungeSeat>>;
+  /** Earned this round, kept through a drain. */
+  readonly banked: Readonly<Record<ParticipantId, number>>;
+  /** Cumulative arcade raw, across rounds. */
+  readonly totals: Readonly<Record<ParticipantId, number>>;
+  /** Null unless a round is running. Absolute epoch, never a duration. */
+  readonly startedAt: number | null;
+  readonly endsAt: number | null;
+  /** The round being played, if it carries state of its own. */
+  readonly play: ArcadePlay | null;
+}
+
+/** Per-round state. One variant per round that needs one. */
+export type ArcadePlay =
+  | {
+      readonly kind: "recruitment";
+      readonly items: readonly EmojiItem[];
+      readonly at: number;
+      readonly secondsPerItem: number;
+      /**
+       * When the current item closes. Each item carries its own twenty
+       * seconds, so the round's `endsAt` is the last item's, not this one.
+       */
+      readonly itemEndsAt: number;
+      /**
+       * Correct answers to the *current item*, in order, for the "first three"
+       * bonus — which is per item, not per round: three bonuses on each of six
+       * items is what makes the Floor max 6 × 15 = 90. Cleared by `nextItem`.
+       */
+      readonly solvedOrder: readonly ParticipantId[];
+      /** Who has answered the current item, and whether they got it. */
+      readonly answered: Readonly<Record<ParticipantId, boolean>>;
+    }
+  | {
+      readonly kind: "plan_apply";
+      /** `plan` is green and tappable; `apply` is pink and a tap drains you. */
+      readonly light: "plan" | "apply";
+      /** When the current light began. The turn is announced 400 ms ahead. */
+      readonly lightChangedAt: number;
+      readonly nextChangeAt: number;
+      /** Resources tapped, per player. The finish line is `target`. */
+      readonly resources: Readonly<Record<ParticipantId, number>>;
+      readonly target: number;
+      /** How long the Floor runs once `beginPlay` starts the clock. */
+      readonly seconds: number;
+      /** Who has crossed, in order, for the +15/+10/+5. */
+      readonly finishOrder: readonly ParticipantId[];
+    };
 
 /* ------------------------------------------------------------------ */
 /* Events                                                              */
@@ -209,7 +339,26 @@ export type Event =
   /** Host closing early, or the server's timer firing. Same event either way. */
   | { type: "closeQuestion" }
   | { type: "revealQuestion" }
-  | { type: "nextQuestion" };
+  | { type: "nextQuestion" }
+  // arcade
+  | { type: "enterArcade"; activityId: ActivityId }
+  | { type: "startRound"; round: ArcadeRoundKind; config: ArcadeRoundConfig }
+  /** The round card is up; the Floor opens on `beginPlay`. */
+  | { type: "beginPlay" }
+  /** Recruitment: a typed answer. Folding happens before this event. */
+  | { type: "submitAnswer"; pid: ParticipantId; answer: string }
+  | { type: "nextItem" }
+  /**
+   * Plan/Apply: the server flips the light. The engine has no clock and no
+   * randomness, so the duration is chosen at the boundary and passed in.
+   */
+  | { type: "setLight"; light: "plan" | "apply"; until: number }
+  /** One tap. `ms` is the corrected instant, as with a trivia answer. */
+  | { type: "tap"; pid: ParticipantId; at: number }
+  /** Lounge: back a player, or change who you are backing. */
+  | { type: "backPlayer"; pid: ParticipantId; backing: ParticipantId }
+  | { type: "endRound" }
+  | { type: "revealRound" };
 
 /* ------------------------------------------------------------------ */
 /* Effects                                                             */
@@ -253,7 +402,20 @@ export type RejectCode =
   | "already_answered"
   | "invalid_choice"
   | "question_not_open"
-  | "no_more_questions";
+  | "no_more_questions"
+  // arcade
+  | "not_in_arcade"
+  | "wrong_round_phase"
+  | "already_answered_item"
+  | "not_on_the_floor"
+  | "not_in_the_lounge"
+  | "cannot_back_yourself"
+  | "cannot_back_a_drained_player"
+  | "floor_locked"
+  /** `startRound` for one of the four rounds that are designed but not built. */
+  | "round_not_built"
+  /** A round config the round itself rejects — a target of zero, say. */
+  | "invalid_round_config";
 
 export interface ReduceResult {
   readonly state: SessionState;

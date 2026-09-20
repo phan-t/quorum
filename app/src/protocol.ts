@@ -7,10 +7,13 @@
  * in `ack`, so a client can reconcile an optimistic update.
  *
  * Phase 1 covers connection, segments, roster, seal and host control. Phase 3
- * adds trivia; arcade messages arrive in Phase 4.
+ * adds trivia; Phase 4 adds the arcade.
  */
 
 import type {
+  ArcadePhase,
+  ArcadeRoundKind,
+  ArcadeStanding,
   ParticipantId,
   QuestionPhase,
   Seal,
@@ -66,6 +69,30 @@ export type ClientMessage =
    */
   | { t: "trivia.answer"; cid: string; index: number; choice: number }
   /**
+   * Recruitment: a typed answer, one per item and final.
+   *
+   * `item` is the index the answer was meant for, for the same reason
+   * `trivia.answer` carries one: a phone that submits as the host advances
+   * would otherwise have answered the *next* emoji, which it has not seen.
+   */
+  | { t: "arcade.answer"; cid: string; item: number; answer: string }
+  /**
+   * Plan / Apply: one tap on the big button.
+   *
+   * No timestamp, for the trivia reason and then one more. The instant a tap
+   * happened decides whether it was a resource or a drain, so a client-chosen
+   * `at` would not merely be worth points — it would be an "I did not tap
+   * during the lock" claim that nothing could check. The server times it from
+   * its own clock and its own latency estimate for this socket; see
+   * SPEC.md "Plan / Apply" and `correctedTapAt` in runtime.ts.
+   *
+   * `round` is the arcade's `roundIndex`, so a tap in flight when the round
+   * ends cannot land on the next one.
+   */
+  | { t: "arcade.tap"; cid: string; round: number }
+  /** The Lounge: back a player, or change who you are backing. */
+  | { t: "arcade.back"; cid: string; pid: ParticipantId }
+  /**
    * `cmd` is null when the command could not be parsed. The frame still
    * arrives so the server can answer with `refusedCmd` on that `cid` — a
    * console that gets silence cannot tell a rejected click from a dropped one.
@@ -117,7 +144,28 @@ export type HostCommand =
   /** Close early. The server's timer sends the identical event at `closesAt`. */
   | { name: "trivia.close" }
   | { name: "trivia.reveal" }
-  | { name: "trivia.next" };
+  | { name: "trivia.next" }
+  /* ---- arcade (phase 4) ---- */
+  /** Hand out the player numbers and put the room in the arcade. */
+  | { name: "arcade.enter" }
+  /**
+   * Pick the round and its settings. Two variants rather than one command
+   * with optional fields: a round's settings are not interchangeable, and
+   * `{ kind: "plan_apply", secondsPerItem: 20 }` should not be a thing the
+   * wire can express.
+   *
+   * The content — the six emoji items — is *not* on this command. It lives on
+   * the server and is attached when the event is built, so a console cannot
+   * choose what the answers are and the answers never travel towards a phone.
+   */
+  | { name: "arcade.round"; kind: "recruitment"; secondsPerItem: number }
+  | { name: "arcade.round"; kind: "plan_apply"; target: number; seconds: number }
+  /** The round card is up; this opens the Floor. */
+  | { name: "arcade.begin" }
+  /** Recruitment: next emoji. */
+  | { name: "arcade.next" }
+  | { name: "arcade.end" }
+  | { name: "arcade.reveal" };
 
 /* ------------------------------------------------------------------ */
 /* Server → client                                                     */
@@ -283,6 +331,171 @@ export type TriviaMine =
       readonly total: number;
     };
 
+
+/* ------------------------------------------------------------------ */
+/* Hashi Arcade                                                        */
+/* ------------------------------------------------------------------ */
+
+export type ArcadeLight = "plan" | "apply";
+
+/**
+ * One cell of the big screen's dormitory grid — and, small, of the mirror at
+ * the bottom of the Lounge screen.
+ *
+ * Numbers, not nicknames. DESIGN.md: "Lines refer to player numbers, never
+ * nicknames, when the news is bad … the nickname is on the phone only." The
+ * roster is on every socket already, so this is a rendering rule that the
+ * shape of the cell keeps honest rather than a secret the wire is keeping.
+ *
+ * No points and no resource counts, on any surface but the host's. Sixty
+ * cells each carrying a score is the full leaderboard, which SPEC allows
+ * exactly nobody below the console to see.
+ */
+export interface ArcadeCell {
+  readonly pid: ParticipantId;
+  /** Three digits when rendered; a number here. */
+  readonly playerNumber: number;
+  readonly standing: ArcadeStanding;
+  /** How many people in the Lounge are backing them. */
+  readonly backers: number;
+  /** Drained during *this* round: the thin pink strike over the cell. */
+  readonly struck: boolean;
+}
+
+/**
+ * Round 0, Recruitment.
+ *
+ * `answer` is the whole game, so it is the field this type exists to withhold:
+ * it reaches a phone or the big screen at the reveal and not one frame before,
+ * and the host has it throughout because the host is reading it out.
+ */
+export interface ArcadeItemRecap {
+  readonly cue: string;
+  readonly answer: string;
+  readonly note: string;
+}
+
+export interface ArcadeRecruitmentView {
+  /** 0-based index into the item list. */
+  readonly at: number;
+  readonly of: number;
+  /** The two emoji. Absent until the Floor is open — a card is not a cue. */
+  readonly cue?: string;
+  /** The current item's answer. Reveal, and the host. */
+  readonly answer?: string;
+  readonly note?: string;
+  /**
+   * Every item with its answer and its note, for the reveal the room reads
+   * together. Present at the reveal, and to the host throughout.
+   */
+  readonly recap?: readonly ArcadeItemRecap[];
+  /** Host and screen: the climbing counts. */
+  readonly answered?: number;
+  readonly eligible?: number;
+  readonly solved?: number;
+  /** The first three correct in the room, as player numbers. At the reveal. */
+  readonly firstThree?: readonly number[];
+}
+
+/**
+ * Round 1, Plan / Apply.
+ *
+ * The two optional epochs are the point of the whole projection. A phone that
+ * knew `nextChangeAt` could tap until 401 ms before the lock and never be
+ * caught, so it is **absent** from a participant's frame — not null, not zero:
+ * the key is not in the bytes. The big screen has it because the big screen
+ * *is* the warning, and the host has it because the host is watching for the
+ * round to end.
+ *
+ * `headTurnsAt` is the telegraph, 400 ms before the lock, as an absolute
+ * epoch. It is sent rather than derived so that a screen which received this
+ * frame late still starts the wipe at the instant the server meant, and stops
+ * it at the instant the light actually changes.
+ */
+export interface ArcadePlanApplyView {
+  readonly light: ArcadeLight;
+  /** When the current light began. Absolute, so a late frame still lines up. */
+  readonly lightChangedAt: number;
+  readonly target: number;
+  /** Where the progress bar's ticks go, and where the banking happens. */
+  readonly checkpoints: readonly number[];
+  /** Screen and host only. */
+  readonly nextChangeAt?: number;
+  /** Screen and host only, and only for a turn *into* the lock. */
+  readonly headTurnsAt?: number;
+  /** Screen and host: how many have crossed the line. */
+  readonly crossed?: number;
+  /** Screen and host: who crossed, in order, as player numbers. */
+  readonly finishOrder?: readonly number[];
+}
+
+/**
+ * The arcade, as one role may see it right now.
+ *
+ * | field | participant | screen | host |
+ * | --- | --- | --- | --- |
+ * | `grid` | always | always | always |
+ * | `recruitment.cue` | running | running | always |
+ * | `recruitment.answer` / `note` | reveal | reveal | always |
+ * | `recruitment.answered` / `eligible` / `solved` | never | always | always |
+ * | `planApply.light` | always | always | always |
+ * | `planApply.nextChangeAt` / `headTurnsAt` | **never** | always | always |
+ * | `planApply.crossed` / `finishOrder` | never | always | always |
+ */
+export interface ArcadeView {
+  readonly activityId: string;
+  readonly round: ArcadeRoundKind | null;
+  /** Which round of the run this is, from 0. The round card counts from 1. */
+  readonly roundIndex: number;
+  readonly phase: ArcadePhase;
+  /** Absolute server epochs, never durations. */
+  readonly startedAt: number | null;
+  readonly endsAt: number | null;
+  readonly grid: readonly ArcadeCell[];
+  readonly onFloor: number;
+  readonly inLounge: number;
+  readonly recruitment?: ArcadeRecruitmentView;
+  readonly planApply?: ArcadePlanApplyView;
+}
+
+/** Recruitment, for the one phone it belongs to. */
+export type ArcadeMineRecruitment =
+  | { readonly state: "unanswered" }
+  /**
+   * Locked in, with whether it was right — and not with what they typed,
+   * which their own phone already knows and the server has no reason to
+   * repeat.
+   *
+   * Unlike trivia this *is* sent while the item is open, and the difference is
+   * the input. Four tiles mean a phone that turns green tells the person next
+   * to you which tile to press; a text field means "Recruited." tells them
+   * nothing they can type. DESIGN.md asks for that line on a correct answer,
+   * and the answer itself still does not travel.
+   */
+  | { readonly state: "locked"; readonly correct: boolean };
+
+export interface ArcadeMinePlanApply {
+  readonly resources: number;
+  /** 1-based, once they are across the line. Absent until then. */
+  readonly place?: number;
+}
+
+/** The participant's own arcade standing. Participants only. */
+export interface ArcadeMine {
+  /** Theirs for the whole arcade. Rendered zero-padded to three digits. */
+  readonly playerNumber: number;
+  readonly standing: ArcadeStanding;
+  /** Banked this round. Kept through a drain, which is the whole point. */
+  readonly banked: number;
+  /** The arcade raw score so far, across rounds. */
+  readonly total: number;
+  /** Lounge only. */
+  readonly backing?: ParticipantId;
+  readonly drainedAt?: number;
+  readonly recruitment?: ArcadeMineRecruitment;
+  readonly planApply?: ArcadeMinePlanApply;
+}
+
 /**
  * What a client renders. The server sends the view for that role — a
  * participant is never sent the full ranking, because the rule is that only
@@ -313,6 +526,10 @@ export interface RenderState {
   readonly trivia?: TriviaView;
   /** Participant only, and only while a question set is loaded. */
   readonly triviaMine?: TriviaMine;
+  /** Absent until `enterArcade`. Projected per role: {@link ArcadeView}. */
+  readonly arcade?: ArcadeView;
+  /** Participant only, and only inside the arcade. */
+  readonly arcadeMine?: ArcadeMine;
   /** Host only. */
   readonly hostExtras?: {
     readonly joinCode: string;
@@ -336,6 +553,21 @@ export interface RenderState {
       readonly answeredBy: readonly ParticipantId[];
       /** How many questions are loaded. Zero means the CSV has not landed. */
       readonly loaded: number;
+    };
+    /**
+     * The arcade in full: who is where, who is backing whom, and every
+     * number. The console is the only surface that may hold all of it,
+     * because the host is running the round and settling the score.
+     */
+    readonly arcade?: {
+      readonly answeredBy: readonly ParticipantId[];
+      readonly drained: readonly ParticipantId[];
+      /** pid -> the pid they are backing. */
+      readonly backing: Readonly<Record<ParticipantId, ParticipantId>>;
+      readonly banked: Readonly<Record<ParticipantId, number>>;
+      readonly totals: Readonly<Record<ParticipantId, number>>;
+      /** Plan / Apply only. pid -> resources applied. */
+      readonly resources: Readonly<Record<ParticipantId, number>>;
     };
   };
 }
@@ -432,6 +664,41 @@ export function parseClientMessage(raw: string): ClientMessage | null {
         return null;
       }
       return { t: "trivia.answer", cid, index, choice };
+    }
+    case "arcade.answer": {
+      const cid = str("cid");
+      const answer = str("answer");
+      const item = m["item"];
+      if (
+        cid === null ||
+        answer === null ||
+        typeof item !== "number" ||
+        !Number.isInteger(item) ||
+        item < 0
+      ) {
+        return null;
+      }
+      // Bounded here rather than in the engine: a megabyte of "answer" is a
+      // socket problem, not a game rule. The fold happens on the server.
+      return { t: "arcade.answer", cid, item, answer: answer.slice(0, 64) };
+    }
+    case "arcade.tap": {
+      const cid = str("cid");
+      const round = m["round"];
+      if (
+        cid === null ||
+        typeof round !== "number" ||
+        !Number.isInteger(round) ||
+        round < 0
+      ) {
+        return null;
+      }
+      return { t: "arcade.tap", cid, round };
+    }
+    case "arcade.back": {
+      const cid = str("cid");
+      const pid = str("pid");
+      return cid === null || pid === null ? null : { t: "arcade.back", cid, pid };
     }
     case "host.cmd": {
       const cid = str("cid");
@@ -540,6 +807,41 @@ function parseHostCommand(v: unknown): HostCommand | null {
       return { name: "trivia.reveal" };
     case "trivia.next":
       return { name: "trivia.next" };
+    case "arcade.enter":
+      return { name: "arcade.enter" };
+    case "arcade.round": {
+      // Positive integers only, and per variant. A zero-second item and a
+      // target of zero are both rounds that end before they start.
+      const int = (k: string): number | null => {
+        const v = c[k];
+        return typeof v === "number" && Number.isInteger(v) && v > 0 ? v : null;
+      };
+      if (c["kind"] === "recruitment") {
+        const secondsPerItem = int("secondsPerItem");
+        return secondsPerItem === null
+          ? null
+          : { name: "arcade.round", kind: "recruitment", secondsPerItem };
+      }
+      if (c["kind"] === "plan_apply") {
+        const target = int("target");
+        const seconds = int("seconds");
+        return target === null || seconds === null
+          ? null
+          : { name: "arcade.round", kind: "plan_apply", target, seconds };
+      }
+      // The other four rounds are designed but not built. Refusing the frame
+      // is how the console finds that out, rather than a round that starts
+      // and does nothing.
+      return null;
+    }
+    case "arcade.begin":
+      return { name: "arcade.begin" };
+    case "arcade.next":
+      return { name: "arcade.next" };
+    case "arcade.end":
+      return { name: "arcade.end" };
+    case "arcade.reveal":
+      return { name: "arcade.reveal" };
     default:
       return null;
   }

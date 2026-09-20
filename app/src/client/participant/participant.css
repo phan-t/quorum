@@ -921,3 +921,430 @@ body.phone:has(.v-splash) {
   border-color: var(--v-hairline);
   color: var(--v-grey);
 }
+
+/* ==================================================================== */
+/* Hashi Arcade                                                         */
+/* ==================================================================== */
+
+/*
+ * DESIGN.md's recast palette, on the phone. Green is the players and the PLAN
+ * light; pink is the staff, the lock and the drain; gold is everything Lounge;
+ * purple is the Front-End Man.
+ *
+ * Every state here carries a word or a shape as well as a hue. The one that
+ * would fail hardest on colour alone is PLAN versus APPLY — a green/pink pair
+ * on a phone held at arm's length — so that button says APPLY or LOCKED,
+ * carries ○ or ■, and is genuinely disabled while the lock is held.
+ */
+
+.v-arcade {
+  display: flex;
+  flex-direction: column;
+  gap: 0.9rem;
+  height: 100%;
+  min-height: 0;
+  position: relative;
+}
+
+.a-badge {
+  align-self: flex-start;
+  display: inline-flex;
+  align-items: baseline;
+  gap: 0.45rem;
+  padding: 0.25rem 0.6rem;
+  border-radius: 6px;
+  background: var(--nomad);
+  color: var(--on-fill-dark);
+  /* A tracksuit patch: 1px darker border, per DESIGN.md's motif. */
+  border: 1px solid #00996c;
+}
+.a-badge[data-standing="drained"] {
+  background: var(--vault);
+  border-color: #c69f00;
+}
+.a-badge-label {
+  color: inherit;
+  opacity: 0.75;
+  letter-spacing: 0.16em;
+  font-size: 10px;
+}
+.a-badge-num {
+  font-weight: 600;
+  font-size: 20px;
+  letter-spacing: 0.06em;
+}
+
+.a-body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.8rem;
+}
+
+/* ---- the Front-End Man -------------------------------------------- */
+
+.a-house {
+  color: var(--arc-house);
+  font-size: 14px;
+  line-height: 1.5;
+  margin: 0;
+  display: flex;
+  gap: 0.5rem;
+}
+.a-prompt {
+  opacity: 0.7;
+}
+
+/* ---- round card ---------------------------------------------------- */
+
+.a-card {
+  position: relative;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 0.6rem;
+  padding: 1.1rem;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--panel);
+  overflow: hidden;
+}
+/* The pastel Escher stairwell, at 6%, behind round cards only. */
+.a-stair {
+  position: absolute;
+  inset: 0;
+  opacity: 0.06;
+  background-image:
+    linear-gradient(135deg, var(--consul) 25%, transparent 25%),
+    linear-gradient(225deg, var(--nomad) 25%, transparent 25%),
+    linear-gradient(45deg, var(--vault) 25%, transparent 25%);
+  background-size: 48px 48px;
+  pointer-events: none;
+}
+.a-card-shapes {
+  display: flex;
+  gap: 0.8rem;
+  font-size: 22px;
+  color: var(--ink);
+  opacity: 0.85;
+}
+.a-staff {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  color: var(--muted);
+  font-size: 12px;
+  margin: 0.4rem 0 0;
+}
+
+/* ---- Recruitment ---------------------------------------------------- */
+
+.a-recruit {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 0.7rem;
+}
+.a-item-timer {
+  margin: 0;
+  color: var(--muted);
+  font-size: 13px;
+  letter-spacing: 0.08em;
+}
+.a-cue {
+  margin: 0;
+  font-size: 96px;
+  line-height: 1.1;
+  text-align: center;
+  letter-spacing: 0.06em;
+}
+.a-recruit-row {
+  display: flex;
+  gap: 0.5rem;
+}
+.a-field {
+  flex: 1;
+  min-width: 0;
+  font-size: 18px;
+}
+.a-submit {
+  appearance: none;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--nomad);
+  color: var(--on-fill-dark);
+  font-weight: 600;
+  padding: 0 1rem;
+  min-height: 48px;
+}
+.a-submit:disabled {
+  background: var(--panel-2);
+  color: var(--muted);
+  border-color: var(--line);
+}
+.a-locked {
+  color: var(--muted);
+  margin: 0;
+}
+
+/* ---- Plan / Apply --------------------------------------------------- */
+
+.a-plan {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 0.7rem;
+  min-height: 0;
+}
+.a-bar-track {
+  position: relative;
+  height: 10px;
+  border-radius: 999px;
+  background: var(--panel-2);
+  overflow: hidden;
+}
+.a-bar-fill {
+  height: 100%;
+  background: var(--nomad);
+}
+.a-bar-ticks {
+  position: absolute;
+  inset: 0;
+}
+.a-tick {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  background: var(--ground);
+  opacity: 0.85;
+}
+
+.a-big {
+  flex: 1;
+  min-height: 0;
+  appearance: none;
+  border: none;
+  border-radius: 14px;
+  background: var(--light, var(--nomad));
+  color: var(--light-ink, var(--on-fill-dark));
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.3rem;
+  /* No transition on the fill: DESIGN.md says the turn is a wipe, never a
+     fade, and a 300ms cross-fade here would be 300ms of ambiguity in the one
+     place the game is decided. */
+}
+.a-big-glyph {
+  font-size: 40px;
+  line-height: 1;
+}
+.a-big-word {
+  font-size: 46px;
+  letter-spacing: 0.04em;
+}
+.a-big-count {
+  font-size: 26px;
+  font-weight: 600;
+  opacity: 0.85;
+}
+/* Locked: hatched as well as pink, and genuinely not pressable. Three
+   signals before the colour is counted. */
+.a-big[data-light="apply"] {
+  background-image: repeating-linear-gradient(
+    45deg,
+    rgba(10, 10, 15, 0.16) 0 10px,
+    transparent 10px 20px
+  );
+  cursor: not-allowed;
+}
+.a-big:disabled {
+  opacity: 1; /* the state is the hatch and the word, not a grey-out */
+}
+
+/* ---- the drain, and the Lounge -------------------------------------- */
+
+/* Beat one: 400 ms of pink over a desaturated page. Beat two is the gold
+   card, which is bigger, brighter and warmer — and is where the phone stays. */
+.v-arcade.is-draining .a-body {
+  filter: saturate(0.15);
+}
+.a-drain {
+  border-left: 3px solid var(--miss);
+  padding: 0.5rem 0.75rem;
+  background: var(--panel);
+  border-radius: 6px;
+}
+.a-drain-error,
+.a-drain-who {
+  margin: 0;
+  color: var(--miss);
+  font-size: 13px;
+  line-height: 1.5;
+}
+.v-arcade.is-lounged .a-drain {
+  opacity: 0.55;
+}
+
+.a-lounge {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+  padding: 0.9rem;
+  border-radius: 12px;
+  background: var(--vault);
+  color: var(--on-fill-dark);
+  animation: a-slide-up var(--pop-ms) var(--pop) both;
+}
+@keyframes a-slide-up {
+  from {
+    transform: translateY(18px);
+    opacity: 0;
+  }
+}
+.a-lounge-kicker {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  margin: 0;
+}
+.a-lounge-kicker .label {
+  color: inherit;
+}
+.a-lounge-mark {
+  font-size: 18px;
+}
+.a-lounge-line,
+.a-lounge-empty {
+  margin: 0;
+  font-size: 14px;
+}
+.a-lounge-prompt {
+  color: inherit;
+  opacity: 0.8;
+  margin: 0;
+}
+.a-lounge-backed {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.45rem 0.6rem;
+  border-radius: 8px;
+  background: rgba(10, 10, 15, 0.14);
+}
+.a-lounge-backed .label {
+  color: inherit;
+}
+.a-lounge-list {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  align-content: flex-start;
+}
+.a-chip {
+  appearance: none;
+  display: inline-flex;
+  align-items: baseline;
+  gap: 0.4rem;
+  min-height: 44px;
+  padding: 0.3rem 0.7rem;
+  border-radius: 999px;
+  border: 1px solid rgba(10, 10, 15, 0.35);
+  background: transparent;
+  color: var(--on-fill-dark);
+  font-size: 14px;
+}
+/* Backed: filled and ticked, so it is not the border colour doing the work. */
+.a-chip.is-backed {
+  background: var(--on-fill-dark);
+  color: var(--vault);
+  font-weight: 600;
+}
+.a-chip.is-backed::after {
+  content: "✓";
+}
+.a-chip:disabled {
+  opacity: 0.55;
+}
+.a-chip-num {
+  font-weight: 600;
+}
+.a-chip-backers {
+  opacity: 0.75;
+}
+
+/* The big screen's grid, mirrored small. */
+.a-mirror {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px;
+}
+.a-mirror-cell {
+  font-family: var(--mono);
+  font-size: 9px;
+  line-height: 1;
+  padding: 2px 3px;
+  border-radius: 2px;
+  background: rgba(10, 10, 15, 0.18);
+  color: var(--on-fill-dark);
+}
+.a-mirror-cell[data-standing="drained"] {
+  background: rgba(10, 10, 15, 0.45);
+  color: var(--vault);
+}
+.a-mirror-cell[data-away="yes"] {
+  opacity: 0.45;
+}
+.a-mirror-cell[data-struck="yes"] {
+  text-decoration: line-through;
+  text-decoration-color: var(--consul);
+}
+
+/* ---- the reveal ----------------------------------------------------- */
+
+.a-reveal {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+.a-banked {
+  margin: 0;
+  font-size: 54px;
+  font-weight: 600;
+  color: var(--arc-lounge);
+  line-height: 1;
+}
+.a-total {
+  margin: 0;
+}
+.a-recap {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 0.2rem 0.6rem;
+  padding: 0.5rem 0;
+  border-top: 1px solid var(--line);
+}
+.a-recap-cue {
+  font-size: 24px;
+}
+.a-recap-answer {
+  font-weight: 600;
+  align-self: center;
+}
+.a-recap-note {
+  grid-column: 2;
+  color: var(--muted);
+  font-size: 13px;
+}

@@ -11,6 +11,7 @@
  *   /host        → host console
  *   /screen      → big screen
  *   /client/*    → dist/client/*
+ *   /arcade/*, /engine/*, /protocol.js → dist/* (the rest of the graph)
  *
  *   app$ npm run client:dev
  *   open 'http://localhost:4173/?mock=1'
@@ -23,6 +24,8 @@ import { fileURLToPath } from "node:url";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const root = resolve(here, "..", "dist", "client");
+/** The whole emitted tree: client files import siblings of `dist/client`. */
+const dist = resolve(here, "..", "dist");
 const port = Number(process.env["PORT"] ?? 4173);
 
 if (!existsSync(root)) {
@@ -50,10 +53,17 @@ function pageFor(pathname) {
   if (pathname === "/screen" || pathname === "/screen/") {
     return join(root, "screen", "index.html");
   }
-  if (pathname.startsWith("/client/")) {
-    const rel = normalize(pathname.slice("/client/".length));
+  // Any emitted module by its own path, not just `/client/*`. A client file
+  // importing something outside `src/client/` — the arcade content, an engine
+  // helper, `protocol.ts` — is emitted beside `dist/client`, so the browser
+  // asks for `/arcade/…` or `/engine/…`. Serving only `/client/*` 404'd those,
+  // the module graph failed, and every surface rendered blank with nothing in
+  // the server log to show for it. Mirrors the production route in
+  // `server/main.ts`.
+  if (/\.(js|css|map|svg|png|woff2|ico)$/.test(pathname)) {
+    const rel = normalize(pathname.slice(1));
     if (rel.startsWith("..")) return null;
-    return join(root, rel);
+    return join(dist, rel);
   }
   return null;
 }

@@ -10,12 +10,15 @@
 
 import type {
   ActivitySummary,
+  ArcadeCell,
+  ArcadeView,
   OwnPoints,
   RefusedReason,
   RenderState,
+  RosterEntry,
   TriviaView,
 } from "../../protocol.ts";
-import type { Segment } from "../../engine/types.ts";
+import type { ArcadeRoundKind, Segment } from "../../engine/types.ts";
 
 export type ViewKind =
   | "waiting"
@@ -81,14 +84,15 @@ export const SEGMENT_PHASE: Readonly<Record<Segment, number>> = {
  * Whether the segment has a real surface behind it yet.
  *
  * Not `SEGMENT_PHASE[s] === 1` — trivia is Phase 3 and it is built, and the
- * console has to be able to say which of those two facts it means. The arcade
- * is the only thing left that puts a placeholder in front of the room.
+ * console has to be able to say which of those two facts it means. Nothing
+ * puts a placeholder in front of the room any more; the flag stays because
+ * the next unbuilt thing will want it and because the console's rail reads it.
  */
 export const SEGMENT_BUILT: Readonly<Record<Segment, boolean>> = {
   lobby: true,
   holding: true,
   trivia: true,
-  arcade: false,
+  arcade: true,
   standings: true,
   final: true,
 };
@@ -102,13 +106,14 @@ export const RUN_OF_SHOW: readonly Segment[] = [
   "lobby",
   "holding",
   "trivia",
+  "arcade",
   "standings",
   "final",
 ];
 
 export function nextSegment(current: Segment): Segment | null {
   const i = RUN_OF_SHOW.indexOf(current);
-  if (i === -1) return "standings"; // off-piste (the arcade): come back
+  if (i === -1) return "standings"; // off-piste: come back to the board
   return RUN_OF_SHOW[i + 1] ?? null;
 }
 
@@ -269,6 +274,296 @@ export function refusalCopy(
         retry: true,
       };
   }
+}
+
+
+/* ------------------------------------------------------------------ */
+/* The arcade register                                                 */
+/* ------------------------------------------------------------------ */
+
+/**
+ * DESIGN.md's recast palette, as CSS values, in one place.
+ *
+ * | Motif | Colour | Used for |
+ * | --- | --- | --- |
+ * | Players | `--nomad` green | number badges, "on the Floor", the PLAN light |
+ * | Staff | `--consul` pink | round cards, APPLY / STATE LOCKED, the drain |
+ * | VIP Lounge | `--vault` gold | the welcome card, backing chips, VIP points |
+ * | The House | `--terraform` purple | the Front-End Man, the arcade's top five |
+ *
+ * Two entries per motif, because a brand hue used as a *fill* and the same
+ * hue used as *text* are not the same colour problem. The fills are the
+ * product hues and do not move between themes; the inks do, because
+ * `--terraform` as text measures 3.07:1 on the dark ground and `--vault` as
+ * text measures 1.48:1 on white. Both fail DESIGN.md's own 4.5:1 floor, which
+ * is the same failure DESIGN.md already had to correct once for the trivia
+ * tiles. The ink tokens are defined in tokens.css and measured there.
+ */
+export interface ArcadeHue {
+  /** The brand hue, as a fill. */
+  readonly fill: string;
+  /** Ink that reads on that fill. */
+  readonly on: string;
+  /** The same motif as text on the page ground, per theme. */
+  readonly ink: string;
+}
+
+export const ARCADE_PALETTE: Readonly<Record<
+  "players" | "staff" | "lounge" | "house",
+  ArcadeHue
+>> = {
+  players: { fill: "var(--nomad)", on: "var(--on-fill-dark)", ink: "var(--arc-players)" },
+  staff: { fill: "var(--consul)", on: "var(--on-fill-dark)", ink: "var(--arc-staff)" },
+  lounge: { fill: "var(--vault)", on: "var(--on-fill-dark)", ink: "var(--arc-lounge)" },
+  house: { fill: "var(--terraform)", on: "var(--on-fill-light)", ink: "var(--arc-house)" },
+};
+
+/** Three digits, zero-padded. *Player 017 has been drained.* */
+export function playerTag(n: number): string {
+  return String(n).padStart(3, "0");
+}
+
+/** `Player 017`, the only name the arcade uses when the news is bad. */
+export function playerName(n: number): string {
+  return `Player ${playerTag(n)}`;
+}
+
+export const ARCADE_ROUND_LABEL: Readonly<Record<ArcadeRoundKind, string>> = {
+  recruitment: "Recruitment",
+  plan_apply: "Plan / Apply",
+  unseal: "Unseal",
+  tug_of_raft: "Tug of Raft",
+  gganbu: "Gganbu",
+  glass_bridge: "The Glass Bridge",
+};
+
+/**
+ * The round cards, verbatim from DESIGN.md "Copy, and how it is said".
+ *
+ * Verbatim matters here more than anywhere else in the product: the tone is
+ * the feature, and "no exclamation marks, ever" is not a thing a renderer can
+ * enforce if every surface writes its own version of the line.
+ *
+ * Game numbers are DESIGN.md's — Plan / Apply is *Game 1* — so the card says
+ * what the announcer says, not what index the host happens to have run it at.
+ */
+export const ARCADE_ROUND_CARD: Readonly<
+  Record<ArcadeRoundKind, readonly string[]>
+> = {
+  recruitment: [
+    "The next game will begin shortly.",
+    "Please remain seated. Please do not run terraform destroy.",
+  ],
+  plan_apply: [
+    "Game 1 — Plan / Apply",
+    "Advance during PLAN. Do not touch your device during APPLY.",
+    "The state lock is held by the doll.",
+  ],
+  unseal: [
+    "Game 2 — Unseal",
+    "Choose a shape. You will be given a sealed tin.",
+    "Reading the docs is permitted. It will cost you.",
+  ],
+  tug_of_raft: [
+    "Game 3 — Tug of Raft",
+    "Two clusters. One rope. Tap on the heartbeat.",
+    "Followers who miss three heartbeats will call an election.",
+    "Elections achieve nothing.",
+  ],
+  gganbu: [
+    "Game 4 — Gganbu",
+    "You have been paired. You each hold ten tokens.",
+    "Tokens expire at the end of the round. Wager accordingly.",
+  ],
+  glass_bridge: [
+    "Game 5 — The Glass Bridge",
+    "Eighteen panes. Nine are tempered. The tempered ones are real.",
+    "Wave 1 goes first. Wave 1 has our sympathy.",
+  ],
+};
+
+/** The staff card, which appears once, before Game 1. DESIGN.md's joke. */
+export const STAFF_CARD: readonly string[] = [
+  "○ reads the plan",
+  "△ runs the apply",
+  "□ approves the PR",
+];
+
+/**
+ * Every announcer line the system needs, written once so that "how they are
+ * said" survives being said from three different files. DESIGN.md's table.
+ */
+export const HOUSE = {
+  welcome: (n: number) =>
+    `Welcome. You have been recruited. You are ${playerName(n)}.`,
+  recruited: "Recruited.",
+  checkpoint: (resources: number) =>
+    `${resources} resources applied. Progress banked.`,
+  crossed: (target: number) =>
+    `Apply complete. Resources: ${target} added, 0 changed, 0 destroyed.`,
+  drained: (n: number) => `${playerName(n)} drained.`,
+  backedSurvived: "Your player survived. The Lounge is pleased.",
+  roundEnd: "All nodes rescheduled. The next game will begin shortly.",
+  arcadeEnd: "The games have concluded. Please return your tracksuit.",
+} as const;
+
+/**
+ * The error a tap during the lock produces, verbatim.
+ *
+ * SPEC.md: "The screen shows the error verbatim, mono, red, the way it looks
+ * in a real terminal." Terraform's own wording, which is the joke: nothing
+ * here is invented, and that is why it is funny.
+ */
+export const STATE_LOCK_ERROR = "Error: state lock held by another process";
+
+/**
+ * The two lights, with everything a surface needs to draw one — including two
+ * signals that are not colour.
+ *
+ * DESIGN.md's accessibility floor says nothing may be distinguished by colour
+ * alone, and a red/green pair is the exact case that fails: roughly one man in
+ * twelve cannot tell these two hues apart on a compressed video tile. So each
+ * light carries a **word** (`PLAN` / `APPLY IN PROGRESS — STATE LOCKED`), a
+ * **glyph** (an open circle against a filled square), and a *state* the phone
+ * expresses as a disabled control with a padlock. The colour is the fourth
+ * signal, not the first.
+ */
+export interface LightFace {
+  readonly light: "plan" | "apply";
+  /** What the big screen puts in display type. */
+  readonly sign: string;
+  /** What the phone's one button says. */
+  readonly button: string;
+  /** Shape, not colour. */
+  readonly glyph: string;
+  readonly fill: string;
+  readonly on: string;
+  /** Read out by a screen reader when the light turns. */
+  readonly announce: string;
+}
+
+export const LIGHT_FACE: Readonly<Record<"plan" | "apply", LightFace>> = {
+  plan: {
+    light: "plan",
+    sign: "PLAN",
+    // Not "APPLY". The sign in the pink state reads APPLY IN PROGRESS — STATE
+    // LOCKED, so putting APPLY on the green button makes one word mean both
+    // "press me" and "do not press me", on a phone held at arm's length, under
+    // a timer, where the two states are a glance apart. SPEC calls each tap a
+    // resource, so the button says what the tap does and collides with
+    // nothing.
+    button: "+1 RESOURCE",
+    glyph: "○",
+    fill: ARCADE_PALETTE.players.fill,
+    on: ARCADE_PALETTE.players.on,
+    announce: "Plan. Tap to apply.",
+  },
+  apply: {
+    light: "apply",
+    sign: "APPLY IN PROGRESS — STATE LOCKED",
+    button: "LOCKED",
+    glyph: "■",
+    fill: ARCADE_PALETTE.staff.fill,
+    on: ARCADE_PALETTE.staff.on,
+    announce: "State locked. Do not tap.",
+  },
+};
+
+/**
+ * Milliseconds until the doll's head starts to turn, or null when the surface
+ * has not been told — which is every surface but the big screen and the
+ * console, on purpose: see `ArcadePlanApplyView` in protocol.ts.
+ *
+ * Negative once the turn has started, so a caller can tell "turning" from
+ * "not yet": the wipe runs from 0 down to `-LIGHT_TELEGRAPH_MS`.
+ */
+export function msToTurn(
+  planApply: { readonly headTurnsAt?: number },
+  now: number,
+): number | null {
+  return planApply.headTurnsAt === undefined ? null : planApply.headTurnsAt - now;
+}
+
+/**
+ * How far through the 400 ms wipe the screen is, 0 → 1. Null when there is
+ * nothing to draw.
+ */
+export function wipeFraction(
+  planApply: { readonly headTurnsAt?: number; readonly nextChangeAt?: number },
+  now: number,
+): number | null {
+  const { headTurnsAt, nextChangeAt } = planApply;
+  if (headTurnsAt === undefined || nextChangeAt === undefined) return null;
+  if (now < headTurnsAt) return null;
+  if (now >= nextChangeAt) return 1;
+  const span = nextChangeAt - headTurnsAt;
+  return span <= 0 ? 1 : (now - headTurnsAt) / span;
+}
+
+/** One grid cell, joined to the roster the same socket already carries. */
+export interface GridEntry {
+  readonly pid: string;
+  readonly playerNumber: number;
+  readonly tag: string;
+  readonly standing: "floor" | "drained";
+  readonly backers: number;
+  readonly struck: boolean;
+  /** Away is grey, per DESIGN.md's grid. From the roster, not the cell. */
+  readonly away: boolean;
+  /**
+   * Phone only. The big screen renders the tag and never this: DESIGN.md is
+   * explicit that the nickname belongs on the phone, "where the person it
+   * belongs to is the only reader".
+   */
+  readonly nickname: string;
+}
+
+export function gridEntries(
+  arcade: ArcadeView,
+  roster: readonly RosterEntry[],
+): GridEntry[] {
+  const by = new Map(roster.map((r) => [r.pid, r]));
+  return arcade.grid.map((cell: ArcadeCell) => {
+    const r = by.get(cell.pid);
+    return {
+      pid: cell.pid,
+      playerNumber: cell.playerNumber,
+      tag: playerTag(cell.playerNumber),
+      standing: cell.standing,
+      backers: cell.backers,
+      struck: cell.struck,
+      away: r?.conn === "away",
+      nickname: r?.nickname ?? "",
+    };
+  });
+}
+
+/** Everyone still on the Floor, for the Lounge's list of people to back. */
+export function floorEntries(
+  arcade: ArcadeView,
+  roster: readonly RosterEntry[],
+  exclude?: string,
+): GridEntry[] {
+  return gridEntries(arcade, roster).filter(
+    (e) => e.standing === "floor" && e.pid !== exclude,
+  );
+}
+
+/**
+ * The progress bar for Plan / Apply, as a fraction and three tick positions.
+ *
+ * The ticks are the engine's checkpoints, sent on the wire rather than
+ * recomputed here, so the bar cannot draw a tick where no points are banked.
+ */
+export function resourceBar(
+  planApply: { readonly target: number; readonly checkpoints: readonly number[] },
+  resources: number,
+): { readonly fraction: number; readonly ticks: readonly number[] } {
+  const target = Math.max(1, planApply.target);
+  return {
+    fraction: Math.min(1, Math.max(0, resources / target)),
+    ticks: planApply.checkpoints.map((c) => Math.min(1, c / target)),
+  };
 }
 
 /* ------------------------------------------------------------------ */

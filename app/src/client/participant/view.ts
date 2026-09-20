@@ -10,16 +10,33 @@
  * shows; this renders it.
  */
 
-import type { RenderState, TriviaMine, TriviaView } from "../../protocol.ts";
+import type {
+  ArcadeMine,
+  ArcadeView,
+  RenderState,
+  TriviaMine,
+  TriviaView,
+} from "../../protocol.ts";
 import { append, h, replace, setAttr, setClass, setText } from "../shared/dom.ts";
 import {
+  ARCADE_ROUND_CARD,
+  ARCADE_ROUND_LABEL,
+  HOUSE,
+  LIGHT_FACE,
+  STAFF_CARD,
+  STATE_LOCK_ERROR,
   answerTiles,
+  floorEntries,
   formatCountdown,
+  gridEntries,
+  playerName,
+  playerTag,
   pointsStripCells,
   pointsStripText,
   questionLabel,
   remainingMs,
   resolveView,
+  resourceBar,
   timerFraction,
   type ViewKind,
 } from "../shared/view.ts";
@@ -38,6 +55,9 @@ export interface ParticipantViewOptions {
   now?: () => number;
   /** Absent on the console's preview, which is a picture and not a phone. */
   onAnswer?: (index: number, choice: number) => void;
+  onArcadeTap?: (round: number) => void;
+  onArcadeAnswer?: (item: number, answer: string) => void;
+  onArcadeBack?: (pid: string) => void;
 }
 
 /**
@@ -101,9 +121,10 @@ export function createParticipantView(
     }, TICK_MS);
   };
 
-  const ctx: TriviaCtx = {
+  const ctx: SceneCtx = {
     now,
     pending: () => pending,
+    live: opts.onAnswer !== undefined || opts.onArcadeTap !== undefined,
     tap: (index, choice) => {
       if (opts.onAnswer === undefined) return;
       // One tap and it is final, so the guard is here as well as on the
@@ -113,6 +134,9 @@ export function createParticipantView(
       opts.onAnswer(index, choice);
       if (last !== null) scene?.update(last, null);
     },
+    arcadeTap: (round) => opts.onArcadeTap?.(round),
+    arcadeAnswer: (item, answer) => opts.onArcadeAnswer?.(item, answer),
+    arcadeBack: (pid) => opts.onArcadeBack?.(pid),
   };
 
   /**
@@ -215,13 +239,21 @@ export function createParticipantView(
 /* Scenes                                                              */
 /* ------------------------------------------------------------------ */
 
-interface TriviaCtx {
+interface SceneCtx {
   now(): number;
   pending(): Pending | null;
+  /**
+   * False on the console's preview, which is a picture of a phone and must
+   * not be able to play the round the host is running.
+   */
+  live: boolean;
   tap(index: number, choice: number): void;
+  arcadeTap(round: number): void;
+  arcadeAnswer(item: number, answer: string): void;
+  arcadeBack(pid: string): void;
 }
 
-function buildScene(kind: ViewKind, ctx: TriviaCtx): Scene {
+function buildScene(kind: ViewKind, ctx: SceneCtx): Scene {
   switch (kind) {
     case "waiting":
       return sceneWaiting();
@@ -238,7 +270,7 @@ function buildScene(kind: ViewKind, ctx: TriviaCtx): Scene {
     case "trivia":
       return sceneTrivia(ctx);
     case "arcade":
-      return scenePending("Hashi Arcade", "The host is setting up.");
+      return sceneArcade(ctx);
   }
 }
 
@@ -403,7 +435,7 @@ function sceneSealed(): Scene {
  * - **revealed** — the correct tile fills, a wrong choice outlines in
  *   `--miss`, the points and the streak, the note, then the trivia top five.
  */
-function sceneTrivia(ctx: TriviaCtx): Scene {
+function sceneTrivia(ctx: SceneCtx): Scene {
   const kicker = h("p", { class: "label t-kicker" });
   const roundCard = h("p", { class: "t-round label", attrs: { hidden: true } });
   const question = h("h1", { class: "t-question" });
@@ -626,6 +658,495 @@ function countUp(el: HTMLElement, from: number, to: number): void {
     if (t < 1) requestAnimationFrame(step);
   };
   step();
+}
+
+
+/* ------------------------------------------------------------------ */
+/* Hashi Arcade                                                        */
+/* ------------------------------------------------------------------ */
+
+/**
+ * A short, guarded buzz. DESIGN.md wants the turn to be felt as well as seen.
+ *
+ * `navigator.vibrate` does not exist on iOS Safari at all, and where it does
+ * exist it can throw outside a user gesture or when the tab is hidden. Both
+ * are silent no-ops here: a haptic is a bonus channel, never the only one
+ * carrying the state, and a phone that cannot buzz still shows the word, the
+ * glyph and a button it cannot press.
+ */
+function buzz(pattern: number | readonly number[]): void {
+  try {
+    const nav = navigator as Navigator & {
+      vibrate?: (p: number | number[]) => boolean;
+    };
+    if (typeof nav.vibrate !== "function") return;
+    nav.vibrate(typeof pattern === "number" ? pattern : [...pattern]);
+  } catch {
+    /* no haptics here, and nothing about the game depends on them */
+  }
+}
+
+/** The Front-End Man, on the phone: mono, purple, with a `>` prompt. */
+function houseLine(text: string): HTMLElement {
+  return h("p", { class: "mono a-house" }, [
+    h("span", { class: "a-prompt", attrs: { "aria-hidden": "true" } }, [">"]),
+    h("span", { text }),
+  ]);
+}
+
+/**
+ * The phone during the arcade.
+ *
+ * One interaction per round and the phone shows only that, which is
+ * DESIGN.md's rule for every arcade screen. What it does show at all times is
+ * the player number, top left, because it is the name the announcer uses.
+ *
+ * The drain is the one sequence with a shape of its own, and it is the
+ * emotional core of the round: 400 ms of pink, then the rest of the round in
+ * gold. Nobody's phone stays on the error.
+ */
+function sceneArcade(ctx: SceneCtx): Scene {
+  const badgeNum = h("span", { class: "mono a-badge-num" });
+  const badge = h("div", { class: "a-badge" }, [
+    h("span", { class: "a-badge-label label", text: "Player" }),
+    badgeNum,
+  ]);
+  const body = h("div", { class: "a-body" });
+  const announce = h("p", {
+    class: "sr-only",
+    attrs: { role: "status", "aria-live": "assertive" },
+  });
+  const node = h("section", { class: "v v-arcade" }, [badge, body, announce]);
+
+  /** Which sub-screen is built, so typing into the field is not eaten. */
+  let built = "";
+  /** The last light seen, so the haptic fires on the turn and not on repaint. */
+  let lastLightAt: number | null = null;
+  let lastStanding: "floor" | "drained" | null = null;
+  /** Local resource count, so the button responds to the thumb, not the link. */
+  let optimistic = 0;
+  let drainTimer: ReturnType<typeof setTimeout> | null = null;
+  /** The Lounge list as last drawn, so a burst of frames does not rebuild it. */
+  let loungeSignature = "";
+
+  /* ---- Recruitment ---- */
+  const cue = h("p", { class: "a-cue", attrs: { "aria-hidden": "true" } });
+  const cueRead = h("p", { class: "sr-only" });
+  const field = h("input", {
+    class: "field a-field",
+    type: "text",
+    attrs: {
+      autocomplete: "off",
+      autocorrect: "off",
+      autocapitalize: "off",
+      spellcheck: "false",
+      enterkeyhint: "send",
+      maxlength: "40",
+      "aria-label": "The product these two emoji mean",
+    },
+  }) as HTMLInputElement;
+  const submit = h("button", {
+    class: "a-submit",
+    type: "button",
+    text: "Submit",
+  }) as HTMLButtonElement;
+  const recruitTimer = h("p", { class: "mono a-item-timer" });
+  const recruitStatus = h("div", { class: "a-recruit-status" });
+  const recruitNode = h("div", { class: "a-recruit" }, [
+    recruitTimer,
+    cue,
+    cueRead,
+    h("div", { class: "a-recruit-row" }, [field, submit]),
+    recruitStatus,
+  ]);
+
+  const sendAnswer = (item: number): void => {
+    const typed = field.value.trim();
+    if (typed === "" || field.disabled) return;
+    field.disabled = true;
+    submit.disabled = true;
+    ctx.arcadeAnswer(item, typed);
+  };
+  submit.addEventListener("click", () => {
+    const item = Number(submit.dataset["item"] ?? "-1");
+    if (item >= 0) sendAnswer(item);
+  });
+  field.addEventListener("keydown", (ev) => {
+    if ((ev as KeyboardEvent).key !== "Enter") return;
+    const item = Number(submit.dataset["item"] ?? "-1");
+    if (item >= 0) sendAnswer(item);
+  });
+
+  /* ---- Plan / Apply ---- */
+  const barFill = h("div", { class: "a-bar-fill" });
+  const barTicks = h("div", { class: "a-bar-ticks", attrs: { "aria-hidden": "true" } });
+  const bar = h("div", { class: "a-bar" }, [
+    h("div", { class: "a-bar-track" }, [barFill, barTicks]),
+  ]);
+  const bigWord = h("span", { class: "display a-big-word" });
+  const bigGlyph = h("span", { class: "a-big-glyph", attrs: { "aria-hidden": "true" } });
+  const bigCount = h("span", { class: "mono a-big-count" });
+  const bigButton = h("button", {
+    class: "a-big",
+    type: "button",
+  }, [bigGlyph, bigWord, bigCount]) as HTMLButtonElement;
+  const planNode = h("div", { class: "a-plan" }, [bar, bigButton]);
+
+  bigButton.addEventListener("click", () => {
+    if (bigButton.disabled) return;
+    const round = Number(bigButton.dataset["round"] ?? "-1");
+    if (round < 0) return;
+    optimistic += 1;
+    setText(bigCount, String(optimistic));
+    ctx.arcadeTap(round);
+  });
+
+  /* ---- the drain, and the Lounge ---- */
+  const drainNode = h("div", { class: "a-drain" }, [
+    h("p", { class: "mono a-drain-error", text: STATE_LOCK_ERROR }),
+    h("p", { class: "mono a-drain-who" }),
+  ]);
+  const loungeList = h("div", { class: "a-lounge-list" });
+  const loungeBacked = h("div", { class: "a-lounge-backed", attrs: { hidden: true } });
+  const loungeMirror = h("div", { class: "a-mirror", attrs: { "aria-hidden": "true" } });
+  const loungeNode = h("div", { class: "a-lounge" }, [
+    h("p", { class: "a-lounge-kicker" }, [
+      h("span", { class: "a-lounge-mark", attrs: { "aria-hidden": "true" }, text: "▣" }),
+      h("span", { class: "label", text: "VIP Lounge" }),
+    ]),
+    h("p", { class: "a-lounge-line", text: "Your allocations have been rescheduled." }),
+    loungeBacked,
+    h("p", { class: "label a-lounge-prompt", text: "Back a player" }),
+    loungeList,
+    loungeMirror,
+  ]);
+
+  const mount = (key: string, children: readonly Node[]): void => {
+    if (built === key) return;
+    built = key;
+    replace(body, children);
+  };
+
+  /* ---- the sub-screens ---- */
+
+  const paintCard = (arcade: ArcadeView): void => {
+    const round = arcade.round;
+    const lines = round ? ARCADE_ROUND_CARD[round] : ARCADE_ROUND_CARD.recruitment;
+    mount(`card:${round ?? "none"}`, [
+      h("div", { class: "a-card" }, [
+        // The stairwell is DESIGN.md's one indulgence and it is behind the
+        // round card only — never behind gameplay, never on the phone during
+        // play, because it would eat contrast.
+        h("div", { class: "a-stair", attrs: { "aria-hidden": "true" } }),
+        h("div", { class: "a-card-shapes", attrs: { "aria-hidden": "true" } }, [
+          h("span", { text: "○" }),
+          h("span", { text: "△" }),
+          h("span", { text: "□" }),
+        ]),
+        ...lines.map((line) => houseLine(line)),
+        // The card that explains the masks appears once, before Game 1.
+        ...(round === "plan_apply"
+          ? [
+              h(
+                "p",
+                { class: "mono a-staff" },
+                STAFF_CARD.map((l) => h("span", { class: "a-staff-line", text: l })),
+              ),
+            ]
+          : []),
+      ]),
+    ]);
+  };
+
+  const paintRecruitment = (state: RenderState, arcade: ArcadeView, mine: ArcadeMine): void => {
+    const r = arcade.recruitment;
+    if (!r) return;
+    mount("recruit", [recruitNode]);
+    if (submit.dataset["item"] !== String(r.at)) {
+      // A new item: a fresh field, and the keyboard stays up.
+      submit.dataset["item"] = String(r.at);
+      field.value = "";
+      field.disabled = !ctx.live;
+      submit.disabled = !ctx.live;
+      if (ctx.live) field.focus();
+    }
+    setText(cue, r.cue ?? "···");
+    // The emoji are `aria-hidden`; this is the same question in words, because
+    // two pictographs read aloud are not a question.
+    setText(cueRead, `Item ${r.at + 1} of ${r.of}. Which product do these two emoji mean?`);
+    const left = remainingMs(arcade.endsAt, ctx.now());
+    setText(recruitTimer, left === null ? "" : formatCountdown(left));
+
+    const locked = mine.recruitment?.state === "locked";
+    if (locked) {
+      field.disabled = true;
+      submit.disabled = true;
+    }
+    const correct = mine.recruitment?.state === "locked" && mine.recruitment.correct;
+    replace(recruitStatus, [
+      locked
+        ? correct
+          ? houseLine(HOUSE.recruited)
+          : h("p", { class: "label a-locked", text: "Locked in." })
+        : h("p", { class: "label a-locked", text: "Type it. One answer." }),
+    ]);
+    setText(announce, locked ? (correct ? HOUSE.recruited : "Locked in.") : "");
+    void state;
+  };
+
+  const paintPlan = (arcade: ArcadeView, mine: ArcadeMine): void => {
+    const pa = arcade.planApply;
+    if (!pa) return;
+    mount("plan", [planNode]);
+    bigButton.dataset["round"] = String(arcade.roundIndex);
+
+    const face = LIGHT_FACE[pa.light];
+    const server = mine.planApply?.resources ?? 0;
+    if (server > optimistic) optimistic = server;
+    const shown = Math.max(server, optimistic);
+
+    setText(bigWord, face.button);
+    setText(bigGlyph, face.glyph);
+    setText(bigCount, String(shown));
+    bigButton.style.setProperty("--light", face.fill);
+    bigButton.style.setProperty("--light-ink", face.on);
+    setAttr(bigButton, "data-light", pa.light);
+    // The button stays LIVE during APPLY, and that is the whole round.
+    //
+    // DESIGN says "pink with LOCKED and nothing to tap", and disabling it is
+    // the literal reading — but it takes the game away. Red Light, Green Light
+    // is a test of self-control: you must be *able* to tap when you should
+    // not, or there is no light to obey. With the button disabled the only
+    // people ever drained are those whose tap left a phone still showing green
+    // and arrived more than the 250 ms grace after the lock — that is, people
+    // on bad connections, which inverts the fairness the grace exists for.
+    // SPEC is unambiguous — "During APPLY, any tap is Error: state lock held
+    // by another process and you are drained" — and SPEC wins.
+    //
+    // `aria-disabled` rather than `disabled`, so assistive tech is told this
+    // is not something to press while the element stays operable. The other
+    // three signals — word, glyph, hatched fill — already carry the state
+    // without relying on colour.
+    bigButton.disabled = !ctx.live;
+    setAttr(bigButton, "aria-disabled", pa.light === "apply" ? "true" : "false");
+    setAttr(bigButton, "aria-label", face.announce);
+
+    const { fraction, ticks } = resourceBar(pa, shown);
+    barFill.style.width = `${fraction * 100}%`;
+    if (barTicks.childElementCount !== ticks.length) {
+      replace(
+        barTicks,
+        ticks.map((t) =>
+          h("span", { class: "a-tick", attrs: { style: `left:${t * 100}%` } }),
+        ),
+      );
+    }
+    setAttr(bar, "aria-label", `${shown} of ${pa.target} resources`);
+
+    // The turn, felt as well as seen. Two patterns, so the lock and the
+    // release are distinguishable without looking — which is a third
+    // non-visual channel, not a flourish.
+    if (lastLightAt !== null && lastLightAt !== pa.lightChangedAt) {
+      buzz(pa.light === "apply" ? [70] : [20, 60, 20]);
+      setText(announce, face.announce);
+    }
+    lastLightAt = pa.lightChangedAt;
+  };
+
+  const paintLounge = (state: RenderState, arcade: ArcadeView, mine: ArcadeMine): void => {
+    mount("lounge", [drainNode, loungeNode]);
+    setText(
+      drainNode.querySelector(".a-drain-who") as HTMLElement,
+      HOUSE.drained(mine.playerNumber),
+    );
+
+    const backing = mine.backing ?? null;
+    const floor = floorEntries(arcade, state.roster);
+    const backed = floor.find((e) => e.pid === backing);
+    loungeBacked.hidden = backed === undefined;
+    if (backed) {
+      replace(loungeBacked, [
+        h("span", { class: "label", text: "Backing" }),
+        h("span", { class: "mono a-chip-num", text: backed.tag }),
+        h("span", { class: "a-chip-name", text: backed.nickname }),
+      ]);
+    }
+    // Changeable until the Floor locks, which is the moment the round stops
+    // running. After that the chips are a record, not a control.
+    const open = arcade.phase === "running" && ctx.live;
+    // Rebuilt only when it actually changed. During Plan / Apply the state
+    // moves on every tap in the room, and a list rebuilt under a thumb is a
+    // tap that lands on nothing. The signature covers the mirror below as
+    // well, which is why it is taken over the whole grid and not the Floor.
+    const all = gridEntries(arcade, state.roster);
+    const signature = `${open}:${backing ?? ""}:${all
+      .map((e) => `${e.pid}/${e.standing}/${e.backers}/${e.away}/${e.struck}`)
+      .join(",")}`;
+    if (signature === loungeSignature) return;
+    loungeSignature = signature;
+    replace(
+      loungeList,
+      floor.map((e) => {
+        const chip = h(
+          "button",
+          {
+            class: e.pid === backing ? "a-chip is-backed" : "a-chip",
+            type: "button",
+            disabled: !open,
+            attrs: { "aria-pressed": e.pid === backing ? "true" : "false" },
+          },
+          [
+            h("span", { class: "mono a-chip-num", text: e.tag }),
+            h("span", { class: "a-chip-name", text: e.nickname }),
+            e.backers > 0
+              ? h("span", { class: "mono a-chip-backers", text: `×${e.backers}` })
+              : null,
+          ],
+        );
+        chip.addEventListener("click", () => ctx.arcadeBack(e.pid));
+        return chip;
+      }),
+    );
+    if (floor.length === 0) {
+      replace(loungeList, [
+        h("p", { class: "a-lounge-empty", text: "Nobody is left on the Floor." }),
+      ]);
+    }
+    // The big screen's grid, mirrored small, so the Lounge can watch without
+    // looking up. DESIGN.md asks for this and it is why the Lounge screen is
+    // the one designed with the most care.
+    replace(
+      loungeMirror,
+      all.map((e) =>
+        h("span", {
+          class: "a-mirror-cell",
+          text: e.tag,
+          attrs: {
+            "data-standing": e.standing,
+            "data-away": e.away ? "yes" : "no",
+            "data-struck": e.struck ? "yes" : "no",
+          },
+        }),
+      ),
+    );
+  };
+
+  const paintReveal = (arcade: ArcadeView, mine: ArcadeMine): void => {
+    const recap = arcade.recruitment?.recap ?? [];
+    mount("reveal", [
+      h("div", { class: "a-reveal" }, [
+        h("p", { class: "label", text: "Banked this round" }),
+        h("p", { class: "mono a-banked", text: String(mine.banked) }),
+        h("p", { class: "label a-total" }, [`Arcade total ${mine.total}`]),
+        ...recap.map((item) =>
+          h("div", { class: "a-recap" }, [
+            h("span", { class: "a-recap-cue", attrs: { "aria-hidden": "true" }, text: item.cue }),
+            h("span", { class: "a-recap-answer", text: item.answer }),
+            h("span", { class: "a-recap-note", text: item.note }),
+          ]),
+        ),
+        houseLine(HOUSE.roundEnd),
+      ]),
+    ]);
+  };
+
+  const paint = (state: RenderState): void => {
+    const arcade = state.arcade;
+    // The console's preview is a picture of the room, and the room has no
+    // single `arcadeMine`. A neutral one lets the preview show the round card,
+    // the light and the cue — everything that is *not* one person's — rather
+    // than a permanent "coming up" that tells the host nothing.
+    const mine: ArcadeMine | undefined =
+      state.arcadeMine ??
+      (arcade === undefined
+        ? undefined
+        : { playerNumber: 0, standing: "floor", banked: 0, total: 0 });
+    if (arcade === undefined || mine === undefined) {
+      badge.hidden = true;
+      mount("waiting", [
+        h("div", { class: "a-card" }, [
+          h("p", { class: "label", text: "Hashi Arcade" }),
+          houseLine("The next game will begin shortly."),
+        ]),
+      ]);
+      return;
+    }
+
+    badge.hidden = state.arcadeMine === undefined;
+    setText(badgeNum, playerTag(mine.playerNumber));
+    setAttr(badge, "data-standing", mine.standing);
+
+    // The drain: 400 ms of desaturation and pink, then the gold card. It is
+    // played once, on the transition, and never on a repaint — a phone that
+    // replayed the error every time a frame arrived would be a phone stuck on
+    // the error, which is the one thing DESIGN.md says must not happen.
+    if (lastStanding === "floor" && mine.standing === "drained") {
+      node.classList.add("is-draining");
+      buzz([120, 60, 120]);
+      setText(announce, `${STATE_LOCK_ERROR}. ${HOUSE.drained(mine.playerNumber)}`);
+      if (drainTimer !== null) clearTimeout(drainTimer);
+      drainTimer = setTimeout(() => {
+        node.classList.remove("is-draining");
+        node.classList.add("is-lounged");
+        drainTimer = null;
+      }, 400);
+    }
+    if (mine.standing === "floor") {
+      node.classList.remove("is-draining", "is-lounged");
+    }
+    lastStanding = mine.standing;
+
+    if (arcade.phase === "reveal") return paintReveal(arcade, mine);
+    if (arcade.phase === "card") {
+      optimistic = 0;
+      lastLightAt = null;
+      return paintCard(arcade);
+    }
+    if (arcade.phase === "idle") {
+      // Between rounds: the round that just ended is not revealed yet and the
+      // next one has no card. One line, and it is the announcer's.
+      optimistic = 0;
+      lastLightAt = null;
+      mount("between", [
+        h("div", { class: "a-card" }, [houseLine(HOUSE.roundEnd)]),
+      ]);
+      return;
+    }
+    if (mine.standing === "drained") return paintLounge(state, arcade, mine);
+    if (arcade.round === "recruitment") return paintRecruitment(state, arcade, mine);
+    if (arcade.round === "plan_apply") return paintPlan(arcade, mine);
+    // A round that is designed but not built: say so rather than show a
+    // button that does nothing.
+    mount("unbuilt", [
+      h("div", { class: "a-card" }, [
+        h("p", {
+          class: "label",
+          text: arcade.round ? ARCADE_ROUND_LABEL[arcade.round] : "Hashi Arcade",
+        }),
+        houseLine("The next game will begin shortly."),
+      ]),
+    ]);
+  };
+
+  return {
+    node,
+    update(state) {
+      paint(state);
+    },
+    tick(state) {
+      // Only the item countdown moves without a frame arriving. A full
+      // repaint on a heartbeat would rebuild the Lounge's chips five times a
+      // second under the thumb that is trying to tap one.
+      const a = state.arcade;
+      if (a?.phase !== "running" || a.round !== "recruitment") return;
+      const left = remainingMs(a.endsAt, ctx.now());
+      setText(recruitTimer, left === null ? "" : formatCountdown(left));
+    },
+    stop() {
+      if (drainTimer !== null) clearTimeout(drainTimer);
+      drainTimer = null;
+    },
+  };
 }
 
 function scenePending(name: string, note: string): Scene {

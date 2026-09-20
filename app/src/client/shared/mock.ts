@@ -24,12 +24,15 @@
  * a surface ever renders a nickname as markup, that bot makes it obvious on
  * the first run rather than in front of thirty people.
  *
- * The scripted session runs the whole of Phase 2 scoring and the whole of
- * Phase 3 trivia, so every surface can be watched without a backend: a judged
- * activity out of 20 with its facilitator on bench, then four real questions
- * with bots tapping at plausible speeds — including a round card, a
- * multi-answer question, a two-answer question and a sudden death — two Spot
- * Awards with reasons, then the seal and the reveal.
+ * The scripted session runs the whole of Phase 2 scoring, the whole of Phase
+ * 3 trivia and the two built rounds of the Phase 4 arcade, so every surface
+ * can be watched without a backend: a judged activity out of 20 with its
+ * facilitator on bench, then four real questions with bots tapping at
+ * plausible speeds — including a round card, a multi-answer question, a
+ * two-answer question and a sudden death — then Recruitment and Plan / Apply
+ * with the light turning, bots being drained into the Lounge and backing the
+ * runners still on the Floor, two Spot Awards with reasons, and finally the
+ * seal and the reveal.
  *
  * The arithmetic here is SCORING.md's and SPEC.md's, implemented a second
  * time on purpose — the mock is a stand-in for the server and must not borrow
@@ -41,6 +44,9 @@
 
 import type {
   ActivitySummary,
+  ArcadeCell,
+  ArcadeMine,
+  ArcadeView,
   ClientMessage,
   HostCommand,
   RenderState,
@@ -55,12 +61,17 @@ import type {
   TriviaView,
 } from "../../protocol.ts";
 import type {
+  ArcadePhase,
+  ArcadeRoundKind,
+  ArcadeStanding,
+  EmojiItem,
   QuestionPhase,
   Seal,
   ScoreStatus,
   Segment,
   SessionPhase,
 } from "../../engine/types.ts";
+import { RECRUITMENT_ITEMS } from "../../arcade/recruitment.ts";
 import type { Transport, TransportFactory, TransportHandlers } from "./transport.ts";
 
 export interface MockConfig {
@@ -205,6 +216,69 @@ interface MockAnswer {
 }
 
 
+
+/* ---- arcade ---- */
+
+/**
+ * The arcade, mocked. As with trivia, the rules here are written from SPEC.md
+ * and DESIGN.md rather than borrowed from the engine or from views.ts — if
+ * the mock and the server ever disagree about what a phone is sent, that
+ * disagreement is the bug worth having found, and a mock that imported the
+ * projection could never find it.
+ *
+ * The *content* is imported, though, because content is not a rule: a second
+ * copy of the same six emoji items is how one of them silently rots.
+ */
+interface MockLounge {
+  backing: string | null;
+  at: number;
+}
+
+interface MockRecruitPlay {
+  kind: "recruitment";
+  items: readonly EmojiItem[];
+  at: number;
+  secondsPerItem: number;
+  itemEndsAt: number;
+  solvedOrder: string[];
+  answered: Record<string, boolean>;
+}
+
+interface MockPlanPlay {
+  kind: "plan_apply";
+  light: "plan" | "apply";
+  lightChangedAt: number;
+  nextChangeAt: number;
+  resources: Record<string, number>;
+  target: number;
+  seconds: number;
+  finishOrder: string[];
+}
+
+type MockPlay = MockRecruitPlay | MockPlanPlay;
+
+/** SPEC.md: 2–6 seconds, drawn at the boundary because the engine is pure. */
+const LIGHT_MIN_MS = 2_000;
+const LIGHT_MAX_MS = 6_000;
+/** SPEC.md: the head begins to turn 400 ms before the lock. */
+const TELEGRAPH_MS = 400;
+/** SPEC.md: "a 250 ms grace after the lock for network latency". */
+const LOCK_GRACE_MS = 250;
+
+/** Quarter marks of the target: 30 / 60 / 90 at the tuned 120. */
+function mockCheckpoints(target: number): number[] {
+  const out: number[] = [];
+  for (const i of [1, 2, 3]) {
+    const at = Math.round((target * i) / 4);
+    if (at > 0 && at < target && !out.includes(at)) out.push(at);
+  }
+  return out;
+}
+
+function mockFold(s: string): string {
+  return s.toLowerCase().replace(/[^\p{L}]/gu, "");
+}
+
 const BOT_NAMES = [
   "Kenji",
   "Priya",
@@ -254,6 +328,202 @@ class MockSession {
   triviaTotals: Record<string, number> = {};
   triviaStreaks: Record<string, number> = {};
 
+
+  /* ---- arcade ---- */
+  arcadeOn = false;
+  arcadeNumbers: Record<string, number> = {};
+  arcadeRound: ArcadeRoundKind | null = null;
+  arcadeRoundIndex = 0;
+  arcadePhase: ArcadePhase = "idle";
+  arcadeStanding: Record<string, ArcadeStanding> = {};
+  arcadeLounge: Record<string, MockLounge> = {};
+  arcadeBanked: Record<string, number> = {};
+  arcadeTotals: Record<string, number> = {};
+  arcadeStartedAt: number | null = null;
+  arcadeEndsAt: number | null = null;
+  arcadePlay: MockPlay | null = null;
+
+  /** Roster order, gapless, assigned once and never changed under anyone. */
+  assignArcadeNumbers(): void {
+    let next = 1;
+    for (const n of Object.values(this.arcadeNumbers)) next = Math.max(next, n + 1);
+    for (const p of this.participants) {
+      if (this.arcadeNumbers[p.pid] === undefined) {
+        this.arcadeNumbers[p.pid] = next++;
+      }
+      this.arcadeStanding[p.pid] ??= "floor";
+    }
+  }
+
+  arcadeNumber(pid: string): number {
+    return this.arcadeNumbers[pid] ?? 0;
+  }
+
+  /** Everyone back on the Floor: a drain lasts exactly one round. */
+  resetFloor(): void {
+    this.arcadeStanding = {};
+    this.arcadeLounge = {};
+    this.arcadeBanked = {};
+    for (const p of this.participants) this.arcadeStanding[p.pid] = "floor";
+  }
+
+  drain(pid: string, at: number): void {
+    this.arcadeStanding[pid] = "drained";
+    this.arcadeLounge[pid] = { backing: null, at };
+  }
+
+  bank(pid: string, points: number): void {
+    if (points <= 0) return;
+    this.arcadeBanked[pid] = (this.arcadeBanked[pid] ?? 0) + points;
+  }
+
+  /**
+   * The grid, which is the same on every surface: numbers and standing, never
+   * points and never nicknames. The roster is already on every socket, so
+   * this is a rendering rule kept honest by the shape of the cell.
+   */
+  arcadeGrid(): ArcadeCell[] {
+    const live = this.arcadePhase === "running" || this.arcadePhase === "reveal";
+    const backers: Record<string, number> = {};
+    for (const seat of Object.values(this.arcadeLounge)) {
+      if (seat.backing === null) continue;
+      backers[seat.backing] = (backers[seat.backing] ?? 0) + 1;
+    }
+    return this.participants
+      .map((p) => {
+        const standing = this.arcadeStanding[p.pid] ?? "floor";
+        return {
+          pid: p.pid,
+          playerNumber: this.arcadeNumber(p.pid),
+          standing,
+          backers: backers[p.pid] ?? 0,
+          struck: live && standing === "drained",
+        };
+      })
+      .sort((a, b) => a.playerNumber - b.playerNumber);
+  }
+
+  /**
+   * The arcade, projected for one role.
+   *
+   * The rule this exists to enforce: `nextChangeAt` and `headTurnsAt` are the
+   * light's schedule, and a phone holding them can tap flat out and stop
+   * 401 ms before every lock. They go to the big screen — which *is* the
+   * warning — and to the console, and to nobody else. Omitted, never nulled,
+   * so the key is not in the bytes.
+   */
+  arcadeView(role: Role): ArcadeView | undefined {
+    if (!this.arcadeOn) return undefined;
+    const privileged = role === "host" || role === "screen";
+    const host = role === "host";
+    const revealed = this.arcadePhase === "reveal";
+    const open = this.arcadePhase === "running" || revealed;
+    const grid = this.arcadeGrid();
+    const play = this.arcadePlay;
+
+    const base: ArcadeView = {
+      activityId: "arcade",
+      round: this.arcadeRound,
+      roundIndex: this.arcadeRoundIndex,
+      phase: this.arcadePhase,
+      startedAt: this.arcadeStartedAt,
+      endsAt: this.arcadeEndsAt,
+      grid,
+      onFloor: grid.filter((c) => c.standing === "floor").length,
+      inLounge: grid.filter((c) => c.standing === "drained").length,
+    };
+
+    if (play?.kind === "recruitment") {
+      const item = play.items[play.at];
+      return {
+        ...base,
+        recruitment: {
+          at: play.at,
+          of: play.items.length,
+          ...(item && (host || open) ? { cue: item.cue } : {}),
+          ...(item && (host || revealed)
+            ? { answer: item.answer, note: item.note }
+            : {}),
+          ...(host || revealed
+            ? {
+                recap: play.items.map((i) => ({
+                  cue: i.cue,
+                  answer: i.answer,
+                  note: i.note,
+                })),
+                firstThree: play.solvedOrder
+                  .slice(0, 3)
+                  .map((pid) => this.arcadeNumber(pid)),
+              }
+            : {}),
+          ...(privileged
+            ? {
+                answered: Object.keys(play.answered).length,
+                eligible: this.participants.length,
+                solved: Object.values(play.answered).filter(Boolean).length,
+              }
+            : {}),
+        },
+      };
+    }
+
+    if (play?.kind === "plan_apply") {
+      return {
+        ...base,
+        planApply: {
+          light: play.light,
+          lightChangedAt: play.lightChangedAt,
+          target: play.target,
+          checkpoints: mockCheckpoints(play.target),
+          ...(privileged
+            ? {
+                nextChangeAt: play.nextChangeAt,
+                ...(play.light === "plan"
+                  ? { headTurnsAt: play.nextChangeAt - TELEGRAPH_MS }
+                  : {}),
+                crossed: play.finishOrder.length,
+                finishOrder: play.finishOrder.map((pid) => this.arcadeNumber(pid)),
+              }
+            : {}),
+        },
+      };
+    }
+    return base;
+  }
+
+  /** One phone's own line. Their number, where they are, and nobody else's. */
+  arcadeMine(pid: string): ArcadeMine | undefined {
+    if (!this.arcadeOn) return undefined;
+    const seat = this.arcadeLounge[pid];
+    const play = this.arcadePlay;
+    const place =
+      play?.kind === "plan_apply" ? play.finishOrder.indexOf(pid) : -1;
+    return {
+      playerNumber: this.arcadeNumber(pid),
+      standing: this.arcadeStanding[pid] ?? "floor",
+      banked: this.arcadeBanked[pid] ?? 0,
+      total: this.arcadeTotals[pid] ?? 0,
+      ...(seat?.backing ? { backing: seat.backing } : {}),
+      ...(seat ? { drainedAt: seat.at } : {}),
+      ...(play?.kind === "recruitment"
+        ? {
+            recruitment:
+              play.answered[pid] === undefined
+                ? { state: "unanswered" as const }
+                : { state: "locked" as const, correct: play.answered[pid] },
+          }
+        : {}),
+      ...(play?.kind === "plan_apply"
+        ? {
+            planApply: {
+              resources: play.resources[pid] ?? 0,
+              ...(place === -1 ? {} : { place: place + 1 }),
+            },
+          }
+        : {}),
+    };
+  }
+
   reset(): void {
     this.phase = "draft";
     this.segment = "lobby";
@@ -275,6 +545,18 @@ class MockSession {
     this.answers = {};
     this.triviaTotals = {};
     this.triviaStreaks = {};
+    this.arcadeOn = false;
+    this.arcadeNumbers = {};
+    this.arcadeRound = null;
+    this.arcadeRoundIndex = 0;
+    this.arcadePhase = "idle";
+    this.arcadeStanding = {};
+    this.arcadeLounge = {};
+    this.arcadeBanked = {};
+    this.arcadeTotals = {};
+    this.arcadeStartedAt = null;
+    this.arcadeEndsAt = null;
+    this.arcadePlay = null;
   }
 
   question(): MockQuestion | undefined {
@@ -649,7 +931,12 @@ class MockSession {
     };
 
     const trivia = this.triviaView(role);
-    const withTrivia = trivia ? { ...base, trivia } : base;
+    const arcade = this.arcadeView(role);
+    const withTrivia = {
+      ...base,
+      ...(trivia ? { trivia } : {}),
+      ...(arcade ? { arcade } : {}),
+    };
 
     if (role === "host") {
       return {
@@ -673,6 +960,30 @@ class MockSession {
             answeredBy: Object.keys(this.answers),
             loaded: this.questions.length,
           },
+          ...(this.arcadeOn
+            ? {
+                arcade: {
+                  answeredBy:
+                    this.arcadePlay?.kind === "recruitment"
+                      ? Object.keys(this.arcadePlay.answered)
+                      : [],
+                  drained: Object.entries(this.arcadeStanding)
+                    .filter(([, st]) => st === "drained")
+                    .map(([pid]) => pid),
+                  backing: Object.fromEntries(
+                    Object.entries(this.arcadeLounge)
+                      .filter(([, seat]) => seat.backing !== null)
+                      .map(([pid, seat]) => [pid, seat.backing as string]),
+                  ),
+                  banked: { ...this.arcadeBanked },
+                  totals: { ...this.arcadeTotals },
+                  resources:
+                    this.arcadePlay?.kind === "plan_apply"
+                      ? { ...this.arcadePlay.resources }
+                      : {},
+                },
+              }
+            : {}),
         },
       };
     }
@@ -683,7 +994,12 @@ class MockSession {
     }
 
     const mine = pid === null ? undefined : this.triviaMine(pid);
-    const forPhone = mine ? { ...withTrivia, triviaMine: mine } : withTrivia;
+    const arcadeMine = pid === null ? undefined : this.arcadeMine(pid);
+    const forPhone = {
+      ...withTrivia,
+      ...(mine ? { triviaMine: mine } : {}),
+      ...(arcadeMine ? { arcadeMine } : {}),
+    };
     const me = pid === null ? null : board.find((r) => r.p.pid === pid);
     // Sealed omits `own` entirely. The phone has nothing to fall back on, by
     // design: a total it kept through the seal is a sealed total on screen.
@@ -774,6 +1090,15 @@ class MockHub {
         return;
       case "trivia.answer":
         this.#answer(conn, msg.cid, msg.index, msg.choice);
+        return;
+      case "arcade.answer":
+        this.#arcadeAnswer(conn, msg.cid, msg.item, msg.answer);
+        return;
+      case "arcade.tap":
+        this.#arcadeTap(conn, msg.cid, msg.round);
+        return;
+      case "arcade.back":
+        this.#arcadeBack(conn, msg.cid, msg.pid);
         return;
       case "host.cmd":
         if (msg.cmd === null) {
@@ -1067,6 +1392,70 @@ class MockHub {
         s.questionPhase = "revealed";
         break;
       }
+      /* ---- arcade ---- */
+
+      case "arcade.enter": {
+        if (s.phase !== "running") {
+          return reject("wrong_phase", "Start the session first.");
+        }
+        if (s.arcadeOn) return noop();
+        s.arcadeOn = true;
+        s.assignArcadeNumbers();
+        s.resetFloor();
+        break;
+      }
+      case "arcade.round": {
+        if (!s.arcadeOn) return reject("not_in_arcade", "Enter the arcade first.");
+        if (s.arcadePhase === "card" || s.arcadePhase === "running") {
+          return reject("wrong_round_phase", "A round is already in play.");
+        }
+        this.#startRound(cmd);
+        this.#send(conn, { t: "ack", cid, applied: true });
+        this.#broadcastState();
+        return;
+      }
+      case "arcade.begin": {
+        if (s.arcadePhase !== "card") {
+          return reject("wrong_round_phase", "No round card is up.");
+        }
+        this.#beginPlay();
+        this.#send(conn, { t: "ack", cid, applied: true });
+        this.#broadcastState();
+        return;
+      }
+      case "arcade.next": {
+        if (s.arcadePhase !== "running" || s.arcadePlay?.kind !== "recruitment") {
+          return reject("wrong_round_phase", "No item round is running.");
+        }
+        this.#nextItem();
+        this.#send(conn, { t: "ack", cid, applied: true });
+        this.#broadcastState();
+        return;
+      }
+      case "arcade.end": {
+        if (s.arcadePhase !== "running") {
+          return reject("wrong_round_phase", "No round is running.");
+        }
+        this.#endRound();
+        this.#send(conn, { t: "ack", cid, applied: true });
+        this.#broadcastState();
+        return;
+      }
+      case "arcade.reveal": {
+        if (s.arcadeRound === null || s.arcadePhase !== "idle") {
+          return reject("wrong_round_phase", "There is nothing to reveal.");
+        }
+        s.arcadePhase = "reveal";
+        // The arcade raw lands in the score grid here and not at the close,
+        // so the points strip cannot move before the answer is public.
+        for (const p of s.participants) {
+          if (p.status["arcade"] === "bench") continue;
+          p.raw["arcade"] = s.arcadeTotals[p.pid] ?? 0;
+          p.status["arcade"] = "played";
+        }
+        break;
+      }
+
       case "trivia.next": {
         if (s.questionPhase !== "revealed") {
           return reject("wrong_question_phase", "Reveal this one first.");
@@ -1224,6 +1613,385 @@ class MockHub {
         }
       }, delay / this.#cfg.speed);
     });
+  }
+
+
+  /* ---- arcade mechanics ---- */
+
+  #lightTimer: ReturnType<typeof setTimeout> | null = null;
+  #itemTimer: ReturnType<typeof setTimeout> | null = null;
+  #floorTimer: ReturnType<typeof setTimeout> | null = null;
+  #botTapTimer: ReturnType<typeof setInterval> | null = null;
+
+  #now(): number {
+    return Date.now() + SERVER_SKEW_MS;
+  }
+
+  #startRound(cmd: Extract<HostCommand, { name: "arcade.round" }>): void {
+    const s = this.session;
+    this.#clearArcadeTimers();
+    // Every round starts with everyone back on the Floor. Cumulative
+    // elimination is the show; it is the wrong shape for a work afternoon.
+    s.resetFloor();
+    s.arcadeRound = cmd.kind;
+    s.arcadePhase = "card";
+    s.arcadeStartedAt = null;
+    s.arcadeEndsAt = null;
+    s.arcadePlay =
+      cmd.kind === "recruitment"
+        ? {
+            kind: "recruitment",
+            items: RECRUITMENT_ITEMS,
+            at: 0,
+            secondsPerItem: cmd.secondsPerItem,
+            itemEndsAt: 0,
+            solvedOrder: [],
+            answered: {},
+          }
+        : {
+            kind: "plan_apply",
+            light: "plan",
+            lightChangedAt: 0,
+            nextChangeAt: 0,
+            resources: {},
+            target: cmd.target,
+            seconds: cmd.seconds,
+            finishOrder: [],
+          };
+  }
+
+  #beginPlay(): void {
+    const s = this.session;
+    const play = s.arcadePlay;
+    if (!play) return;
+    const now = this.#now();
+    s.arcadePhase = "running";
+    s.arcadeStartedAt = now;
+    if (play.kind === "recruitment") {
+      play.itemEndsAt = now + play.secondsPerItem * 1000;
+      s.arcadeEndsAt = now + play.items.length * play.secondsPerItem * 1000;
+      this.#armItemTimer();
+      this.#botsAnswerItem();
+    } else {
+      play.light = "plan";
+      play.lightChangedAt = now;
+      // The first light gets a duration here for the same reason the server
+      // does it: the engine has no randomness, so the boundary draws it.
+      play.nextChangeAt = now + this.#lightMs();
+      s.arcadeEndsAt = now + play.seconds * 1000;
+      this.#armLightTimer();
+      this.#startBotTaps();
+    }
+    this.#armFloorTimer();
+  }
+
+  #lightMs(): number {
+    return LIGHT_MIN_MS + Math.floor(Math.random() * (LIGHT_MAX_MS - LIGHT_MIN_MS + 1));
+  }
+
+  #armLightTimer(): void {
+    const s = this.session;
+    const play = s.arcadePlay;
+    if (this.#lightTimer !== null) clearTimeout(this.#lightTimer);
+    this.#lightTimer = null;
+    if (s.arcadePhase !== "running" || play?.kind !== "plan_apply") return;
+    const at = play.nextChangeAt;
+    this.#lightTimer = setTimeout(
+      () => {
+        this.#lightTimer = null;
+        const p = s.arcadePlay;
+        if (s.arcadePhase !== "running" || p?.kind !== "plan_apply") return;
+        if (p.nextChangeAt !== at) return;
+        p.light = p.light === "plan" ? "apply" : "plan";
+        p.lightChangedAt = this.#now();
+        p.nextChangeAt = p.lightChangedAt + this.#lightMs();
+        this.#armLightTimer();
+        this.#broadcastState();
+      },
+      Math.max(0, at - this.#now()),
+    );
+  }
+
+  #armItemTimer(): void {
+    const s = this.session;
+    const play = s.arcadePlay;
+    if (this.#itemTimer !== null) clearTimeout(this.#itemTimer);
+    this.#itemTimer = null;
+    if (s.arcadePhase !== "running" || play?.kind !== "recruitment") return;
+    const at = play.itemEndsAt;
+    const item = play.at;
+    this.#itemTimer = setTimeout(
+      () => {
+        this.#itemTimer = null;
+        const p = s.arcadePlay;
+        if (s.arcadePhase !== "running" || p?.kind !== "recruitment") return;
+        if (p.at !== item || p.itemEndsAt !== at) return;
+        if (p.at + 1 >= p.items.length) this.#endRound();
+        else this.#nextItem();
+        this.#broadcastState();
+      },
+      Math.max(0, at - this.#now()),
+    );
+  }
+
+  #armFloorTimer(): void {
+    const s = this.session;
+    if (this.#floorTimer !== null) clearTimeout(this.#floorTimer);
+    this.#floorTimer = null;
+    if (s.arcadePhase !== "running" || s.arcadeEndsAt === null) return;
+    const at = s.arcadeEndsAt;
+    this.#floorTimer = setTimeout(
+      () => {
+        this.#floorTimer = null;
+        if (s.arcadePhase !== "running" || s.arcadeEndsAt !== at) return;
+        this.#endRound();
+        this.#broadcastState();
+      },
+      Math.max(0, at - this.#now()),
+    );
+  }
+
+  #nextItem(): void {
+    const play = this.session.arcadePlay;
+    if (play?.kind !== "recruitment") return;
+    play.at += 1;
+    play.itemEndsAt = this.#now() + play.secondsPerItem * 1000;
+    // Both are per item: a fresh three, and everybody may answer again.
+    play.solvedOrder = [];
+    play.answered = {};
+    this.#armItemTimer();
+    this.#botsAnswerItem();
+  }
+
+  /**
+   * Settle and stop. The Lounge is paid here — SPEC.md's "backed runner
+   * crosses +10, backed runner wins +15" — and the totals take the banked
+   * points, which a drain never touched.
+   */
+  #endRound(): void {
+    const s = this.session;
+    const play = s.arcadePlay;
+    this.#clearArcadeTimers();
+    if (play?.kind === "plan_apply") {
+      const winner = play.finishOrder[0];
+      for (const [pid, seat] of Object.entries(s.arcadeLounge)) {
+        if (seat.backing === null) continue;
+        if (play.finishOrder.includes(seat.backing)) s.bank(pid, 10);
+        if (seat.backing === winner) s.bank(pid, 15);
+      }
+    }
+    for (const p of s.participants) {
+      const banked = s.arcadeBanked[p.pid] ?? 0;
+      s.arcadeTotals[p.pid] = (s.arcadeTotals[p.pid] ?? 0) + banked;
+    }
+    s.arcadePhase = "idle";
+    s.arcadeEndsAt = null;
+    s.arcadeRoundIndex += 1;
+  }
+
+  #clearArcadeTimers(): void {
+    for (const t of [this.#lightTimer, this.#itemTimer, this.#floorTimer]) {
+      if (t !== null) clearTimeout(t);
+    }
+    this.#lightTimer = null;
+    this.#itemTimer = null;
+    this.#floorTimer = null;
+    if (this.#botTapTimer !== null) clearInterval(this.#botTapTimer);
+    this.#botTapTimer = null;
+  }
+
+  /* ---- arcade: client frames ---- */
+
+  #arcadeAnswer(conn: MockConn, cid: string, item: number, answer: string): void {
+    const s = this.session;
+    const pid = conn.pid;
+    const refuse = (code: string, message: string): void => {
+      this.#send(conn, { t: "refusedCmd", cid, code, message });
+    };
+    if (conn.role !== "participant" || pid === null) {
+      return refuse("forbidden", "Only a participant plays the arcade.");
+    }
+    const play = s.arcadePlay;
+    if (s.arcadePhase !== "running" || play?.kind !== "recruitment") {
+      return refuse("wrong_round_phase", "Nothing to answer.");
+    }
+    if (item !== play.at) return refuse("wrong_round_phase", "That one has moved on.");
+    if (pid in play.answered) return refuse("already_answered_item", "You are locked in.");
+    this.#recordItemAnswer(pid, answer);
+    this.#send(conn, { t: "ack", cid, applied: true });
+    // Addressed, not broadcast: the item is open for twenty seconds and the
+    // rest of the room is still typing.
+    this.#sendStateTo((c) => c.role !== "participant" || c.pid === pid);
+  }
+
+  #recordItemAnswer(pid: string, answer: string): void {
+    const s = this.session;
+    const play = s.arcadePlay;
+    if (play?.kind !== "recruitment" || pid in play.answered) return;
+    const item = play.items[play.at];
+    if (!item) return;
+    const folded = mockFold(answer);
+    const correct =
+      folded !== "" &&
+      this.#now() <= play.itemEndsAt &&
+      (folded === mockFold(item.answer) ||
+        item.accept.some((a) => mockFold(a) === folded));
+    play.answered[pid] = correct;
+    if (!correct) return;
+    // 10, plus 5 for each of the first three correct *in the room*, per item.
+    s.bank(pid, 10 + (play.solvedOrder.length < 3 ? 5 : 0));
+    play.solvedOrder.push(pid);
+  }
+
+  /**
+   * One tap, judged against the light at the instant it happened.
+   *
+   * The grace is one-directional: a tap inside 250 ms of the lock is pulled
+   * back to the last instant of the PLAN before it, and nothing is ever
+   * pushed the other way. Subtracting it unconditionally would slide a
+   * legitimate tap at the start of a PLAN back into the APPLY before it.
+   */
+  #tapInstant(receivedAt: number, play: MockPlanPlay): number {
+    if (play.light !== "apply") return receivedAt;
+    const since = play.lightChangedAt;
+    if (receivedAt >= since && receivedAt - since < LOCK_GRACE_MS) return since - 1;
+    return receivedAt;
+  }
+
+  #arcadeTap(conn: MockConn, cid: string, round: number): void {
+    const s = this.session;
+    const pid = conn.pid;
+    const refuse = (code: string, message: string): void => {
+      this.#send(conn, { t: "refusedCmd", cid, code, message });
+    };
+    if (conn.role !== "participant" || pid === null) {
+      return refuse("forbidden", "Only a participant plays the arcade.");
+    }
+    if (!s.arcadeOn) return refuse("not_in_arcade", "The arcade is not open.");
+    if (round !== s.arcadeRoundIndex) {
+      return refuse("wrong_round_phase", "That round has moved on.");
+    }
+    const play = s.arcadePlay;
+    if (s.arcadePhase !== "running" || play?.kind !== "plan_apply") {
+      return refuse("wrong_round_phase", "Nothing to tap.");
+    }
+    if (s.arcadeStanding[pid] !== "floor") {
+      return refuse("not_on_the_floor", "You are in the Lounge. Back a player.");
+    }
+    this.#recordTap(pid, this.#tapInstant(this.#now(), play));
+    this.#send(conn, { t: "ack", cid, applied: true });
+    this.#sendStateTo((c) => c.role !== "participant" || c.pid === pid);
+  }
+
+  #recordTap(pid: string, at: number): void {
+    const s = this.session;
+    const play = s.arcadePlay;
+    if (play?.kind !== "plan_apply") return;
+    if (play.finishOrder.includes(pid)) return;
+    if (play.light === "apply" && at >= play.lightChangedAt) {
+      // `Error: state lock held by another process`. Drained, not out.
+      s.drain(pid, this.#now());
+      return;
+    }
+    const from = play.resources[pid] ?? 0;
+    const to = from + 1;
+    play.resources[pid] = to;
+    for (const c of mockCheckpoints(play.target)) {
+      if (from < c && to >= c) s.bank(pid, 5);
+    }
+    if (to >= play.target) {
+      s.bank(pid, 10 + ([15, 10, 5][play.finishOrder.length] ?? 0));
+      play.finishOrder.push(pid);
+    }
+  }
+
+  #arcadeBack(conn: MockConn, cid: string, backing: string): void {
+    const s = this.session;
+    const pid = conn.pid;
+    const refuse = (code: string, message: string): void => {
+      this.#send(conn, { t: "refusedCmd", cid, code, message });
+    };
+    if (conn.role !== "participant" || pid === null) {
+      return refuse("forbidden", "Only a participant plays the arcade.");
+    }
+    const seat = s.arcadeLounge[pid];
+    if (!seat) return refuse("not_in_the_lounge", "You are on the Floor.");
+    if (backing === pid) return refuse("cannot_back_yourself", "Back somebody else.");
+    if (s.arcadeStanding[backing] !== "floor") {
+      return refuse("cannot_back_a_drained_player", "They are in the Lounge too.");
+    }
+    if (s.arcadePhase !== "running") {
+      return refuse("floor_locked", "The Floor has closed.");
+    }
+    seat.backing = backing;
+    this.#send(conn, { t: "ack", cid, applied: true });
+    this.#broadcastState();
+  }
+
+  /* ---- arcade: the bots ---- */
+
+  #botsAnswerItem(): void {
+    const s = this.session;
+    const play = s.arcadePlay;
+    if (play?.kind !== "recruitment") return;
+    const item = play.items[play.at];
+    if (!item) return;
+    const at = play.at;
+    s.participants
+      .filter((p) => p.bot)
+      .forEach((p, i) => {
+        if (i % 6 === 4) return; // somebody always misses one
+        const typed = (i + at) % 5 === 0 ? "nomadd" : item.answer;
+        this.#later(
+          () => {
+            const now = s.arcadePlay;
+            if (now?.kind !== "recruitment" || now.at !== at) return;
+            if (s.arcadePhase !== "running") return;
+            this.#recordItemAnswer(p.pid, typed);
+            this.#sendStateTo((c) => c.role !== "participant" || c.pid === p.pid);
+          },
+          (500 + i * 260 + Math.random() * 900) / this.#cfg.speed,
+        );
+      });
+  }
+
+  /**
+   * The bots tap. Most watch the light; a few of them do not, which is what
+   * fills the Lounge — and the Lounge is the point of the round. A drained
+   * bot then backs somebody, so the big screen has backing to show.
+   */
+  #startBotTaps(): void {
+    const s = this.session;
+    if (this.#botTapTimer !== null) clearInterval(this.#botTapTimer);
+    this.#botTapTimer = setInterval(() => {
+      const play = s.arcadePlay;
+      if (s.arcadePhase !== "running" || play?.kind !== "plan_apply") return;
+      let moved = false;
+      s.participants.forEach((p, i) => {
+        if (!p.bot) return;
+        if (s.arcadeStanding[p.pid] === "drained") {
+          const seat = s.arcadeLounge[p.pid];
+          if (seat && seat.backing === null) {
+            const floor = s.participants.filter(
+              (x) => s.arcadeStanding[x.pid] === "floor",
+            );
+            const pick = floor[Math.floor(Math.random() * floor.length)];
+            if (pick) {
+              seat.backing = pick.pid;
+              moved = true;
+            }
+          }
+          return;
+        }
+        // One bot in seven is not watching the light at all.
+        const careless = i % 7 === 2;
+        if (play.light === "apply" && !careless) return;
+        const taps = 1 + Math.floor(Math.random() * 3);
+        for (let n = 0; n < taps; n += 1) this.#recordTap(p.pid, this.#now());
+        moved = true;
+      });
+      if (moved) this.#broadcastState();
+    }, 220 / this.#cfg.speed);
   }
 
   #sendStateTo(want: (conn: MockConn) => boolean): void {
@@ -1439,12 +2207,75 @@ class MockHub {
       }
     }
 
+
+    /**
+     * The arcade: round 0 Recruitment, then round 1 Plan / Apply.
+     *
+     * Both run at demo pace rather than SPEC.md's — four seconds an item
+     * instead of twenty, twenty-two seconds of Floor instead of seventy-five
+     * — because the point of the loop is to watch every screen change, not to
+     * play the game. The light durations are the real 2–6 s, since those are
+     * what the wipe and the haptic are timed against.
+     */
     this.#at(70, () => {
+      this.session.segment = "arcade";
+      this.session.arcadeOn = true;
+      this.session.assignArcadeNumbers();
+      this.session.resetFloor();
+      this.#broadcastState();
+    });
+    this.#at(72, () => {
+      this.#startRound({
+        name: "arcade.round",
+        kind: "recruitment",
+        secondsPerItem: 4,
+      });
+      this.#broadcastState();
+    });
+    this.#at(75, () => {
+      this.#beginPlay();
+      this.#broadcastState();
+    });
+    // Six items at four seconds each; the item timer walks them and ends the
+    // round on its own, exactly as the server's does.
+    this.#at(100, () => {
+      if (this.session.arcadePhase !== "idle") return;
+      this.session.arcadePhase = "reveal";
+      this.#broadcastState();
+    });
+
+    this.#at(106, () => {
+      this.#startRound({
+        name: "arcade.round",
+        kind: "plan_apply",
+        // A target the bots can actually reach inside the demo Floor, so the
+        // finish order and the Lounge's payout are both worth watching.
+        target: 60,
+        seconds: 22,
+      });
+      this.#broadcastState();
+    });
+    this.#at(109, () => {
+      this.#beginPlay();
+      this.#broadcastState();
+    });
+    this.#at(133, () => {
+      if (this.session.arcadePhase !== "idle") return;
+      this.session.arcadePhase = "reveal";
+      for (const p of this.session.participants) {
+        if (p.status["arcade"] === "bench") continue;
+        p.raw["arcade"] = this.session.arcadeTotals[p.pid] ?? 0;
+        p.status["arcade"] = "played";
+      }
+      this.#broadcastState();
+    });
+
+    this.#at(140, () => {
       this.session.segment = "standings";
       this.#broadcastState();
     });
 
-    this.#at(72, () => {
+    this.#at(142, () => {
       const p = this.session.participants[4];
       if (!p) return;
       const spot = this.session.grantSpot(
@@ -1456,12 +2287,12 @@ class MockHub {
       this.#toast("spot", `Spot Award — ${p.nickname} — ${spot.reason}`);
     });
 
-    this.#at(74, () => {
+    this.#at(144, () => {
       this.session.seal = "sealed";
       this.#broadcastState();
     });
 
-    this.#at(86, () => {
+    this.#at(156, () => {
       this.session.seal = "revealed";
       this.session.segment = "final";
       this.#broadcastState();
@@ -1469,7 +2300,8 @@ class MockHub {
 
     // Long enough for the big screen's final reveal to actually finish: four
     // four-second dwells, then the hold on the empty first slot.
-    this.#at(122, () => {
+    this.#at(192, () => {
+      this.#clearArcadeTimers();
       this.session.reset();
       this.#directorStarted = false;
       this.#broadcastState();

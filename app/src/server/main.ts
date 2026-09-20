@@ -30,6 +30,7 @@ import { Persister } from "./persist.ts";
 import { openStore } from "./store/index.ts";
 import type { StoredEvent } from "./store/types.ts";
 import { recoverSessions, rehydrate } from "./recovery.ts";
+import { recruitmentRound } from "../arcade/recruitment.ts";
 import { formatErrors, importTriviaCsv } from "../trivia/import.ts";
 import {
   eventsJsonl,
@@ -55,8 +56,23 @@ const registry = new SessionRegistry(persister);
 /* Static client                                                       */
 /* ------------------------------------------------------------------ */
 
-const CLIENT_ROOT = resolve(
-  process.env["QUORUM_CLIENT_ROOT"] ?? new URL("../../dist/client", import.meta.url).pathname,
+/**
+ * The emitted module tree, which is `dist/` and not `dist/client/`.
+ *
+ * `tsc` keeps its output laid out like `src/`, so a client file importing
+ * anything outside `src/client/` — the arcade's question content, the engine's
+ * pure helpers, `protocol.ts` — is emitted as a sibling of `dist/client`, and
+ * the browser asks for it at `/arcade/…`, `/engine/…`, `/protocol.js`. Serving
+ * only `/client/*` meant those requests 404'd, the module graph failed to
+ * load, and **every** surface rendered a blank page. Nothing in the server
+ * threw and no test noticed, because the failure is in the browser's loader.
+ *
+ * `dist/` holds only browser-bound emitted modules — the server itself runs
+ * from `src/` under --experimental-strip-types and is never in here — and the
+ * extension allow-list below is what keeps it that way if that ever changes.
+ */
+const ASSET_ROOT = resolve(
+  process.env["QUORUM_CLIENT_ROOT"] ?? new URL("../../dist", import.meta.url).pathname,
 );
 
 const MIME: Record<string, string> = {
@@ -72,8 +88,8 @@ const MIME: Record<string, string> = {
 async function serveFile(res: ServerResponse, rel: string): Promise<boolean> {
   // normalize + prefix check: a path like /client/../../etc/passwd must not
   // escape the client root, and `..` is the whole of that attack.
-  const abs = resolve(join(CLIENT_ROOT, normalize(rel)));
-  if (abs !== CLIENT_ROOT && !abs.startsWith(CLIENT_ROOT + "/")) return false;
+  const abs = resolve(join(ASSET_ROOT, normalize(rel)));
+  if (abs !== ASSET_ROOT && !abs.startsWith(ASSET_ROOT + "/")) return false;
   try {
     const info = await stat(abs);
     if (!info.isFile()) return false;
@@ -407,13 +423,14 @@ function handleHttp(req: IncomingMessage, res: ServerResponse): void {
   // The three client shells. /j/:code serves the same page as / — the client
   // reads the code off the path, so a QR can point straight at a session.
   if (req.method === "GET") {
+    // Relative to `dist/`, so these carry the `client/` segment themselves.
     const shell =
       path === "/" || path.startsWith("/j/")
-        ? "participant/index.html"
+        ? "client/participant/index.html"
         : path === "/host"
-          ? "host/index.html"
+          ? "client/host/index.html"
           : path === "/screen"
-            ? "screen/index.html"
+            ? "client/screen/index.html"
             : null;
     if (shell) {
       void serveFile(res, shell).then((ok) => {
@@ -421,8 +438,11 @@ function handleHttp(req: IncomingMessage, res: ServerResponse): void {
       });
       return;
     }
-    if (path.startsWith("/client/")) {
-      void serveFile(res, path.slice("/client/".length)).then((ok) => {
+    // Any emitted module, by its own path, not just `/client/*`. The
+    // extension has to be one we deliberately serve: that is what stops this
+    // from becoming "serve anything that happens to be under dist".
+    if (/\.(js|css|map|svg|png|woff2)$/.test(path)) {
+      void serveFile(res, path.slice(1)).then((ok) => {
         if (!ok) json(res, 404, { error: "not_found" });
       });
       return;
@@ -594,6 +614,39 @@ wss.on("connection", (socket: WebSocket, req: IncomingMessage) => {
         }
         return;
       }
+      case "arcade.answer":
+      case "arcade.tap":
+      case "arcade.back": {
+        if (client.role !== "participant") {
+          runtime.send(client, {
+            t: "refusedCmd",
+            cid: msg.cid,
+            code: "forbidden",
+            message: "Only a participant plays the arcade.",
+          });
+          return;
+        }
+        // `now` is the timestamp taken at the top of this handler, before any
+        // work. For a tap that is the whole game: it is measured from when
+        // the frame arrived, not from when the server got round to it.
+        const out =
+          msg.t === "arcade.tap"
+            ? runtime.tap(client, msg.round, now)
+            : msg.t === "arcade.answer"
+              ? runtime.submitAnswer(client, msg.item, msg.answer, now)
+              : runtime.back(client, msg.pid, now);
+        if (out.rejection) {
+          runtime.send(client, {
+            t: "refusedCmd",
+            cid: msg.cid,
+            code: out.rejection.code,
+            message: out.rejection.message,
+          });
+        } else {
+          runtime.send(client, { t: "ack", cid: msg.cid, applied: out.applied });
+        }
+        return;
+      }
       case "host.cmd": {
         if (client.role !== "host") {
           runtime.send(client, {
@@ -604,7 +657,7 @@ wss.on("connection", (socket: WebSocket, req: IncomingMessage) => {
           });
           return;
         }
-        const event = msg.cmd ? commandToEvent(msg.cmd) : null;
+        const event = msg.cmd ? commandToEvent(msg.cmd, runtime) : null;
         if (!event) {
           runtime.send(client, {
             t: "refusedCmd",
@@ -617,7 +670,10 @@ wss.on("connection", (socket: WebSocket, req: IncomingMessage) => {
         const out = runtime.apply(event, now);
         // A question has just gone up. Take a fresh round trip off every
         // phone while nobody is tapping yet; see probeParticipants.
-        if (out.applied && msg.cmd?.name === "trivia.open") {
+        if (
+          out.applied &&
+          (msg.cmd?.name === "trivia.open" || msg.cmd?.name === "arcade.begin")
+        ) {
           probeParticipants(runtime, now);
         }
         // Kicking or releasing has to reach the device, not just the state:
@@ -769,7 +825,18 @@ function cmd_pid(cmd: HostCommand | null): string | null {
     : null;
 }
 
-function commandToEvent(cmd: HostCommand): Event | null {
+/**
+ * Which activity the arcade scores into. The session's own arcade activity if
+ * it has one, and the id `arcade` otherwise — the same fallback the trivia
+ * upload uses, so a session with a renamed activity list still works.
+ */
+function arcadeActivityId(runtime: SessionRuntime): string {
+  return (
+    runtime.state.activities.find((a) => a.kind === "arcade")?.id ?? "arcade"
+  );
+}
+
+function commandToEvent(cmd: HostCommand, runtime: SessionRuntime): Event | null {
   switch (cmd.name) {
     case "open":
       return { type: "open" };
@@ -823,6 +890,38 @@ function commandToEvent(cmd: HostCommand): Event | null {
       return { type: "revealQuestion" };
     case "trivia.next":
       return { type: "nextQuestion" };
+    case "arcade.enter":
+      return { type: "enterArcade", activityId: arcadeActivityId(runtime) };
+    case "arcade.round":
+      // The content is attached here, not carried on the command: see
+      // arcade-content.ts. A console cannot choose what the answers are, and
+      // the answers never travel towards a browser that is not the host's.
+      return cmd.kind === "recruitment"
+        ? {
+            type: "startRound",
+            round: "recruitment",
+            // The items come from src/arcade/, which is where the content
+            // lives; what this boundary decides is only that they are
+            // attached here and never travel on a command from a browser.
+            config: recruitmentRound(undefined, cmd.secondsPerItem),
+          }
+        : {
+            type: "startRound",
+            round: "plan_apply",
+            config: {
+              kind: "plan_apply",
+              target: cmd.target,
+              seconds: cmd.seconds,
+            },
+          };
+    case "arcade.begin":
+      return { type: "beginPlay" };
+    case "arcade.next":
+      return { type: "nextItem" };
+    case "arcade.end":
+      return { type: "endRound" };
+    case "arcade.reveal":
+      return { type: "revealRound" };
     default:
       return null;
   }
@@ -886,6 +985,9 @@ async function shutdown(signal: string): Promise<void> {
     // `closesAt` it always had. The next process re-arms from it; this one
     // must not fire a `closeQuestion` it will never get to persist.
     r.clearQuestionTimer();
+    // And the arcade's, for the same reason: a light this process turns and
+    // never gets to persist is a light the next one disagrees about.
+    r.clearArcadeTimers();
   }
   await Promise.race([persister.drain(), new Promise((r) => setTimeout(r, 10_000))]);
   for (const r of registry.all()) {

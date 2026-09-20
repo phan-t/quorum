@@ -96,6 +96,7 @@ function build(b: Build): SessionState {
     spots,
     holding: null,
     trivia: null,
+    arcade: null,
     joinsLocked: false,
     seq: 0,
     nextPlayerNumber: b.participants.length + 1,

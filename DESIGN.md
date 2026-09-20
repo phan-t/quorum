@@ -395,7 +395,7 @@ Every round has a single interaction and the phone shows only that:
 | Round | The phone is… |
 | --- | --- |
 | Recruitment | Emoji at 96 px, one text field, one button. Keyboard up by default |
-| Plan / Apply | One full-screen button. Green with `APPLY` and your count; pink with `LOCKED` and nothing to tap. Haptic on the turn. A thin progress bar with three checkpoint ticks at the top |
+| Plan / Apply | One full-screen button. Green with `+1 RESOURCE` and your count; pink with `LOCKED` and nothing to tap. Haptic on the turn. A thin progress bar with three checkpoint ticks at the top. **Not `APPLY` on the green button** — the pink sign reads APPLY IN PROGRESS, and one word cannot mean both "press me" and "do not press me" on a phone at arm's length under a timer |
 | Unseal | Shape picker (four large tiles), then a grid of scrambled letters as ≥ 56 px tiles, the solved letters filling in a row above. **Read the docs** is a small mono link, deliberately un-button-like, at the bottom |
 | Tug of Raft | A pulsing ring at 100 bpm, the whole lower half is the tap target, a strip showing your side's colour and the rope position |
 | Gganbu | Prompt in body type, `OVER` / `UNDER` as two tall tiles, a 1–5 wager stepper under them, your rival's name and tokens as a mono line at the top |

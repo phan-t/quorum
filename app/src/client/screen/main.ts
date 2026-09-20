@@ -13,6 +13,7 @@
 
 import type {
   ActivitySummary,
+  ArcadeView,
   RenderState,
   StandingRow,
   TriviaView,
@@ -21,14 +22,23 @@ import { h, qs, replace, setAttr, setClass, setText } from "../shared/dom.ts";
 import { QuorumClient } from "../shared/net.ts";
 import { mockBadge, mockTransport, readMockConfig } from "../shared/mock.ts";
 import {
+  ARCADE_ROUND_CARD,
+  ARCADE_ROUND_LABEL,
+  HOUSE,
+  LIGHT_FACE,
+  STAFF_CARD,
+  STATE_LOCK_ERROR,
   activityHue,
   answerTiles,
   formatCountdown,
+  gridEntries,
+  playerName,
   questionLabel,
   remainingMs,
   resolveView,
   stackedBar,
   timerFraction,
+  wipeFraction,
   type ViewKind,
 } from "../shared/view.ts";
 import { drawQr, encodeQr } from "../shared/qr.ts";
@@ -129,7 +139,7 @@ function build(k: ViewKind): Scene {
     case "trivia":
       return sceneTrivia();
     case "arcade":
-      return sceneCard("Hashi Arcade", "Coming up.");
+      return sceneArcade();
   }
 }
 
@@ -427,6 +437,336 @@ function sceneTrivia(): Scene {
     stop() {
       if (ticker !== null) clearInterval(ticker);
       ticker = null;
+    },
+  };
+}
+
+
+/* ------------------------------------------------------------------ */
+/* Hashi Arcade                                                        */
+/* ------------------------------------------------------------------ */
+
+const ARCADE_TICK_MS = 60;
+
+/**
+ * The doll: a twelve-foot Terraform logo.
+ *
+ * The mark, drawn rather than fetched, so it survives with no network and no
+ * font. DESIGN.md rules out figures, silhouettes and anything else from the
+ * show; a product logo on a stand is the joke, and it is the only version of
+ * the doll that is funny rather than grim.
+ *
+ * Its "head" turning is a rotation about the vertical axis, which reads as a
+ * turn at any size. The wipe across the screen is the real warning; this is
+ * the thing the room watches while the wipe happens.
+ */
+function doll(): SVGSVGElement {
+  const ns = "http://www.w3.org/2000/svg";
+  const svg = document.createElementNS(ns, "svg");
+  svg.setAttribute("viewBox", "0 0 128 148");
+  svg.setAttribute("class", "s-doll");
+  svg.setAttribute("aria-hidden", "true");
+  // The Terraform mark: four parallelograms, two stacked and two beside them.
+  const bars: [number, number, number][] = [
+    [8, 26, 1],
+    [48, 26, 1],
+    [48, 74, 1],
+    [88, 50, 1],
+  ];
+  for (const [x, y] of bars) {
+    const path = document.createElementNS(ns, "path");
+    path.setAttribute(
+      "d",
+      `M${x} ${y} l32 18 v40 l-32 -18 z`,
+    );
+    path.setAttribute("fill", "currentColor");
+    svg.appendChild(path);
+  }
+  return svg;
+}
+
+/**
+ * The arcade on the big screen.
+ *
+ * The grid is the centrepiece: sixty three-digit numbers, green on the Floor,
+ * gold in the Lounge, grey away, with a thin pink strike on anyone drained
+ * this round. DESIGN.md calls it the dormitory, and it is the arcade's
+ * scoreboard, roster and mood in one.
+ *
+ * Plan / Apply takes the screen over entirely, because in that round the
+ * screen *is* the light.
+ */
+function sceneArcade(): Scene {
+  const kicker = h("p", { class: "s-kicker label" });
+  const title = h("h1", { class: "display s-title" });
+  const cardLines = h("div", { class: "s-arc-card" });
+  const stair = h("div", { class: "s-stair", attrs: { "aria-hidden": "true" } });
+
+  /* the grid */
+  const grid = h("div", { class: "s-grid", role: "list" });
+  const counts = h("p", { class: "mono s-grid-counts" });
+
+  /* recruitment */
+  const cue = h("p", { class: "s-arc-cue", attrs: { "aria-hidden": "true" } });
+  const recruitCount = h("p", { class: "mono s-arc-count" });
+  const recap = h("ol", { class: "s-recap", attrs: { hidden: true } });
+
+  /* plan / apply */
+  const sign = h("h2", { class: "display s-sign" });
+  const signGlyph = h("span", { class: "s-sign-glyph", attrs: { "aria-hidden": "true" } });
+  const dollWrap = h("div", { class: "s-doll-wrap" }, [doll()]);
+  const wipe = h("div", { class: "s-wipe", attrs: { "aria-hidden": "true" } });
+  const crossed = h("p", { class: "mono s-crossed" });
+  const light = h("section", { class: "s-light", attrs: { hidden: true } }, [
+    wipe,
+    dollWrap,
+    h("div", { class: "s-sign-row" }, [signGlyph, sign]),
+    crossed,
+  ]);
+
+  /* the drain, verbatim */
+  const drainLog = h("div", { class: "s-drain-log", attrs: { hidden: true } });
+
+  const main = h("div", { class: "s-arc-main" }, [
+    cue,
+    recruitCount,
+    cardLines,
+    recap,
+  ]);
+
+  const node = h("section", { class: "s-stage s-arcade" }, [
+    stair,
+    h("div", { class: "s-arc-head" }, [kicker, title]),
+    main,
+    grid,
+    counts,
+    light,
+    // After the light, deliberately: in Plan / Apply the screen *is* the
+    // light and covers everything, and a drain during that round is exactly
+    // when the error has to be readable. So it sits on top of it.
+    drainLog,
+  ]);
+
+  let ticker: ReturnType<typeof setInterval> | null = null;
+  let lastState: RenderState | null = null;
+  let struck = new Set<string>();
+  let drainTimer: ReturnType<typeof setTimeout> | null = null;
+
+  const paintGrid = (state: RenderState, arcade: ArcadeView): void => {
+    const entries = gridEntries(arcade, state.roster);
+    replace(
+      grid,
+      entries.map((e) =>
+        h(
+          "div",
+          {
+            class: "s-cell",
+            role: "listitem",
+            attrs: {
+              "data-standing": e.standing,
+              "data-away": e.away ? "yes" : "no",
+              "data-struck": e.struck ? "yes" : "no",
+              // The number is the label. DESIGN.md: the nickname is on the
+              // phone only, where the person it belongs to is the only reader.
+              "aria-label": `${playerName(e.playerNumber)}${
+                e.standing === "drained" ? ", in the Lounge" : ", on the Floor"
+              }${e.backers > 0 ? `, backed by ${e.backers}` : ""}`,
+            },
+          },
+          [
+            h("span", { class: "mono s-cell-num", text: e.tag }),
+            e.backers > 0
+              ? h("span", { class: "mono s-cell-backers", text: `×${e.backers}` })
+              : null,
+          ],
+        ),
+      ),
+    );
+    setText(counts, `${arcade.onFloor} on the Floor · ${arcade.inLounge} in the Lounge`);
+  };
+
+  /**
+   * A drain, verbatim, mono, red — the way it looks in a real terminal.
+   *
+   * SPEC.md asks for exactly that, and DESIGN.md bounds it: red is the show's
+   * blood and ours is `--miss` coral, used only in the error beat. So this is
+   * a short-lived line over the grid, not a state the screen sits in.
+   */
+  const paintDrains = (arcade: ArcadeView): void => {
+    const now = new Set(
+      arcade.grid.filter((c) => c.struck).map((c) => String(c.playerNumber)),
+    );
+    const fresh = [...now].filter((n) => !struck.has(n));
+    struck = now;
+    if (fresh.length === 0) return;
+    replace(drainLog, [
+      h("p", { class: "mono s-drain-error", text: STATE_LOCK_ERROR }),
+      ...fresh
+        .map(Number)
+        .sort((a, b) => a - b)
+        .slice(0, 6)
+        .map((n) => h("p", { class: "mono s-drain-who", text: HOUSE.drained(n) })),
+    ]);
+    drainLog.hidden = false;
+    if (drainTimer !== null) clearTimeout(drainTimer);
+    // Four seconds: DESIGN.md's dwell floor, because video latency means a
+    // thing that shows for two seconds was never seen.
+    drainTimer = setTimeout(() => {
+      drainLog.hidden = true;
+      drainTimer = null;
+    }, 4_000);
+  };
+
+  const paintLight = (arcade: ArcadeView): void => {
+    const pa = arcade.planApply;
+    if (!pa || arcade.phase !== "running") {
+      light.hidden = true;
+      return;
+    }
+    light.hidden = false;
+    const face = LIGHT_FACE[pa.light];
+    setText(sign, face.sign);
+    setText(signGlyph, face.glyph);
+    setAttr(light, "data-light", pa.light);
+    light.style.setProperty("--light", face.fill);
+    light.style.setProperty("--light-ink", face.on);
+    setText(crossed, `${pa.crossed ?? 0} of ${arcade.onFloor + arcade.inLounge} across`);
+
+    // The wipe. Driven off the absolute epochs the server sent, never off a
+    // duration measured from whenever this frame arrived — a screen that
+    // received the frame 300 ms late must still finish the wipe at the
+    // instant the lock actually lands.
+    const f = wipeFraction(pa, serverNow());
+    const turning = f !== null && f < 1;
+    wipe.style.width = f === null ? "0%" : `${f * 100}%`;
+    setClass(light, "is-turning", turning);
+    // The head starts to turn with the wipe, which is the 400 ms of warning
+    // the whole round depends on.
+    dollWrap.style.setProperty("--turn", `${(f ?? (pa.light === "apply" ? 1 : 0)) * 180}deg`);
+  };
+
+  const paint = (state: RenderState): void => {
+    const arcade = state.arcade;
+    if (arcade === undefined) {
+      setText(kicker, "Hashi Arcade");
+      setText(title, "The next game will begin shortly.");
+      replace(cardLines, []);
+      replace(grid, []);
+      setText(counts, "");
+      light.hidden = true;
+      recap.hidden = true;
+      stair.hidden = false;
+      return;
+    }
+
+    const roundLabel = arcade.round ? ARCADE_ROUND_LABEL[arcade.round] : "Hashi Arcade";
+    setText(kicker, roundLabel.toUpperCase());
+    paintGrid(state, arcade);
+    paintDrains(arcade);
+
+    if (arcade.phase === "card" || arcade.phase === "idle") {
+      stair.hidden = false;
+      // Between rounds the headline is always the next game, never a count of
+      // who is left — DESIGN.md is explicit that the grid says that, quietly.
+      const between = arcade.phase === "idle";
+      setText(title, between ? "" : roundLabel);
+      const lines = between
+        ? [HOUSE.roundEnd]
+        : arcade.round
+          ? ARCADE_ROUND_CARD[arcade.round]
+          : ARCADE_ROUND_CARD.recruitment;
+      replace(
+        cardLines,
+        [
+          ...lines.map((line) =>
+            h("p", { class: "mono s-house" }, [
+              h("span", { class: "s-prompt", attrs: { "aria-hidden": "true" }, text: ">" }),
+              h("span", { text: line }),
+            ]),
+          ),
+          // The mask card, once, before Game 1.
+          ...(!between && arcade.round === "plan_apply"
+            ? [
+                h(
+                  "p",
+                  { class: "mono s-staff" },
+                  STAFF_CARD.map((l) => h("span", { class: "s-staff-line", text: l })),
+                ),
+              ]
+            : []),
+        ],
+      );
+      setText(cue, "");
+      setText(recruitCount, "");
+      recap.hidden = true;
+      light.hidden = true;
+      return;
+    }
+
+    stair.hidden = true;
+    replace(cardLines, []);
+
+    if (arcade.round === "plan_apply") {
+      setText(title, "");
+      setText(cue, "");
+      setText(recruitCount, "");
+      recap.hidden = arcade.phase !== "reveal";
+      paintLight(arcade);
+      if (arcade.phase === "reveal") {
+        setText(title, HOUSE.roundEnd);
+      }
+      return;
+    }
+
+    light.hidden = true;
+    const r = arcade.recruitment;
+    if (!r) {
+      setText(title, roundLabel);
+      return;
+    }
+    if (arcade.phase === "reveal") {
+      // SPEC.md: "At the end, the big screen 'recruits' everyone: the grid
+      // fills with player numbers and the Front-End Man welcomes them." The
+      // grid is already up; this is the welcome.
+      setText(title, "Recruited.");
+      setText(cue, "");
+      setText(recruitCount, "");
+      recap.hidden = (r.recap ?? []).length === 0;
+      replace(
+        recap,
+        (r.recap ?? []).map((item) =>
+          h("li", { class: "s-recap-row" }, [
+            h("span", { class: "s-recap-cue", attrs: { "aria-hidden": "true" }, text: item.cue }),
+            h("span", { class: "display s-recap-answer", text: item.answer }),
+            h("span", { class: "s-recap-note", text: item.note }),
+          ]),
+        ),
+      );
+      return;
+    }
+    recap.hidden = true;
+    setText(title, "");
+    setText(cue, r.cue ?? "");
+    setText(recruitCount, `${r.answered ?? 0} of ${r.eligible ?? 0} answered`);
+  };
+
+  ticker = setInterval(() => {
+    // Only the wipe needs this, and only while a light round is running.
+    const a = lastState?.arcade;
+    if (a?.round === "plan_apply" && a.phase === "running") paintLight(a);
+  }, ARCADE_TICK_MS);
+
+  return {
+    node,
+    update(state) {
+      lastState = state;
+      paint(state);
+    },
+    stop() {
+      if (ticker !== null) clearInterval(ticker);
+      ticker = null;
+      if (drainTimer !== null) clearTimeout(drainTimer);
+      drainTimer = null;
     },
   };
 }

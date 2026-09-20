@@ -14,7 +14,9 @@ import {
   topFive,
   type Standing,
 } from "../engine/scoring.ts";
+import { checkpointsFor } from "../engine/arcade.ts";
 import type {
+  ArcadeState,
   ParticipantId,
   Question,
   SessionState,
@@ -22,6 +24,13 @@ import type {
 } from "../engine/types.ts";
 import type {
   ActivitySummary,
+  ArcadeCell,
+  ArcadeMine,
+  ArcadeMinePlanApply,
+  ArcadeMineRecruitment,
+  ArcadePlanApplyView,
+  ArcadeRecruitmentView,
+  ArcadeView,
   OwnPoints,
   RenderState,
   Role,
@@ -307,6 +316,254 @@ export function triviaMineFor(
   };
 }
 
+
+/* ------------------------------------------------------------------ */
+/* Hashi Arcade                                                        */
+/* ------------------------------------------------------------------ */
+
+/**
+ * How long before the lock the doll's head starts to turn.
+ *
+ * SPEC.md: "the big screen shows the head beginning to turn 400 ms before the
+ * lock". It lives here rather than in the client because it goes on the wire
+ * as an absolute epoch — see {@link arcadePlanApplyFor}.
+ */
+export const LIGHT_TELEGRAPH_MS = 400;
+
+/** Null until `enterArcade`. Named so the call sites read as a question. */
+export function arcadeStateOf(state: SessionState): ArcadeState | null {
+  return state.arcade;
+}
+
+/**
+ * The dormitory grid: every player number, in arcade order.
+ *
+ * The same filter as the roster — kicked and released people are not in the
+ * room — and sorted by the arcade number rather than by join order, because
+ * the grid is read as a grid and 007 sitting between 041 and 012 is not.
+ */
+export function arcadeGrid(state: SessionState, arcade: ArcadeState): ArcadeCell[] {
+  // A drain lasts exactly one round, so "drained" and "drained this round"
+  // are the same set while a round is up — and the strike has to come off
+  // when the next round's card does, which is what `struck` is watching for.
+  const live = arcade.phase === "running" || arcade.phase === "reveal";
+  const backers: Record<ParticipantId, number> = {};
+  for (const seat of Object.values(arcade.lounge)) {
+    if (seat.backing === null) continue;
+    backers[seat.backing] = (backers[seat.backing] ?? 0) + 1;
+  }
+  return Object.values(state.participants)
+    .filter((p) => !p.kicked && p.nicknameKey !== "")
+    .map((p) => {
+      const standing = arcade.standing[p.pid] ?? "floor";
+      return {
+        pid: p.pid,
+        // The arcade's own number, which is gapless; `playerNumber` is join
+        // order and has a hole in it for everyone who was ever kicked.
+        playerNumber: arcade.playerNumbers[p.pid] ?? p.playerNumber,
+        standing,
+        backers: backers[p.pid] ?? 0,
+        struck: live && standing === "drained",
+      };
+    })
+    .sort((a, b) => a.playerNumber - b.playerNumber);
+}
+
+/** Everyone who could be playing: the roster's filter, not the roster. */
+function arcadeEligible(state: SessionState): number {
+  return Object.values(state.participants).filter(
+    (p) => !p.kicked && p.nicknameKey !== "",
+  ).length;
+}
+
+function numbersOf(
+  arcade: ArcadeState,
+  state: SessionState,
+  pids: readonly ParticipantId[],
+): number[] {
+  return pids.map(
+    (pid) => arcade.playerNumbers[pid] ?? state.participants[pid]?.playerNumber ?? 0,
+  );
+}
+
+/**
+ * Recruitment, projected.
+ *
+ * `answer` is the entire game: the item is two emoji and a text field, so a
+ * phone that has been sent the word has won it. It is therefore sent to the
+ * host — who reads it out — and to everybody else at the reveal, and it is
+ * *omitted* in between rather than blanked, so the word is not in the bytes.
+ *
+ * The cue itself waits for the Floor to open. While the round card is up the
+ * room is looking at the card, and an emoji pair sitting in a phone's JSON
+ * twenty seconds early is twenty seconds of thinking time for one person.
+ */
+export function arcadeRecruitmentFor(
+  state: SessionState,
+  arcade: ArcadeState,
+  role: Role,
+): ArcadeRecruitmentView | undefined {
+  const play = arcade.play;
+  if (play?.kind !== "recruitment") return undefined;
+  const isHost = role === "host";
+  const open = arcade.phase === "running" || arcade.phase === "reveal";
+  const revealed = arcade.phase === "reveal";
+  const item = play.items[play.at];
+
+  const base: ArcadeRecruitmentView = {
+    at: play.at,
+    of: play.items.length,
+  };
+  const extra: {
+    cue?: string;
+    answer?: string;
+    note?: string;
+    recap?: readonly { cue: string; answer: string; note: string }[];
+    answered?: number;
+    eligible?: number;
+    solved?: number;
+    firstThree?: readonly number[];
+  } = {};
+
+  if (item && (isHost || open)) extra.cue = item.cue;
+  if (item && (isHost || revealed)) {
+    extra.answer = item.answer;
+    extra.note = item.note;
+  }
+  if (isHost || revealed) {
+    extra.recap = play.items.map((i) => ({
+      cue: i.cue,
+      answer: i.answer,
+      note: i.note,
+    }));
+  }
+  if (isHost || role === "screen") {
+    extra.answered = Object.keys(play.answered).length;
+    extra.eligible = arcadeEligible(state);
+    extra.solved = Object.values(play.answered).filter(Boolean).length;
+  }
+  // The first three correct, as player numbers, because that is how the
+  // announcer says it and the only other way to say it is a nickname in the
+  // one place DESIGN.md will not have one.
+  if (isHost || revealed) {
+    extra.firstThree = numbersOf(arcade, state, play.solvedOrder.slice(0, 3));
+  }
+  return { ...base, ...extra };
+}
+
+/**
+ * Plan / Apply, projected. This is the projection the round lives or dies on.
+ *
+ * `nextChangeAt` is when the light turns, and a phone holding it does not have
+ * to watch the screen, does not have to react, and cannot be caught: it can
+ * tap flat out and stop 401 ms early, every time. So it is absent from a
+ * participant's frame — absent, not null, so there is no key to forget to
+ * strip and nothing for devtools to read out to the room.
+ *
+ * `headTurnsAt` is the same instant minus 400 ms and is sent for the same
+ * reason the countdown is sent as `closesAt`: the big screen has to start the
+ * wipe at an instant, not after a duration it measured from whenever the
+ * frame happened to arrive. It exists only for a turn *into* the lock —
+ * going back to PLAN is not a warning, it is a relief.
+ *
+ * `lightChangedAt` *is* sent to the phone. It is the instant the phone is
+ * already looking at, it is what makes the haptic fire once rather than on
+ * every repaint, and it predicts nothing: the next duration is drawn fresh
+ * and uniformly between two and six seconds.
+ */
+export function arcadePlanApplyFor(
+  state: SessionState,
+  arcade: ArcadeState,
+  role: Role,
+): ArcadePlanApplyView | undefined {
+  const play = arcade.play;
+  if (play?.kind !== "plan_apply") return undefined;
+  const privileged = role === "host" || role === "screen";
+
+  const base: ArcadePlanApplyView = {
+    light: play.light,
+    lightChangedAt: play.lightChangedAt,
+    target: play.target,
+    checkpoints: checkpointsFor(play.target),
+  };
+  if (!privileged) return base;
+  return {
+    ...base,
+    nextChangeAt: play.nextChangeAt,
+    ...(play.light === "plan"
+      ? { headTurnsAt: play.nextChangeAt - LIGHT_TELEGRAPH_MS }
+      : {}),
+    crossed: play.finishOrder.length,
+    finishOrder: numbersOf(arcade, state, play.finishOrder),
+  };
+}
+
+export function arcadeViewFor(
+  state: SessionState,
+  arcade: ArcadeState,
+  role: Role,
+): ArcadeView {
+  const grid = arcadeGrid(state, arcade);
+  const recruitment = arcadeRecruitmentFor(state, arcade, role);
+  const planApply = arcadePlanApplyFor(state, arcade, role);
+  return {
+    activityId: arcade.activityId,
+    round: arcade.round,
+    roundIndex: arcade.roundIndex,
+    phase: arcade.phase,
+    startedAt: arcade.startedAt,
+    endsAt: arcade.endsAt,
+    grid,
+    onFloor: grid.filter((c) => c.standing === "floor").length,
+    inLounge: grid.filter((c) => c.standing === "drained").length,
+    ...(recruitment ? { recruitment } : {}),
+    ...(planApply ? { planApply } : {}),
+  };
+}
+
+/**
+ * The participant's own line: their number, where they are, what they have
+ * banked, and nothing about anybody else's score.
+ */
+export function arcadeMineFor(
+  state: SessionState,
+  arcade: ArcadeState,
+  pid: ParticipantId,
+): ArcadeMine {
+  const seat = arcade.lounge[pid];
+  const play = arcade.play;
+
+  let recruitment: ArcadeMineRecruitment | undefined;
+  if (play?.kind === "recruitment") {
+    const answered = play.answered[pid];
+    recruitment =
+      answered === undefined
+        ? { state: "unanswered" }
+        : { state: "locked", correct: answered };
+  }
+
+  let planApply: ArcadeMinePlanApply | undefined;
+  if (play?.kind === "plan_apply") {
+    const place = play.finishOrder.indexOf(pid);
+    planApply = {
+      resources: play.resources[pid] ?? 0,
+      ...(place === -1 ? {} : { place: place + 1 }),
+    };
+  }
+
+  return {
+    playerNumber:
+      arcade.playerNumbers[pid] ?? state.participants[pid]?.playerNumber ?? 0,
+    standing: arcade.standing[pid] ?? "floor",
+    banked: arcade.banked[pid] ?? 0,
+    total: arcade.totals[pid] ?? 0,
+    ...(seat?.backing ? { backing: seat.backing } : {}),
+    ...(seat ? { drainedAt: seat.at } : {}),
+    ...(recruitment ? { recruitment } : {}),
+    ...(planApply ? { planApply } : {}),
+  };
+}
+
 export function renderStateFor(
   state: SessionState,
   opts: ViewOptions,
@@ -350,6 +607,8 @@ export function renderStateFor(
 
   const trivia = triviaStateOf(state);
   const triviaView = trivia ? triviaViewFor(state, trivia, opts.role) : undefined;
+  const arcade = arcadeStateOf(state);
+  const arcadeView = arcade ? arcadeViewFor(state, arcade, opts.role) : undefined;
 
   const base: RenderState = {
     sid: state.sid,
@@ -363,6 +622,7 @@ export function renderStateFor(
     standings: visible,
     activities,
     ...(triviaView ? { trivia: triviaView } : {}),
+    ...(arcadeView ? { arcade: arcadeView } : {}),
   };
 
   if (opts.role === "screen") {
@@ -391,14 +651,44 @@ export function renderStateFor(
               },
             }
           : {}),
+        ...(arcade ? { arcade: hostArcade(arcade) } : {}),
       },
     };
   }
   const mine =
     trivia && opts.pid ? triviaMineFor(trivia, opts.pid) : undefined;
+  const arcadeMine =
+    arcade && opts.pid ? arcadeMineFor(state, arcade, opts.pid) : undefined;
   return {
     ...base,
     ...(own ? { own } : {}),
     ...(mine ? { triviaMine: mine } : {}),
+    ...(arcadeMine ? { arcadeMine } : {}),
+  };
+}
+
+/**
+ * The console's copy of the arcade: every number, for the one surface that is
+ * allowed all of them. The host settles the raw score at the end of the
+ * arcade, and a host who cannot see who banked what cannot do it.
+ */
+function hostArcade(arcade: ArcadeState): NonNullable<
+  NonNullable<RenderState["hostExtras"]>["arcade"]
+> {
+  const play = arcade.play;
+  const backing: Record<ParticipantId, ParticipantId> = {};
+  for (const [pid, seat] of Object.entries(arcade.lounge)) {
+    if (seat.backing !== null) backing[pid] = seat.backing;
+  }
+  return {
+    answeredBy:
+      play?.kind === "recruitment" ? Object.keys(play.answered) : [],
+    drained: Object.entries(arcade.standing)
+      .filter(([, st]) => st === "drained")
+      .map(([pid]) => pid),
+    backing,
+    banked: { ...arcade.banked },
+    totals: { ...arcade.totals },
+    resources: play?.kind === "plan_apply" ? { ...play.resources } : {},
   };
 }

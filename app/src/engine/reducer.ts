@@ -13,6 +13,8 @@
 import type {
   Activity,
   ActivityId,
+  ArcadePlay,
+  ArcadeStanding,
   Audience,
   Effect,
   Event,
@@ -26,6 +28,19 @@ import type {
   TriviaState,
 } from "./types.ts";
 import { spotsRemaining } from "./scoring.ts";
+import {
+  assignPlayerNumbers,
+  checkpointBank,
+  checkpointsFor,
+  finishBonus,
+  matchesItem,
+  PLAN_APPLY_CROSS,
+  RECRUITMENT_CORRECT,
+  RECRUITMENT_FIRST_BONUS,
+  RECRUITMENT_FIRST_PLACES,
+  rosterOrder,
+  settleRound,
+} from "./arcade.ts";
 import { clampMs, idleQuestion, isCorrect, settleQuestion,
   triviaHasBegun,
 } from "./trivia.ts";
@@ -105,6 +120,7 @@ export function newSession(input: NewSessionInput): SessionState {
     spots: [],
     holding: null,
     trivia: null,
+    arcade: null,
     joinsLocked: false,
     seq: 0,
     nextPlayerNumber: 1,
@@ -125,22 +141,27 @@ const BROADCAST_STANDINGS: Effect[] = [
 ];
 
 /**
- * Write the trivia totals into the session's per-activity scores.
+ * Write an activity's own totals into the session's per-activity scores.
  *
- * The trivia total *is* the raw score, stored exactly as `setScore` stores a
- * typed one — `{ raw, status: "played" }` — so the Phase 2 scoreboard
+ * An activity's total *is* its raw score, stored exactly as `setScore` stores
+ * a typed one — `{ raw, status: "played" }` — so the Phase 2 scoreboard
  * normalises it with no special case for where the number came from. That is
  * also why nothing here touches the normalisation: SCORING.md's one rule
- * applies to trivia because trivia hands it an ordinary raw.
+ * applies to trivia, and to the arcade, because both hand it an ordinary raw.
+ *
+ * Shared by trivia and the arcade deliberately. The bench rule below is the
+ * same statement about a person in both, and two copies of it would be one
+ * copy away from disagreeing.
  */
-function withTriviaScores(
+function withActivityTotals(
   state: SessionState,
-  trivia: TriviaState,
+  activityId: ActivityId,
+  totals: Readonly<Record<ParticipantId, number>>,
 ): SessionState["scores"] {
   const bucket: Record<ParticipantId, RawScore> = {
-    ...(state.scores[trivia.activityId] ?? {}),
+    ...(state.scores[activityId] ?? {}),
   };
-  for (const [pid, raw] of Object.entries(trivia.totals)) {
+  for (const [pid, raw] of Object.entries(totals)) {
     const prev = bucket[pid];
     // Bench credit is a statement about a person, not a score. A facilitator
     // who plays along from the bench must not be scored back onto the board —
@@ -149,7 +170,7 @@ function withTriviaScores(
     if (prev?.status === "played" && prev.raw === raw) continue;
     bucket[pid] = { raw, status: "played" };
   }
-  return { ...state.scores, [trivia.activityId]: bucket };
+  return { ...state.scores, [activityId]: bucket };
 }
 
 export function reduce(
@@ -871,7 +892,15 @@ export function reduce(
           ...state,
           trivia: revealed,
           // Deferred from `closeQuestion` on purpose — see the note there.
-          ...(trivia.suddenDeath ? {} : { scores: withTriviaScores(state, revealed) }),
+          ...(trivia.suddenDeath
+            ? {}
+            : {
+                scores: withActivityTotals(
+                  state,
+                  revealed.activityId,
+                  revealed.totals,
+                ),
+              }),
         },
         [
           BROADCAST_STATE,
@@ -914,6 +943,680 @@ export function reduce(
         BROADCAST_STATE,
         PERSIST,
       ]);
+    }
+
+    /* ---------------- arcade ---------------- */
+
+    case "enterArcade": {
+      const activity = state.activities.find((a) => a.id === event.activityId);
+      if (!activity) {
+        return unchanged(
+          reject("host", "unknown_activity", `No activity ${event.activityId}.`),
+        );
+      }
+      if (state.phase !== "running") {
+        return unchanged(
+          reject("host", "wrong_phase", "Start the session first."),
+        );
+      }
+      const arcade = state.arcade;
+      if (arcade && arcade.activityId !== event.activityId) {
+        return unchanged(
+          reject(
+            "host",
+            "wrong_phase",
+            `The arcade is already running for ${arcade.activityId}.`,
+          ),
+        );
+      }
+      const playerNumbers = assignPlayerNumbers(
+        state,
+        arcade?.playerNumbers ?? {},
+      );
+      // Re-entering is not an error: it is how the host hands a number to
+      // somebody who joined after the arcade started. Numbers already handed
+      // out never move — see assignPlayerNumbers().
+      if (arcade) {
+        if (
+          Object.keys(playerNumbers).length ===
+          Object.keys(arcade.playerNumbers).length
+        ) {
+          return unchanged();
+        }
+        return applied({ ...state, arcade: { ...arcade, playerNumbers } }, [
+          BROADCAST_STATE,
+          PERSIST,
+        ]);
+      }
+      return applied(
+        {
+          ...state,
+          arcade: {
+            activityId: event.activityId,
+            playerNumbers,
+            round: null,
+            roundIndex: 0,
+            phase: "idle",
+            standing: {},
+            lounge: {},
+            banked: {},
+            totals: {},
+            startedAt: null,
+            endsAt: null,
+            play: null,
+          },
+        },
+        [BROADCAST_STATE, PERSIST],
+      );
+    }
+
+    case "startRound": {
+      const arcade = state.arcade;
+      if (!arcade) {
+        return unchanged(
+          reject("host", "not_in_arcade", "Enter the arcade first."),
+        );
+      }
+      if (state.phase !== "running") {
+        return unchanged(
+          reject("host", "wrong_phase", "Start the session first."),
+        );
+      }
+      if (arcade.phase === "card" || arcade.phase === "running") {
+        return unchanged(
+          reject("host", "wrong_round_phase", "A round is already in play."),
+        );
+      }
+      // Two of the six rounds are built. The config union carries only those
+      // two, so a mismatch is both "that is the wrong config" and "that round
+      // does not exist yet" — the message says which.
+      if (event.config.kind !== event.round) {
+        const built = event.round === "recruitment" || event.round === "plan_apply";
+        return unchanged(
+          reject(
+            "host",
+            built ? "invalid_round_config" : "round_not_built",
+            built
+              ? `That configuration is for ${event.config.kind}, not ${event.round}.`
+              : `${event.round} is not built yet.`,
+          ),
+        );
+      }
+      const config = event.config;
+      if (config.kind === "recruitment") {
+        // An empty round can never be played and gives the host no error to
+        // read: the same reasoning as an empty trivia set.
+        if (config.items.length === 0) {
+          return unchanged(
+            reject("host", "wrong_phase", "That round has no items."),
+          );
+        }
+        if (!Number.isFinite(config.secondsPerItem) || config.secondsPerItem <= 0) {
+          return unchanged(
+            reject("host", "wrong_phase", "Each item needs a timer above zero."),
+          );
+        }
+      } else {
+        // A target of zero would have everybody across the line on their first
+        // tap, before the light had ever turned.
+        if (!Number.isInteger(config.target) || config.target <= 0) {
+          return unchanged(
+            reject("host", "wrong_phase", "The resource target must be a whole number above zero."),
+          );
+        }
+        if (!Number.isFinite(config.seconds) || config.seconds <= 0) {
+          return unchanged(
+            reject("host", "wrong_phase", "The round needs a length above zero."),
+          );
+        }
+      }
+
+      // Every round starts with everyone back on the Floor. SPEC.md is
+      // emphatic: cumulative elimination would spend the last five minutes
+      // with three people playing and thirty watching.
+      const standing: Record<ParticipantId, ArcadeStanding> = {};
+      for (const p of rosterOrder(state)) standing[p.pid] = "floor";
+
+      const play: ArcadePlay =
+        config.kind === "recruitment"
+          ? {
+              kind: "recruitment",
+              items: config.items,
+              at: 0,
+              secondsPerItem: config.secondsPerItem,
+              // The clocks start at `beginPlay`, not here: the round card is
+              // up for twenty seconds and nobody is playing against it.
+              itemEndsAt: 0,
+              solvedOrder: [],
+              answered: {},
+            }
+          : {
+              kind: "plan_apply",
+              light: "plan",
+              lightChangedAt: 0,
+              nextChangeAt: 0,
+              resources: {},
+              target: config.target,
+              seconds: config.seconds,
+              finishOrder: [],
+            };
+
+      return applied(
+        {
+          ...state,
+          arcade: {
+            ...arcade,
+            playerNumbers: assignPlayerNumbers(state, arcade.playerNumbers),
+            round: event.round,
+            roundIndex: arcade.round === null ? 0 : arcade.roundIndex + 1,
+            phase: "card",
+            standing,
+            lounge: {},
+            // Last round's banked points have already been folded into the
+            // totals by `endRound`; this round starts everyone at nothing.
+            banked: {},
+            startedAt: null,
+            endsAt: null,
+            play,
+          },
+        },
+        [BROADCAST_STATE, PERSIST],
+      );
+    }
+
+    case "beginPlay": {
+      const arcade = state.arcade;
+      if (!arcade) {
+        return unchanged(
+          reject("host", "not_in_arcade", "Enter the arcade first."),
+        );
+      }
+      const play = arcade.play;
+      if (arcade.phase !== "card" || !play) {
+        return unchanged(
+          reject("host", "wrong_round_phase", "No round card is up."),
+        );
+      }
+      const started: ArcadePlay =
+        play.kind === "recruitment"
+          ? { ...play, itemEndsAt: now + play.secondsPerItem * 1000 }
+          : // The first light is PLAN and the boundary schedules the turn:
+            // durations are random 2–6 s and the engine has no randomness.
+            { ...play, light: "plan", lightChangedAt: now, nextChangeAt: now };
+      const endsAt =
+        play.kind === "recruitment"
+          ? now + play.items.length * play.secondsPerItem * 1000
+          : now + play.seconds * 1000;
+      return applied(
+        {
+          ...state,
+          arcade: {
+            ...arcade,
+            phase: "running",
+            startedAt: now,
+            endsAt,
+            play: started,
+          },
+        },
+        [BROADCAST_STATE, PERSIST],
+      );
+    }
+
+    case "submitAnswer": {
+      const arcade = state.arcade;
+      if (!arcade) {
+        return unchanged(
+          reject({ pid: event.pid }, "not_in_arcade", "The arcade is not open."),
+        );
+      }
+      const play = arcade.play;
+      if (arcade.phase !== "running" || play?.kind !== "recruitment") {
+        return unchanged(
+          reject(
+            { pid: event.pid },
+            "wrong_round_phase",
+            "There is nothing to answer.",
+          ),
+        );
+      }
+      const p = state.participants[event.pid];
+      if (!p || p.kicked) {
+        return unchanged(
+          reject(
+            { pid: event.pid },
+            "unknown_participant",
+            `No participant ${event.pid}.`,
+          ),
+        );
+      }
+      // Absent means "joined after the round started", and such a person is
+      // put on the Floor by playing: `startRound` fixed the standings before
+      // they arrived, so without this they were refused a tap for being in the
+      // Lounge *and* refused a bet for being on the Floor — two contradictory
+      // sentences on one phone, and nothing they could do about either.
+      // Joining late costs them the seconds they missed and nothing else.
+      if (arcade.standing[event.pid] === "drained") {
+        return unchanged(
+          reject(
+            { pid: event.pid },
+            "not_on_the_floor",
+            "You are not on the Floor for this round.",
+          ),
+        );
+      }
+      // One answer per item. A typed answer is not a change of mind: the item
+      // is twenty seconds long and a second guess would be a second chance
+      // nobody else gets.
+      if (event.pid in play.answered) {
+        return unchanged(
+          reject({ pid: event.pid }, "already_answered_item", "You are locked in."),
+        );
+      }
+      const item = play.items[play.at];
+      if (!item) {
+        return unchanged(
+          reject({ pid: event.pid }, "wrong_round_phase", "No item is open."),
+        );
+      }
+
+      // "Every correct answer *within the timer*". The boundary closes the
+      // item on its own clock, so a submission past `itemEndsAt` is a race,
+      // not a normal case — and it scores nothing, because the alternative is
+      // a timer that only applies to people whose network is fast.
+      const correct = now <= play.itemEndsAt && matchesItem(item, event.answer);
+      // The first three correct *in the room*, per item: 10 + 5, six times
+      // over, is the Floor max of 90.
+      const points = correct
+        ? RECRUITMENT_CORRECT +
+          (play.solvedOrder.length < RECRUITMENT_FIRST_PLACES
+            ? RECRUITMENT_FIRST_BONUS
+            : 0)
+        : 0;
+
+      return applied(
+        {
+          ...state,
+          arcade: {
+            ...arcade,
+            banked:
+              points > 0
+                ? {
+                    ...arcade.banked,
+                    [event.pid]: (arcade.banked[event.pid] ?? 0) + points,
+                  }
+                : arcade.banked,
+            play: {
+              ...play,
+              answered: { ...play.answered, [event.pid]: correct },
+              solvedOrder: correct
+                ? [...play.solvedOrder, event.pid]
+                : play.solvedOrder,
+            },
+          },
+        },
+        // Not `to: "all"`. Who has solved it is on the big screen and the
+        // console; the only participant who learns anything is the one who
+        // just typed, and what they learn about is their own answer.
+        [
+          { kind: "broadcast", to: { pid: event.pid }, what: "state" },
+          { kind: "broadcast", to: "host", what: "state" },
+          { kind: "broadcast", to: "screen", what: "state" },
+          PERSIST,
+        ],
+      );
+    }
+
+    case "nextItem": {
+      const arcade = state.arcade;
+      if (!arcade) {
+        return unchanged(
+          reject("host", "not_in_arcade", "Enter the arcade first."),
+        );
+      }
+      const play = arcade.play;
+      if (arcade.phase !== "running" || play?.kind !== "recruitment") {
+        return unchanged(
+          reject("host", "wrong_round_phase", "No item round is running."),
+        );
+      }
+      const at = play.at + 1;
+      if (at >= play.items.length) {
+        return unchanged(
+          reject(
+            "host",
+            "wrong_round_phase",
+            "That was the last item. End the round.",
+          ),
+        );
+      }
+      return applied(
+        {
+          ...state,
+          arcade: {
+            ...arcade,
+            play: {
+              ...play,
+              at,
+              itemEndsAt: now + play.secondsPerItem * 1000,
+              // Both are per item: the next item's first three are a fresh
+              // three, and everybody may answer again.
+              solvedOrder: [],
+              answered: {},
+            },
+          },
+        },
+        [BROADCAST_STATE, PERSIST],
+      );
+    }
+
+    case "setLight": {
+      const arcade = state.arcade;
+      if (!arcade) {
+        return unchanged(
+          reject("host", "not_in_arcade", "Enter the arcade first."),
+        );
+      }
+      const play = arcade.play;
+      if (arcade.phase !== "running" || play?.kind !== "plan_apply") {
+        return unchanged(
+          reject("host", "wrong_round_phase", "No light round is running."),
+        );
+      }
+      if (play.light === event.light && play.nextChangeAt === event.until) {
+        return unchanged();
+      }
+      return applied(
+        {
+          ...state,
+          arcade: {
+            ...arcade,
+            play: {
+              ...play,
+              light: event.light,
+              // Re-scheduling the same light must not move the instant taps
+              // are judged against, or a player could be drained for a tap
+              // that was comfortably inside the PLAN they were looking at.
+              lightChangedAt:
+                play.light === event.light ? play.lightChangedAt : now,
+              nextChangeAt: event.until,
+            },
+          },
+        },
+        [BROADCAST_STATE, PERSIST],
+      );
+    }
+
+    case "tap": {
+      const arcade = state.arcade;
+      if (!arcade) {
+        return unchanged(
+          reject({ pid: event.pid }, "not_in_arcade", "The arcade is not open."),
+        );
+      }
+      const play = arcade.play;
+      if (arcade.phase !== "running" || play?.kind !== "plan_apply") {
+        return unchanged(
+          reject({ pid: event.pid }, "wrong_round_phase", "Nothing to tap."),
+        );
+      }
+      const p = state.participants[event.pid];
+      if (!p || p.kicked) {
+        return unchanged(
+          reject(
+            { pid: event.pid },
+            "unknown_participant",
+            `No participant ${event.pid}.`,
+          ),
+        );
+      }
+      // Absent means "joined after the round started", and such a person is
+      // put on the Floor by playing: `startRound` fixed the standings before
+      // they arrived, so without this they were refused a tap for being in the
+      // Lounge *and* refused a bet for being on the Floor — two contradictory
+      // sentences on one phone, and nothing they could do about either.
+      // Joining late costs them the seconds they missed and nothing else.
+      if (arcade.standing[event.pid] === "drained") {
+        return unchanged(
+          reject(
+            { pid: event.pid },
+            "not_on_the_floor",
+            "You are in the Lounge. Back a player.",
+          ),
+        );
+      }
+      // `at` is the corrected instant: the 250 ms grace after a lock is
+      // applied at the socket boundary, exactly as a trivia response time is
+      // latency-corrected there. Deriving either from `now` would put network
+      // time back into the game.
+      if (arcade.endsAt !== null && event.at >= arcade.endsAt) {
+        return unchanged(
+          reject({ pid: event.pid }, "floor_locked", "The Floor is closed."),
+        );
+      }
+      // Already across. Their button is done; a stray tap is not a drain.
+      if (play.finishOrder.includes(event.pid)) return unchanged();
+
+      if (play.light === "apply" && event.at >= play.lightChangedAt) {
+        // `Error: state lock held by another process`. Drained, not out:
+        // everything banked stays banked and the Lounge opens.
+        return applied(
+          {
+            ...state,
+            arcade: {
+              ...arcade,
+              standing: { ...arcade.standing, [event.pid]: "drained" },
+              lounge: {
+                ...arcade.lounge,
+                [event.pid]: { backing: null, at: now },
+              },
+            },
+          },
+          [BROADCAST_STATE, PERSIST],
+        );
+      }
+
+      const from = play.resources[event.pid] ?? 0;
+      const to = from + 1;
+      const crossed = to >= play.target;
+      const gained =
+        checkpointBank(from, to, checkpointsFor(play.target)) +
+        (crossed ? PLAN_APPLY_CROSS + finishBonus(play.finishOrder.length) : 0);
+
+      return applied(
+        {
+          ...state,
+          arcade: {
+            ...arcade,
+            banked:
+              gained > 0
+                ? {
+                    ...arcade.banked,
+                    [event.pid]: (arcade.banked[event.pid] ?? 0) + gained,
+                  }
+                : arcade.banked,
+            play: {
+              ...play,
+              resources: { ...play.resources, [event.pid]: to },
+              finishOrder: crossed
+                ? [...play.finishOrder, event.pid]
+                : play.finishOrder,
+            },
+          },
+        },
+        // An ordinary tap emits nothing. Sixty phones at ten taps a second is
+        // six hundred events a second, and a broadcast or a persist each would
+        // be six hundred fan-outs or writes a second to carry a number that is
+        // reconstructed to the last checkpoint anyway, which is what "banked"
+        // means. The phone counts optimistically in the meantime. Milestones
+        // are different — they move points, so they are worth a write.
+        //
+        // (An earlier draft of this comment claimed the runtime re-broadcasts
+        // the round at 10 Hz. It does not; there is no periodic broadcast
+        // anywhere. The surfaces are driven entirely by these effects.)
+        gained > 0 ? [BROADCAST_STATE, PERSIST] : [],
+      );
+    }
+
+    case "backPlayer": {
+      const arcade = state.arcade;
+      if (!arcade) {
+        return unchanged(
+          reject({ pid: event.pid }, "not_in_arcade", "The arcade is not open."),
+        );
+      }
+      if (arcade.phase !== "running") {
+        return unchanged(
+          reject(
+            { pid: event.pid },
+            "wrong_round_phase",
+            "The Lounge is not open.",
+          ),
+        );
+      }
+      if (arcade.standing[event.pid] !== "drained") {
+        return unchanged(
+          reject(
+            { pid: event.pid },
+            "not_in_the_lounge",
+            "You are on the Floor. Play.",
+          ),
+        );
+      }
+      // "Change it freely until the Floor locks." The Floor locks when the
+      // round clock runs out, which is a real window: `endRound` arrives from
+      // the boundary a moment later, and a backing changed in between would be
+      // a bet placed after the race.
+      if (arcade.endsAt !== null && now >= arcade.endsAt) {
+        return unchanged(
+          reject({ pid: event.pid }, "floor_locked", "The Floor has locked."),
+        );
+      }
+      if (event.backing === event.pid) {
+        return unchanged(
+          reject(
+            { pid: event.pid },
+            "cannot_back_yourself",
+            "You are in the Lounge. Back somebody still playing.",
+          ),
+        );
+      }
+      const backed = state.participants[event.backing];
+      if (!backed || backed.kicked) {
+        return unchanged(
+          reject(
+            { pid: event.pid },
+            "unknown_participant",
+            `No participant ${event.backing}.`,
+          ),
+        );
+      }
+      if (arcade.standing[event.backing] !== "floor") {
+        return unchanged(
+          reject(
+            { pid: event.pid },
+            "cannot_back_a_drained_player",
+            `${backed.nickname} is in the Lounge too.`,
+          ),
+        );
+      }
+      const seat = arcade.lounge[event.pid];
+      if (seat?.backing === event.backing) return unchanged();
+      return applied(
+        {
+          ...state,
+          arcade: {
+            ...arcade,
+            lounge: {
+              ...arcade.lounge,
+              // `at` is when they were drained, not when they last changed
+              // their mind: the big screen orders the Lounge by arrival.
+              [event.pid]: { backing: event.backing, at: seat?.at ?? now },
+            },
+          },
+        },
+        // The big screen shows who has backed whom — being backed by six
+        // people is its own small pressure — and the console shows the room.
+        [
+          { kind: "broadcast", to: { pid: event.pid }, what: "state" },
+          { kind: "broadcast", to: "host", what: "state" },
+          { kind: "broadcast", to: "screen", what: "state" },
+          PERSIST,
+        ],
+      );
+    }
+
+    case "endRound": {
+      const arcade = state.arcade;
+      if (!arcade) {
+        return unchanged(
+          reject("host", "not_in_arcade", "Enter the arcade first."),
+        );
+      }
+      if (arcade.phase !== "running") {
+        return unchanged(
+          reject("host", "wrong_round_phase", "No round is running."),
+        );
+      }
+      // The Floor locks, the Lounge is paid, and the round folds into the
+      // arcade total. Who is drained is *not* reset here: the big screen keeps
+      // the gold seats and the pink strike up between rounds, and everyone
+      // returns to the Floor at the next `startRound`.
+      const settled = settleRound(arcade);
+      return applied(
+        {
+          ...state,
+          arcade: {
+            ...arcade,
+            phase: "idle",
+            startedAt: null,
+            endsAt: null,
+            banked: settled.banked,
+            totals: settled.totals,
+          },
+        },
+        // The settled points go no further than `arcade` yet — see
+        // `revealRound`, and the same note on `closeQuestion`.
+        [BROADCAST_STATE, PERSIST],
+      );
+    }
+
+    case "revealRound": {
+      const arcade = state.arcade;
+      if (!arcade) {
+        return unchanged(
+          reject("host", "not_in_arcade", "Enter the arcade first."),
+        );
+      }
+      if (arcade.round === null || arcade.phase !== "idle") {
+        return unchanged(
+          reject(
+            "host",
+            "wrong_round_phase",
+            arcade.phase === "running"
+              ? "End the round before revealing it."
+              : "There is nothing to reveal.",
+          ),
+        );
+      }
+      // The arcade total lands in `scores` here rather than at `endRound`.
+      //
+      // Trivia learned this the hard way: the participant's points strip is
+      // projected from `scores`, so writing at the close made the strip jump
+      // for a right answer before the reveal and leaked correctness. The
+      // arcade's hazard is milder — the phone has already said `Recruited.`,
+      // already shown the drain, already counted the resources, so by the end
+      // of a round nothing about your own play is still secret — but two
+      // things are: the Lounge settlement, and the last item's answer, which
+      // is not read out until the reveal. Writing here costs nothing and keeps
+      // one rule for both activities: points become public when the answer does.
+      return applied(
+        {
+          ...state,
+          arcade: { ...arcade, phase: "reveal" },
+          scores: withActivityTotals(state, arcade.activityId, arcade.totals),
+        },
+        [BROADCAST_STATE, ...BROADCAST_STANDINGS, PERSIST],
+      );
     }
   }
 }

@@ -230,23 +230,45 @@ share an envelope and differ in `floor`:
   "line": "Error: state lock held by another process" }
 ```
 
-Round-specific `floor` payloads, briefly:
+Round-specific `floor` payloads, briefly. **"Public" here means the big screen
+and the host, not a phone.** The projection is per role and enforced by leaving
+a field out rather than nulling it, so a key a phone may not have never appears
+in its bytes.
+
+The one that decides `plan_apply` is the epoch of the *next* light change —
+this table used to list it as `nextTurnHintAt` in the public payload, and that
+is unshippable: a client holding it can tap flat out, stop 401 ms before every
+lock, and never be caught. It goes to the screen and the host only, as
+`nextChangeAt` and its 400 ms telegraph `headTurnsAt`. `progress` and
+`finished` are likewise withheld from phones; a phone is told its own count and
+nothing about anyone else's.
+
 
 | Round | Public `floor` | Private `me` |
 | --- | --- | --- |
 | `recruitment` | `item { cue }`, `itemEndsAt`, `solved: [pid]` | `answered`, `correct` |
-| `plan_apply` | `light: "plan"/"apply"`, `lightChangedAt`, `nextTurnHintAt`, `target`, `progress: { pid: n }`, `finished: [pid]` | `n`, `checkpoint` |
+| `plan_apply` | `light: "plan"/"apply"`, `lightChangedAt`, `target`, `checkpoints` | `n`, `checkpoint` |
 | `unseal` | `shapes: { pid: "circle" }`, `progress: { pid: k }`, `cracked: [pid]` | `word` (scrambled), `taps`, `hintsUsed` |
 | `tug_of_raft` | `pull: 1..3`, `sides: { a: [pid], b: [pid] }`, `rope: -1..1`, `beatEpoch`, `bpm` | `side`, `onBeat`, `misses`, `electing` |
 | `gganbu` | `item { prompt, line }`, `itemEndsAt`, `tokens: { pid: n }` | `rival`, `tokens`, `wager` |
 | `glass_bridge` | `step`, `wave`, `waveEndsAt`, `broken: [[step, choice]]`, `position: { pid: step }` | `wave`, `step`, `fallen` |
 
-**Tap batching.** `plan_apply` and `tug_of_raft` produce up to ten taps a
-second per player. The client batches taps into one `arcade.input` per 100 ms
-carrying the count and the client timestamp of the *last* tap; the server
-credits the count and judges the light against the timestamp. Sixty players
-is then at most 600 messages a second inbound and one 10 Hz `arcade.round`
-broadcast outbound, which `ws` handles without noticing.
+**Taps, as built.** This section used to describe batching ten taps into one
+`arcade.input` per 100 ms carrying a *client* timestamp, and a 10 Hz
+`arcade.round` broadcast. Neither exists, and the client timestamp in
+particular should not: the server times the tap itself, as it does a trivia
+answer, because a client timestamp is a number the player's own device chooses
+about whether they beat the lock.
+
+What is built: one `arcade.tap` per tap, and **an ordinary tap produces no
+broadcast and no write at all**. Only a milestone — a checkpoint, a crossing,
+a drain, a light turn — moves points or the room's state, and only those fan
+out. The phone counts optimistically in between, so the button answers the
+thumb rather than the link. There is no periodic broadcast anywhere.
+
+Sixty players tapping flat out is therefore ~600 inbound messages a second and
+close to nothing outbound, which is the opposite way round from the design
+above and the reason it was abandoned.
 
 ### Host
 

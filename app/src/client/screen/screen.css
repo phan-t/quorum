@@ -509,3 +509,256 @@ body {
 .s-trivia-row .s-total {
   font-size: clamp(32px, 2.2vw, 44px);
 }
+
+/* ==================================================================== */
+/* Hashi Arcade                                                         */
+/* ==================================================================== */
+
+/*
+ * The grid is the centrepiece and everything else gives way to it. DESIGN.md:
+ * "Sixty people fit at 1080p at 96px per cell." The cells are sized from that
+ * and shrink no further than 76px, so a room of ninety still reads rather
+ * than wrapping into a stripe.
+ *
+ * Nothing here glides. The one animation is the 400ms wipe, which is a width
+ * set on a tick off the server's own epoch — not a CSS transition, because a
+ * transition would run from whenever the frame arrived rather than from the
+ * instant the lock was scheduled for.
+ */
+
+.s-arcade {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 1.2rem;
+  overflow: hidden;
+}
+.s-arcade .s-stair {
+  position: absolute;
+  inset: 0;
+  opacity: 0.06;
+  background-image:
+    linear-gradient(135deg, var(--consul) 25%, transparent 25%),
+    linear-gradient(225deg, var(--nomad) 25%, transparent 25%),
+    linear-gradient(45deg, var(--vault) 25%, transparent 25%);
+  background-size: 120px 120px;
+  pointer-events: none;
+}
+.s-arc-head,
+.s-arc-main {
+  position: relative;
+}
+.s-house {
+  margin: 0 0 0.35rem;
+  color: var(--arc-house);
+  font-size: 30px;
+  line-height: 1.45;
+  display: flex;
+  gap: 0.6rem;
+}
+.s-prompt {
+  opacity: 0.7;
+}
+.s-staff {
+  display: flex;
+  gap: 2rem;
+  margin: 1rem 0 0;
+  color: var(--muted);
+  font-size: 22px;
+}
+
+.s-arc-cue {
+  margin: 0;
+  font-size: 180px;
+  line-height: 1;
+  text-align: center;
+}
+.s-arc-count {
+  margin: 0;
+  text-align: center;
+  color: var(--muted);
+  font-size: 26px;
+  letter-spacing: 0.08em;
+}
+
+/* ---- the dormitory grid --------------------------------------------- */
+
+.s-grid {
+  position: relative;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(76px, 1fr));
+  gap: 8px;
+  align-content: start;
+}
+.s-cell {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  height: 76px;
+  border-radius: 6px;
+  background: var(--nomad);
+  color: var(--on-fill-dark);
+  border: 1px solid #00996c;
+}
+.s-cell-num {
+  font-weight: 600;
+  font-size: 28px;
+  letter-spacing: 0.04em;
+}
+.s-cell-backers {
+  font-size: 14px;
+  opacity: 0.8;
+}
+.s-cell[data-standing="drained"] {
+  background: var(--vault);
+  border-color: #c69f00;
+}
+/* Away is grey, and it is also dimmer and un-bordered: never the hue alone. */
+.s-cell[data-away="yes"] {
+  background: var(--panel-2);
+  color: var(--muted);
+  border-color: var(--line);
+}
+/* The thin pink strike for a drain this round, drawn rather than coloured. */
+.s-cell[data-struck="yes"] {
+  position: relative;
+}
+.s-cell[data-struck="yes"]::after {
+  content: "";
+  position: absolute;
+  left: 6%;
+  right: 6%;
+  top: 50%;
+  height: 3px;
+  background: var(--consul);
+}
+.s-grid-counts {
+  margin: 0;
+  color: var(--muted);
+  font-size: 24px;
+  letter-spacing: 0.08em;
+}
+
+/* ---- a drain, verbatim, the way it looks in a terminal --------------- */
+
+.s-drain-log {
+  position: absolute;
+  z-index: 2;
+  left: 5%;
+  right: 5%;
+  bottom: 5%;
+  padding: 1rem 1.2rem;
+  background: #0a0a0f;
+  border: 1px solid var(--miss);
+  border-radius: 6px;
+}
+.s-drain-error,
+.s-drain-who {
+  margin: 0;
+  color: var(--miss);
+  font-size: 28px;
+  line-height: 1.5;
+}
+
+/* ---- the light: the screen *is* the light ---------------------------- */
+
+.s-light {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  background: var(--light, var(--nomad));
+  color: var(--light-ink, var(--on-fill-dark));
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2rem;
+  overflow: hidden;
+}
+/*
+ * The wipe: pink advancing left to right across a green screen over the 400ms
+ * before the lock. It sits *under* the sign so the words stay readable the
+ * whole way across, and its width is set per tick, never transitioned.
+ */
+.s-wipe {
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 0;
+  background: var(--consul);
+}
+.s-light[data-light="apply"] .s-wipe {
+  display: none;
+}
+.s-sign-row {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 1.5rem;
+  padding: 0 5%;
+  text-align: center;
+}
+.s-sign-glyph {
+  font-size: 72px;
+  line-height: 1;
+}
+.s-sign {
+  margin: 0;
+  font-size: 96px;
+  letter-spacing: -0.01em;
+}
+/* APPLY's sign is the terminal line, so it is set in mono — a second signal
+   that this is not the same state as PLAN, before any hue is involved. */
+.s-light[data-light="apply"] .s-sign {
+  font-family: var(--mono);
+  font-size: 64px;
+  font-weight: 600;
+}
+.s-doll-wrap {
+  position: relative;
+  color: var(--light-ink, var(--on-fill-dark));
+  transform: rotateY(var(--turn, 0deg));
+}
+.s-doll {
+  width: 240px;
+  height: 278px;
+  display: block;
+}
+.s-crossed {
+  position: relative;
+  margin: 0;
+  font-size: 30px;
+  letter-spacing: 0.08em;
+  opacity: 0.85;
+}
+
+/* ---- the reveal ------------------------------------------------------ */
+
+.s-recap {
+  position: relative;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 0.8rem 2.5rem;
+}
+.s-recap-row {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 0.2rem 1rem;
+  align-items: baseline;
+}
+.s-recap-cue {
+  font-size: 44px;
+}
+.s-recap-answer {
+  font-size: 34px;
+}
+.s-recap-note {
+  grid-column: 2;
+  color: var(--muted);
+  font-size: 20px;
+}

@@ -165,6 +165,39 @@ Iterative, and the order matters. Each round is a day or two, not a week.
 one is bored in round four. That second clause is the actual acceptance test
 and it needs humans, not bots.
 
+> **Round 0, the Lounge and Round 1 built 20 Sep 2026.** Verification found
+> three bugs that no test could have caught, all of them invisible to the
+> suite and obvious in a browser — worth remembering when deciding how much
+> the green tick is worth:
+>
+> - **Every surface rendered a blank page.** A client file imported the
+>   arcade's content from outside `src/client/`, `tsc` emitted it beside
+>   `dist/client`, and both servers served only `/client/*`. The module graph
+>   404'd, the page stayed empty, and nothing threw. Fixed by serving the whole
+>   emitted tree.
+> - **The big screen's sixty-player grid was never visible.** `.s-light` set
+>   `display: flex`, which silently beats the UA's `[hidden]` rule, so a
+>   full-bleed light sat on top of the grid for every segment. Eleven other
+>   elements each had a hand-written `[hidden]` rule; the twelfth was missed.
+>   Fixed once, globally.
+> - **The phone could not make the losing move.** The tap button was
+>   `disabled` during APPLY, so no one could ever be drained by tapping — Red
+>   Light, Green Light with the red light removed. The only players who could
+>   lose were those whose taps arrived late over a bad connection, the exact
+>   inverse of what the 250 ms grace is for.
+>
+> **Still open, each with a failing `todo` test naming the file:** the engine
+> forgives an APPLY tap that lands after the light returns to PLAN; a round
+> ending within 250 ms of a lock accepts taps received after the close;
+> Recruitment arms two competing timers; and the drained strike flickers off
+> between `endRound` and `revealRound`.
+>
+> **Not yet built, from DESIGN:** the phone shows the round clock where the
+> per-item 20 s clock should be (`itemEndsAt` is not on the wire), and five
+> announcer lines — the welcome, the checkpoint, the crossing — are written
+> and never shown, so no checkpoint or crossing feedback reaches a phone.
+> One contrast failure remains: the Lounge mirror's drained cells, 3.1:1.
+
 ## Phase 5 — Operations
 
 - A runbook: pre-session checklist, what to do when the host's browser dies,

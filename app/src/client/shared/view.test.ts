@@ -14,18 +14,32 @@ import {
   activityHue,
   activityLabel,
   answerTiles,
+  floorEntries,
   formatCountdown,
+  gridEntries,
+  msToTurn,
   nextSegment,
+  playerName,
+  playerTag,
   pointsStripCells,
   pointsStripText,
   questionLabel,
   remainingMs,
+  resourceBar,
   stackedBar,
   timerFraction,
+  wipeFraction,
+  ARCADE_ROUND_CARD,
+  LIGHT_FACE,
   RUN_OF_SHOW,
   SEGMENT_BUILT,
 } from "./view.ts";
-import type { ActivitySummary, TriviaView } from "../../protocol.ts";
+import type {
+  ActivitySummary,
+  ArcadeView,
+  RosterEntry,
+  TriviaView,
+} from "../../protocol.ts";
 
 const ACTIVITIES: readonly ActivitySummary[] = [
   { id: "ttx", title: "Agentic Security TTX", kind: "manual", spotCap: 2, spotsLeft: 2 },
@@ -234,14 +248,154 @@ describe("countdowns", () => {
 });
 
 describe("the run of show", () => {
-  it("includes trivia now that it exists", () => {
-    // A segment joins the space bar's walk when its surface is real. The
-    // arcade is still a placeholder and still out.
+  it("includes the arcade now that it exists", () => {
+    // A segment joins the space bar's walk when its surface is real. Both
+    // activities are now built, so the primary button walks the whole
+    // afternoon and never lands on a placeholder.
     assert.ok(RUN_OF_SHOW.includes("trivia"));
-    assert.ok(!RUN_OF_SHOW.includes("arcade"));
+    assert.ok(RUN_OF_SHOW.includes("arcade"));
     assert.equal(nextSegment("holding"), "trivia");
-    assert.equal(nextSegment("trivia"), "standings");
+    assert.equal(nextSegment("trivia"), "arcade");
+    assert.equal(nextSegment("arcade"), "standings");
     assert.equal(SEGMENT_BUILT.trivia, true);
-    assert.equal(SEGMENT_BUILT.arcade, false);
+    assert.equal(SEGMENT_BUILT.arcade, true);
+  });
+
+  it("still comes back to the board from anywhere off-piste", () => {
+    // Nothing is off the run of show today, but the fallback is the reason a
+    // host can hand-pick a segment and still find the space bar useful.
+    assert.equal(nextSegment("final"), null);
+  });
+});
+
+/* ------------------------------------------------------------------ */
+/* The arcade register                                                 */
+/* ------------------------------------------------------------------ */
+
+const ROSTER: readonly RosterEntry[] = [
+  { pid: "p1", nickname: "Priya", playerNumber: 1, conn: "on" },
+  { pid: "p2", nickname: "Kenji", playerNumber: 2, conn: "away" },
+  { pid: "p3", nickname: "Ade", playerNumber: 3, conn: "on" },
+];
+
+function arcade(over: Partial<ArcadeView> = {}): ArcadeView {
+  return {
+    activityId: "arcade",
+    round: "plan_apply",
+    roundIndex: 1,
+    phase: "running",
+    startedAt: 1_000,
+    endsAt: 76_000,
+    grid: [
+      { pid: "p1", playerNumber: 1, standing: "floor", backers: 2, struck: false },
+      { pid: "p2", playerNumber: 2, standing: "drained", backers: 0, struck: true },
+      { pid: "p3", playerNumber: 17, standing: "floor", backers: 0, struck: false },
+    ],
+    onFloor: 2,
+    inLounge: 1,
+    ...over,
+  };
+}
+
+describe("player numbers", () => {
+  it("are three digits, because the announcer says three digits", () => {
+    // DESIGN.md: "Three digits, Plex Mono 600, on a green badge." And the
+    // copy is *Player 017 has been drained*, never a colleague's name in red.
+    assert.equal(playerTag(17), "017");
+    assert.equal(playerTag(1), "001");
+    assert.equal(playerTag(140), "140");
+    assert.equal(playerName(17), "Player 017");
+    // Above 999 the badge simply gets longer: a wrapped-around number would
+    // be two people with the same name.
+    assert.equal(playerTag(1_000), "1000");
+  });
+});
+
+describe("the light", () => {
+  it("is never distinguished by colour alone", () => {
+    // DESIGN.md's floor, and a green/pink pair is the exact case that fails
+    // it. Each light carries a word, a button label and a glyph before any
+    // hue is involved, and the two must differ on every one of them.
+    const plan = LIGHT_FACE.plan;
+    const apply = LIGHT_FACE.apply;
+    assert.notEqual(plan.sign, apply.sign);
+    assert.notEqual(plan.button, apply.button);
+    assert.notEqual(plan.glyph, apply.glyph);
+    assert.notEqual(plan.fill, apply.fill);
+    assert.notEqual(plan.announce, apply.announce);
+    // SPEC.md's words, verbatim: they are read out and they are the joke.
+    assert.equal(plan.sign, "PLAN");
+    assert.equal(apply.sign, "APPLY IN PROGRESS — STATE LOCKED");
+  });
+
+  it("has no exclamation marks anywhere in the register", () => {
+    // DESIGN.md: "Short sentences. No exclamation marks, ever."
+    for (const lines of Object.values(ARCADE_ROUND_CARD)) {
+      for (const line of lines) {
+        assert.ok(!line.includes("!"), `"${line}" raises its voice`);
+      }
+    }
+  });
+});
+
+describe("the wipe", () => {
+  const TURN = 10_000;
+  const pa = { headTurnsAt: TURN - 400, nextChangeAt: TURN };
+
+  it("runs from the telegraph to the lock, off absolute epochs", () => {
+    // Never a duration measured from whenever the frame arrived: a screen
+    // 300 ms behind must still finish the wipe when the lock lands.
+    assert.equal(wipeFraction(pa, TURN - 500), null);
+    assert.equal(wipeFraction(pa, TURN - 400), 0);
+    assert.equal(wipeFraction(pa, TURN - 200), 0.5);
+    assert.equal(wipeFraction(pa, TURN), 1);
+    assert.equal(wipeFraction(pa, TURN + 1_000), 1);
+  });
+
+  it("draws nothing at all on a surface that was not told", () => {
+    // Which is every phone in the room, and that is the whole projection:
+    // no schedule, no wipe, no way to know the lock is coming.
+    assert.equal(wipeFraction({}, TURN), null);
+    assert.equal(msToTurn({}, TURN), null);
+    assert.equal(msToTurn(pa, TURN - 900), 500);
+  });
+});
+
+describe("the resource bar", () => {
+  it("puts its ticks where the points are banked", () => {
+    const bar = resourceBar({ target: 120, checkpoints: [30, 60, 90] }, 45);
+    assert.equal(bar.fraction, 0.375);
+    assert.deepEqual(bar.ticks, [0.25, 0.5, 0.75]);
+  });
+
+  it("never runs past the end of itself", () => {
+    assert.equal(resourceBar({ target: 120, checkpoints: [] }, 400).fraction, 1);
+    assert.equal(resourceBar({ target: 0, checkpoints: [] }, 0).fraction, 0);
+  });
+});
+
+describe("the grid", () => {
+  it("joins the cell to the roster the same socket already carried", () => {
+    const entries = gridEntries(arcade(), ROSTER);
+    assert.deepEqual(
+      entries.map((e) => e.tag),
+      ["001", "002", "017"],
+    );
+    // Away comes from the roster, not from the cell: nothing about who is
+    // connected belongs in the arcade's own state.
+    assert.equal(entries[1]?.away, true);
+    assert.equal(entries[1]?.struck, true);
+    assert.equal(entries[0]?.backers, 2);
+  });
+
+  it("offers the Lounge everyone still on the Floor, and not themselves", () => {
+    const floor = floorEntries(arcade(), ROSTER, "p3");
+    assert.deepEqual(
+      floor.map((e) => e.pid),
+      ["p1"],
+    );
+    // The nickname is here because this list is on a phone. The big screen
+    // renders the tag and never reads this field.
+    assert.equal(floor[0]?.nickname, "Priya");
   });
 });

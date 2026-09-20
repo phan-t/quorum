@@ -62,6 +62,23 @@
   --body: "IBM Plex Sans", ui-sans-serif, system-ui, sans-serif;
   --mono: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace;
 
+
+  /* Arcade inks — DESIGN.md's recast palette, drawn as *text*.
+     The four product hues stay the four product hues as fills; these are the
+     readable counterparts, because a fill and a label are not the same
+     contrast problem. Measured against --ground, WCAG AA needs 4.5:1:
+       --arc-players  #00ca8e on #0a0a0f   9.03:1
+       --arc-staff    #dc477d on #0a0a0f   4.80:1
+       --arc-lounge   #ffcf25 on #0a0a0f  13.03:1
+       --arc-house    #a06ce4 on #0a0a0f   5.30:1
+     The house hue is lightened from --terraform #7b42bc, which measures
+     3.07:1 as text on the dark ground and fails. DESIGN.md asks for the
+     Front-End Man in purple; it does not ask for him to be unreadable. */
+  --arc-players: var(--nomad);
+  --arc-staff: var(--consul);
+  --arc-lounge: var(--vault);
+  --arc-house: #a06ce4;
+
   /* motion — one easing for reveals, 300ms */
   --pop: cubic-bezier(0.2, 0.9, 0.3, 1.2);
   --pop-ms: 300ms;
@@ -87,6 +104,15 @@
     --miss: #c02a1b;
     --danger: #c02a1b;
     --sealed: #8a6d00;
+
+    /* Arcade inks on white. Every one of the four fails there unmodified:
+       #00ca8e 2.13:1, #dc477d 4.01:1, #ffcf25 1.48:1, #7b42bc 5.68:1 — only
+       the last passes, and it is the one that fails on dark. Measured:
+       #007a58 5.35:1, #b52e60 5.96:1, #8a6d00 5.02:1, #6a2fa8 8.17:1. */
+    --arc-players: #007a58;
+    --arc-staff: #b52e60;
+    --arc-lounge: #8a6d00;
+    --arc-house: #6a2fa8;
   }
 }
 
@@ -106,6 +132,15 @@
   --miss: #c02a1b;
   --danger: #c02a1b;
   --sealed: #8a6d00;
+
+    /* Arcade inks on white. Every one of the four fails there unmodified:
+       #00ca8e 2.13:1, #dc477d 4.01:1, #ffcf25 1.48:1, #7b42bc 5.68:1 — only
+       the last passes, and it is the one that fails on dark. Measured:
+       #007a58 5.35:1, #b52e60 5.96:1, #8a6d00 5.02:1, #6a2fa8 8.17:1. */
+    --arc-players: #007a58;
+    --arc-staff: #b52e60;
+    --arc-lounge: #8a6d00;
+    --arc-house: #6a2fa8;
 }
 
 :root[data-theme="dark"] {
@@ -124,6 +159,11 @@
   --miss: #ff6b5a;
   --danger: #ff6b5a;
   --sealed: var(--vault);
+
+  --arc-players: var(--nomad);
+  --arc-staff: var(--consul);
+  --arc-lounge: var(--vault);
+  --arc-house: #a06ce4;
 }
 
 /* The big screen is shared to a room over compressed video, where light text
@@ -139,6 +179,21 @@
   --ink: #f6f5f3;
   --muted: #8b8a9c;
   --dim: #5e5d6e;
+
+  /* The semantic inks have to come back with the ground. Without this a
+     laptop whose OS is set to light drives the big screen — which is always
+     dark — with the light theme's inks, and #007a58 on #0a0a0f is 3.60:1.
+     The screen does not follow the switch, so nothing it uses may. */
+  --hit: var(--nomad);
+  --live: var(--nomad);
+  --miss: #ff6b5a;
+  --danger: #ff6b5a;
+  --sealed: var(--vault);
+
+  --arc-players: var(--nomad);
+  --arc-staff: var(--consul);
+  --arc-lounge: var(--vault);
+  --arc-house: #a06ce4;
 }
 
 
@@ -283,3 +338,22 @@ button {
 }
 .theme-toggle:hover { color: var(--ink); border-color: var(--dim); }
 .theme-toggle:focus-visible { outline: 2px solid var(--ink); outline-offset: 2px; }
+
+/*
+ * `hidden` means hidden, on every element and in every surface.
+ *
+ * The UA stylesheet's `[hidden] { display: none }` has the lowest possible
+ * specificity, so any rule that sets `display` on the element itself silently
+ * beats it — and the code sets `el.hidden = true` everywhere, believing it
+ * worked. That is how the big screen's Plan/Apply light came to sit at
+ * `display: flex`, full-bleed, `hidden` and 879 px tall, on top of the
+ * sixty-player grid that is the centrepiece of the round: the grid was
+ * rendered correctly and painted underneath, for the whole of every other
+ * segment, and nothing anywhere threw.
+ *
+ * Eleven elements had each been given their own `[hidden]` rule by hand. The
+ * twelfth was missed, which is what a rule repeated eleven times is for.
+ */
+[hidden] {
+  display: none !important;
+}

@@ -22,7 +22,12 @@ import type {
   Role,
   ServerMessage,
 } from "../protocol.ts";
-import { renderStateFor, rosterOf, triviaStateOf } from "./views.ts";
+import {
+  arcadeStateOf,
+  renderStateFor,
+  rosterOf,
+  triviaStateOf,
+} from "./views.ts";
 import { hashToken, newToken } from "./tokens.ts";
 import {
   NO_PERSISTENCE,
@@ -137,6 +142,70 @@ export function correctedResponseMs(
   return Math.max(0, receivedAt - opensAt - correction);
 }
 
+/* ------------------------------------------------------------------ */
+/* Plan / Apply: the light, and the grace after the lock                */
+/* ------------------------------------------------------------------ */
+
+/**
+ * SPEC.md: "There is a 250 ms grace after the lock for network latency,
+ * because a fair game over a video call is one where the last tap before the
+ * light changed is not a loss."
+ *
+ * It is applied *on top of* the ordinary latency correction, and that is not
+ * double-counting: the two are the two legs of the round trip. The correction
+ * takes off the upstream leg, reconstructing when the thumb actually came off
+ * the glass in server time. The grace covers the downstream leg — the lock
+ * left the server at `lightChangedAt` and did not reach the phone until half
+ * a round trip later, so a tap made in good faith against the light the phone
+ * was showing can land after the lock by that much. SPEC flat-rates it at
+ * 250 ms rather than making it per-socket, so nobody's grace depends on a
+ * number the server measured about them.
+ */
+export const LOCK_GRACE_MS = 250;
+
+/** SPEC.md: "Phases alternate on random durations between 2 and 6 seconds." */
+export const LIGHT_MIN_MS = 2_000;
+export const LIGHT_MAX_MS = 6_000;
+
+/**
+ * One light duration. The engine has no randomness, so this is drawn here and
+ * travels to it on `setLight` as an absolute `until`.
+ */
+export function pickLightMs(rng: () => number): number {
+  const r = Math.min(0.999_999, Math.max(0, rng()));
+  return LIGHT_MIN_MS + Math.floor(r * (LIGHT_MAX_MS - LIGHT_MIN_MS + 1));
+}
+
+/**
+ * When a tap happened, in server time, for the engine to judge against the
+ * light.
+ *
+ * `lockedSince` is `lightChangedAt` while the light is APPLY, and null while
+ * it is PLAN. The grace is one-directional on purpose: a tap inside the
+ * window is pulled back to the last instant of the PLAN that preceded the
+ * lock, and nothing is ever pushed the other way. Subtracting 250 ms
+ * unconditionally would be the bug this shape exists to avoid — a legitimate
+ * tap at the start of a PLAN would slide back across the boundary into the
+ * APPLY before it and drain someone for tapping on green.
+ *
+ * `lightChangedAt - 1` is always inside the preceding PLAN, because a light
+ * lasts at least {@link LIGHT_MIN_MS}.
+ */
+export function correctedTapAt(
+  receivedAt: number,
+  rttMs: number | null,
+  lockedSince: number | null,
+): number {
+  const correction =
+    rttMs === null ? 0 : Math.min(rttMs / 2, MAX_LATENCY_CORRECTION_MS);
+  const at = receivedAt - correction;
+  if (lockedSince === null) return at;
+  if (at >= lockedSince && at - lockedSince < LOCK_GRACE_MS) {
+    return lockedSince - 1;
+  }
+  return at;
+}
+
 export interface SessionSecrets {
   readonly hostTokenHash: string;
   readonly screenTokenHash: string;
@@ -164,6 +233,19 @@ export class SessionRuntime {
   /** The armed `closeQuestion`, and exactly which question it is armed for. */
   #closeTimer: ReturnType<typeof setTimeout> | null = null;
   #closeTimerFor: { index: number; closesAt: number } | null = null;
+  /** The arcade's three clocks. See {@link armArcadeTimers}. */
+  #lightTimer: ReturnType<typeof setTimeout> | null = null;
+  #lightTimerFor: { round: number; at: number } | null = null;
+  #itemTimer: ReturnType<typeof setTimeout> | null = null;
+  #itemTimerFor: { round: number; item: number; at: number } | null = null;
+  #floorTimer: ReturnType<typeof setTimeout> | null = null;
+  #floorTimerFor: { round: number; at: number } | null = null;
+  /**
+   * Where the light durations come from. A field rather than a parameter so a
+   * test can make the round deterministic without the production path growing
+   * an argument nobody passes.
+   */
+  rng: () => number = Math.random;
 
   constructor(
     state: SessionState,
@@ -337,6 +419,10 @@ export class SessionRuntime {
     // reveal, next, a host closing the session out from under an open
     // question — that can leave one armed for a question that is gone.
     this.armQuestionTimer(now);
+    // Same reasoning, for the arcade's clocks: they are a function of the
+    // state, so deriving them at the end of every event means there is no
+    // path that can leave one armed for a round that is over.
+    this.armArcadeTimers(now);
     return rejection ? { applied: result.applied, rejection } : { applied: result.applied };
   }
 
@@ -417,6 +503,309 @@ export class SessionRuntime {
   /** The deadline the timer is armed for, for tests and for /status. */
   get armedCloseAt(): number | null {
     return this.#closeTimerFor?.closesAt ?? null;
+  }
+
+
+  /* ---------------- the arcade's clocks ---------------- */
+
+  /**
+   * Three timers, for the three things the engine cannot do for itself.
+   *
+   * - **the light**, because the durations are random and the engine has no
+   *   randomness;
+   * - **the item**, because Recruitment's six items are twenty seconds each
+   *   and nobody should have to press a button six times to run them;
+   * - **the Floor**, because Plan / Apply is seventy-five seconds and then it
+   *   is over whether or not anyone is looking at the console.
+   *
+   * Each is keyed on exactly what it is armed for — the round, and the
+   * instant — so re-arming is idempotent, a host who ends the round early
+   * clears them, and a timeout that was in flight when the round changed
+   * checks the state before it does anything. Node's loop is single-threaded,
+   * so by the time a callback runs the state is settled: it either still
+   * matches or the timer is moot. And if one slipped through anyway, the
+   * engine refuses the event; it stays the only writer of the rule.
+   */
+  armArcadeTimers(now = Date.now()): void {
+    this.#armLightTimer(now);
+    this.#armItemTimer(now);
+    this.#armFloorTimer(now);
+  }
+
+  #armLightTimer(now: number): void {
+    const arcade = arcadeStateOf(this.state);
+    const play = arcade?.play;
+    if (!arcade || arcade.phase !== "running" || play?.kind !== "plan_apply") {
+      return this.#clearLightTimer();
+    }
+    const want = { round: arcade.roundIndex, at: play.nextChangeAt };
+    if (
+      this.#lightTimerFor !== null &&
+      this.#lightTimerFor.round === want.round &&
+      this.#lightTimerFor.at === want.at
+    ) {
+      return;
+    }
+    this.#clearLightTimer();
+    this.#lightTimerFor = want;
+    const timer = setTimeout(
+      () => {
+        this.#lightTimer = null;
+        this.#lightTimerFor = null;
+        this.flipLight(Date.now(), want);
+      },
+      Math.max(0, want.at - now),
+    );
+    timer.unref?.();
+    this.#lightTimer = timer;
+  }
+
+  /**
+   * Turn the light, or — once, at the top of the round — give the first one a
+   * duration.
+   *
+   * `beginPlay` sets PLAN with `nextChangeAt` equal to `lightChangedAt`,
+   * because that is as far as a reducer with no clock and no randomness can
+   * get. That equality is the signal that this light has never been
+   * scheduled, and it is the one case where the light does not flip: the
+   * round would otherwise lock a quarter of a second after it started.
+   */
+  flipLight(now: number, armedFor?: { round: number; at: number }): void {
+    const arcade = arcadeStateOf(this.state);
+    const play = arcade?.play;
+    if (!arcade || arcade.phase !== "running" || play?.kind !== "plan_apply") {
+      return;
+    }
+    if (
+      armedFor &&
+      (armedFor.round !== arcade.roundIndex || armedFor.at !== play.nextChangeAt)
+    ) {
+      return; // the round moved on under a timeout already in flight
+    }
+    const scheduled = play.nextChangeAt > play.lightChangedAt;
+    const light = scheduled ? (play.light === "plan" ? "apply" : "plan") : play.light;
+    this.apply({ type: "setLight", light, until: now + pickLightMs(this.rng) }, now);
+  }
+
+  #clearLightTimer(): void {
+    if (this.#lightTimer !== null) clearTimeout(this.#lightTimer);
+    this.#lightTimer = null;
+    this.#lightTimerFor = null;
+  }
+
+  #armItemTimer(now: number): void {
+    const arcade = arcadeStateOf(this.state);
+    const play = arcade?.play;
+    if (!arcade || arcade.phase !== "running" || play?.kind !== "recruitment") {
+      return this.#clearItemTimer();
+    }
+    const want = {
+      round: arcade.roundIndex,
+      item: play.at,
+      at: play.itemEndsAt,
+    };
+    if (
+      this.#itemTimerFor !== null &&
+      this.#itemTimerFor.round === want.round &&
+      this.#itemTimerFor.item === want.item &&
+      this.#itemTimerFor.at === want.at
+    ) {
+      return;
+    }
+    this.#clearItemTimer();
+    this.#itemTimerFor = want;
+    const last = play.at + 1 >= play.items.length;
+    const timer = setTimeout(
+      () => {
+        this.#itemTimer = null;
+        this.#itemTimerFor = null;
+        const at = arcadeStateOf(this.state);
+        const now2 = Date.now();
+        if (
+          !at ||
+          at.phase !== "running" ||
+          at.roundIndex !== want.round ||
+          at.play?.kind !== "recruitment" ||
+          at.play.at !== want.item ||
+          at.play.itemEndsAt !== want.at
+        ) {
+          return;
+        }
+        // The last item does not advance to a seventh; it ends the round, and
+        // the host reveals when they are ready to read the notes out.
+        this.apply(last ? { type: "endRound" } : { type: "nextItem" }, now2);
+      },
+      Math.max(0, want.at - now),
+    );
+    timer.unref?.();
+    this.#itemTimer = timer;
+  }
+
+  #clearItemTimer(): void {
+    if (this.#itemTimer !== null) clearTimeout(this.#itemTimer);
+    this.#itemTimer = null;
+    this.#itemTimerFor = null;
+  }
+
+  #armFloorTimer(now: number): void {
+    const arcade = arcadeStateOf(this.state);
+    if (!arcade || arcade.phase !== "running" || arcade.endsAt === null) {
+      return this.#clearFloorTimer();
+    }
+    const want = { round: arcade.roundIndex, at: arcade.endsAt };
+    if (
+      this.#floorTimerFor !== null &&
+      this.#floorTimerFor.round === want.round &&
+      this.#floorTimerFor.at === want.at
+    ) {
+      return;
+    }
+    this.#clearFloorTimer();
+    this.#floorTimerFor = want;
+    const timer = setTimeout(
+      () => {
+        this.#floorTimer = null;
+        this.#floorTimerFor = null;
+        const at = arcadeStateOf(this.state);
+        if (
+          !at ||
+          at.phase !== "running" ||
+          at.roundIndex !== want.round ||
+          at.endsAt !== want.at
+        ) {
+          return;
+        }
+        this.apply({ type: "endRound" }, Date.now());
+      },
+      Math.max(0, want.at - now),
+    );
+    timer.unref?.();
+    this.#floorTimer = timer;
+  }
+
+  #clearFloorTimer(): void {
+    if (this.#floorTimer !== null) clearTimeout(this.#floorTimer);
+    this.#floorTimer = null;
+    this.#floorTimerFor = null;
+  }
+
+  clearArcadeTimers(): void {
+    this.#clearLightTimer();
+    this.#clearItemTimer();
+    this.#clearFloorTimer();
+  }
+
+  /** What the light timer is armed for, for tests and for /status. */
+  get armedLightAt(): number | null {
+    return this.#lightTimerFor?.at ?? null;
+  }
+
+  /* ---------------- the arcade at the socket boundary ---------------- */
+
+  /**
+   * One tap in Plan / Apply, turned into an engine event.
+   *
+   * This is the only place the 250 ms grace exists, for the same reason the
+   * trivia correction lives at this boundary: the engine is pure, has no
+   * clock and no notion that a network happened. It is handed the instant the
+   * tap is to be judged at, and judges it.
+   *
+   * `round` is checked here rather than in the reducer because `tap` carries
+   * no round id: the driver is the only layer that can tell a tap meant for
+   * round 1 from one that arrived after the host started round 2. Everything
+   * else — drained, already across, the Floor closed — is the engine's.
+   */
+  tap(
+    client: Client,
+    round: number,
+    receivedAt: number,
+  ): { applied: boolean; rejection?: { code: string; message: string } } {
+    if (client.pid === undefined) {
+      return {
+        applied: false,
+        rejection: { code: "unknown_participant", message: "Not a participant." },
+      };
+    }
+    const arcade = arcadeStateOf(this.state);
+    if (!arcade) {
+      return {
+        applied: false,
+        rejection: { code: "not_in_arcade", message: "The arcade is not open." },
+      };
+    }
+    if (round !== arcade.roundIndex) {
+      return {
+        applied: false,
+        rejection: {
+          code: "wrong_round_phase",
+          message: "That round has moved on.",
+        },
+      };
+    }
+    const play = arcade.play;
+    const lockedSince =
+      play?.kind === "plan_apply" && play.light === "apply"
+        ? play.lightChangedAt
+        : null;
+    const at = correctedTapAt(receivedAt, medianRtt(client.rtt), lockedSince);
+    return this.apply({ type: "tap", pid: client.pid, at }, receivedAt);
+  }
+
+  /**
+   * One typed answer in Recruitment. `item` is the index it was meant for, so
+   * a submission sent as the item rolls over is refused rather than landing
+   * on an emoji pair the person has not seen.
+   */
+  submitAnswer(
+    client: Client,
+    item: number,
+    answer: string,
+    receivedAt: number,
+  ): { applied: boolean; rejection?: { code: string; message: string } } {
+    if (client.pid === undefined) {
+      return {
+        applied: false,
+        rejection: { code: "unknown_participant", message: "Not a participant." },
+      };
+    }
+    const play = arcadeStateOf(this.state)?.play;
+    if (play?.kind !== "recruitment") {
+      return {
+        applied: false,
+        rejection: { code: "wrong_round_phase", message: "Nothing to answer." },
+      };
+    }
+    if (item !== play.at) {
+      return {
+        applied: false,
+        rejection: {
+          code: "wrong_round_phase",
+          message: "That one has moved on.",
+        },
+      };
+    }
+    return this.apply(
+      { type: "submitAnswer", pid: client.pid, answer },
+      receivedAt,
+    );
+  }
+
+  /** The Lounge backs a player. Changeable until the Floor locks. */
+  back(
+    client: Client,
+    backing: ParticipantId,
+    receivedAt: number,
+  ): { applied: boolean; rejection?: { code: string; message: string } } {
+    if (client.pid === undefined) {
+      return {
+        applied: false,
+        rejection: { code: "unknown_participant", message: "Not a participant." },
+      };
+    }
+    return this.apply(
+      { type: "backPlayer", pid: client.pid, backing },
+      receivedAt,
+    );
   }
 
   /**
@@ -638,6 +1027,10 @@ export class SessionRegistry {
     // reconnects, so a deadline that passed during the gap closes on the first
     // tick rather than leaving a question open forever with nobody to close it.
     runtime.armQuestionTimer();
+    // And the arcade's, for the same reason: a round that was running when
+    // the process went away comes back with its light turning and its Floor
+    // still due to close.
+    runtime.armArcadeTimers();
     return runtime;
   }
 

@@ -85,6 +85,15 @@ const view = createParticipantView({
   onAnswer: (index, choice) => {
     client?.answer(index, choice);
   },
+  onArcadeTap: (round) => {
+    client?.arcadeTap(round);
+  },
+  onArcadeAnswer: (item, answer) => {
+    client?.arcadeAnswer(item, answer);
+  },
+  onArcadeBack: (pid) => {
+    client?.arcadeBack(pid);
+  },
 });
 let nickname = "";
 let joinCode = codeFromPath();
@@ -383,5 +392,30 @@ function guardTopFive(state: RenderState): void {
   }
   if (trivia?.distribution !== undefined) {
     console.error("protocol violation: participant received the answer distribution");
+  }
+
+  // The arcade's version, and the one that matters most is the light
+  // schedule: a phone holding `nextChangeAt` can tap flat out and stop
+  // 401 ms before every lock. It is never sent, so if it turns up it is a
+  // bug on the wire and this is where it gets shouted about.
+  const arcade = state.arcade;
+  if (arcade === undefined) return;
+  const pa = arcade.planApply;
+  if (pa?.nextChangeAt !== undefined || pa?.headTurnsAt !== undefined) {
+    console.error(
+      "protocol violation: participant received the light schedule; the lock must not be predictable from the phone",
+    );
+  }
+  if (pa?.finishOrder !== undefined || pa?.crossed !== undefined) {
+    console.error("protocol violation: participant received the Floor's results");
+  }
+  const r = arcade.recruitment;
+  if (arcade.phase !== "reveal" && (r?.answer !== undefined || r?.recap !== undefined)) {
+    console.error(
+      "protocol violation: participant received a Recruitment answer before the reveal",
+    );
+  }
+  if (r?.answered !== undefined || r?.eligible !== undefined) {
+    console.error("protocol violation: participant received the room's answer counts");
   }
 }

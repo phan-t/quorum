@@ -10,23 +10,29 @@
  */
 
 import type {
+  ArcadePlanApplyView,
+  ArcadeRecruitmentView,
+  ArcadeView,
   HostCommand,
   RenderState,
   RosterEntry,
   TriviaView,
 } from "../../protocol.ts";
 import { initTheme, themeToggle } from "../shared/theme.ts";
-import type { Segment } from "../../engine/types.ts";
+import type { ArcadeRoundKind, Segment } from "../../engine/types.ts";
 import { h, keyedList, qs, replace, setAttr, setText } from "../shared/dom.ts";
 import { QuorumClient } from "../shared/net.ts";
 import { mockBadge, mockTransport, readMockConfig } from "../shared/mock.ts";
 import {
+  ARCADE_ROUND_LABEL,
+  LIGHT_FACE,
   SEGMENTS,
   SEGMENT_BUILT,
   SEGMENT_LABEL,
   SEGMENT_PHASE,
   answerTiles,
   formatCountdown,
+  gridEntries,
   nextSegment,
   questionLabel,
   remainingMs,
@@ -469,13 +475,291 @@ const bodyTrivia = h("section", { class: "pb pb-trivia" }, [
   triviaLoad,
 ]);
 
+/* ---- arcade ---- */
+
+/**
+ * The console's arcade panel: pick the round, set it up, run the card → play
+ * → reveal, and watch the Floor/Lounge split.
+ *
+ * The picker is a local choice until the host presses the primary button,
+ * because `startRound` is what commits it and a round that started because
+ * somebody clicked a radio would be a round nobody meant to start. The two
+ * built rounds are selectable; the other four are listed and disabled, so the
+ * host can see the shape of the run of show without being able to start
+ * something that does not exist.
+ */
+const ARCADE_ROUNDS: readonly ArcadeRoundKind[] = [
+  "recruitment",
+  "plan_apply",
+  "unseal",
+  "tug_of_raft",
+  "gganbu",
+  "glass_bridge",
+];
+
+const ARCADE_BUILT: Readonly<Record<ArcadeRoundKind, boolean>> = {
+  recruitment: true,
+  plan_apply: true,
+  unseal: false,
+  tug_of_raft: false,
+  gganbu: false,
+  glass_bridge: false,
+};
+
+let arcadePick: "recruitment" | "plan_apply" = "recruitment";
+
+const arcadePicker = h("div", { class: "a-picker", role: "radiogroup" });
+const arcadePickButtons = new Map<ArcadeRoundKind, HTMLButtonElement>();
+for (const kind of ARCADE_ROUNDS) {
+  const built = ARCADE_BUILT[kind];
+  const button = h("button", {
+    class: built ? "a-pick" : "a-pick is-unbuilt",
+    type: "button",
+    disabled: !built,
+    attrs: {
+      role: "radio",
+      "aria-checked": "false",
+      title: built ? "" : "Designed, not built yet",
+    },
+  }, [
+    h("span", { class: "a-pick-name", text: ARCADE_ROUND_LABEL[kind] }),
+    built ? null : h("span", { class: "mono a-pick-todo", text: "—" }),
+  ]) as HTMLButtonElement;
+  if (built) {
+    button.addEventListener("click", () => {
+      arcadePick = kind as "recruitment" | "plan_apply";
+      if (lastState) render(lastState);
+    });
+  }
+  arcadePickButtons.set(kind, button);
+  arcadePicker.appendChild(button);
+}
+
+const arcadeSeconds = h("input", {
+  class: "field field-num",
+  type: "number",
+  value: "20",
+  attrs: { min: "5", max: "60", "aria-label": "Seconds per item" },
+}) as HTMLInputElement;
+const arcadeTarget = h("input", {
+  class: "field field-num",
+  type: "number",
+  value: "120",
+  attrs: { min: "10", max: "999", "aria-label": "Resource target" },
+}) as HTMLInputElement;
+const arcadeFloorSeconds = h("input", {
+  class: "field field-num",
+  type: "number",
+  value: "75",
+  attrs: { min: "15", max: "300", "aria-label": "Seconds of play" },
+}) as HTMLInputElement;
+
+const arcadeRecruitCfg = h("div", { class: "a-cfg" }, [
+  h("label", { class: "field-row" }, [
+    h("span", { class: "label", text: "Seconds per item" }),
+    arcadeSeconds,
+  ]),
+  h("p", { class: "pb-note", text: "Six items. The server walks them; you do not have to press anything." }),
+]);
+const arcadePlanCfg = h("div", { class: "a-cfg" }, [
+  h("label", { class: "field-row" }, [
+    h("span", { class: "label", text: "Resource target" }),
+    arcadeTarget,
+  ]),
+  h("label", { class: "field-row" }, [
+    h("span", { class: "label", text: "Seconds of play" }),
+    arcadeFloorSeconds,
+  ]),
+  h("p", {
+    class: "pb-note",
+    text: "120 is tuned so about half the room crosses. The light turns on its own, 2–6 s, and the screen telegraphs the lock 400 ms early.",
+  }),
+]);
+
+const arcadeState = h("p", { class: "mono t-head-line" });
+const arcadeSplit = h("div", { class: "a-split" });
+const arcadeFloorList = h("p", { class: "mono a-floor-list" });
+const arcadeBacking = h("ul", { class: "a-backing" });
+const arcadeItem = h("p", { class: "a-item" });
+const arcadeNote = h("p", { class: "pb-note a-note", attrs: { hidden: true } });
+
+const arcadeEnd = control({
+  label: "End the round",
+  className: "ctl-secondary",
+  title: "Stop the Floor now. The server would do this when the clock runs out.",
+  onFire: (c) => issue({ name: "arcade.end" }, c),
+});
+const arcadeNext = control({
+  label: "Skip to the next item",
+  className: "ctl-secondary",
+  title: "Recruitment only. The item timer does this on its own.",
+  onFire: (c) => issue({ name: "arcade.next" }, c),
+});
+
+const bodyArcade = h("section", { class: "pb pb-arcade" }, [
+  arcadeState,
+  arcadePicker,
+  arcadeRecruitCfg,
+  arcadePlanCfg,
+  arcadeItem,
+  arcadeNote,
+  arcadeSplit,
+  arcadeFloorList,
+  h("p", { class: "label", text: "Backing" }),
+  arcadeBacking,
+  h("div", { class: "field-actions" }, [arcadeEnd.el, arcadeNext.el]),
+]);
+
+/** The round command the picker and its fields currently describe. */
+function arcadeRoundCommand(): HostCommand {
+  const int = (el: HTMLInputElement, dflt: number): number => {
+    const v = Number(el.value);
+    return Number.isFinite(v) && Number.isInteger(v) && v > 0 ? v : dflt;
+  };
+  return arcadePick === "recruitment"
+    ? {
+        name: "arcade.round",
+        kind: "recruitment",
+        secondsPerItem: int(arcadeSeconds, 20),
+      }
+    : {
+        name: "arcade.round",
+        kind: "plan_apply",
+        target: int(arcadeTarget, 120),
+        seconds: int(arcadeFloorSeconds, 75),
+      };
+}
+
+function renderArcade(s: RenderState): void {
+  const a = s.arcade;
+  for (const [kind, button] of arcadePickButtons) {
+    const on = ARCADE_BUILT[kind] && kind === arcadePick;
+    button.classList.toggle("on", on);
+    setAttr(button, "aria-checked", on ? "true" : "false");
+  }
+  arcadeRecruitCfg.hidden = arcadePick !== "recruitment";
+  arcadePlanCfg.hidden = arcadePick !== "plan_apply";
+
+  if (a === undefined) {
+    setText(arcadeState, "NOT IN THE ARCADE");
+    setText(
+      arcadeItem,
+      "Entering hands out the player numbers. Everyone keeps theirs for the whole arcade.",
+    );
+    arcadeNote.hidden = true;
+    replace(arcadeSplit, []);
+    setText(arcadeFloorList, "");
+    replace(arcadeBacking, []);
+    arcadeEnd.setDisabled(true);
+    arcadeNext.setDisabled(true);
+    // The picker is still live: the host chooses the round before entering.
+    return;
+  }
+
+  const roundLabel = a.round ? ARCADE_ROUND_LABEL[a.round] : "no round";
+  const left = remainingMs(a.endsAt, client?.now() ?? Date.now());
+  setText(
+    arcadeState,
+    [
+      `ROUND ${a.roundIndex + 1}`,
+      roundLabel.toUpperCase(),
+      a.phase.toUpperCase(),
+      a.phase === "running" && left !== null ? formatCountdown(left) : null,
+    ]
+      .filter((x) => x !== null)
+      .join(" · "),
+  );
+
+  // The Floor / Lounge split, which is the one number the host is asked about
+  // between rounds and the reason nobody is sitting out.
+  const total = a.onFloor + a.inLounge;
+  replace(arcadeSplit, [
+    h("div", { class: "a-split-bar" }, [
+      h("div", {
+        class: "a-split-floor",
+        attrs: {
+          style: `flex-basis:${total > 0 ? (a.onFloor / total) * 100 : 100}%`,
+        },
+      }),
+      h("div", {
+        class: "a-split-lounge",
+        attrs: {
+          style: `flex-basis:${total > 0 ? (a.inLounge / total) * 100 : 0}%`,
+        },
+      }),
+    ]),
+    h("p", {
+      class: "mono a-split-text",
+      text: `${a.onFloor} on the Floor · ${a.inLounge} in the Lounge`,
+    }),
+  ]);
+
+  // The console is the one surface that may hold the answer while the item is
+  // open, because the host is the one about to read it out.
+  const r = a.recruitment;
+  const pa = a.planApply;
+  if (r) {
+    setText(
+      arcadeItem,
+      `Item ${r.at + 1} of ${r.of} — ${r.cue ?? ""} → ${r.answer ?? "?"}  (${r.solved ?? 0} solved, ${r.answered ?? 0} of ${r.eligible ?? 0} answered)`,
+    );
+    const note = r.note ?? "";
+    arcadeNote.hidden = note === "";
+    setText(arcadeNote, note);
+  } else if (pa) {
+    setText(
+      arcadeItem,
+      `${LIGHT_FACE[pa.light].sign} — ${pa.crossed ?? 0} across, target ${pa.target}, checkpoints ${pa.checkpoints.join(" / ")}`,
+    );
+    arcadeNote.hidden = false;
+    setText(
+      arcadeNote,
+      pa.headTurnsAt === undefined
+        ? "The light turns back to PLAN on its own."
+        : `The head starts to turn in ${Math.max(0, Math.round((pa.headTurnsAt - (client?.now() ?? Date.now())) / 100) / 10)}s.`,
+    );
+  } else {
+    setText(arcadeItem, "");
+    arcadeNote.hidden = true;
+  }
+
+  const entries = gridEntries(a, s.roster);
+  const lounge = entries.filter((e) => e.standing === "drained");
+  setText(
+    arcadeFloorList,
+    lounge.length === 0
+      ? "Nobody has drained this round."
+      : `Lounge: ${lounge.map((e) => e.tag).join(" ")}`,
+  );
+
+  // Who has backed whom, by number on both sides: the host reads these out.
+  const backing = s.hostExtras?.arcade?.backing ?? {};
+  const numberOf = new Map(entries.map((e) => [e.pid, e.tag]));
+  const nameOf = new Map(entries.map((e) => [e.pid, e.nickname]));
+  replace(
+    arcadeBacking,
+    Object.entries(backing).map(([pid, onPid]) =>
+      h("li", { class: "a-backing-row" }, [
+        h("span", { class: "mono", text: numberOf.get(pid) ?? "???" }),
+        h("span", { class: "a-backing-name", text: nameOf.get(pid) ?? "" }),
+        h("span", { class: "label", text: "backs" }),
+        h("span", { class: "mono", text: numberOf.get(onPid) ?? "???" }),
+        h("span", { class: "a-backing-name", text: nameOf.get(onPid) ?? "" }),
+      ]),
+    ),
+  );
+
+  arcadeEnd.setDisabled(a.phase !== "running");
+  arcadeNext.setDisabled(a.phase !== "running" || a.round !== "recruitment");
+}
+
 const bodies: Record<string, HTMLElement> = {
   lobby: bodyLobby,
   holding: bodyHolding,
   standings: bodyStandings,
   final: bodyStandings,
   trivia: bodyTrivia,
-  arcade: bodyPending,
+  arcade: bodyArcade,
 };
 
 /* ------------------------------------------------------------------ */
@@ -524,6 +808,39 @@ function primaryPlan(): { label: string; cmd: HostCommand | null } {
           : { label: "Show standings", cmd: { name: "segment", kind: "standings" } };
     }
   }
+  // Inside the arcade the primary button walks the round the same way it
+  // walks a question: enter, card, Floor, end, reveal. One activity, one key.
+  if (s.segment === "arcade") {
+    const a = s.arcade;
+    if (a === undefined) {
+      return { label: "Enter the arcade", cmd: { name: "arcade.enter" } };
+    }
+    switch (a.phase) {
+      case "card":
+        return { label: "Open the Floor", cmd: { name: "arcade.begin" } };
+      case "running":
+        return { label: "End the round", cmd: { name: "arcade.end" } };
+      case "idle":
+        // A round that has been played and not revealed. Revealing it is what
+        // puts the points on the board, so it is never skipped by accident.
+        if (a.round !== null) {
+          return {
+            label: `Reveal ${ARCADE_ROUND_LABEL[a.round]}`,
+            cmd: { name: "arcade.reveal" },
+          };
+        }
+        return {
+          label: `Start ${ARCADE_ROUND_LABEL[arcadePick]}`,
+          cmd: arcadeRoundCommand(),
+        };
+      case "reveal":
+        return {
+          label: `Start ${ARCADE_ROUND_LABEL[arcadePick]}`,
+          cmd: arcadeRoundCommand(),
+        };
+    }
+  }
+
   const next = nextSegment(s.segment);
   if (next === null) return { label: "Nothing queued", cmd: null };
   const labels: Record<Segment, string> = {
@@ -625,6 +942,8 @@ function render(s: RenderState): void {
   }
 
   if (body === bodyTrivia) renderTrivia(s);
+
+  if (body === bodyArcade) renderArcade(s);
 
   if (body === bodyPending) {
     const note = bodyPending.firstElementChild;
@@ -776,7 +1095,7 @@ function renderTrivia(s: RenderState): void {
  * screen-share by accident.
  */
 function roomView(s: RenderState): RenderState {
-  const { hostExtras: _hostExtras, own: _own, trivia, ...rest } = s;
+  const { hostExtras: _hostExtras, own: _own, trivia, arcade, ...rest } = s;
   // Fields are *removed*, not set to undefined, so the preview is fed the
   // same shape a phone is: the participant's copy has no `correct` key at all
   // before the reveal, and a preview that carried one would be a phone that
@@ -802,9 +1121,59 @@ function roomView(s: RenderState): RenderState {
       ...(revealed && podium !== undefined ? { podium } : {}),
     };
   }
+  // The arcade's version of the same rule, and the sharp end of it is the
+  // light schedule: the console holds `nextChangeAt` and `headTurnsAt` from
+  // the moment the round starts, and a preview that carried them would be a
+  // phone that cannot be caught — in the corner of a screen that gets shared.
+  let roomArcade: ArcadeView | undefined;
+  if (arcade !== undefined) {
+    const { recruitment, planApply, ...shared } = arcade;
+    const revealed = arcade.phase === "reveal";
+    const open = arcade.phase === "running" || revealed;
+    let roomRecruitment: ArcadeRecruitmentView | undefined;
+    if (recruitment !== undefined) {
+      const {
+        cue,
+        answer,
+        note,
+        recap,
+        answered: _answered,
+        eligible: _eligible,
+        solved: _solved,
+        firstThree,
+        ...rest2
+      } = recruitment;
+      roomRecruitment = {
+        ...rest2,
+        ...(open && cue !== undefined ? { cue } : {}),
+        ...(revealed && answer !== undefined ? { answer } : {}),
+        ...(revealed && note !== undefined ? { note } : {}),
+        ...(revealed && recap !== undefined ? { recap } : {}),
+        ...(revealed && firstThree !== undefined ? { firstThree } : {}),
+      };
+    }
+    let roomPlan: ArcadePlanApplyView | undefined;
+    if (planApply !== undefined) {
+      const {
+        nextChangeAt: _nextChangeAt,
+        headTurnsAt: _headTurnsAt,
+        crossed: _crossed,
+        finishOrder: _finishOrder,
+        ...rest2
+      } = planApply;
+      roomPlan = rest2;
+    }
+    roomArcade = {
+      ...shared,
+      ...(roomRecruitment !== undefined ? { recruitment: roomRecruitment } : {}),
+      ...(roomPlan !== undefined ? { planApply: roomPlan } : {}),
+    };
+  }
+
   return {
     ...rest,
     ...(roomTrivia !== undefined ? { trivia: roomTrivia } : {}),
+    ...(roomArcade !== undefined ? { arcade: roomArcade } : {}),
     standings: s.seal === "sealed" ? [] : s.standings,
   };
 }
@@ -872,9 +1241,15 @@ client = new QuorumClient({
  * move by itself gets a heartbeat of its own.
  */
 setInterval(() => {
-  if (lastState?.segment !== "trivia") return;
-  if (lastState.trivia?.phase !== "open") return;
-  renderTrivia(lastState);
+  if (lastState === null) return;
+  if (lastState.segment === "trivia" && lastState.trivia?.phase === "open") {
+    renderTrivia(lastState);
+  }
+  // The arcade's clocks move without anything arriving: the item timer, the
+  // Floor's countdown, and the light turning every two to six seconds.
+  if (lastState.segment === "arcade" && lastState.arcade !== undefined) {
+    renderArcade(lastState);
+  }
 }, 250);
 
 bindSpace(primary);

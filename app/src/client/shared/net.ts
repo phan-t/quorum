@@ -154,6 +154,31 @@ export class QuorumClient {
     return cid;
   }
 
+  /** Recruitment: one typed answer for one item, and it is final. */
+  arcadeAnswer(item: number, answer: string): string {
+    const cid = this.#nextCid();
+    this.#send({ t: "arcade.answer", cid, item, answer });
+    return cid;
+  }
+
+  /**
+   * Plan / Apply: one tap. No timestamp — see the note on `arcade.tap` in
+   * protocol.ts. `round` is the arcade's round index, so a tap in flight when
+   * the round ends cannot land on the next one.
+   */
+  arcadeTap(round: number): string {
+    const cid = this.#nextCid();
+    this.#send({ t: "arcade.tap", cid, round });
+    return cid;
+  }
+
+  /** The Lounge: back a player, or change who you are backing. */
+  arcadeBack(pid: string): string {
+    const cid = this.#nextCid();
+    this.#send({ t: "arcade.back", cid, pid });
+    return cid;
+  }
+
   #nextCid(): string {
     return `c${++this.#cidSeq}-${Math.random().toString(36).slice(2, 8)}`;
   }
