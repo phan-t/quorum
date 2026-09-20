@@ -603,6 +603,67 @@ describe("plan / apply on the Floor", () => {
     assert.ok(milestone.effects.some((e) => e.kind === "broadcast"));
   });
 
+  test("a tap is judged against the light at its own instant, not the light now", () => {
+    // SPEC: "During APPLY (pink), any tap is … drained." A 400 ms round trip
+    // taps 1.9 s into the lock, the phone plainly pink, and the frame lands
+    // after the light has gone back to green. The instant is what counts.
+    let s = planning(["p1", "p2"]);
+    s = accept(s, [{ type: "setLight", light: "apply", until: T0 + 5_000 }], T0 + 3_000);
+    s = accept(s, [{ type: "setLight", light: "plan", until: T0 + 11_000 }], T0 + 5_000);
+    assert.equal(planPlay(s).light, "plan");
+    assert.equal(planPlay(s).applySince, T0 + 3_000, "the lock that just closed");
+
+    const late = accept(s, [{ type: "tap", pid: "p1", at: T0 + 4_900 }], T0 + 5_100);
+    assert.equal(arcadeOf(late).standing["p1"], "drained");
+
+    // The other direction is untouched: a tap inside the PLAN *before* that
+    // lock, and one inside the PLAN after it, both bank a resource.
+    const early = accept(s, [{ type: "tap", pid: "p2", at: T0 + 2_900 }], T0 + 5_100);
+    assert.equal(arcadeOf(early).standing["p2"], "floor");
+    assert.equal(planPlay(early).resources["p2"], 1);
+    const after = accept(s, [{ type: "tap", pid: "p2", at: T0 + 5_050 }], T0 + 5_100);
+    assert.equal(arcadeOf(after).standing["p2"], "floor");
+    assert.equal(planPlay(after).resources["p2"], 1);
+  });
+
+  test("before the first lock there is no window for a tap to fall in", () => {
+    // `beginPlay` sets PLAN with `lightChangedAt` at the top of the round, so
+    // "earlier than the current light" must not be read as "in the APPLY
+    // before it" — there was not one.
+    const s = planning(["p1"]);
+    assert.equal(planPlay(s).applySince, null);
+    const before = accept(s, [{ type: "tap", pid: "p1", at: T0 - 500 }], T0 + 100);
+    assert.equal(arcadeOf(before).standing["p1"], "floor");
+    assert.equal(planPlay(before).resources["p1"], 1);
+  });
+
+  test("a milestone is addressed, not shouted: the tapper, the console, and the screen only on a crossing", () => {
+    // Sixty phones do not render anybody else's resource count, so a
+    // checkpoint that fans out to the room is fifty-nine frames that change
+    // nothing. Measured in bots/arcade-round.test.ts; here is the rule.
+    const audiences = (effects: readonly Effect[]) =>
+      effects
+        .filter((e): e is Extract<Effect, { kind: "broadcast" }> => e.kind === "broadcast")
+        .map((e) => (typeof e.to === "string" ? e.to : `pid:${e.to.pid}`))
+        .sort();
+
+    let s = planning(["p1", "p2"], 30);
+    s = taps(s, "p1", 7); // the quarter marks of 30 are 8, 15, 23
+    const checkpoint = run(s, { type: "tap", pid: "p1", at: T0 + 200 }, T0 + 200);
+    assert.equal(arcadeOf(checkpoint.state).banked["p1"], PLAN_APPLY_CHECKPOINT_BANK);
+    assert.deepEqual(audiences(checkpoint.effects), ["host", "pid:p1"]);
+
+    s = taps(s, "p1", 22); // 8 + 22 = 30 − 1: one short of the line
+    const crossing = run(s, { type: "tap", pid: "p1", at: T0 + 300 }, T0 + 300);
+    assert.deepEqual(planPlay(crossing.state).finishOrder, ["p1"]);
+    assert.deepEqual(audiences(crossing.effects), ["host", "pid:p1", "screen"]);
+
+    // A drain still is room-wide: the dormitory grid moves for everybody.
+    const locked = accept(s, [{ type: "setLight", light: "apply", until: T0 + 9_000 }], T0 + 400);
+    const drain = run(locked, { type: "tap", pid: "p2", at: T0 + 500 }, T0 + 500);
+    assert.deepEqual(audiences(drain.effects), ["all"]);
+  });
+
   test("setLight and tap need a Plan / Apply round that is running", () => {
     const s = recruiting(["p1"]);
     assertRefused(s, run(s, { type: "setLight", light: "apply", until: 9e9 }, T0), "wrong_round_phase");

@@ -379,6 +379,15 @@ export interface ArcadeRecruitmentView {
   /** 0-based index into the item list. */
   readonly at: number;
   readonly of: number;
+  /**
+   * When *this item* closes, as an absolute epoch — never a duration.
+   *
+   * Every role gets it, because every surface has an item timer to draw and
+   * the round's `endsAt` is the wrong number for all of them: it is the last
+   * item's deadline, two minutes away on item one. Absent while the round
+   * card is up and at the reveal, when no item is running.
+   */
+  readonly itemEndsAt?: number;
   /** The two emoji. Absent until the Floor is open — a card is not a cue. */
   readonly cue?: string;
   /** The current item's answer. Reveal, and the host. */

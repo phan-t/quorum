@@ -717,6 +717,8 @@ interface ExpectedPlanApply {
   readonly banked: ReadonlyMap<ParticipantId, number>;
   /** How many checkpoint/crossing events moved points, for the frame count. */
   readonly milestones: number;
+  /** Of those, how many were a crossing — the ones the big screen draws. */
+  readonly crossings: number;
 }
 
 type Move =
@@ -797,7 +799,17 @@ function expectPlanApply(): ExpectedPlanApply {
     if (pay) banked.set(pid, (banked.get(pid) ?? 0) + pay);
   }
 
-  return { taps, backs, resources, drained, finishOrder, backing, banked, milestones };
+  return {
+    taps,
+    backs,
+    resources,
+    drained,
+    finishOrder,
+    backing,
+    banked,
+    milestones,
+    crossings: finishOrder.length,
+  };
 }
 
 /* ------------------------------------------------------------------ */
@@ -919,6 +931,8 @@ interface Played {
   readonly ordinaryTapFrames: number;
   /** Wire counts over the Plan / Apply Floor only. */
   readonly planApplyWire: { participant: Counts; host: Counts; screen: Counts };
+  /** State frames each phone received over the Plan / Apply Floor only. */
+  readonly phoneStateFrames: ReadonlyMap<ParticipantId, number>;
   /** The participant view of one phone while the light was PLAN, and the raw frame. */
   readonly phoneFramePlan: string;
   readonly phoneFrameApply: string;
@@ -1033,6 +1047,7 @@ function play(): Played {
     participant: { ...wire.participant },
     host: { ...wire.host },
     screen: { ...wire.screen },
+    perPhone: new Map(wire.perPhone),
   };
 
   // The first light is scheduled by the driver the way the runtime's timer
@@ -1104,6 +1119,13 @@ function play(): Played {
       other: wire.screen.other - paStart.screen.other,
     },
   };
+  const phoneStateFrames = new Map<ParticipantId, number>();
+  for (const b of BOTS) {
+    phoneStateFrames.set(
+      b.pid,
+      (wire.perPhone.get(b.pid) ?? 0) - (paStart.perPhone.get(b.pid) ?? 0),
+    );
+  }
   must({ type: "revealRound" }, PA_END_ROUND + 3_000, "reveal plan/apply");
   // Nothing in this file waits on a timer: the runtime armed real ones from
   // the fake clock, and they must not fire into the next test file.
@@ -1122,6 +1144,7 @@ function play(): Played {
     wire,
     ordinaryTapFrames,
     planApplyWire,
+    phoneStateFrames,
     phoneFramePlan,
     phoneFrameApply,
   };
@@ -1519,40 +1542,100 @@ describe("sixty bots play Recruitment and Plan / Apply", () => {
     assert.ok(played.phoneFrameApply.includes('"light":"apply"'));
   });
 
-  test("an ordinary tap costs no frames; the round's milestones cost these", (t) => {
+  test("an ordinary tap costs no frames, and a milestone costs three, not sixty", (t) => {
     assert.equal(played.ordinaryTapFrames, 0, "a non-milestone tap fanned frames out");
     const w = played.planApplyWire;
     const n = BOTS.length;
-    // Every `to: all` broadcast is one state frame per socket *and* one roster
-    // frame per non-host socket (and a second state frame to the host).
     const lights = SCHEDULE.length; // the first light's scheduling plus each turn
     const drains = pa.drained.size;
-    const allBroadcasts = lights + pa.milestones + drains + 1; // + endRound
-    const perPhoneFloor = allBroadcasts;
+    const ownBets = pa.backs.filter((b) => b.outcome === "ok").length;
+
+    // What is genuinely room-wide, and it is a short list: the light turning,
+    // somebody being drained (the dormitory grid moves for everyone), and the
+    // round ending.
+    const roomWide = lights + drains + 1; // + endRound
+
+    // ---- before ----
+    //
+    // Every milestone used to be `to: "all"` as well, and every `to: "all"`
+    // state broadcast also forced a roster resend — a second full frame on
+    // every socket, and for the host a second whole RenderState rather than a
+    // delta. These four numbers are the measurement this change was made
+    // against: 11 121 state frames and 11 100 roster frames to the phones over
+    // a 75 s Floor with sixty players, about 113 MB at the frame size below,
+    // roughly 300 frames a second.
+    const wasAll = roomWide + pa.milestones;
+    const before = {
+      participantState: wasAll * n + ownBets,
+      participantRoster: wasAll * n,
+      hostState: wasAll + ownBets + wasAll, // + the roster resend's full state
+      screenState: wasAll + ownBets,
+    };
+    assert.deepEqual(before, {
+      participantState: 11_121,
+      participantRoster: 11_100,
+      hostState: 391,
+      screenState: 206,
+    }, "the baseline these numbers are measured against has moved");
+
+    // ---- after ----
+    //
+    // A checkpoint goes to the tapping phone and the console; a crossing goes
+    // to the big screen as well, because `crossed` and `finishOrder` are on
+    // its projection and nothing else on it moved. A roster frame goes out
+    // when the roster changes, which during a Floor is never.
+    const after = {
+      participantState: roomWide * n + pa.milestones + ownBets,
+      participantRoster: 0,
+      hostState: roomWide + pa.milestones + ownBets,
+      screenState: roomWide + pa.crossings + ownBets,
+    };
+    assert.deepEqual(after, {
+      participantState: 2_625,
+      participantRoster: 0,
+      hostState: 206,
+      screenState: 83,
+    });
+
+    // And the measurement itself, from the fake sockets, against both.
+    assert.equal(w.participant.state, after.participantState);
+    assert.equal(w.participant.roster, after.participantRoster);
+    assert.equal(w.host.state, after.hostState);
+    assert.equal(w.host.roster, 0, "the host is never sent a roster delta");
+    assert.equal(w.screen.state, after.screenState);
+    assert.equal(w.screen.roster, after.participantRoster);
+
+    // Every phone still hears every room-wide broadcast: the saving is in what
+    // was never theirs to hear, not in dropping frames they needed.
+    const perPhone = played.phoneStateFrames;
     for (const b of BOTS) {
-      const got = played.wire.perPhone.get(b.pid) ?? 0;
-      assert.ok(got >= perPhoneFloor, `${b.nickname} received ${got} state frames, expected at least ${perPhoneFloor}`);
+      const got = perPhone.get(b.pid) ?? 0;
+      assert.ok(
+        got >= roomWide,
+        `${b.nickname} received ${got} state frames over the Floor, expected at least ${roomWide}`,
+      );
     }
-    assert.ok(w.participant.state >= allBroadcasts * n);
-    assert.ok(w.participant.roster >= allBroadcasts * n);
-    // For the report: the real per-round cost at sixty players.
+
+    const bytes = played.phoneFramePlan.length;
     const summary = {
       lights,
       milestones: pa.milestones,
+      crossings: pa.crossings,
       drains,
-      bets: pa.backs.filter((b) => b.outcome === "ok").length,
-      participantStateFrames: w.participant.state,
-      participantRosterFrames: w.participant.roster,
-      hostStateFrames: w.host.state,
-      screenStateFrames: w.screen.state,
-      approxBytesPerStateFrame: played.phoneFramePlan.length,
+      bets: ownBets,
+      before,
+      after,
+      approxBytesPerStateFrame: bytes,
+      beforeMB: Math.round((before.participantState * bytes) / 1e6),
+      afterMB: Math.round((after.participantState * bytes) / 1e6),
     };
     t.diagnostic(JSON.stringify(summary));
-    // A second checkable statement about the load: the phones' state frames
-    // are exactly the all-broadcasts plus each phone's own accepted bets.
-    const ownBets = pa.backs.filter((b) => b.outcome === "ok").length;
-    assert.equal(w.participant.state, allBroadcasts * n + ownBets, JSON.stringify(summary));
-    assert.equal(w.participant.roster, allBroadcasts * n, JSON.stringify(summary));
+    // The whole point, as one assertion: better than a four-fold cut on the
+    // state frames and the roster traffic gone entirely.
+    assert.ok(
+      after.participantState * 4 < before.participantState,
+      JSON.stringify(summary),
+    );
   });
 
   test("the whole run replays from its event log to the same state", () => {
@@ -1653,7 +1736,6 @@ describe("known discrepancies against SPEC", () => {
 
   test(
     "a tap made during APPLY that reaches the server after the light has gone back to PLAN is a drain",
-    { todo: "reducer.ts `tap` judges against the *current* light, not the light at the corrected instant; the engine forgives it" },
     () => {
       // Lock at +3000 for 2000 ms; PLAN again at +5000. A 400 ms round trip
       // phone taps at +4900 — 1.9 s into the lock, the phone plainly showing
@@ -1662,8 +1744,9 @@ describe("known discrepancies against SPEC", () => {
       const s = replay(planning(), [
         { event: { type: "setLight", light: "apply", until: T0 + 5_000 }, at: T0 + 3_000 },
         { event: { type: "setLight", light: "plan", until: T0 + 9_000 }, at: T0 + 5_000 },
-        // correctedTapAt() at the boundary: light is PLAN so lockedSince is
-        // null; at = 5100 − 200 = 4900, inside the APPLY that just ended.
+        // correctedTapAt() at the boundary: at = 5100 − 200 = 4900, inside
+        // the APPLY that just ended, so the grace does not reach it and the
+        // reducer judges it against `applySince`, not against the light now.
         { event: { type: "tap", pid: "p1", at: T0 + 4_900 }, at: T0 + 5_100 },
       ]);
       assert.equal(s.arcade?.standing["p1"], "drained");
@@ -1690,32 +1773,60 @@ describe("known discrepancies against SPEC", () => {
 
   test(
     "Recruitment's last item gets its full twenty seconds",
-    { todo: "runtime.ts arms both the item timer and the Floor timer for Recruitment; the Floor timer fires at beginPlay + 6 × 20 s, before the last item's own timer by the accumulated item-timer lag" },
     () => {
-      // Two items for brevity. The item timer fires 300 ms late (event-loop
-      // lag), so item 2 opens at +20 300 and its timer ends at +40 300; the
-      // Floor timer fires at +40 000 and ends the round. An answer at
-      // +40 200 — 19.9 s into item 2 — is refused.
-      const s0 = replay(base, [
+      // Two items for brevity, driven through the runtime because the defect
+      // was two clocks racing, and only the runtime has clocks.
+      //
+      // The item timer fires 300 ms late (event-loop lag), so item 2 opens at
+      // +20 300 and its own twenty seconds run to +40 300. The Floor timer was
+      // armed for `beginPlay + 2 × 20 s` = +40 000 and ended the round there,
+      // 300 ms early — every round, on the last item, by the accumulated
+      // item-timer lag. One of the two owns the ending, and for Recruitment it
+      // is the item's: the round is six twenty-second items, not a two-minute
+      // Floor that happens to contain six of them.
+      const registry = new SessionRegistry();
+      const initial = newSession({ sid: "s3", title: "t", joinCode: "RAFT", activities: ACTIVITIES });
+      const { runtime } = registry.add(initial, T0);
+      const setup: readonly Event[] = [
         { type: "open" },
         { type: "join", pid: "p1", nickname: "Priya" },
         { type: "start" },
         { type: "enterArcade", activityId: "arcade" },
-        { type: "startRound", round: "recruitment", config: recruitmentRound(RECRUITMENT_ITEMS.slice(0, 2)) },
-      ].map((event) => ({ event: event as Event, at: T0 })));
-      const s = replay(s0, [
-        { event: { type: "beginPlay" }, at: T0 },
-        { event: { type: "nextItem" }, at: T0 + 20_300 },
-        { event: { type: "endRound" }, at: T0 + 40_000 }, // the Floor timer
-        { event: { type: "submitAnswer", pid: "p1", answer: "Terraform" }, at: T0 + 40_200 },
-      ]);
-      assert.equal(s.arcade?.banked["p1"], 10);
+        {
+          type: "startRound",
+          round: "recruitment",
+          config: recruitmentRound(RECRUITMENT_ITEMS.slice(0, 2)),
+        },
+        { type: "beginPlay" },
+      ];
+      for (const event of setup) assert.ok(runtime.apply(event, T0).applied, event.type);
+      const client: Client = {
+        socket: { readyState: 1, send() {} } as unknown as Client["socket"],
+        role: "participant", pid: "p1", lastSeen: T0, seq: 0, rtt: [], pingSentAt: null,
+      };
+      runtime.clients.add(client);
+
+      assert.equal(runtime.armedItemAt, T0 + 20_000, "item 1 owns its twenty seconds");
+      assert.equal(runtime.armedFloorAt, null, "and no second clock is racing it");
+
+      assert.ok(runtime.apply({ type: "nextItem" }, T0 + 20_300).applied);
+      assert.equal(runtime.armedItemAt, T0 + 40_300, "item 2 gets its own twenty");
+      assert.equal(runtime.armedFloorAt, null);
+      // The round's clock on the wire agrees with the clock that will end it,
+      // so the countdown does not run out while the item is still open.
+      assert.equal(runtime.state.arcade?.endsAt, T0 + 40_300);
+
+      // 19.9 s into item 2: inside the item, and it counts. 10 for correct,
+      // +5 for being first in the room.
+      const out = runtime.submitAnswer(client, 1, "Terraform", T0 + 40_200);
+      assert.ok(out.applied, out.rejection?.code);
+      assert.equal(runtime.state.arcade?.banked["p1"], R_CORRECT + R_FIRST_BONUS);
+      runtime.clearArcadeTimers();
     },
   );
 
   test(
     "a tap received after the Floor has closed is refused even when the round ends inside a lock's grace",
-    { todo: "runtime.ts correctedTapAt() pulls a tap inside the 250 ms grace back to lightChangedAt − 1 before the reducer compares it with endsAt, so a round that happens to end within 250 ms of a lock accepts taps received after the close" },
     () => {
       const registry = new SessionRegistry();
       const initial = newSession({ sid: "s2", title: "t", joinCode: "RAFT", activities: ACTIVITIES });
@@ -1737,7 +1848,6 @@ describe("known discrepancies against SPEC", () => {
 
   test(
     "the pink strike stays on a drained player between the end of the round and its reveal",
-    { todo: "views.ts arcadeGrid() sets `struck` only while phase is running or reveal; after endRound the phase is idle and the strike comes off, then comes back at revealRound" },
     () => {
       const s = replay(planning(), [
         { event: { type: "setLight", light: "apply", until: T0 + 5_000 }, at: T0 + 3_000 },

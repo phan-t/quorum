@@ -36,7 +36,7 @@ import {
   pickLightMs,
   type Client,
 } from "./runtime.ts";
-import { LIGHT_TELEGRAPH_MS, arcadeGrid, renderStateFor } from "./views.ts";
+import { AWAY_AFTER_MS, LIGHT_TELEGRAPH_MS, arcadeGrid, renderStateFor } from "./views.ts";
 import { parseClientMessage } from "../protocol.ts";
 import type { RenderState } from "../protocol.ts";
 
@@ -258,6 +258,44 @@ describe("Recruitment does not hand out the answer", () => {
     assert.ok(wire(revealed, "screen").includes("ARGON-ANSWER"));
   });
 
+  it("gives every role the item's own deadline, as an instant", () => {
+    // SPEC: "Six items, 20 seconds each". The round's `endsAt` is the *last*
+    // item's, two minutes out on item one, so a surface drawing it in the
+    // item-timer slot counts down the wrong number six times running. The
+    // item's deadline is not a secret from anybody, and it is an absolute
+    // epoch like every other instant on this wire.
+    for (const role of ["participant", "host", "screen"] as const) {
+      const r = view(open, role, "p1").arcade?.recruitment;
+      assert.equal(r?.itemEndsAt, T0 + 20_000, role);
+    }
+    assert.equal(view(open, "screen").arcade?.endsAt, T0 + 40_000, "and it is not the round's");
+
+    // It moves with the item, and by the item's own clock: `nextItem` fires
+    // late and item 2 still gets its twenty seconds.
+    const second = replay(recruiting(), [
+      { event: { type: "nextItem" }, at: T0 + 20_300 },
+    ]);
+    assert.equal(view(second, "participant", "p1").arcade?.recruitment?.itemEndsAt, T0 + 40_300);
+
+    // Omitted, not nulled, when no item is running: the round card and the
+    // reveal have no item timer to draw.
+    const card = entered([
+      {
+        type: "startRound",
+        round: "recruitment",
+        config: { kind: "recruitment", items: ITEMS, secondsPerItem: 20 },
+      },
+    ]);
+    assert.ok(!wire(card, "participant", "p1").includes("itemEndsAt"));
+    const revealed = replay(recruiting(), [
+      { event: { type: "endRound" }, at: T0 + 40_000 },
+      { event: { type: "revealRound" }, at: T0 + 41_000 },
+    ]);
+    assert.ok(!wire(revealed, "screen").includes("itemEndsAt"));
+    // And it is never a duration.
+    assert.ok(wire(open, "participant", "p1").includes(`"itemEndsAt":${T0 + 20_000}`));
+  });
+
   it("keeps the room's counts off the phone and on the two surfaces that show one", () => {
     const answered = replay(recruiting(), [
       { event: { type: "submitAnswer", pid: "p1", answer: "krypton answer" }, at: T0 + 2_000 },
@@ -332,23 +370,48 @@ describe("the dormitory grid", () => {
     assert.deepEqual(numbers, [...numbers].sort((a, b) => a - b));
   });
 
-  it("drops the strike once the next round's card is up", () => {
+  it("drops the strike once the next round's card is up, and not before", () => {
     // A drain lasts exactly one round. The gold stays while the round is up;
-    // the pink strike is "drained *this* round" and has to come off with it.
+    // the pink strike is "drained *this* round" and has to come off with the
+    // round — which is the next round's card going up, not the end of this
+    // one. `endRound` leaves the phase `idle` and `revealRound` makes it
+    // `reveal`, so a strike gated on the phase blinked out at the end of the
+    // round and back in a few seconds later, on the one surface a grid of
+    // sixty of them is drawn on.
     const drained = replay(planning(), [
       { event: { type: "setLight", light: "apply", until: T0 + 9_000 }, at: T0 + 3_000 },
       { event: { type: "tap", pid: "p2", at: T0 + 4_000 }, at: T0 + 4_000 },
     ]);
-    assert.equal(
-      arcadeGrid(drained, drained.arcade!).find((c) => c.pid === "p2")?.struck,
-      true,
-    );
-    const next = replay(drained, [
+    const struck = (s: SessionState): boolean | undefined =>
+      arcadeGrid(s, s.arcade!).find((c) => c.pid === "p2")?.struck;
+    assert.equal(struck(drained), true, "drained, mid-round");
+
+    const ended = replay(drained, [
       { event: { type: "endRound" }, at: T0 + 60_000 },
     ]);
+    assert.equal(ended.arcade?.phase, "idle");
+    assert.equal(struck(ended), true, "the round has ended and the strike stays");
+
+    const revealed = replay(ended, [
+      { event: { type: "revealRound" }, at: T0 + 63_000 },
+    ]);
+    assert.equal(struck(revealed), true, "and through the reveal");
+
+    const next = replay(revealed, [
+      {
+        event: {
+          type: "startRound",
+          round: "plan_apply",
+          config: { kind: "plan_apply", target: 120, seconds: 75 },
+        },
+        at: T0 + 70_000,
+      },
+    ]);
+    assert.equal(next.arcade?.phase, "card");
     assert.equal(
       arcadeGrid(next, next.arcade!).every((c) => !c.struck),
       true,
+      "the next card puts everyone back on the Floor",
     );
   });
 
@@ -593,6 +656,103 @@ describe("a tap at the socket boundary", () => {
     assert.equal(runtime.state.arcade?.lounge["p1"]?.backing, null);
   });
 
+  it("still drains a tap made in the lock whose frame lands after the light has turned back", () => {
+    // The boundary picks the APPLY window the *corrected instant* falls in,
+    // not the light that happens to be up when the frame arrives. Without
+    // that the grace is unreachable for exactly the people it is for, and the
+    // drain is forgiven for exactly the people who earned it.
+    const { runtime } = running();
+    runtime.apply({ type: "setLight", light: "apply", until: T0 + 5_000 }, T0 + 3_000);
+    runtime.apply({ type: "setLight", light: "plan", until: T0 + 11_000 }, T0 + 5_000);
+    const client = fakeClient("p1", [400, 400, 400]);
+    runtime.clients.add(client);
+    // 5100 − 200 = 4900: 1.9 s into a lock that has just ended.
+    assert.equal(runtime.tap(client, 0, T0 + 5_100).applied, true);
+    assert.equal(runtime.state.arcade?.standing["p1"], "drained");
+    runtime.clearArcadeTimers();
+  });
+
+  it("still gives the grace to a tap at the lock whose frame lands after the turn back", () => {
+    const { runtime } = running();
+    runtime.apply({ type: "setLight", light: "apply", until: T0 + 5_000 }, T0 + 3_000);
+    runtime.apply({ type: "setLight", light: "plan", until: T0 + 11_000 }, T0 + 5_000);
+    const client = fakeClient("p2", [4_000, 4_000, 4_000]);
+    runtime.clients.add(client);
+    // Capped at 250: 3400 − 250 = 3150, which is 150 ms into the lock and so
+    // inside the 250 ms grace. Green when they pressed it, as far as their
+    // phone could tell.
+    assert.equal(runtime.tap(client, 0, T0 + 3_400).applied, true);
+    assert.equal(runtime.state.arcade?.standing["p2"], "floor");
+    const play = runtime.state.arcade?.play;
+    assert.equal(play?.kind === "plan_apply" ? play.resources["p2"] : null, 1);
+    runtime.clearArcadeTimers();
+  });
+
+  it("does not let the grace reopen a Floor that has closed", () => {
+    // The round ends at T0 + 75 000 and the last lock lands 100 ms before it.
+    // The grace pulls a tap inside the window back to `lockedSince − 1`,
+    // which is *before* the close — so a frame that arrived after the Floor
+    // shut used to be judged as a tap on green, inside the round, and scored.
+    const { runtime } = running();
+    runtime.apply({ type: "setLight", light: "apply", until: T0 + 80_000 }, T0 + 74_900);
+    const client = fakeClient("p1", []);
+    runtime.clients.add(client);
+    const out = runtime.tap(client, 0, T0 + 75_100);
+    assert.deepEqual(out, {
+      applied: false,
+      rejection: { code: "floor_locked", message: "The Floor is closed." },
+    });
+    // The ordinary latency correction is untouched by that: a tap whose
+    // corrected instant is still inside the round counts, however late the
+    // frame is.
+    const slow = fakeClient("p2", [400, 400, 400]);
+    runtime.clients.add(slow);
+    // 75 050 − 200 = 74 850, before both the lock and the close.
+    assert.equal(runtime.tap(slow, 0, T0 + 75_050).applied, true);
+    const play = runtime.state.arcade?.play;
+    assert.equal(play?.kind === "plan_apply" ? play.resources["p2"] : null, 1);
+    runtime.clearArcadeTimers();
+  });
+
+  it("lets the item timer own Recruitment's ending, with no Floor timer racing it", () => {
+    const registry = new SessionRegistry();
+    const { runtime } = registry.add(entered(), T0);
+    runtime.apply(
+      {
+        type: "startRound",
+        round: "recruitment",
+        config: { kind: "recruitment", items: ITEMS, secondsPerItem: 20 },
+      },
+      T0,
+    );
+    runtime.apply({ type: "beginPlay" }, T0);
+    assert.equal(runtime.armedItemAt, T0 + 20_000);
+    assert.equal(runtime.armedFloorAt, null);
+    // The item timer runs 250 ms late; the last item still gets twenty
+    // seconds of its own, and the round's clock moves with it.
+    runtime.apply({ type: "nextItem" }, T0 + 20_250);
+    assert.equal(runtime.armedItemAt, T0 + 40_250);
+    assert.equal(runtime.armedFloorAt, null);
+    assert.equal(runtime.state.arcade?.endsAt, T0 + 40_250);
+    runtime.clearArcadeTimers();
+
+    // Plan / Apply is the other way round: no items, and the Floor's clock is
+    // the only one that can end it.
+    const { runtime: pa } = new SessionRegistry().add(entered(), T0);
+    pa.apply(
+      {
+        type: "startRound",
+        round: "plan_apply",
+        config: { kind: "plan_apply", target: 120, seconds: 75 },
+      },
+      T0,
+    );
+    pa.apply({ type: "beginPlay" }, T0);
+    assert.equal(pa.armedFloorAt, T0 + 75_000);
+    assert.equal(pa.armedItemAt, null);
+    pa.clearArcadeTimers();
+  });
+
   it("refuses a tap meant for a round that has moved on", () => {
     const { runtime } = running();
     const client = fakeClient("p1", []);
@@ -622,6 +782,142 @@ describe("a tap at the socket boundary", () => {
     assert.equal(ok.applied, true);
     const play = runtime.state.arcade?.play;
     assert.equal(play?.kind === "recruitment" ? play.answered["p1"] : null, true);
+  });
+});
+
+/* ------------------------------------------------------------------ */
+/* What a broadcast costs                                              */
+/* ------------------------------------------------------------------ */
+
+describe("what a broadcast costs", () => {
+  interface Counted {
+    readonly client: Client;
+    state: number;
+    roster: number;
+  }
+
+  function counted(
+    runtime: ReturnType<SessionRegistry["add"]>["runtime"],
+    role: "participant" | "host" | "screen",
+    pid?: string,
+  ): Counted {
+    const out: Counted = { client: null as unknown as Client, state: 0, roster: 0 };
+    const socket = {
+      readyState: 1,
+      send(frame: string) {
+        const t = (JSON.parse(frame) as { t: string }).t;
+        if (t === "state") out.state += 1;
+        else if (t === "roster") out.roster += 1;
+      },
+    } as unknown as Client["socket"];
+    const client: Client = {
+      socket,
+      role,
+      ...(pid ? { pid } : {}),
+      lastSeen: T0,
+      seq: 0,
+      rtt: [],
+      pingSentAt: null,
+    };
+    runtime.clients.add(client);
+    return Object.assign(out, { client });
+  }
+
+  function room() {
+    const registry = new SessionRegistry();
+    const { runtime } = registry.add(entered(), T0);
+    runtime.apply(
+      {
+        type: "startRound",
+        round: "plan_apply",
+        config: { kind: "plan_apply", target: 120, seconds: 75 },
+      },
+      T0,
+    );
+    runtime.apply({ type: "beginPlay" }, T0);
+    runtime.apply({ type: "setLight", light: "plan", until: T0 + 3_000 }, T0);
+    const phones = ["p1", "p2", "p3"].map((pid) => counted(runtime, "participant", pid));
+    const host = counted(runtime, "host");
+    const screen = counted(runtime, "screen");
+    // What main.ts does as each socket arrives: a full state to the new one
+    // and the roster to everybody else. Counting from after that is counting
+    // the round, not the connect.
+    runtime.broadcastRoster(T0);
+    for (const c of [...phones, host, screen]) {
+      c.state = 0;
+      c.roster = 0;
+    }
+    return { runtime, phones, host, screen };
+  }
+
+  it("sends no roster frame when the roster has not moved", () => {
+    // A `to: "all"` state broadcast used to force a roster resend on every
+    // socket — and the state frame it follows already carries the roster, so
+    // it was a second full frame saying the same thing. Over a 75 s Floor at
+    // sixty players that was 11 100 frames; see bots/arcade-round.test.ts.
+    const { runtime, phones, host, screen } = room();
+    runtime.apply({ type: "setLight", light: "apply", until: T0 + 6_000 }, T0 + 3_000);
+    for (const p of phones) {
+      assert.equal(p.state, 1, "the light turn is room-wide");
+      assert.equal(p.roster, 0, "and the roster did not move");
+    }
+    assert.equal(host.state, 1);
+    assert.equal(screen.state, 1);
+
+    // Nor does the fifteen-second sweep, whose job is to repaint the roster
+    // when somebody goes amber. Nobody has.
+    runtime.sweep(T0 + 3_100);
+    for (const p of phones) assert.equal(p.roster, 0);
+    // Let one go quiet and it does repaint.
+    const first = phones[0];
+    assert.ok(first);
+    first.client.lastSeen = T0 - AWAY_AFTER_MS - 1;
+    runtime.sweep(T0 + 3_200);
+    for (const p of phones) assert.equal(p.roster, 1);
+    runtime.clearArcadeTimers();
+  });
+
+  it("sends one when it has", () => {
+    const { runtime, phones, host } = room();
+    runtime.apply({ type: "join", pid: "p4", nickname: "Mei" }, T0 + 1_000);
+    for (const p of phones) assert.equal(p.roster, 1, "somebody joined");
+    // The host gets a whole state instead: their headcount lives in
+    // hostExtras, which a roster frame does not carry.
+    assert.equal(host.state, 2);
+    // Kicking them moves it back, and that is a second roster frame, not a
+    // suppressed one — the comparison is on the roster, not on the event.
+    runtime.apply({ type: "kick", pid: "p4" }, T0 + 2_000);
+    for (const p of phones) assert.equal(p.roster, 2);
+    runtime.clearArcadeTimers();
+  });
+
+  it("sends a checkpoint to the phone that earned it and the console, and nobody else", () => {
+    const { runtime, phones, host, screen } = room();
+    const p1 = phones[0];
+    assert.ok(p1);
+    for (let i = 0; i < 29; i += 1) {
+      runtime.apply({ type: "tap", pid: "p1", at: T0 + 100 + i }, T0 + 100 + i);
+    }
+    assert.equal(p1.state, 0, "an ordinary tap is worth no frames at all");
+    runtime.apply({ type: "tap", pid: "p1", at: T0 + 200 }, T0 + 200);
+    assert.equal(runtime.state.arcade?.banked["p1"], 5);
+    assert.equal(p1.state, 1);
+    assert.equal(host.state, 1);
+    assert.equal(screen.state, 0, "the screen does not draw anybody's resources");
+    assert.equal(phones[1]?.state, 0);
+    assert.equal(phones[2]?.state, 0);
+    for (const p of phones) assert.equal(p.roster, 0);
+    runtime.clearArcadeTimers();
+  });
+
+  it("sends a drain to everybody, because the dormitory grid moves", () => {
+    const { runtime, phones, screen } = room();
+    runtime.apply({ type: "setLight", light: "apply", until: T0 + 9_000 }, T0 + 3_000);
+    runtime.apply({ type: "tap", pid: "p1", at: T0 + 4_000 }, T0 + 4_000);
+    assert.equal(runtime.state.arcade?.standing["p1"], "drained");
+    for (const p of phones) assert.equal(p.state, 2, "the light turn and the drain");
+    assert.equal(screen.state, 2);
+    runtime.clearArcadeTimers();
   });
 });
 

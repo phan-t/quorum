@@ -11,6 +11,7 @@
 import type {
   ActivitySummary,
   ArcadeCell,
+  ArcadeRecruitmentView,
   ArcadeView,
   OwnPoints,
   RefusedReason,
@@ -338,6 +339,25 @@ export const ARCADE_ROUND_LABEL: Readonly<Record<ArcadeRoundKind, string>> = {
 };
 
 /**
+ * SPEC.md's round numbers, which are the ones the room hears.
+ *
+ * Not `roundIndex + 1`. `roundIndex` is where the round fell in *this* run —
+ * the host picks the order — and numbering off it made the console say
+ * `ROUND 1 · RECRUITMENT` while the card in front of thirty people said
+ * *Game 1 — Plan / Apply*. SPEC.md's table numbers Recruitment 0 and
+ * Plan / Apply 1, and DESIGN.md's round cards agree, so the number belongs to
+ * the round and not to its position in one host's run of show.
+ */
+export const ARCADE_ROUND_NUMBER: Readonly<Record<ArcadeRoundKind, number>> = {
+  recruitment: 0,
+  plan_apply: 1,
+  unseal: 2,
+  tug_of_raft: 3,
+  gganbu: 4,
+  glass_bridge: 5,
+};
+
+/**
  * The round cards, verbatim from DESIGN.md "Copy, and how it is said".
  *
  * Verbatim matters here more than anywhere else in the product: the tone is
@@ -415,6 +435,75 @@ export const HOUSE = {
  * here is invented, and that is why it is funny.
  */
 export const STATE_LOCK_ERROR = "Error: state lock held by another process";
+
+/* ------------------------------------------------------------------ */
+/* The keyboard                                                        */
+/* ------------------------------------------------------------------ */
+
+/**
+ * What the participant surface says about the keys, written once.
+ *
+ * The audience joins on laptops. Plan / Apply is 120 taps in 75 seconds,
+ * which is natural under a thumb and genuinely unpleasant on a trackpad — it
+ * is the single thing most likely to make somebody put the game down halfway,
+ * and it quietly disadvantages whoever does not have a mouse. So every
+ * control that is tapped under a clock is operable from the keyboard.
+ *
+ * The hint is on screen because nobody guesses "press space". It is *not*
+ * phrased as an instruction — a click still works, and on a phone the keys do
+ * not exist — so it reads as an offer and never as a requirement.
+ */
+export const KEY_HINT = {
+  /** The one big button in Plan / Apply. */
+  tap: "Space or Enter also taps",
+  /** The four trivia tiles. */
+  trivia: "Keys 1–4 also answer",
+  /** Recruitment's text field. */
+  recruit: "Enter submits",
+} as const;
+
+/**
+ * Whether a keystroke should be treated as a press of the game's button.
+ *
+ * Two rules, and the second is the one that matters.
+ *
+ * **Space and Enter, and nothing else.** They are what a `<button>` already
+ * answers to, so the keyboard path and the pointer path stay the same control
+ * rather than two controls that have to be kept in step.
+ *
+ * **A held key is one tap, never a stream.** `KeyboardEvent.repeat` marks the
+ * strokes the OS synthesises while a key is down — roughly 30 a second once
+ * the delay elapses, which no hand on a trackpad can match and which would
+ * turn a race of 120 taps into a race to lean on a key. Rejecting the repeats
+ * makes a tap cost one physical press, exactly as it costs one click, so the
+ * keyboard is an accommodation and not an advantage. It also means a player
+ * who rests a finger on the space bar does not machine-gun themselves into a
+ * drain the moment the light turns pink.
+ */
+export function isTapKey(ev: {
+  readonly key: string;
+  readonly repeat: boolean;
+  readonly altKey: boolean;
+  readonly ctrlKey: boolean;
+  readonly metaKey: boolean;
+}): { readonly handled: boolean; readonly taps: boolean } {
+  if (ev.altKey || ev.ctrlKey || ev.metaKey) return { handled: false, taps: false };
+  // "Spacebar" is IE/old-Edge's name for it and costs one comparison.
+  if (ev.key !== " " && ev.key !== "Spacebar" && ev.key !== "Enter") {
+    return { handled: false, taps: false };
+  }
+  // Handled either way: the page must not scroll on space, and the browser
+  // must not also activate the button underneath.
+  return { handled: true, taps: !ev.repeat };
+}
+
+/** `1`–`4` → a 0-based tile index, or null. Never the numpad's own names. */
+export function answerKeyIndex(key: string, count: number): number | null {
+  if (key.length !== 1) return null;
+  const n = Number(key);
+  if (!Number.isInteger(n) || n < 1 || n > count) return null;
+  return n - 1;
+}
 
 /**
  * The two lights, with everything a surface needs to draw one — including two
@@ -564,6 +653,44 @@ export function resourceBar(
     fraction: Math.min(1, Math.max(0, resources / target)),
     ticks: planApply.checkpoints.map((c) => Math.min(1, c / target)),
   };
+}
+
+/**
+ * The highest checkpoint this many resources has passed, or null for none.
+ *
+ * The announcer's line — *30 resources applied. Progress banked.* — names the
+ * checkpoint, not the running count, so it says the same thing on every phone
+ * that reached it rather than whatever number happened to be on screen when
+ * the frame landed. Checkpoints are not assumed sorted: they come off the
+ * wire.
+ */
+export function latestCheckpoint(
+  checkpoints: readonly number[],
+  resources: number,
+): number | null {
+  let best: number | null = null;
+  for (const c of checkpoints) {
+    if (c <= resources && (best === null || c > best)) best = c;
+  }
+  return best;
+}
+
+/**
+ * When the *current Recruitment item* closes, as an absolute epoch.
+ *
+ * SPEC.md gives Recruitment "six items, 20 seconds each", and an item timer
+ * means the item: the round's `endsAt` is the *last* item's deadline, so
+ * drawing it in this slot counted two and a half minutes down at somebody who
+ * had twenty seconds, six times in a row.
+ *
+ * Null when no item is running — the round card and the reveal — because the
+ * server omits the key there rather than nulling it, and a timer with nothing
+ * behind it shows nothing rather than a zero.
+ */
+export function itemEndsAt(
+  recruitment: ArcadeRecruitmentView | undefined,
+): number | null {
+  return recruitment?.itemEndsAt ?? null;
 }
 
 /* ------------------------------------------------------------------ */

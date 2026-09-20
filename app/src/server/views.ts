@@ -344,9 +344,16 @@ export function arcadeStateOf(state: SessionState): ArcadeState | null {
  */
 export function arcadeGrid(state: SessionState, arcade: ArcadeState): ArcadeCell[] {
   // A drain lasts exactly one round, so "drained" and "drained this round"
-  // are the same set while a round is up — and the strike has to come off
-  // when the next round's card does, which is what `struck` is watching for.
-  const live = arcade.phase === "running" || arcade.phase === "reveal";
+  // are the same set, full stop: `startRound` puts everybody back on the
+  // Floor, so the strike comes off when the next round's card goes up and not
+  // one moment before.
+  //
+  // It used to be gated on `phase === "running" || "reveal"` as well, and
+  // that gate had a hole in the middle of it: `endRound` leaves the phase
+  // `idle`, so the strike came off at the end of the round and back on at the
+  // reveal a few seconds later. On the big screen that is a grid of pink
+  // strikes blinking out and in while the host is talking. The standing is
+  // the whole rule; the phase adds nothing to it.
   const backers: Record<ParticipantId, number> = {};
   for (const seat of Object.values(arcade.lounge)) {
     if (seat.backing === null) continue;
@@ -363,7 +370,7 @@ export function arcadeGrid(state: SessionState, arcade: ArcadeState): ArcadeCell
         playerNumber: arcade.playerNumbers[p.pid] ?? p.playerNumber,
         standing,
         backers: backers[p.pid] ?? 0,
-        struck: live && standing === "drained",
+        struck: standing === "drained",
       };
     })
     .sort((a, b) => a.playerNumber - b.playerNumber);
@@ -413,6 +420,14 @@ export function arcadeRecruitmentFor(
   const base: ArcadeRecruitmentView = {
     at: play.at,
     of: play.items.length,
+    // SPEC: "Six items, 20 seconds each". The item has its own deadline and
+    // it is not the round's — the round's is the *last* item's — so a surface
+    // that drew `endsAt` in the item-timer slot was counting down two minutes
+    // at somebody who has twenty seconds. Absolute, like every other instant
+    // on this wire, so a frame that arrived late still lines up. Omitted
+    // rather than nulled while the round card is up or at the reveal: there is
+    // no item running then, and the key is simply not in the bytes.
+    ...(arcade.phase === "running" ? { itemEndsAt: play.itemEndsAt } : {}),
   };
   const extra: {
     cue?: string;
@@ -466,10 +481,11 @@ export function arcadeRecruitmentFor(
  * frame happened to arrive. It exists only for a turn *into* the lock —
  * going back to PLAN is not a warning, it is a relief.
  *
- * `lightChangedAt` *is* sent to the phone. It is the instant the phone is
- * already looking at, it is what makes the haptic fire once rather than on
- * every repaint, and it predicts nothing: the next duration is drawn fresh
- * and uniformly between two and six seconds.
+ * `lightChangedAt` *is* sent. It is the instant the participant is already
+ * looking at, it lets a surface fire the light's change exactly once rather
+ * than on every repaint (participants join on laptops, so that cue is visual
+ * — nothing may depend on a haptic), and it predicts nothing: the next
+ * duration is drawn fresh and uniformly between two and six seconds.
  */
 export function arcadePlanApplyFor(
   state: SessionState,

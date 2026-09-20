@@ -192,11 +192,35 @@ and it needs humans, not bots.
 > Recruitment arms two competing timers; and the drained strike flickers off
 > between `endRound` and `revealRound`.
 >
-> **Not yet built, from DESIGN:** the phone shows the round clock where the
-> per-item 20 s clock should be (`itemEndsAt` is not on the wire), and five
-> announcer lines — the welcome, the checkpoint, the crossing — are written
-> and never shown, so no checkpoint or crossing feedback reaches a phone.
-> One contrast failure remains: the Lounge mirror's drained cells, 3.1:1.
+> **Hardened 20 Sep 2026**, after the user confirmed participants join on
+> **laptops, not phones** — SPEC and DESIGN have been corrected, and the
+> participant surface is now keyboard-operable throughout (Space/Enter taps,
+> keys 1–4 answer, with the affordances shown only where there is a real
+> pointer). Auto-repeat is deliberately rejected: leaning on the space bar
+> would beat any hand on a trackpad, so a tap costs one physical press exactly
+> as a click does. All four todo tests are fixed, every announcer line is
+> rendered, the per-item clock is on the wire and shown, and the broadcast load
+> for sixty players fell from ~22,200 frames and ~113 MB a round to ~2,600 and
+> ~27 MB.
+>
+> **Still open, and each is a decision rather than a defect:**
+>
+> - **The participant surface is still a 480 px centred column on a laptop.**
+>   It reads as a deliberate play column and makes the arcade's tap button
+>   ~590 px tall, which suits a race — but it is a phone layout being used on a
+>   laptop, and a genuinely laptop-native participant surface is a separate
+>   piece of design.
+> - **`HOUSE.arcadeEnd` has no honest trigger.** There is no "the arcade is
+>   over" command — the host simply moves the segment on — so "the games have
+>   concluded" is inferred from being outside the arcade with a round behind
+>   us, and it does not appear at all if the host seals the standings first.
+> - **The big screen has no Recruitment item clock.** `itemEndsAt` now reaches
+>   every role, so the room's own twenty-second countdown is available; putting
+>   one on the screen is a design choice, not a fix.
+> - **The scripted mock desynchronises above `speed=1` for the arcade**: the
+>   director's schedule scales but the item and light timers do not, so
+>   Plan/Apply starts on top of a still-running Recruitment. Demo pacing, not a
+>   product bug — but run arcade work at `speed=1`.
 
 ## Phase 5 — Operations
 

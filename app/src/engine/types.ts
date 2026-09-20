@@ -292,6 +292,19 @@ export type ArcadePlay =
       /** When the current light began. The turn is announced 400 ms ahead. */
       readonly lightChangedAt: number;
       readonly nextChangeAt: number;
+      /**
+       * When the APPLY in force began — or, while the light is PLAN, when the
+       * APPLY that *preceded* this PLAN began. Null until the first lock.
+       *
+       * One window of history, and one is enough: a tap's corrected instant is
+       * at most 250 ms behind the frame that carried it, and a light lasts at
+       * least two seconds, so a tap can only ever fall in the window that is
+       * running or the one immediately before it. It exists because a tap has
+       * to be judged against the light that was showing *at the corrected
+       * instant*, not against whatever the light happens to be by the time the
+       * frame lands — see `tap` in reducer.ts.
+       */
+      readonly applySince: number | null;
       /** Resources tapped, per player. The finish line is `target`. */
       readonly resources: Readonly<Record<ParticipantId, number>>;
       readonly target: number;

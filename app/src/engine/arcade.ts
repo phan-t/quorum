@@ -49,6 +49,38 @@ export const PLAN_APPLY_CROSS = 10;
 /** First, second and third across. Fourth onwards get the crossing and no more. */
 export const PLAN_APPLY_FINISH_BONUS: readonly number[] = [15, 10, 5];
 
+/**
+ * The APPLY window that was in force at `at`, as the instant it began — or
+ * null if the light was green then.
+ *
+ * A tap is judged against the light that was showing **at its corrected
+ * instant**, which is not always the light showing when the frame lands. A
+ * 400 ms round trip taps 1.9 s into a lock and the frame can arrive after the
+ * light has gone back to green; the phone was plainly pink, and SPEC is flat
+ * about it — "During APPLY (pink), any tap is … drained."
+ *
+ * Only two windows can ever be in play. `play.applySince` names the APPLY that
+ * is running or the one that ended when this PLAN began, and that is enough: a
+ * corrected instant is at most 250 ms behind the frame that carried it (the
+ * cap on the latency correction) and a light runs for at least two seconds, so
+ * nothing can reach back past the window immediately before the current one.
+ *
+ * The start instant is returned rather than a boolean because the 250 ms grace
+ * at the socket boundary needs it: the grace pulls a tap back to the last
+ * instant of the PLAN that preceded *that* lock.
+ */
+export function lockInForceAt(
+  play: Extract<ArcadePlay, { kind: "plan_apply" }>,
+  at: number,
+): number | null {
+  if (play.light === "apply") {
+    return at >= play.lightChangedAt ? play.lightChangedAt : null;
+  }
+  const since = play.applySince;
+  if (since === null) return null;
+  return at >= since && at < play.lightChangedAt ? since : null;
+}
+
 /** The Lounge: the runner you backed crossed the line. */
 export const PLAN_APPLY_BACKED_CROSSES = 10;
 

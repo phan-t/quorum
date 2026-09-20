@@ -529,8 +529,36 @@ body.phone #app {
   opacity: 0.85;
 }
 .t-answer {
+  flex: 1;
   min-width: 0;
   overflow: hidden;
+}
+/* The number key that picks this tile. Drawn on the tile because a hint at
+   the bottom of the screen cannot say *which* key is which answer, and the
+   mapping is the only part anybody has to learn. Hidden on a touch phone for
+   the same reason as `.a-keys`; the `aria-label` says it either way. */
+.t-key {
+  display: none;
+  flex: 0 0 auto;
+  align-self: center;
+  min-width: 1.5em;
+  padding: 2px 0;
+  border: 1px solid currentColor;
+  border-radius: 4px;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1.2;
+  text-align: center;
+  /* Not dimmed. At 0.6 the keycap measured 2.96:1 on --consul and 3.11:1 on
+     --terraform, and it is the only thing on screen that says which key picks
+     which answer. Full ink is the tile's own ink, which is measured: 5.76 /
+     4.93 / 9.25 / 13.36. Size and the outline make it subordinate, not alpha. */
+  opacity: 1;
+}
+@media (hover: hover) and (pointer: fine) {
+  .t-key {
+    display: block;
+  }
 }
 
 /* Locked in: the chosen tile outlined, the others dimmed. No colour change
@@ -995,6 +1023,43 @@ body.phone:has(.v-splash) {
 .a-prompt {
   opacity: 0.7;
 }
+/* Entering the arcade, and the banked checkpoint. Both are the announcer
+   talking over something that is already on screen, so they sit above it
+   rather than taking a screen of their own. */
+.a-welcome,
+.a-plan-house {
+  flex: none;
+}
+.a-welcome[hidden],
+.a-plan-house[hidden],
+.a-standings-house[hidden] {
+  display: none;
+}
+
+/* ---- the keyboard hint --------------------------------------------- */
+
+/* Participants join on laptops, so every control that is pressed under a
+   clock answers to the keyboard — and says so, because nobody guesses "press
+   space". Shown only where the primary pointer is fine, which is the closest
+   thing the platform offers to "there is a keyboard attached": on a phone the
+   line would be noise about keys that are not there, and the behaviour it
+   describes still works if one is plugged in. */
+.a-keys {
+  display: none;
+  margin: 0;
+  flex: none;
+  color: var(--muted);
+  font-size: 11px;
+  letter-spacing: 0.14em;
+}
+@media (hover: hover) and (pointer: fine) {
+  .a-keys {
+    display: block;
+  }
+}
+.a-keys[hidden] {
+  display: none;
+}
 
 /* ---- round card ---------------------------------------------------- */
 
@@ -1047,11 +1112,17 @@ body.phone:has(.v-splash) {
   flex-direction: column;
   gap: 0.7rem;
 }
+/* The *item's* clock — twenty seconds — not the round's two and a half
+   minutes. It counts down to the epoch the server named for this item. */
 .a-item-timer {
   margin: 0;
   color: var(--muted);
   font-size: 13px;
   letter-spacing: 0.08em;
+}
+.a-item-timer.urgent {
+  color: var(--miss);
+  font-weight: 600;
 }
 .a-cue {
   margin: 0;
@@ -1164,6 +1235,20 @@ body.phone:has(.v-splash) {
 }
 .a-big:disabled {
   opacity: 1; /* the state is the hatch and the word, not a grey-out */
+}
+/* The button takes focus when Plan / Apply comes up, so the ring is the thing
+   that says "the keys press this". Inset, because the global ring sits 2px
+   outside the element and this one fills its box. */
+.a-big:focus-visible {
+  outline: none;
+  box-shadow:
+    inset 0 0 0 3px var(--on-fill-dark),
+    inset 0 0 0 6px var(--ibm-blue);
+}
+/* No pressed-state transition, for the same reason the fill has none: under a
+   race, the feedback has to be the count moving, immediately. */
+.a-big:active {
+  transform: scale(0.995);
 }
 
 /* ---- the drain, and the Lounge -------------------------------------- */
@@ -1297,9 +1382,26 @@ body.phone:has(.v-splash) {
   background: rgba(10, 10, 15, 0.18);
   color: var(--on-fill-dark);
 }
+/* Drained, in the Lounge's mirror of the big screen's grid.
+ *
+ * This was 45% ink over the gold panel with gold text — #ffcf25 on #91761b,
+ * which measures **2.95:1** against DESIGN.md's own 4.5:1 floor, at 9px, and
+ * it was the only thing in the mirror saying who is in the Lounge. Taking the
+ * wash to 82% gives #362d13 and **9.21:1**. (The Floor cell is unchanged and
+ * measures 9.12:1, so the two now read as equals rather than one of them
+ * being the readable one.)
+ *
+ * The ▣ is the other half, and the more important half: standing was hue
+ * alone here. A haptic that does not exist on a laptop plus a gold/olive pair
+ * on a compressed video tile is not two channels. ▣ is the Lounge's own mark,
+ * the one on the gold card's kicker. */
 .a-mirror-cell[data-standing="drained"] {
-  background: rgba(10, 10, 15, 0.45);
+  background: rgba(10, 10, 15, 0.82);
   color: var(--vault);
+}
+.a-mirror-cell[data-standing="drained"]::before {
+  content: "▣";
+  margin-right: 2px;
 }
 .a-mirror-cell[data-away="yes"] {
   opacity: 0.45;

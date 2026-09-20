@@ -33,6 +33,7 @@ import {
   checkpointBank,
   checkpointsFor,
   finishBonus,
+  lockInForceAt,
   matchesItem,
   PLAN_APPLY_CROSS,
   RECRUITMENT_CORRECT,
@@ -1095,6 +1096,7 @@ export function reduce(
               light: "plan",
               lightChangedAt: 0,
               nextChangeAt: 0,
+              applySince: null,
               resources: {},
               target: config.target,
               seconds: config.seconds,
@@ -1289,15 +1291,26 @@ export function reduce(
           ),
         );
       }
+      const itemEndsAt = now + play.secondsPerItem * 1000;
       return applied(
         {
           ...state,
           arcade: {
             ...arcade,
+            // The round ends when the *last item* does, so the Floor's clock
+            // is re-derived from the item that is actually open. `beginPlay`
+            // could only guess at `begin + items × 20 s`, and every item
+            // starts a little after its predecessor's deadline — the timer
+            // that opens it has event-loop lag — so the guess drifts earlier
+            // than the truth by the accumulated lag. Left alone, that is the
+            // last item losing the tail of its twenty seconds.
+            endsAt:
+              itemEndsAt +
+              (play.items.length - 1 - at) * play.secondsPerItem * 1000,
             play: {
               ...play,
               at,
-              itemEndsAt: now + play.secondsPerItem * 1000,
+              itemEndsAt,
               // Both are per item: the next item's first three are a fresh
               // three, and everybody may answer again.
               solvedOrder: [],
@@ -1338,6 +1351,14 @@ export function reduce(
               // that was comfortably inside the PLAN they were looking at.
               lightChangedAt:
                 play.light === event.light ? play.lightChangedAt : now,
+              // The lock's own start, kept across the turn back to PLAN so a
+              // tap that was made during it can still be judged against it.
+              // Going back to green does not erase the window that just
+              // closed: it closes it at `lightChangedAt`.
+              applySince:
+                event.light === "apply" && play.light !== "apply"
+                  ? now
+                  : play.applySince,
               nextChangeAt: event.until,
             },
           },
@@ -1396,7 +1417,11 @@ export function reduce(
       // Already across. Their button is done; a stray tap is not a drain.
       if (play.finishOrder.includes(event.pid)) return unchanged();
 
-      if (play.light === "apply" && event.at >= play.lightChangedAt) {
+      // The light *at the corrected instant*, not the light now. A tap made
+      // 1.9 s into a lock over a 400 ms link lands after the flip back to
+      // green, and the phone it was made on was plainly pink; judging it
+      // against the current light forgives it. See {@link lockInForceAt}.
+      if (lockInForceAt(play, event.at) !== null) {
         // `Error: state lock held by another process`. Drained, not out:
         // everything banked stays banked and the Lounge opens.
         return applied(
@@ -1450,10 +1475,36 @@ export function reduce(
         // means. The phone counts optimistically in the meantime. Milestones
         // are different — they move points, so they are worth a write.
         //
+        // But a milestone is still **not** `to: "all"`, and the difference is
+        // measured rather than argued: sixty bots over a 75 s Floor hit 144
+        // milestones, and at `to: "all"` that was 144 × 60 = 8 640 of the
+        // 11 121 state frames the phones received, plus a roster frame each
+        // (see runtime.ts). Address it to the people whose surface actually
+        // moves and the same round costs 2 625.
+        //
+        // - A **checkpoint** moves `banked` and `resources`, and the only
+        //   surfaces that draw either are the tapper's own phone and the
+        //   console. The big screen's projection does not contain them — see
+        //   `arcadePlanApplyFor` in views.ts — so it is not sent one.
+        // - A **crossing** also moves `finishOrder` and `crossed`, which the
+        //   big screen *does* draw. It goes there too.
+        //
+        // Nobody else's frame changes on either: a phone is never told another
+        // player's resources, and the dormitory grid only moves on a drain.
+        //
         // (An earlier draft of this comment claimed the runtime re-broadcasts
         // the round at 10 Hz. It does not; there is no periodic broadcast
         // anywhere. The surfaces are driven entirely by these effects.)
-        gained > 0 ? [BROADCAST_STATE, PERSIST] : [],
+        gained > 0
+          ? [
+              { kind: "broadcast", to: { pid: event.pid }, what: "state" },
+              { kind: "broadcast", to: "host", what: "state" },
+              ...(crossed
+                ? [{ kind: "broadcast", to: "screen", what: "state" } as const]
+                : []),
+              PERSIST,
+            ]
+          : [],
       );
     }
 

@@ -8,6 +8,7 @@
 
 import type { WebSocket } from "ws";
 import { reduce } from "../engine/reducer.ts";
+import { lockInForceAt } from "../engine/arcade.ts";
 import type {
   Activity,
   Audience,
@@ -137,9 +138,12 @@ export function correctedResponseMs(
   opensAt: number,
   rttMs: number | null,
 ): number {
-  const correction =
-    rttMs === null ? 0 : Math.min(rttMs / 2, MAX_LATENCY_CORRECTION_MS);
-  return Math.max(0, receivedAt - opensAt - correction);
+  return Math.max(0, receivedAt - opensAt - latencyCorrection(rttMs));
+}
+
+/** `min(rtt ÷ 2, 250 ms)`, and zero on a socket nobody has measured. */
+export function latencyCorrection(rttMs: number | null): number {
+  return rttMs === null ? 0 : Math.min(rttMs / 2, MAX_LATENCY_CORRECTION_MS);
 }
 
 /* ------------------------------------------------------------------ */
@@ -180,15 +184,21 @@ export function pickLightMs(rng: () => number): number {
  * When a tap happened, in server time, for the engine to judge against the
  * light.
  *
- * `lockedSince` is `lightChangedAt` while the light is APPLY, and null while
- * it is PLAN. The grace is one-directional on purpose: a tap inside the
- * window is pulled back to the last instant of the PLAN that preceded the
- * lock, and nothing is ever pushed the other way. Subtracting 250 ms
- * unconditionally would be the bug this shape exists to avoid — a legitimate
- * tap at the start of a PLAN would slide back across the boundary into the
- * APPLY before it and drain someone for tapping on green.
+ * `lockedSince` is the start of the APPLY window the tap's corrected instant
+ * falls in, or null if it fell on green — {@link lockInForceAt} works that
+ * out, and it is deliberately *not* "is the light APPLY right now". A tap
+ * made deep inside a lock can land after the light has gone back to green,
+ * and it still deserves the grace that a tap made at the same instant on a
+ * faster socket would have got.
  *
- * `lightChangedAt - 1` is always inside the preceding PLAN, because a light
+ * The grace is one-directional on purpose: a tap inside the window is pulled
+ * back to the last instant of the PLAN that preceded the lock, and nothing is
+ * ever pushed the other way. Subtracting 250 ms unconditionally would be the
+ * bug this shape exists to avoid — a legitimate tap at the start of a PLAN
+ * would slide back across the boundary into the APPLY before it and drain
+ * someone for tapping on green.
+ *
+ * `lockedSince - 1` is always inside the preceding PLAN, because a light
  * lasts at least {@link LIGHT_MIN_MS}.
  */
 export function correctedTapAt(
@@ -196,9 +206,7 @@ export function correctedTapAt(
   rttMs: number | null,
   lockedSince: number | null,
 ): number {
-  const correction =
-    rttMs === null ? 0 : Math.min(rttMs / 2, MAX_LATENCY_CORRECTION_MS);
-  const at = receivedAt - correction;
+  const at = receivedAt - latencyCorrection(rttMs);
   if (lockedSince === null) return at;
   if (at >= lockedSince && at - lockedSince < LOCK_GRACE_MS) {
     return lockedSince - 1;
@@ -227,6 +235,8 @@ export class SessionRuntime {
   private readonly rejoinByPid = new Map<ParticipantId, string[]>();
   /** Append-only, for replay and for settling a scoring dispute after the fact. */
   readonly log: EventRecord[] = [];
+  /** The roster as last put on the wire, so an identical one is not resent. */
+  #rosterSent: string | null = null;
   /** Where a `persist` effect goes. Writes never block {@link apply}. */
   readonly persistence: SessionPersistence;
   readonly createdAt: number;
@@ -378,7 +388,8 @@ export class SessionRuntime {
             });
           } else {
             stateTo.push(effect.to);
-            // Only a broadcast to the whole room can have moved the roster.
+            // Only a broadcast to the whole room can have moved the roster —
+            // and most of them have not. See {@link broadcastRosterIfChanged}.
             if (effect.what === "state" && effect.to === "all") sendRoster = true;
           }
           break;
@@ -413,7 +424,7 @@ export class SessionRuntime {
     }
 
     if (stateTo.length > 0) this.sendStateTo(stateTo, now);
-    if (sendRoster) this.broadcastRoster(now);
+    if (sendRoster) this.broadcastRosterIfChanged(now);
     // Every transition, not just the trivia ones: the timer is a function of
     // the state, so deriving it here means there is no path — open, close,
     // reveal, next, a host closing the session out from under an open
@@ -647,9 +658,27 @@ export class SessionRuntime {
     this.#itemTimerFor = null;
   }
 
+  /**
+   * The Floor's close — for the rounds the Floor's clock actually owns.
+   *
+   * Recruitment's is owned by the item timer instead, and only one of them may
+   * own it. Six items are twenty seconds *each*, and each one opens a little
+   * after its predecessor's deadline because the timer that opened it ran
+   * late; the round therefore ends a little after `beginPlay + 6 × 20 s`, by
+   * the accumulated lag. Armed as well, the Floor timer fired at the nominal
+   * instant and ended the round while the last item still had its tail to run
+   * — the last item, every time, and only the last item. The item timer ends
+   * the round on the last item (see {@link #armItemTimer}) and `nextItem`
+   * keeps `endsAt` in step for the countdown, so nothing is left unowned.
+   */
   #armFloorTimer(now: number): void {
     const arcade = arcadeStateOf(this.state);
-    if (!arcade || arcade.phase !== "running" || arcade.endsAt === null) {
+    if (
+      !arcade ||
+      arcade.phase !== "running" ||
+      arcade.endsAt === null ||
+      arcade.play?.kind === "recruitment"
+    ) {
       return this.#clearFloorTimer();
     }
     const want = { round: arcade.roundIndex, at: arcade.endsAt };
@@ -700,6 +729,19 @@ export class SessionRuntime {
     return this.#lightTimerFor?.at ?? null;
   }
 
+  /** What the item timer is armed for. Null when no item is open. */
+  get armedItemAt(): number | null {
+    return this.#itemTimerFor?.at ?? null;
+  }
+
+  /**
+   * What the Floor timer is armed for. Null in Recruitment, whose ending the
+   * item timer owns — see {@link #armFloorTimer}.
+   */
+  get armedFloorAt(): number | null {
+    return this.#floorTimerFor?.at ?? null;
+  }
+
   /* ---------------- the arcade at the socket boundary ---------------- */
 
   /**
@@ -743,12 +785,24 @@ export class SessionRuntime {
       };
     }
     const play = arcade.play;
+    const rtt = medianRtt(client.rtt);
+    // The latency correction first, on its own: it reconstructs when the thumb
+    // actually came off the glass, and *that* is the instant everything else
+    // is decided from.
+    const corrected = receivedAt - latencyCorrection(rtt);
     const lockedSince =
-      play?.kind === "plan_apply" && play.light === "apply"
-        ? play.lightChangedAt
-        : null;
-    const at = correctedTapAt(receivedAt, medianRtt(client.rtt), lockedSince);
-    return this.apply({ type: "tap", pid: client.pid, at }, receivedAt);
+      play?.kind === "plan_apply" ? lockInForceAt(play, corrected) : null;
+    const at = correctedTapAt(receivedAt, rtt, lockedSince);
+    // The grace is a fiction about the *light*, not about the clock, and it
+    // must never carry a tap back across the Floor's close. A round that
+    // happens to end within 250 ms of a lock would otherwise accept taps whose
+    // corrected instant is past `endsAt`: pulled back to `lockedSince - 1`,
+    // they land inside the round, on green, and score. The latency correction
+    // still applies — someone on a bad link keeps their last taps — but the
+    // grace does not get to reopen a Floor that is shut.
+    const judgeAt =
+      arcade.endsAt !== null && corrected >= arcade.endsAt ? corrected : at;
+    return this.apply({ type: "tap", pid: client.pid, at: judgeAt }, receivedAt);
   }
 
   /**
@@ -922,6 +976,7 @@ export class SessionRuntime {
   /** `except` is the client that has just been sent a full state already. */
   broadcastRoster(now: number, except?: Client): void {
     const roster = rosterOf(this.state, this.lastSeenMap(), now);
+    this.#rosterSent = JSON.stringify(roster);
     for (const c of this.clients) {
       if (c === except) continue;
       // The host's counts live in hostExtras, which a roster frame does not
@@ -930,6 +985,28 @@ export class SessionRuntime {
       if (c.role === "host") this.sendState(c, now);
       else this.send(c, { t: "roster", seq: 0, roster });
     }
+  }
+
+  /**
+   * The roster, but only when it has actually moved since it last went out.
+   *
+   * A `to: "all"` state broadcast used to force one unconditionally, which
+   * cost a second full frame on every socket — the host's is a whole
+   * `RenderState`, not a delta — for every checkpoint, every light turn and
+   * every drain. Over a 75 s Floor with sixty players that was 11 100 roster
+   * frames to the phones alongside 11 121 state frames, and not one of them
+   * carried anything new: the roster moves on join, disconnect, reconnect,
+   * kick and release, and every one of those paths calls
+   * {@link broadcastRoster} directly (see main.ts). It does not move on a tap.
+   *
+   * The comparison is on the projected roster rather than on the event type,
+   * because the away/amber flag is a function of the clock as well as of the
+   * state and `sweep` is not the only thing that can flip it.
+   */
+  private broadcastRosterIfChanged(now: number): void {
+    const roster = rosterOf(this.state, this.lastSeenMap(), now);
+    if (JSON.stringify(roster) === this.#rosterSent) return;
+    this.broadcastRoster(now);
   }
 
   refuse(socket: WebSocket, reason: RefusedReason, message: string): void {
@@ -941,9 +1018,16 @@ export class SessionRuntime {
     }
   }
 
-  /** Participants whose socket has gone quiet are marked away, not removed. */
+  /**
+   * Participants whose socket has gone quiet are marked away, not removed.
+   *
+   * Every fifteen seconds, so that amber appears without anyone having to do
+   * anything — but only when something has actually gone amber or come back.
+   * A quiet room of sixty was otherwise sixty frames every sweep to repaint a
+   * roster that had not changed.
+   */
   sweep(now: number): void {
-    this.broadcastRoster(now);
+    this.broadcastRosterIfChanged(now);
   }
 }
 

@@ -72,11 +72,27 @@ answer has a shape as well as a colour. Touch targets ≥ 56 px on the phone.
 Focus is visible on the console. Nothing is conveyed by colour alone,
 including "drained".
 
-## Participant — phone first
+## Participant — laptop first
 
-The participant page is designed at 360 × 740 and grows from there. It is
-used with one thumb, on a video call, often with the video app taking half
-the screen. That sets the rules:
+The participant page is used in a second window beside a video call, on a
+laptop, with a keyboard and a trackpad. It is still designed from 360 × 740
+upward, because a responsive page that works at phone width works anywhere and
+somebody will inevitably use a phone — but the laptop is the case to get right.
+See SPEC.md "The three surfaces"; this said "phone first" until 20 Sep 2026 and
+the rules below were written for a thumb.
+
+What that changes:
+
+- **Every control has a keyboard route**, and the page says so. Nobody guesses
+  "press space" unless told. The arcade's tap button is the one that matters:
+  120 taps in 75 seconds is fine with a thumb and miserable on a trackpad.
+- **No haptics.** `navigator.vibrate` does not exist on desktop, so a state
+  change has to be carried entirely by what is on screen.
+- **Hover exists**, which it does not on a phone, but nothing may depend on it:
+  a hover-only affordance is invisible to a touch user and to a keyboard.
+
+The rules below still hold, and the reasoning behind them mostly still does —
+large targets and no scrolling under a timer are good on any device: 
 
 **No scrolling during play.** Every segment fits the viewport. If a trivia
 question and its four answers cannot fit, the question shrinks first, the

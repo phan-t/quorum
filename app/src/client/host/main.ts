@@ -25,6 +25,7 @@ import { QuorumClient } from "../shared/net.ts";
 import { mockBadge, mockTransport, readMockConfig } from "../shared/mock.ts";
 import {
   ARCADE_ROUND_LABEL,
+  ARCADE_ROUND_NUMBER,
   LIGHT_FACE,
   SEGMENTS,
   SEGMENT_BUILT,
@@ -33,6 +34,7 @@ import {
   answerTiles,
   formatCountdown,
   gridEntries,
+  itemEndsAt,
   nextSegment,
   questionLabel,
   remainingMs,
@@ -661,7 +663,12 @@ function renderArcade(s: RenderState): void {
   setText(
     arcadeState,
     [
-      `ROUND ${a.roundIndex + 1}`,
+      // SPEC.md's number for the round, not its position in this run. The
+      // console counted from `roundIndex`, so it read ROUND 1 · RECRUITMENT
+      // while the card in front of the room read *Game 1 — Plan / Apply* —
+      // and the host reads the console out loud. SPEC.md numbers Recruitment
+      // 0; the host picks the order, so the position is not the number.
+      a.round ? `ROUND ${ARCADE_ROUND_NUMBER[a.round]}` : null,
       roundLabel.toUpperCase(),
       a.phase.toUpperCase(),
       a.phase === "running" && left !== null ? formatCountdown(left) : null,
@@ -699,9 +706,15 @@ function renderArcade(s: RenderState): void {
   const r = a.recruitment;
   const pa = a.planApply;
   if (r) {
+    // The item's own clock, not the round's: the host is timing when to read
+    // the answer out, and the round header already carries the round's.
+    const itemLeft = remainingMs(
+      itemEndsAt(r),
+      client?.now() ?? Date.now(),
+    );
     setText(
       arcadeItem,
-      `Item ${r.at + 1} of ${r.of} — ${r.cue ?? ""} → ${r.answer ?? "?"}  (${r.solved ?? 0} solved, ${r.answered ?? 0} of ${r.eligible ?? 0} answered)`,
+      `Item ${r.at + 1} of ${r.of}${itemLeft === null ? "" : ` · ${formatCountdown(itemLeft)}`} — ${r.cue ?? ""} → ${r.answer ?? "?"}  (${r.solved ?? 0} solved, ${r.answered ?? 0} of ${r.eligible ?? 0} answered)`,
     );
     const note = r.note ?? "";
     arcadeNote.hidden = note === "";

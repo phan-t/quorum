@@ -46,6 +46,7 @@ import type {
   ActivitySummary,
   ArcadeCell,
   ArcadeMine,
+  ArcadeRecruitmentView,
   ArcadeView,
   ClientMessage,
   HostCommand,
@@ -435,36 +436,44 @@ class MockSession {
 
     if (play?.kind === "recruitment") {
       const item = play.items[play.at];
-      return {
-        ...base,
-        recruitment: {
-          at: play.at,
-          of: play.items.length,
-          ...(item && (host || open) ? { cue: item.cue } : {}),
-          ...(item && (host || revealed)
-            ? { answer: item.answer, note: item.note }
-            : {}),
-          ...(host || revealed
-            ? {
-                recap: play.items.map((i) => ({
-                  cue: i.cue,
-                  answer: i.answer,
-                  note: i.note,
-                })),
-                firstThree: play.solvedOrder
-                  .slice(0, 3)
-                  .map((pid) => this.arcadeNumber(pid)),
-              }
-            : {}),
-          ...(privileged
-            ? {
-                answered: Object.keys(play.answered).length,
-                eligible: this.participants.length,
-                solved: Object.values(play.answered).filter(Boolean).length,
-              }
-            : {}),
-        },
+      // `itemEndsAt` is the *item's* clock, and every role gets it: SPEC.md
+      // gives Recruitment twenty seconds an item while the round's `endsAt`
+      // is two and a half minutes away, so a surface drawing the round clock
+      // in the item slot tells the room the wrong number six times running.
+      //
+      // Omitted, never nulled, while the round card is up and at the reveal,
+      // because no item is running then — which is also what the server does.
+      // Sending it unconditionally drew `00:00` on the card, since the play
+      // carries a zero until the Floor opens.
+      const recruitment: ArcadeRecruitmentView = {
+        ...(this.arcadePhase === "running" ? { itemEndsAt: play.itemEndsAt } : {}),
+        at: play.at,
+        of: play.items.length,
+        ...(item && (host || open) ? { cue: item.cue } : {}),
+        ...(item && (host || revealed)
+          ? { answer: item.answer, note: item.note }
+          : {}),
+        ...(host || revealed
+          ? {
+              recap: play.items.map((i) => ({
+                cue: i.cue,
+                answer: i.answer,
+                note: i.note,
+              })),
+              firstThree: play.solvedOrder
+                .slice(0, 3)
+                .map((pid) => this.arcadeNumber(pid)),
+            }
+          : {}),
+        ...(privileged
+          ? {
+              answered: Object.keys(play.answered).length,
+              eligible: this.participants.length,
+              solved: Object.values(play.answered).filter(Boolean).length,
+            }
+          : {}),
       };
+      return { ...base, recruitment };
     }
 
     if (play?.kind === "plan_apply") {

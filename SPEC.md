@@ -50,9 +50,31 @@ and the host's attention one thing (a console, not four windows).
 
 | Surface | Path | Device | Who |
 | --- | --- | --- | --- |
-| **Participant** | `/` and `/j/<CODE>` | Phone, one thumb | Everyone playing |
+| **Participant** | `/` and `/j/<CODE>` | Laptop, a second window beside the call | Everyone playing |
 | **Host console** | `/host#<token>` | Laptop, *not* screen-shared | Facilitator, co-host |
 | **Big screen** | `/screen#<token>` | The tab that gets screen-shared | Nobody touches it |
+
+**The participant surface is a laptop, not a phone.** This said "phone, one
+thumb" until 20 Sep 2026, and the whole participant design was built on it.
+The events are virtual: everyone is already at a laptop for the video call, so
+joining in a second window beats scanning a QR and typing an `hvs.` token on a
+phone keyboard. The page still has to work on a phone — it is a responsive web
+page and nothing stops someone using one — but it is not what to optimise for.
+
+Three things follow, and two of them are load-bearing:
+
+- **Everything must be operable from a keyboard.** The arcade's Plan/Apply is a
+  race to 120 taps in 75 seconds: natural with a thumb, unpleasant on a
+  trackpad, and quietly unfair to anyone without an external mouse.
+- **Haptics do not exist.** `navigator.vibrate` is absent on desktop, so the
+  light turn's vibration is gone and the word, the glyph and the hatch are the
+  only cues rather than belt-and-braces.
+- **Two justifications elsewhere in this document weaken.** "A phone that turns
+  green is visible to the person next to you" is the stated reason the
+  participant surface reveals nothing until the reveal — and in a virtual event
+  nobody is next to anyone. Keep the rule: it still protects the reveal, and it
+  matters the moment someone screen-shares. And the big screen's join QR is
+  decoration now; the join link goes over chat.
 
 The split between console and big screen is the important one. In the current
 arcade the host shares the board *and* drives it, so the room sees the roster

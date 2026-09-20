@@ -22,13 +22,18 @@ import {
   ARCADE_ROUND_CARD,
   ARCADE_ROUND_LABEL,
   HOUSE,
+  KEY_HINT,
   LIGHT_FACE,
   STAFF_CARD,
   STATE_LOCK_ERROR,
+  answerKeyIndex,
   answerTiles,
   floorEntries,
   formatCountdown,
   gridEntries,
+  isTapKey,
+  itemEndsAt,
+  latestCheckpoint,
   playerName,
   playerTag,
   pointsStripCells,
@@ -376,10 +381,26 @@ function sceneStandings(final: boolean): Scene {
     class: "v-note",
     text: final ? "No scores were recorded." : "No scores yet.",
   });
-  const node = h("section", { class: "v v-standings" }, [heading, list, empty]);
+  // DESIGN.md's last announcer line. The arcade has no "end the arcade"
+  // command — the host simply moves the room on — so the only honest signal
+  // for *the games have concluded* is the room standing outside the arcade
+  // with a round behind it. Standings is where that lands in the run of show,
+  // and it is the screen the host talks over while the line is up.
+  const house = houseSlot("a-standings-house");
+  house.node.hidden = true;
+  const node = h("section", { class: "v v-standings" }, [
+    heading,
+    house.node,
+    list,
+    empty,
+  ]);
   return {
     node,
     update(state) {
+      const concluded =
+        !final && state.arcade !== undefined && state.arcade.round !== null;
+      house.node.hidden = !concluded;
+      if (concluded) house.set(HOUSE.arcadeEnd);
       const rows = state.standings;
       empty.hidden = rows.length > 0;
       replace(
@@ -448,6 +469,7 @@ function sceneTrivia(ctx: SceneCtx): Scene {
   ]);
 
   const grid = h("div", { class: "t-grid" });
+  const keys = keyHint(KEY_HINT.trivia);
   const status = h("p", { class: "t-status label" });
 
   const verdict = h("p", { class: "display t-verdict" });
@@ -466,6 +488,7 @@ function sceneTrivia(ctx: SceneCtx): Scene {
   const node = h("section", { class: "v v-trivia" }, [
     h("div", { class: "t-head" }, [kicker, roundCard, question, timer]),
     grid,
+    keys,
     status,
     reveal,
   ]);
@@ -487,12 +510,19 @@ function sceneTrivia(ctx: SceneCtx): Scene {
         attrs: {
           style: `--tile:${tile.hue};--tile-ink:${tile.ink}`,
           "data-choice": String(tile.index),
-          // The shape is decoration to a reader; the text is the answer.
-          "aria-label": tile.text,
+          // The shape is decoration to a reader; the text is the answer, and
+          // the number key is said out loud because a keyboard user has no
+          // other way to learn it.
+          "aria-label": `${tile.text}. Key ${tile.index + 1}.`,
         },
       }, [
         h("span", { class: "t-shape", attrs: { "aria-hidden": "true" }, text: tile.shape }),
         h("span", { class: "t-answer", text: tile.text }),
+        h("span", {
+          class: "t-key mono",
+          attrs: { "aria-hidden": "true" },
+          text: String(tile.index + 1),
+        }),
       ]);
       button.addEventListener("click", () => ctx.tap(trivia.index, tile.index));
       return button;
@@ -531,6 +561,8 @@ function sceneTrivia(ctx: SceneCtx): Scene {
       setText(question, "Get ready.");
       timer.hidden = true;
       replace(grid, []);
+      tiles = [];
+      keys.hidden = true;
       builtFor = "";
       setText(status, "The host is about to open the question.");
       reveal.hidden = true;
@@ -572,6 +604,7 @@ function sceneTrivia(ctx: SceneCtx): Scene {
 
     if (revealed) {
       timer.hidden = true;
+      keys.hidden = true;
       setText(status, "");
       status.hidden = true;
       reveal.hidden = false;
@@ -615,6 +648,7 @@ function sceneTrivia(ctx: SceneCtx): Scene {
     reveal.hidden = true;
     countedFrom = null;
     status.hidden = false;
+    keys.hidden = chosen !== null || trivia.phase !== "open";
     setText(
       status,
       chosen !== null
@@ -622,10 +656,32 @@ function sceneTrivia(ctx: SceneCtx): Scene {
         : trivia.phase === "open"
           ? trivia.suddenDeath
             ? "Sudden death. First correct answer wins."
-            : "Tap one. It is final."
+            : "Pick one. It is final."
           : "Time's up.",
     );
   };
+
+  /**
+   * `1`–`4` answer, from anywhere on the page.
+   *
+   * On the tile itself, so the tile's own handler and its guards stay the one
+   * place a choice is made — a keyboard path with its own copy of "one tap and
+   * it is final" is a second rule to keep in step. Focus moves first so the
+   * choice is visible where the ring is, which is the whole reason a keyboard
+   * user can follow what just happened.
+   */
+  const onKey = (ev: KeyboardEvent): void => {
+    if (!ctx.live || isTypingTarget(ev.target)) return;
+    if (ev.altKey || ev.ctrlKey || ev.metaKey) return;
+    const i = answerKeyIndex(ev.key, tiles.length);
+    if (i === null) return;
+    const tile = tiles[i];
+    if (tile === undefined || tile.disabled) return;
+    ev.preventDefault();
+    tile.focus();
+    tile.click();
+  };
+  if (ctx.live) window.addEventListener("keydown", onKey);
 
   return {
     node,
@@ -634,6 +690,9 @@ function sceneTrivia(ctx: SceneCtx): Scene {
     },
     tick(state) {
       if (state.trivia) paintTimer(state.trivia);
+    },
+    stop() {
+      window.removeEventListener("keydown", onKey);
     },
   };
 }
@@ -695,6 +754,56 @@ function houseLine(text: string): HTMLElement {
 }
 
 /**
+ * The same line, built once and rewritten in place.
+ *
+ * The announcer's lines that arrive *during* play — the welcome, a banked
+ * checkpoint — cannot be rebuilt on every frame: Plan / Apply repaints on
+ * every tap in the room, and replacing a node under a cursor is how a click
+ * lands on nothing.
+ */
+interface HouseSlot {
+  readonly node: HTMLElement;
+  set(text: string): void;
+}
+
+function houseSlot(className: string): HouseSlot {
+  const body = h("span");
+  const node = h("p", { class: `mono a-house ${className}` }, [
+    h("span", { class: "a-prompt", attrs: { "aria-hidden": "true" } }, [">"]),
+    body,
+  ]);
+  return {
+    node,
+    set: (text) => setText(body, text),
+  };
+}
+
+/**
+ * The keyboard hint, which is on screen because nobody guesses "press space".
+ *
+ * Hidden by CSS where the primary pointer is coarse — see `.a-keys` in
+ * participant.css. A phone has no keys to press and the line would be noise;
+ * the behaviour it describes is still there if a keyboard is attached.
+ */
+function keyHint(text: string): HTMLElement {
+  return h("p", { class: "a-keys label", text });
+}
+
+/**
+ * Whether a keystroke belongs to something the person is typing into.
+ *
+ * The page-level key handlers are what make the keyboard work without first
+ * tabbing to the right control, and the price of that reach is that they must
+ * keep their hands off Recruitment's text field.
+ */
+function isTypingTarget(target: EventTarget | null): boolean {
+  const el = target as HTMLElement | null;
+  if (el === null || typeof el.tagName !== "string") return false;
+  if (el.isContentEditable) return true;
+  return el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.tagName === "SELECT";
+}
+
+/**
  * The phone during the arcade.
  *
  * One interaction per round and the phone shows only that, which is
@@ -716,7 +825,22 @@ function sceneArcade(ctx: SceneCtx): Scene {
     class: "sr-only",
     attrs: { role: "status", "aria-live": "assertive" },
   });
-  const node = h("section", { class: "v v-arcade" }, [badge, body, announce]);
+  /**
+   * DESIGN.md's *entering the arcade* line: the first thing this phone is
+   * told, and the only place the player number is spelled out in words.
+   *
+   * It lives outside `body` because `body` is replaced every time the
+   * sub-screen changes, and the welcome has to survive the round card
+   * arriving underneath it.
+   */
+  const welcome = houseSlot("a-welcome");
+  welcome.node.hidden = true;
+  const node = h("section", { class: "v v-arcade" }, [
+    badge,
+    welcome.node,
+    body,
+    announce,
+  ]);
 
   /** Which sub-screen is built, so typing into the field is not eaten. */
   let built = "";
@@ -725,6 +849,14 @@ function sceneArcade(ctx: SceneCtx): Scene {
   let lastStanding: "floor" | "drained" | null = null;
   /** Local resource count, so the button responds to the thumb, not the link. */
   let optimistic = 0;
+  /** The last checkpoint announced, so the line is said once per crossing. */
+  let lastCheckpoint: number | null = null;
+  /** Latches the crossing line so a later frame does not re-announce it. */
+  let lastPlace: number | null = null;
+  /** True once a round has actually started: the welcome has been read. */
+  let welcomed = false;
+  /** Set for one paint when the live region holds something a mount must not eat. */
+  let keepAnnounce = false;
   let drainTimer: ReturnType<typeof setTimeout> | null = null;
   /** The Lounge list as last drawn, so a burst of frames does not rebuild it. */
   let loungeSignature = "";
@@ -757,8 +889,24 @@ function sceneArcade(ctx: SceneCtx): Scene {
     cue,
     cueRead,
     h("div", { class: "a-recruit-row" }, [field, submit]),
+    keyHint(KEY_HINT.recruit),
     recruitStatus,
   ]);
+
+  /**
+   * The item clock, counted to the instant the server named.
+   *
+   * SPEC.md gives Recruitment six items at twenty seconds each, and this slot
+   * used to draw `arcade.endsAt` — the whole round — so it read 00:17, 00:15,
+   * 00:12 straight through an item change and told nobody how long they had
+   * to type. Always an absolute epoch against the corrected clock, never a
+   * duration: a phone that got the frame late still stops at the same instant.
+   */
+  const paintItemTimer = (arcade: ArcadeView): void => {
+    const left = remainingMs(itemEndsAt(arcade.recruitment), ctx.now());
+    setText(recruitTimer, left === null ? "" : formatCountdown(left));
+    setClass(recruitTimer, "urgent", left !== null && left <= 5_000);
+  };
 
   const sendAnswer = (item: number): void => {
     const typed = field.value.trim();
@@ -790,16 +938,82 @@ function sceneArcade(ctx: SceneCtx): Scene {
     class: "a-big",
     type: "button",
   }, [bigGlyph, bigWord, bigCount]) as HTMLButtonElement;
-  const planNode = h("div", { class: "a-plan" }, [bar, bigButton]);
+  const planHouse = houseSlot("a-plan-house");
+  planHouse.node.hidden = true;
+  /** A new round banks nothing yet, so last round's line must not linger. */
+  const resetCheckpointLine = (): void => {
+    lastCheckpoint = null;
+    lastPlace = null;
+    planHouse.node.hidden = true;
+  };
+  const planNode = h("div", { class: "a-plan" }, [
+    bar,
+    planHouse.node,
+    bigButton,
+    keyHint(KEY_HINT.tap),
+  ]);
 
-  bigButton.addEventListener("click", () => {
+  /**
+   * One tap. The single place a resource is added, whatever pressed it.
+   *
+   * Deliberately no check on the light: during APPLY this must fire and drain
+   * you, exactly as a click does. A keyboard that could not lose the game
+   * would be a keyboard that was not playing it.
+   */
+  const tapOnce = (): void => {
     if (bigButton.disabled) return;
     const round = Number(bigButton.dataset["round"] ?? "-1");
     if (round < 0) return;
     optimistic += 1;
     setText(bigCount, String(optimistic));
     ctx.arcadeTap(round);
+  };
+
+  /**
+   * Set while a key is doing the work, so a click the browser synthesises from
+   * that same keystroke is not counted twice.
+   *
+   * `preventDefault` on the keydown should stop the synthetic click on its
+   * own, and in Chrome, Safari and Firefox it does — this is the belt to that
+   * pair of braces, because a double-counted tap is silent, and under a race
+   * to 120 nobody would ever notice it. Cleared by a real pointer, which is
+   * what an actual click always begins with.
+   */
+  let swallowClick = false;
+  bigButton.addEventListener("pointerdown", () => {
+    swallowClick = false;
   });
+  bigButton.addEventListener("click", () => {
+    if (swallowClick) {
+      swallowClick = false;
+      return;
+    }
+    tapOnce();
+  });
+
+  /**
+   * Space and Enter, from anywhere on the page while Plan / Apply is up.
+   *
+   * On the window rather than the button because nobody tabs to a control
+   * before a race starts, and a key that works only after a click would be an
+   * affordance that arrives too late to be one. It is attached only when this
+   * view is live: the host console renders the same module as a 180 px
+   * preview, and the console's own space bar drives the run of show.
+   *
+   * See `isTapKey` for why an OS key repeat is not a tap.
+   */
+  const onTapKey = (ev: KeyboardEvent): void => {
+    if (built !== "plan" || isTypingTarget(ev.target)) return;
+    const { handled, taps } = isTapKey(ev);
+    if (!handled) return;
+    // Always: the space bar must not scroll the page, and the browser must
+    // not activate the focused button a second time.
+    ev.preventDefault();
+    if (!taps) return;
+    swallowClick = true;
+    tapOnce();
+  };
+  if (ctx.live) window.addEventListener("keydown", onTapKey);
 
   /* ---- the drain, and the Lounge ---- */
   const drainNode = h("div", { class: "a-drain" }, [
@@ -824,6 +1038,11 @@ function sceneArcade(ctx: SceneCtx): Scene {
   const mount = (key: string, children: readonly Node[]): void => {
     if (built === key) return;
     built = key;
+    // A live region's message belongs to the screen that produced it. Without
+    // this, "State locked. Do not tap." was still sitting in the status when
+    // the round ended and the reveal came up — a screen reader reading out a
+    // warning about a light that is no longer on.
+    if (!keepAnnounce) setText(announce, "");
     replace(body, children);
   };
 
@@ -874,8 +1093,7 @@ function sceneArcade(ctx: SceneCtx): Scene {
     // The emoji are `aria-hidden`; this is the same question in words, because
     // two pictographs read aloud are not a question.
     setText(cueRead, `Item ${r.at + 1} of ${r.of}. Which product do these two emoji mean?`);
-    const left = remainingMs(arcade.endsAt, ctx.now());
-    setText(recruitTimer, left === null ? "" : formatCountdown(left));
+    paintItemTimer(arcade);
 
     const locked = mine.recruitment?.state === "locked";
     if (locked) {
@@ -897,8 +1115,13 @@ function sceneArcade(ctx: SceneCtx): Scene {
   const paintPlan = (arcade: ArcadeView, mine: ArcadeMine): void => {
     const pa = arcade.planApply;
     if (!pa) return;
+    const fresh = built !== "plan";
     mount("plan", [planNode]);
     bigButton.dataset["round"] = String(arcade.roundIndex);
+    // The keys work from anywhere, but the focus ring is the only thing that
+    // says *this* is what they press. There is nothing else on this screen to
+    // take focus from.
+    if (fresh && ctx.live) bigButton.focus();
 
     const face = LIGHT_FACE[pa.light];
     const server = mine.planApply?.resources ?? 0;
@@ -942,6 +1165,35 @@ function sceneArcade(ctx: SceneCtx): Scene {
       );
     }
     setAttr(bar, "aria-label", `${shown} of ${pa.target} resources`);
+
+    // The checkpoint, in the announcer's voice. DESIGN.md's register asks for
+    // it and nothing said it: you banked five points three times in a round
+    // and the phone never mentioned it.
+    //
+    // Counted off `server` and never off `optimistic`. Banking is a fact about
+    // the server's count, and a line fired on a tap that was later refused
+    // would be the phone telling you that you have points you do not have.
+    const banked = latestCheckpoint(pa.checkpoints, server);
+    if (banked !== lastCheckpoint) {
+      lastCheckpoint = banked;
+      planHouse.node.hidden = banked === null;
+      if (banked !== null) {
+        planHouse.set(HOUSE.checkpoint(banked));
+        setText(announce, HOUSE.checkpoint(banked));
+      }
+    }
+
+    // Crossing the line, which is the biggest thing that happens to anyone in
+    // this round and went unmentioned: you tap a hundred and twenty times and
+    // the phone said nothing at all. `place` only appears once the server has
+    // you across, so this cannot fire on an optimistic count.
+    const place = mine.planApply?.place ?? null;
+    if (place !== null && place !== lastPlace) {
+      lastPlace = place;
+      planHouse.node.hidden = false;
+      planHouse.set(HOUSE.crossed(pa.target));
+      setText(announce, HOUSE.crossed(pa.target));
+    }
 
     // The turn, felt as well as seen. Two patterns, so the lock and the
     // release are distinguishable without looking — which is a third
@@ -1031,9 +1283,25 @@ function sceneArcade(ctx: SceneCtx): Scene {
     );
   };
 
-  const paintReveal = (arcade: ArcadeView, mine: ArcadeMine): void => {
+  const paintReveal = (
+    state: RenderState,
+    arcade: ArcadeView,
+    mine: ArcadeMine,
+  ): void => {
     const recap = arcade.recruitment?.recap ?? [];
-    mount("reveal", [
+    // The Lounge's own result. SPEC.md pays a backer whose runner crossed and
+    // pays them again if the runner won; DESIGN.md gives that its line, and
+    // until now the Lounge watched the grid all round and was told nothing at
+    // the end of it. "Survived" is the standing on the final grid: still on
+    // the Floor when the Floor locked.
+    const backing = mine.backing ?? null;
+    const survived =
+      backing !== null &&
+      gridEntries(arcade, state.roster).some(
+        (e) => e.pid === backing && e.standing === "floor",
+      );
+    // Keyed on what it draws, so a later frame in the same reveal redraws it.
+    mount(`reveal:${mine.banked}:${mine.total}:${survived}`, [
       h("div", { class: "a-reveal" }, [
         h("p", { class: "label", text: "Banked this round" }),
         h("p", { class: "mono a-banked", text: String(mine.banked) }),
@@ -1045,12 +1313,14 @@ function sceneArcade(ctx: SceneCtx): Scene {
             h("span", { class: "a-recap-note", text: item.note }),
           ]),
         ),
+        survived ? houseLine(HOUSE.backedSurvived) : null,
         houseLine(HOUSE.roundEnd),
       ]),
     ]);
   };
 
   const paint = (state: RenderState): void => {
+    keepAnnounce = false;
     const arcade = state.arcade;
     // The console's preview is a picture of the room, and the room has no
     // single `arcadeMine`. A neutral one lets the preview show the round card,
@@ -1063,6 +1333,7 @@ function sceneArcade(ctx: SceneCtx): Scene {
         : { playerNumber: 0, standing: "floor", banked: 0, total: 0 });
     if (arcade === undefined || mine === undefined) {
       badge.hidden = true;
+      welcome.node.hidden = true;
       mount("waiting", [
         h("div", { class: "a-card" }, [
           h("p", { class: "label", text: "Hashi Arcade" }),
@@ -1076,6 +1347,16 @@ function sceneArcade(ctx: SceneCtx): Scene {
     setText(badgeNum, playerTag(mine.playerNumber));
     setAttr(badge, "data-standing", mine.standing);
 
+    // "Welcome. You have been recruited. You are Player 017." — DESIGN.md's
+    // line for entering the arcade, which is exactly what this is: the number
+    // has just been handed out and no game has started yet. It holds until
+    // the first round is actually being played, then never comes back, so
+    // somebody joining mid-arcade is not welcomed over the top of a round.
+    if (arcade.phase === "running") welcomed = true;
+    const greet = !welcomed && state.arcadeMine !== undefined;
+    welcome.node.hidden = !greet;
+    if (greet) welcome.set(HOUSE.welcome(mine.playerNumber));
+
     // The drain: 400 ms of desaturation and pink, then the gold card. It is
     // played once, on the transition, and never on a repaint — a phone that
     // replayed the error every time a frame arrived would be a phone stuck on
@@ -1084,6 +1365,9 @@ function sceneArcade(ctx: SceneCtx): Scene {
       node.classList.add("is-draining");
       buzz([120, 60, 120]);
       setText(announce, `${STATE_LOCK_ERROR}. ${HOUSE.drained(mine.playerNumber)}`);
+      // The Lounge is about to mount underneath this, and a mount clears the
+      // live region. This one message outlives its screen on purpose.
+      keepAnnounce = true;
       if (drainTimer !== null) clearTimeout(drainTimer);
       drainTimer = setTimeout(() => {
         node.classList.remove("is-draining");
@@ -1096,10 +1380,11 @@ function sceneArcade(ctx: SceneCtx): Scene {
     }
     lastStanding = mine.standing;
 
-    if (arcade.phase === "reveal") return paintReveal(arcade, mine);
+    if (arcade.phase === "reveal") return paintReveal(state, arcade, mine);
     if (arcade.phase === "card") {
       optimistic = 0;
       lastLightAt = null;
+      resetCheckpointLine();
       return paintCard(arcade);
     }
     if (arcade.phase === "idle") {
@@ -1107,6 +1392,7 @@ function sceneArcade(ctx: SceneCtx): Scene {
       // next one has no card. One line, and it is the announcer's.
       optimistic = 0;
       lastLightAt = null;
+      resetCheckpointLine();
       mount("between", [
         h("div", { class: "a-card" }, [houseLine(HOUSE.roundEnd)]),
       ]);
@@ -1139,10 +1425,10 @@ function sceneArcade(ctx: SceneCtx): Scene {
       // second under the thumb that is trying to tap one.
       const a = state.arcade;
       if (a?.phase !== "running" || a.round !== "recruitment") return;
-      const left = remainingMs(a.endsAt, ctx.now());
-      setText(recruitTimer, left === null ? "" : formatCountdown(left));
+      paintItemTimer(a);
     },
     stop() {
+      window.removeEventListener("keydown", onTapKey);
       if (drainTimer !== null) clearTimeout(drainTimer);
       drainTimer = null;
     },

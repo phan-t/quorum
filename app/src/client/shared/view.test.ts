@@ -13,10 +13,14 @@ import { describe, it } from "node:test";
 import {
   activityHue,
   activityLabel,
+  answerKeyIndex,
   answerTiles,
   floorEntries,
   formatCountdown,
   gridEntries,
+  isTapKey,
+  itemEndsAt,
+  latestCheckpoint,
   msToTurn,
   nextSegment,
   playerName,
@@ -30,6 +34,7 @@ import {
   timerFraction,
   wipeFraction,
   ARCADE_ROUND_CARD,
+  ARCADE_ROUND_NUMBER,
   LIGHT_FACE,
   RUN_OF_SHOW,
   SEGMENT_BUILT,
@@ -397,5 +402,118 @@ describe("the grid", () => {
     // The nickname is here because this list is on a phone. The big screen
     // renders the tag and never reads this field.
     assert.equal(floor[0]?.nickname, "Priya");
+  });
+});
+
+/* ------------------------------------------------------------------ */
+/* The keyboard                                                        */
+/* ------------------------------------------------------------------ */
+
+const key = (
+  k: string,
+  over: Partial<{ repeat: boolean; altKey: boolean; ctrlKey: boolean; metaKey: boolean }> = {},
+): { key: string; repeat: boolean; altKey: boolean; ctrlKey: boolean; metaKey: boolean } => ({
+  key: k,
+  repeat: false,
+  altKey: false,
+  ctrlKey: false,
+  metaKey: false,
+  ...over,
+});
+
+describe("the tap key", () => {
+  it("answers to space and enter, and to nothing else", () => {
+    assert.deepEqual(isTapKey(key(" ")), { handled: true, taps: true });
+    assert.deepEqual(isTapKey(key("Enter")), { handled: true, taps: true });
+    assert.deepEqual(isTapKey(key("Spacebar")), { handled: true, taps: true });
+    assert.deepEqual(isTapKey(key("a")), { handled: false, taps: false });
+    assert.deepEqual(isTapKey(key("Tab")), { handled: false, taps: false });
+  });
+
+  /**
+   * The whole point of the repeat rule: a held key is claimed — so the page
+   * does not scroll and the button is not activated underneath — but it does
+   * not add a resource. One physical press, one tap, exactly like one click.
+   */
+  it("claims a held key without counting it", () => {
+    assert.deepEqual(isTapKey(key(" ", { repeat: true })), {
+      handled: true,
+      taps: false,
+    });
+  });
+
+  it("keeps its hands off the browser's own shortcuts", () => {
+    assert.equal(isTapKey(key(" ", { metaKey: true })).handled, false);
+    assert.equal(isTapKey(key("Enter", { ctrlKey: true })).handled, false);
+    assert.equal(isTapKey(key(" ", { altKey: true })).handled, false);
+  });
+});
+
+describe("the answer keys", () => {
+  it("maps 1-4 onto the tiles that exist", () => {
+    assert.equal(answerKeyIndex("1", 4), 0);
+    assert.equal(answerKeyIndex("4", 4), 3);
+    // A two-answer question has no tile 3, and pressing 3 must do nothing
+    // rather than throw or lock in a choice nobody can see.
+    assert.equal(answerKeyIndex("3", 2), null);
+    assert.equal(answerKeyIndex("0", 4), null);
+    assert.equal(answerKeyIndex("5", 4), null);
+    assert.equal(answerKeyIndex("Enter", 4), null);
+    assert.equal(answerKeyIndex(" ", 4), null);
+  });
+});
+
+/* ------------------------------------------------------------------ */
+/* The arcade's numbers and clocks                                     */
+/* ------------------------------------------------------------------ */
+
+describe("the round number", () => {
+  /**
+   * SPEC.md's table, not the position in the run: the host picks the order,
+   * so numbering off `roundIndex` had the console saying ROUND 1 ·
+   * RECRUITMENT while the room's card said Game 1 — Plan / Apply.
+   */
+  it("is the round's own, and matches the card the room is shown", () => {
+    assert.equal(ARCADE_ROUND_NUMBER.recruitment, 0);
+    assert.equal(ARCADE_ROUND_NUMBER.plan_apply, 1);
+    assert.equal(ARCADE_ROUND_NUMBER.glass_bridge, 5);
+    for (const [kind, lines] of Object.entries(ARCADE_ROUND_CARD)) {
+      const n = ARCADE_ROUND_NUMBER[kind as keyof typeof ARCADE_ROUND_NUMBER];
+      if (n === 0) continue; // Recruitment's card does not name a game number
+      assert.equal(lines[0]?.startsWith(`Game ${n} —`), true, kind);
+    }
+  });
+});
+
+describe("the checkpoint line", () => {
+  it("names the checkpoint that was crossed, not the running count", () => {
+    assert.equal(latestCheckpoint([30, 60, 90], 0), null);
+    assert.equal(latestCheckpoint([30, 60, 90], 29), null);
+    assert.equal(latestCheckpoint([30, 60, 90], 30), 30);
+    assert.equal(latestCheckpoint([30, 60, 90], 59), 30);
+    assert.equal(latestCheckpoint([30, 60, 90], 119), 90);
+  });
+
+  it("does not assume the wire sent them in order", () => {
+    assert.equal(latestCheckpoint([90, 30, 60], 61), 60);
+    assert.equal(latestCheckpoint([], 500), null);
+  });
+});
+
+describe("the item clock", () => {
+  /**
+   * The item's deadline, never the round's. The round's `endsAt` is the last
+   * item's, so drawing it in the item slot counted two and a half minutes
+   * down at somebody who had twenty seconds.
+   */
+  it("is the item's own instant", () => {
+    assert.equal(itemEndsAt({ at: 0, of: 6, itemEndsAt: 1_700 }), 1_700);
+  });
+
+  it("is nothing at all when no item is running", () => {
+    // The round card and the reveal: the server omits the key rather than
+    // nulling it, and a timer with nothing behind it shows nothing.
+    assert.equal(itemEndsAt({ at: 5, of: 6 }), null);
+    assert.equal(itemEndsAt(undefined), null);
   });
 });
