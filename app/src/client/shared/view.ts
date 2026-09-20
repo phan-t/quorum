@@ -11,6 +11,7 @@
 import type {
   ActivitySummary,
   ArcadeCell,
+  ArcadeGlassView,
   ArcadeRecruitmentView,
   ArcadeView,
   OwnPoints,
@@ -19,7 +20,7 @@ import type {
   RosterEntry,
   TriviaView,
 } from "../../protocol.ts";
-import type { ArcadeRoundKind, Segment } from "../../engine/types.ts";
+import type { ArcadeRoundKind, GlassWave, Segment } from "../../engine/types.ts";
 
 export type ViewKind =
   | "waiting"
@@ -397,7 +398,10 @@ export const ARCADE_ROUND_CARD: Readonly<
   ],
   glass_bridge: [
     "Game 5 — The Glass Bridge",
-    "Eighteen panes. Nine are tempered. The tempered ones are real.",
+    // Twelve, not eighteen: the launch board is six steps of two panes. The
+    // show has eighteen and DESIGN quoted it, which meant the card announced a
+    // bridge a third longer than the one on the screen behind it.
+    "Twelve panes. Six are tempered. The tempered ones are real.",
     "Wave 1 goes first. Wave 1 has our sympathy.",
   ],
 };
@@ -422,6 +426,31 @@ export const HOUSE = {
   crossed: (target: number) =>
     `Apply complete. Resources: ${target} added, 0 changed, 0 destroyed.`,
   drained: (n: number) => `${playerName(n)} drained.`,
+  /**
+   * DESIGN.md: `> Pane 4 was not tempered. Player 017 drained.`
+   *
+   * "Pane 4" is the fourth *step*, 1-based, and it is deliberately not which
+   * of the two panes at that step: the line goes on the big screen, in a room
+   * that still has two waves in it who have not crossed. Saying which pane
+   * broke would be saying which pane is real — see {@link ArcadeGlassView} —
+   * and the engine will not tell this surface either way until the step
+   * closes.
+   */
+  glassPane: (step: number) => `Pane ${step} was not tempered.`,
+  glassFall: (step: number, n: number) =>
+    `Pane ${step} was not tempered. ${playerName(n)} drained.`,
+  /**
+   * The other way off the bridge, which DESIGN.md has no line for because it
+   * is not in the show: the step closed and you had not put your weight
+   * anywhere. Written in the same register and saying the true thing, so the
+   * phone does not tell somebody they stood on a pane they never touched.
+   */
+  glassPaneMissed: (step: number) => `Pane ${step} was not chosen.`,
+  glassTimeout: (step: number, n: number) =>
+    `Pane ${step} was not chosen. ${playerName(n)} drained.`,
+  /** DESIGN.md, verbatim, and the funniest line in the product. */
+  glassCrossed: (n: number) =>
+    `${playerName(n)} has reached the far side. It is not very interesting there.`,
   backedSurvived: "Your player survived. The Lounge is pleased.",
   roundEnd: "All nodes rescheduled. The next game will begin shortly.",
   arcadeEnd: "The games have concluded. Please return your tracksuit.",
@@ -460,6 +489,20 @@ export const KEY_HINT = {
   trivia: "Keys 1–4 also answer",
   /** Recruitment's text field. */
   recruit: "Enter submits",
+  /**
+   * The Glass Bridge's two panes.
+   *
+   * Wave 3 gets six seconds a step. A control that needs a trackpad, a hunt
+   * for a target and a click inside six seconds is a control that costs
+   * somebody the round for owning the wrong hardware, so the two panes answer
+   * to the two keys that already mean "the left one" and "the right one".
+   *
+   * They commit, rather than moving focus, for the same reason the trivia
+   * tiles answer to 1–4 and for the same reason one pane per step is final:
+   * under six seconds a two-keystroke commitment is a worse game, and every
+   * other way of stepping is one action too.
+   */
+  glass: "← and → step onto a pane",
 } as const;
 
 /**
@@ -636,6 +679,187 @@ export function floorEntries(
   return gridEntries(arcade, roster).filter(
     (e) => e.standing === "floor" && e.pid !== exclude,
   );
+}
+
+/* ------------------------------------------------------------------ */
+/* The Glass Bridge                                                    */
+/* ------------------------------------------------------------------ */
+
+/**
+ * `ArrowLeft`/`ArrowRight`, or `1`/`2`, to a pane index. Null for anything
+ * else.
+ *
+ * The arrows because the panes are physically left and right, the digits
+ * because the trivia tiles already answer to digits and a room that has
+ * learned one keyboard should not have to learn a second. A held key is not a
+ * second step — `repeat` is rejected — but that matters less here than in
+ * Plan / Apply, because the engine refuses a second commitment anyway: one
+ * pane per step, and you have put your weight on it.
+ */
+export function paneKeyIndex(ev: {
+  readonly key: string;
+  readonly repeat: boolean;
+  readonly altKey: boolean;
+  readonly ctrlKey: boolean;
+  readonly metaKey: boolean;
+}): 0 | 1 | null {
+  if (ev.altKey || ev.ctrlKey || ev.metaKey || ev.repeat) return null;
+  if (ev.key === "ArrowLeft" || ev.key === "1") return 0;
+  if (ev.key === "ArrowRight" || ev.key === "2") return 1;
+  return null;
+}
+
+/**
+ * Which wave a player number crosses in, from the two cuts on the wire.
+ *
+ * The same arithmetic as `waveOf` in engine/arcade.ts, written here rather
+ * than imported because it is the arithmetic the *room* does: SPEC.md has the
+ * waves "by player number", and the two cuts are on the big screen precisely
+ * so that thirty people can each work out their own wave without being told
+ * by a field only their own phone has.
+ */
+export function waveOfNumber(
+  playerNumber: number,
+  cuts: readonly [number, number],
+): GlassWave {
+  if (playerNumber <= cuts[0]) return 1;
+  if (playerNumber <= cuts[1]) return 2;
+  return 3;
+}
+
+/** One player, placed on the bridge. */
+export interface BridgeEntry extends GridEntry {
+  readonly wave: GlassWave;
+  /** Steps completed. Also the step they are facing. */
+  readonly position: number;
+  /** Their wave is crossing, they are still standing, and not yet across. */
+  readonly onBridge: boolean;
+  readonly across: boolean;
+  /** Still on the Floor, and their wave has not walked on yet. */
+  readonly waiting: boolean;
+}
+
+export function bridgeEntries(
+  arcade: ArcadeView,
+  roster: readonly RosterEntry[],
+  glass: ArcadeGlassView,
+): BridgeEntry[] {
+  const of = glass.of;
+  return gridEntries(arcade, roster).map((e) => {
+    const wave = waveOfNumber(e.playerNumber, glass.waveCuts);
+    const position = glass.position?.[e.pid] ?? 0;
+    const standing = e.standing === "floor";
+    const across = standing && position >= of;
+    return {
+      ...e,
+      wave,
+      position,
+      across,
+      onBridge: standing && !across && wave === glass.wave,
+      waiting: standing && !across && wave > glass.wave,
+    };
+  });
+}
+
+/** One step of the bridge, with everything a surface draws on it. */
+export interface BridgeStep {
+  /** 0-based. The label the room hears is this plus one. */
+  readonly index: number;
+  readonly product: string;
+  readonly labels: readonly [string, string];
+  /**
+   * Which pane broke here, or null for a step nobody has fallen at.
+   *
+   * With two panes this *is* the answer to the step, which is why the server
+   * only ever sends a non-null entry for a step everybody who could use it
+   * has already walked past. It is the whole of what wave 2 and wave 3 are
+   * promised, and the reason going first is worse.
+   */
+  readonly broken: 0 | 1 | null;
+  /** Everyone facing this step right now. Empty for a step nobody is on. */
+  readonly standing: readonly BridgeEntry[];
+  /** The step the open wave is deciding. */
+  readonly open: boolean;
+}
+
+/**
+ * The bridge, as a row of steps plus the far side.
+ *
+ * `labels` is empty for every step while the round card is up, because the
+ * server does not send the board until the Floor opens — the row still draws,
+ * so the bridge is there before anybody walks onto it.
+ */
+export function bridgeSteps(
+  arcade: ArcadeView,
+  roster: readonly RosterEntry[],
+  glass: ArcadeGlassView,
+): { steps: BridgeStep[]; across: BridgeEntry[] } {
+  const entries = bridgeEntries(arcade, roster, glass);
+  const steps: BridgeStep[] = [];
+  for (let i = 0; i < glass.of; i += 1) {
+    const pane = glass.board?.[i];
+    steps.push({
+      index: i,
+      product: pane?.product ?? "",
+      labels: pane?.labels ?? ["", ""],
+      broken: glass.broken[i] ?? null,
+      standing: entries.filter((e) => e.onBridge && e.position === i),
+      open: glass.step === i,
+    });
+  }
+  return { steps, across: entries.filter((e) => e.across) };
+}
+
+/** The three waves, in order, with their members. Wave 1 goes blind. */
+export function waveRosters(
+  arcade: ArcadeView,
+  roster: readonly RosterEntry[],
+  glass: ArcadeGlassView,
+): { wave: GlassWave; seconds: number; members: BridgeEntry[] }[] {
+  const entries = bridgeEntries(arcade, roster, glass);
+  return ([1, 2, 3] as const).map((wave) => ({
+    wave,
+    seconds: glass.waveSeconds[wave - 1] ?? 0,
+    members: entries.filter((e) => e.wave === wave),
+  }));
+}
+
+/**
+ * Who a drained player may back on this bridge.
+ *
+ * SPEC.md: "Drained players back someone in a **later** wave." The engine
+ * refuses anything else, and a list of chips that are refused when pressed is
+ * a list that should not have been drawn — so the filter is here as well,
+ * where the chips are made.
+ */
+export function glassBackable(
+  arcade: ArcadeView,
+  roster: readonly RosterEntry[],
+  glass: ArcadeGlassView,
+  exclude?: string,
+): BridgeEntry[] {
+  return bridgeEntries(arcade, roster, glass).filter(
+    (e) => e.standing === "floor" && e.pid !== exclude && e.wave > glass.wave,
+  );
+}
+
+/**
+ * How much of the step's time is left, 0–1, for the draining bar.
+ *
+ * Off the two absolute epochs the server sent, never off `waveSeconds`: a
+ * step that opened 300 ms late still empties exactly when it closes, and a
+ * surface that received the frame late still agrees with every other surface
+ * about the instant.
+ */
+export function stepFraction(
+  glass: { readonly stepStartedAt?: number; readonly stepEndsAt?: number },
+  now: number,
+): number | null {
+  const { stepStartedAt, stepEndsAt } = glass;
+  if (stepStartedAt === undefined || stepEndsAt === undefined) return null;
+  if (stepEndsAt <= stepStartedAt) return null;
+  const left = (stepEndsAt - now) / (stepEndsAt - stepStartedAt);
+  return Math.min(1, Math.max(0, left));
 }
 
 /**

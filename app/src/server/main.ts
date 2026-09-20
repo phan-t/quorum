@@ -31,6 +31,7 @@ import { openStore } from "./store/index.ts";
 import type { StoredEvent } from "./store/types.ts";
 import { recoverSessions, rehydrate } from "./recovery.ts";
 import { recruitmentRound } from "../arcade/recruitment.ts";
+import { glassBridgeRound } from "../arcade/glass-bridge.ts";
 import { formatErrors, importTriviaCsv } from "../trivia/import.ts";
 import {
   eventsJsonl,
@@ -616,6 +617,7 @@ wss.on("connection", (socket: WebSocket, req: IncomingMessage) => {
       }
       case "arcade.answer":
       case "arcade.tap":
+      case "arcade.step":
       case "arcade.back": {
         if (client.role !== "participant") {
           runtime.send(client, {
@@ -634,7 +636,9 @@ wss.on("connection", (socket: WebSocket, req: IncomingMessage) => {
             ? runtime.tap(client, msg.round, now)
             : msg.t === "arcade.answer"
               ? runtime.submitAnswer(client, msg.item, msg.answer, now)
-              : runtime.back(client, msg.pid, now);
+              : msg.t === "arcade.step"
+                ? runtime.step(client, msg.round, msg.step, msg.choice, now)
+                : runtime.back(client, msg.pid, now);
         if (out.rejection) {
           runtime.send(client, {
             t: "refusedCmd",
@@ -896,28 +900,51 @@ function commandToEvent(cmd: HostCommand, runtime: SessionRuntime): Event | null
       // The content is attached here, not carried on the command: see
       // arcade-content.ts. A console cannot choose what the answers are, and
       // the answers never travel towards a browser that is not the host's.
-      return cmd.kind === "recruitment"
-        ? {
-            type: "startRound",
-            round: "recruitment",
-            // The items come from src/arcade/, which is where the content
-            // lives; what this boundary decides is only that they are
-            // attached here and never travel on a command from a browser.
-            config: recruitmentRound(undefined, cmd.secondsPerItem),
-          }
-        : {
-            type: "startRound",
-            round: "plan_apply",
-            config: {
-              kind: "plan_apply",
-              target: cmd.target,
-              seconds: cmd.seconds,
-            },
-          };
+      if (cmd.kind === "recruitment") {
+        return {
+          type: "startRound",
+          round: "recruitment",
+          // The items come from src/arcade/, which is where the content
+          // lives; what this boundary decides is only that they are
+          // attached here and never travel on a command from a browser.
+          config: recruitmentRound(undefined, cmd.secondsPerItem),
+        };
+      }
+      if (cmd.kind === "glass_bridge") {
+        return {
+          type: "startRound",
+          round: "glass_bridge",
+          // Same rule, and on this round it is the rule the whole thing
+          // rests on: a `GlassStep` carries `real` and both reveal notes, so
+          // eighteen panes arriving from a browser would be the answer key
+          // arriving from a browser. The host sets the three step timers and
+          // nothing else; the content is read from src/arcade/ here and the
+          // engine splits the answer out of it on `startRound`.
+          config: glassBridgeRound(undefined, cmd.waveSeconds),
+        };
+      }
+      return {
+        type: "startRound",
+        round: "plan_apply",
+        config: {
+          kind: "plan_apply",
+          target: cmd.target,
+          seconds: cmd.seconds,
+        },
+      };
     case "arcade.begin":
       return { type: "beginPlay" };
     case "arcade.next":
       return { type: "nextItem" };
+    // The host cutting a step or a wave short, and the server's step timer,
+    // send the identical event. One code path, so there is no "closed by the
+    // host" step that behaves differently from "closed by the clock" for
+    // anyone downstream — which matters here more than in trivia, because
+    // closing a step is what publishes the pane that broke.
+    case "arcade.nextStep":
+      return { type: "nextStep" };
+    case "arcade.nextWave":
+      return { type: "nextWave" };
     case "arcade.end":
       return { type: "endRound" };
     case "arcade.reveal":

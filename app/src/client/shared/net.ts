@@ -172,6 +172,21 @@ export class QuorumClient {
     return cid;
   }
 
+  /**
+   * The Glass Bridge: put your weight on one of the two panes. One per step,
+   * and it is final.
+   *
+   * No timestamp — see the note on `arcade.step` in protocol.ts. `step` is
+   * the step this phone believed was open and `round` is the arcade's round
+   * index, because the bridge resets to step 0 at every wave and every round
+   * and step 0 is exactly the index a stale frame carries.
+   */
+  arcadeStep(round: number, step: number, choice: 0 | 1): string {
+    const cid = this.#nextCid();
+    this.#send({ t: "arcade.step", cid, round, step, choice });
+    return cid;
+  }
+
   /** The Lounge: back a player, or change who you are backing. */
   arcadeBack(pid: string): string {
     const cid = this.#nextCid();

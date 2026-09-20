@@ -28,12 +28,15 @@ import {
   STATE_LOCK_ERROR,
   answerKeyIndex,
   answerTiles,
+  bridgeSteps,
   floorEntries,
   formatCountdown,
+  glassBackable,
   gridEntries,
   isTapKey,
   itemEndsAt,
   latestCheckpoint,
+  paneKeyIndex,
   playerName,
   playerTag,
   pointsStripCells,
@@ -42,7 +45,9 @@ import {
   remainingMs,
   resolveView,
   resourceBar,
+  stepFraction,
   timerFraction,
+  type BridgeEntry,
   type ViewKind,
 } from "../shared/view.ts";
 
@@ -52,6 +57,16 @@ export interface ParticipantView {
   setBanner(text: string | null): void;
   /** The tap was refused. Drop the optimistic "locked in" and let them retry. */
   clearPendingAnswer(): void;
+  /**
+   * A step onto a pane was refused. Give the two panes back.
+   *
+   * The commitment is shown the instant the key comes up — under six seconds
+   * a phone that waits for the server is a phone that gets pressed twice —
+   * so a refusal has to be able to take it off again, or the person believes
+   * they are standing on a pane they never reached. Exactly the reason
+   * `clearPendingAnswer` exists for a trivia tap.
+   */
+  clearPendingStep(): void;
 }
 
 export interface ParticipantViewOptions {
@@ -62,6 +77,7 @@ export interface ParticipantViewOptions {
   onAnswer?: (index: number, choice: number) => void;
   onArcadeTap?: (round: number) => void;
   onArcadeAnswer?: (item: number, answer: string) => void;
+  onArcadeStep?: (round: number, step: number, choice: 0 | 1) => void;
   onArcadeBack?: (pid: string) => void;
 }
 
@@ -82,6 +98,8 @@ interface Scene {
   update(state: RenderState, nickname: string | null): void;
   /** Called a few times a second while mounted. Only the timer needs it. */
   tick?(state: RenderState): void;
+  /** The arcade only: a refused commitment, taken back off the screen. */
+  clearStep?(): void;
   stop?(): void;
 }
 
@@ -141,6 +159,8 @@ export function createParticipantView(
     },
     arcadeTap: (round) => opts.onArcadeTap?.(round),
     arcadeAnswer: (item, answer) => opts.onArcadeAnswer?.(item, answer),
+    arcadeStep: (round, step, choice) =>
+      opts.onArcadeStep?.(round, step, choice),
     arcadeBack: (pid) => opts.onArcadeBack?.(pid),
   };
 
@@ -212,6 +232,11 @@ export function createParticipantView(
       if (last !== null) scene?.update(last, null);
     },
 
+    clearPendingStep() {
+      scene?.clearStep?.();
+      if (last !== null) scene?.update(last, null);
+    },
+
     update(state, nickname) {
       if (state === null) return;
       last = state;
@@ -255,6 +280,7 @@ interface SceneCtx {
   tap(index: number, choice: number): void;
   arcadeTap(round: number): void;
   arcadeAnswer(item: number, answer: string): void;
+  arcadeStep(round: number, step: number, choice: 0 | 1): void;
   arcadeBack(pid: string): void;
 }
 
@@ -860,6 +886,18 @@ function sceneArcade(ctx: SceneCtx): Scene {
   let drainTimer: ReturnType<typeof setTimeout> | null = null;
   /** The Lounge list as last drawn, so a burst of frames does not rebuild it. */
   let loungeSignature = "";
+  /** The bridge as last drawn, for the same reason. */
+  let bridgeSignature = "";
+  /** The step this phone has already committed to. One pane per step. */
+  let stepSent: number | null = null;
+  /** Which step the panes are currently showing, so a new one resets them. */
+  let stepIndex = -1;
+  /** The last step the focus ring was moved to. Once per step, never per frame. */
+  let focusedStep = -1;
+  /** Whether the two panes are a live control right now. */
+  let glassOpen = false;
+  /** How this phone left the bridge, latched at the transition — see paint(). */
+  let glassExit: string | null = null;
 
   /* ---- Recruitment ---- */
   const cue = h("p", { class: "a-cue", attrs: { "aria-hidden": "true" } });
@@ -940,6 +978,16 @@ function sceneArcade(ctx: SceneCtx): Scene {
   }, [bigGlyph, bigWord, bigCount]) as HTMLButtonElement;
   const planHouse = houseSlot("a-plan-house");
   planHouse.node.hidden = true;
+  /** A new round has a fresh bridge: last round's commitment must not stick. */
+  const resetBridge = (): void => {
+    stepSent = null;
+    stepIndex = -1;
+    focusedStep = -1;
+    glassOpen = false;
+    bridgeSignature = "";
+    glassExit = null;
+  };
+
   /** A new round banks nothing yet, so last round's line must not linger. */
   const resetCheckpointLine = (): void => {
     lastCheckpoint = null;
@@ -1014,6 +1062,296 @@ function sceneArcade(ctx: SceneCtx): Scene {
     tapOnce();
   };
   if (ctx.live) window.addEventListener("keydown", onTapKey);
+
+  /* ---- The Glass Bridge ---- */
+
+  /**
+   * The bridge on the phone.
+   *
+   * Four things, in the order SPEC.md asks for them: whose turn it is, the
+   * step's own clock, where everybody is standing, and — only while it is
+   * your turn — the two panes. A wave that is waiting gets the first three
+   * and no button, because SPEC.md is explicit that the asymmetry is the
+   * point and that waiting for your wave has to be worth doing: what you are
+   * doing is watching the bridge fill in and reading which panes break.
+   */
+  const glassWave = h("p", { class: "mono a-glass-wave" });
+  const glassTimer = h("p", { class: "mono a-step-timer" });
+  const glassBarFill = h("div", { class: "a-step-bar-fill" });
+  const glassBar = h("div", { class: "a-step-bar", attrs: { "aria-hidden": "true" } }, [
+    glassBarFill,
+  ]);
+  const bridge = h("div", { class: "a-bridge", role: "list" });
+  const glassProduct = h("p", { class: "a-glass-product" });
+  const glassPanes = h("div", { class: "a-panes" });
+  const glassKeys = keyHint(KEY_HINT.glass);
+  const glassStatus = h("p", { class: "a-glass-status" });
+  const glassBanked = h("p", { class: "mono a-glass-banked" });
+  const glassNode = h("div", { class: "a-glass" }, [
+    glassWave,
+    glassTimer,
+    glassBar,
+    bridge,
+    glassProduct,
+    glassPanes,
+    glassKeys,
+    glassStatus,
+    glassBanked,
+  ]);
+
+  /** The two pane buttons, built once: a list rebuilt under a cursor is a
+   * click that lands on nothing, and this one is rebuilt on every frame the
+   * room produces. */
+  const paneButtons: HTMLButtonElement[] = [0, 1].map((side) => {
+    const label = h("span", { class: "a-pane-label" });
+    const mark = h("span", {
+      class: "a-pane-key mono",
+      attrs: { "aria-hidden": "true" },
+      text: side === 0 ? "←" : "→",
+    });
+    const button = h(
+      "button",
+      {
+        class: "a-pane",
+        type: "button",
+        attrs: { "data-side": side === 0 ? "left" : "right" },
+      },
+      side === 0 ? [mark, label] : [label, mark],
+    ) as HTMLButtonElement;
+    button.addEventListener("click", () => stepOn(side as 0 | 1));
+    return button;
+  });
+  replace(glassPanes, paneButtons);
+
+  /**
+   * One step onto a pane. The single place a commitment is made, whatever
+   * pressed it.
+   *
+   * Guarded by the button's own disabled state and by `stepSent`, which is
+   * this phone's memory of having already committed: the server refuses a
+   * second frame with `already_stepped`, but a person who pressed twice under
+   * a six-second clock should see the first press take, not a refusal.
+   */
+  const stepOn = (choice: 0 | 1): void => {
+    const round = Number(glassNode.dataset["round"] ?? "-1");
+    const step = Number(glassNode.dataset["step"] ?? "-1");
+    if (round < 0 || step < 0) return;
+    if (stepSent === step || !glassOpen) return;
+    stepSent = step;
+    for (const b of paneButtons) b.disabled = true;
+    setText(glassStatus, "You are on the pane.");
+    setText(announce, "You are on the pane.");
+    ctx.arcadeStep(round, step, choice);
+  };
+
+  /**
+   * The two keys, from anywhere on the page while the bridge is up.
+   *
+   * On the window rather than the buttons because nobody tabs to a control
+   * before a six-second clock starts, and a key that works only after a click
+   * is an affordance that arrives too late to be one. Attached only when this
+   * view is live: the console renders the same module as a 180 px preview,
+   * and the console's own arrow keys walk the run of show.
+   */
+  const onPaneKey = (ev: KeyboardEvent): void => {
+    if (built !== "glass" || !glassOpen || isTypingTarget(ev.target)) return;
+    const side = paneKeyIndex(ev);
+    if (side === null) return;
+    // The page must not scroll sideways under an arrow key, and the browser
+    // must not also activate whichever pane happens to have focus.
+    ev.preventDefault();
+    stepOn(side);
+  };
+  if (ctx.live) window.addEventListener("keydown", onPaneKey);
+
+  const paintStepTimer = (arcade: ArcadeView): void => {
+    const g = arcade.glass;
+    const left = remainingMs(g?.stepEndsAt ?? null, ctx.now());
+    setText(glassTimer, left === null ? "" : formatCountdown(left));
+    // Wave 3 gets six seconds, so "urgent" is a third of the step rather than
+    // trivia's flat five seconds — at six seconds a five-second warning is
+    // the whole step.
+    const span = (g?.stepEndsAt ?? 0) - (g?.stepStartedAt ?? 0);
+    setClass(
+      glassTimer,
+      "urgent",
+      left !== null && span > 0 && left <= Math.max(2_000, span / 3),
+    );
+    const f = stepFraction(g ?? {}, ctx.now());
+    glassBarFill.style.width = `${(f ?? 0) * 100}%`;
+  };
+
+  /**
+   * The bridge itself: one cell per step, two pane marks in each, and the
+   * player numbers standing on them.
+   *
+   * A pane mark goes dark when the server says that pane broke — which it
+   * only ever says for a step everybody who could use it has walked past, so
+   * this row is the information wave 2 and wave 3 are promised and never the
+   * answer to the step anybody is standing on.
+   *
+   * Rebuilt only when it changed: the room produces a frame per commitment
+   * and a row rebuilt under a cursor is a click that lands on nothing.
+   */
+  const paintBridge = (state: RenderState, arcade: ArcadeView, mine: ArcadeMine): void => {
+    const g = arcade.glass;
+    if (!g) return;
+    const { steps, across } = bridgeSteps(arcade, state.roster, g);
+    const signature = [
+      g.step,
+      g.wave,
+      mine.playerNumber,
+      g.broken.join(""),
+      steps.map((s) => s.standing.map((e) => e.tag).join("-")).join("/"),
+      across.map((e) => e.tag).join("-"),
+    ].join("|");
+    if (signature === bridgeSignature) return;
+    bridgeSignature = signature;
+
+    const cell = (
+      className: string,
+      label: string,
+      marks: readonly Node[],
+      here: readonly BridgeEntry[],
+      attrs: Record<string, string>,
+    ): HTMLElement =>
+      h("div", { class: className, role: "listitem", attrs }, [
+        h("span", { class: "mono a-bridge-num", text: label }),
+        ...marks,
+        h(
+          "span",
+          { class: "a-bridge-who mono" },
+          here.map((e) =>
+            h("span", {
+              class: "a-bridge-tag",
+              text: e.tag,
+              attrs: { "data-you": e.playerNumber === mine.playerNumber ? "yes" : "no" },
+            }),
+          ),
+        ),
+      ]);
+
+    replace(bridge, [
+      ...steps.map((s) =>
+        cell(
+          "a-bridge-step",
+          String(s.index + 1),
+          [
+            h(
+              "span",
+              { class: "a-bridge-panes", attrs: { "aria-hidden": "true" } },
+              [0, 1].map((side) =>
+                h("span", {
+                  class: "a-bridge-pane",
+                  attrs: { "data-broken": s.broken === side ? "yes" : "no" },
+                }),
+              ),
+            ),
+          ],
+          s.standing,
+          {
+            "data-open": s.open ? "yes" : "no",
+            "aria-label": `Step ${s.index + 1}${
+              s.broken === null
+                ? ", nobody has fallen here"
+                : `, the ${s.broken === 0 ? "left" : "right"} pane broke here`
+            }${
+              s.standing.length === 0
+                ? ""
+                : `, ${s.standing.map((e) => playerName(e.playerNumber)).join(", ")} standing`
+            }`,
+          },
+        ),
+      ),
+      cell(
+        "a-bridge-far",
+        "▣",
+        [],
+        across,
+        { "aria-label": `The far side, ${across.length} across` },
+      ),
+    ]);
+  };
+
+  const paintGlass = (state: RenderState, arcade: ArcadeView, mine: ArcadeMine): void => {
+    const g = arcade.glass;
+    if (!g) return;
+    const fresh = built !== "glass";
+    mount("glass", [glassNode]);
+    const me = mine.glass;
+    const wave = me?.wave ?? 3;
+    const yourTurn = me?.onTheBridge === true && !me.committed;
+    glassNode.dataset["round"] = String(arcade.roundIndex);
+    glassNode.dataset["step"] = String(g.step ?? 0);
+    // A new step is a fresh commitment: forget the last one.
+    if (stepIndex !== g.step) {
+      stepIndex = g.step ?? 0;
+      stepSent = null;
+    }
+    glassOpen = yourTurn && ctx.live && stepSent !== g.step;
+
+    setText(
+      glassWave,
+      [
+        `WAVE ${wave} OF 3`,
+        `${g.waveSeconds[wave - 1] ?? 0}s A STEP`,
+        yourTurn
+          ? "YOUR TURN"
+          : me?.onTheBridge
+            ? "COMMITTED"
+            : me?.across
+              ? "ACROSS"
+              : `WAVE ${g.wave} IS CROSSING`,
+      ].join(" · "),
+    );
+    setAttr(glassNode, "data-turn", yourTurn ? "yes" : "no");
+    paintStepTimer(arcade);
+    paintBridge(state, arcade, mine);
+
+    const step = g.board?.[g.step ?? 0];
+    setText(glassProduct, step?.product ?? "");
+    glassProduct.hidden = step === undefined;
+    const labels = step?.labels ?? ["", ""];
+    paneButtons.forEach((button, side) => {
+      const label = button.querySelector(".a-pane-label");
+      if (label instanceof HTMLElement) setText(label, labels[side] ?? "");
+      button.disabled = !glassOpen;
+      setAttr(
+        button,
+        "aria-label",
+        `${side === 0 ? "Left" : "Right"} pane: ${labels[side] ?? ""}`,
+      );
+    });
+    // The panes are only a control while it is your turn. A waiting wave sees
+    // the bridge and the clock; a committed player sees the pane they are
+    // standing on and cannot take it back.
+    glassPanes.hidden = !(me?.onTheBridge ?? false);
+    glassKeys.hidden = !glassOpen;
+
+    // The keys work from anywhere, but the focus ring is the only thing that
+    // says *these two* are what you press. There is nothing else on this
+    // screen to take focus from, and it is taken once per step rather than on
+    // every frame the room produces.
+    if (ctx.live && glassOpen && (fresh || focusedStep !== stepIndex)) {
+      focusedStep = stepIndex;
+      paneButtons[0]?.focus();
+    }
+
+    setText(
+      glassStatus,
+      me?.across
+        ? HOUSE.glassCrossed(mine.playerNumber)
+        : me?.onTheBridge
+          ? me.committed
+            ? "You are on the pane."
+            : "Two panes. One is a real feature. Step on it."
+          : `Wave ${g.wave} is on the bridge. Watch which panes break.`,
+    );
+    setText(
+      glassBanked,
+      `Step ${Math.min((me?.step ?? 0) + (me?.across ? 0 : 1), g.of)} of ${g.of} · banked ${mine.banked}`,
+    );
+  };
 
   /* ---- the drain, and the Lounge ---- */
   const drainNode = h("div", { class: "a-drain" }, [
@@ -1207,14 +1545,36 @@ function sceneArcade(ctx: SceneCtx): Scene {
 
   const paintLounge = (state: RenderState, arcade: ArcadeView, mine: ArcadeMine): void => {
     mount("lounge", [drainNode, loungeNode]);
+    // `glassExit` is latched at the transition, because the frame that
+    // carries a fall is the only one that can tell a fall from a timeout —
+    // see paint(). Null outside the bridge, and cleared by the next round.
+    setText(
+      drainNode.querySelector(".a-drain-error") as HTMLElement,
+      glassExit ?? STATE_LOCK_ERROR,
+    );
     setText(
       drainNode.querySelector(".a-drain-who") as HTMLElement,
       HOUSE.drained(mine.playerNumber),
     );
 
     const backing = mine.backing ?? null;
-    const floor = floorEntries(arcade, state.roster);
-    const backed = floor.find((e) => e.pid === backing);
+    const g = arcade.glass;
+    // SPEC.md narrows the Lounge on this bridge: "Drained players back
+    // someone in a **later** wave." The engine refuses anything else, and a
+    // chip that is refused when pressed is a chip that should not have been
+    // drawn — so the list is narrowed where it is made as well.
+    const floor = g
+      ? glassBackable(arcade, state.roster, g)
+      : floorEntries(arcade, state.roster);
+    // …and once your runner walks onto the bridge the bet stands, which is
+    // the other half of the same sentence. The chips become a record.
+    const locked =
+      g !== undefined &&
+      backing !== null &&
+      !floor.some((e) => e.pid === backing);
+    const backed = (
+      g ? gridEntries(arcade, state.roster) : floor
+    ).find((e) => e.pid === backing);
     loungeBacked.hidden = backed === undefined;
     if (backed) {
       replace(loungeBacked, [
@@ -1225,13 +1585,13 @@ function sceneArcade(ctx: SceneCtx): Scene {
     }
     // Changeable until the Floor locks, which is the moment the round stops
     // running. After that the chips are a record, not a control.
-    const open = arcade.phase === "running" && ctx.live;
+    const open = arcade.phase === "running" && ctx.live && !locked;
     // Rebuilt only when it actually changed. During Plan / Apply the state
     // moves on every tap in the room, and a list rebuilt under a thumb is a
     // tap that lands on nothing. The signature covers the mirror below as
     // well, which is why it is taken over the whole grid and not the Floor.
     const all = gridEntries(arcade, state.roster);
-    const signature = `${open}:${backing ?? ""}:${all
+    const signature = `${open}:${backing ?? ""}:${g?.wave ?? ""}:${all
       .map((e) => `${e.pid}/${e.standing}/${e.backers}/${e.away}/${e.struck}`)
       .join(",")}`;
     if (signature === loungeSignature) return;
@@ -1261,7 +1621,14 @@ function sceneArcade(ctx: SceneCtx): Scene {
     );
     if (floor.length === 0) {
       replace(loungeList, [
-        h("p", { class: "a-lounge-empty", text: "Nobody is left on the Floor." }),
+        h("p", {
+          class: "a-lounge-empty",
+          text: locked
+            ? "Your runner is on the bridge. The bet stands."
+            : g
+              ? "Every later wave has already crossed."
+              : "Nobody is left on the Floor.",
+        }),
       ]);
     }
     // The big screen's grid, mirrored small, so the Lounge can watch without
@@ -1300,12 +1667,39 @@ function sceneArcade(ctx: SceneCtx): Scene {
       gridEntries(arcade, state.roster).some(
         (e) => e.pid === backing && e.standing === "floor",
       );
+    // The bridge's answer, which is the only round whose reveal is a lesson:
+    // SPEC.md asks the note on each pane to read out why the fake was fake,
+    // and both notes are shown because the real one's is the thing somebody
+    // learns. This is the first frame on which any of it has existed.
+    const glassRecap = arcade.glass?.recap ?? [];
     // Keyed on what it draws, so a later frame in the same reveal redraws it.
-    mount(`reveal:${mine.banked}:${mine.total}:${survived}`, [
+    mount(`reveal:${mine.banked}:${mine.total}:${survived}:${glassRecap.length}`, [
       h("div", { class: "a-reveal" }, [
         h("p", { class: "label", text: "Banked this round" }),
         h("p", { class: "mono a-banked", text: String(mine.banked) }),
         h("p", { class: "label a-total" }, [`Arcade total ${mine.total}`]),
+        ...glassRecap.map((step, i) =>
+          h("div", { class: "a-glass-recap" }, [
+            h("p", { class: "mono a-glass-recap-head" }, [
+              h("span", { class: "a-glass-recap-num", text: String(i + 1) }),
+              h("span", { text: step.product }),
+            ]),
+            ...[0, 1].map((side) =>
+              h("div", {
+                class: "a-glass-recap-pane",
+                attrs: { "data-real": step.real === side ? "yes" : "no" },
+              }, [
+                h("span", {
+                  class: "a-glass-recap-mark mono",
+                  attrs: { "aria-hidden": "true" },
+                  text: step.real === side ? "○" : "□",
+                }),
+                h("span", { class: "a-glass-recap-label", text: step.labels[side] ?? "" }),
+                h("span", { class: "a-glass-recap-note", text: step.notes[side] ?? "" }),
+              ]),
+            ),
+          ]),
+        ),
         ...recap.map((item) =>
           h("div", { class: "a-recap" }, [
             h("span", { class: "a-recap-cue", attrs: { "aria-hidden": "true" }, text: item.cue }),
@@ -1330,7 +1724,27 @@ function sceneArcade(ctx: SceneCtx): Scene {
       state.arcadeMine ??
       (arcade === undefined
         ? undefined
-        : { playerNumber: 0, standing: "floor", banked: 0, total: 0 });
+        : {
+            playerNumber: 0,
+            standing: "floor",
+            banked: 0,
+            total: 0,
+            // A neutral bridge line for the same reason: without one, the
+            // preview shows the console a round with no panes in it, which
+            // is not what anybody in the room is looking at. `ctx.live` is
+            // false on the preview, so the panes are a picture either way.
+            ...(arcade.glass
+              ? {
+                  glass: {
+                    wave: arcade.glass.wave,
+                    onTheBridge: true,
+                    step: 0,
+                    committed: false,
+                    across: false,
+                  } as const,
+                }
+              : {}),
+          });
     if (arcade === undefined || mine === undefined) {
       badge.hidden = true;
       welcome.node.hidden = true;
@@ -1362,9 +1776,31 @@ function sceneArcade(ctx: SceneCtx): Scene {
     // replayed the error every time a frame arrived would be a phone stuck on
     // the error, which is the one thing DESIGN.md says must not happen.
     if (lastStanding === "floor" && mine.standing === "drained") {
+      // The bridge has its own error, and it has two of them.
+      //
+      // DESIGN.md gives the fall — *Pane 4 was not tempered* — and the step
+      // it names is the one they were facing, which is their own `position`
+      // and never the bridge's open step: by the time a timeout drain
+      // reaches a phone, `nextStep` has already moved the bridge on.
+      //
+      // `committed` tells the two apart, and it is only readable on this
+      // frame: a fall arrives with the phone still in `stepped`, and a
+      // timeout arrives after the close cleared it. Which is why the line is
+      // latched here and not recomputed in the Lounge.
+      const g = mine.glass;
+      const pane = (g?.step ?? 0) + 1;
+      glassExit =
+        arcade.round !== "glass_bridge"
+          ? null
+          : g?.committed
+            ? HOUSE.glassPane(pane)
+            : HOUSE.glassPaneMissed(pane);
       node.classList.add("is-draining");
       buzz([120, 60, 120]);
-      setText(announce, `${STATE_LOCK_ERROR}. ${HOUSE.drained(mine.playerNumber)}`);
+      setText(
+        announce,
+        `${glassExit ?? STATE_LOCK_ERROR}. ${HOUSE.drained(mine.playerNumber)}`,
+      );
       // The Lounge is about to mount underneath this, and a mount clears the
       // live region. This one message outlives its screen on purpose.
       keepAnnounce = true;
@@ -1385,6 +1821,7 @@ function sceneArcade(ctx: SceneCtx): Scene {
       optimistic = 0;
       lastLightAt = null;
       resetCheckpointLine();
+      resetBridge();
       return paintCard(arcade);
     }
     if (arcade.phase === "idle") {
@@ -1393,6 +1830,7 @@ function sceneArcade(ctx: SceneCtx): Scene {
       optimistic = 0;
       lastLightAt = null;
       resetCheckpointLine();
+      resetBridge();
       mount("between", [
         h("div", { class: "a-card" }, [houseLine(HOUSE.roundEnd)]),
       ]);
@@ -1401,6 +1839,7 @@ function sceneArcade(ctx: SceneCtx): Scene {
     if (mine.standing === "drained") return paintLounge(state, arcade, mine);
     if (arcade.round === "recruitment") return paintRecruitment(state, arcade, mine);
     if (arcade.round === "plan_apply") return paintPlan(arcade, mine);
+    if (arcade.round === "glass_bridge") return paintGlass(state, arcade, mine);
     // A round that is designed but not built: say so rather than show a
     // button that does nothing.
     mount("unbuilt", [
@@ -1420,15 +1859,25 @@ function sceneArcade(ctx: SceneCtx): Scene {
       paint(state);
     },
     tick(state) {
-      // Only the item countdown moves without a frame arriving. A full
-      // repaint on a heartbeat would rebuild the Lounge's chips five times a
-      // second under the thumb that is trying to tap one.
+      // Only the two countdowns move without a frame arriving. A full repaint
+      // on a heartbeat would rebuild the Lounge's chips five times a second
+      // under the thumb that is trying to tap one, and the bridge under the
+      // cursor that is trying to step.
       const a = state.arcade;
-      if (a?.phase !== "running" || a.round !== "recruitment") return;
-      paintItemTimer(a);
+      if (a?.phase !== "running") return;
+      if (a.round === "recruitment") paintItemTimer(a);
+      else if (a.round === "glass_bridge" && built === "glass") paintStepTimer(a);
+    },
+    clearStep() {
+      // The server refused the commitment — the step closed under the frame,
+      // or the round moved on. Whatever this phone drew optimistically is
+      // now a lie, so it comes off and the next paint decides afresh.
+      stepSent = null;
+      glassOpen = false;
     },
     stop() {
       window.removeEventListener("keydown", onTapKey);
+      window.removeEventListener("keydown", onPaneKey);
       if (drainTimer !== null) clearTimeout(drainTimer);
       drainTimer = null;
     },

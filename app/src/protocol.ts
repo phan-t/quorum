@@ -14,12 +14,14 @@ import type {
   ArcadePhase,
   ArcadeRoundKind,
   ArcadeStanding,
+  GlassWave,
   ParticipantId,
   QuestionPhase,
   Seal,
   ScoreStatus,
   Segment,
   SessionPhase,
+  WaveSeconds,
 } from "./engine/types.ts";
 
 export const PROTOCOL_VERSION = 1;
@@ -90,6 +92,30 @@ export type ClientMessage =
    * ends cannot land on the next one.
    */
   | { t: "arcade.tap"; cid: string; round: number }
+  /**
+   * The Glass Bridge: put your weight on one of the two panes. One per step,
+   * and it is final.
+   *
+   * No timestamp, for the same two reasons a tap carries none, and then a
+   * third. The decision time this frame produces — how long after the step
+   * opened the pane was chosen — is what "the fastest full crossing" is
+   * measured in, so a client-chosen instant would be a number worth 15 points
+   * to somebody's backer. The server times it from its own clock and its own
+   * latency estimate for this socket; see `step` in runtime.ts.
+   *
+   * `step` is the step the phone believed was open, for the reason
+   * `arcade.answer` carries `item`: a frame that crossed a step boundary is a
+   * commitment to a pane the player never saw, and the engine refuses it
+   * rather than applying it to whatever is open now. `round` is the arcade's
+   * `roundIndex`, so a frame in flight when the round ends cannot land on the
+   * next one — the bridge resets to step 0 at every wave and every round, and
+   * step 0 is exactly the index a stale frame carries.
+   *
+   * `choice` is 0 for the left pane and 1 for the right, in the order the
+   * labels arrived. Which of them is real is not on this wire in either
+   * direction: see {@link ArcadeGlassView}.
+   */
+  | { t: "arcade.step"; cid: string; round: number; step: number; choice: number }
   /** The Lounge: back a player, or change who you are backing. */
   | { t: "arcade.back"; cid: string; pid: ParticipantId }
   /**
@@ -160,10 +186,31 @@ export type HostCommand =
    */
   | { name: "arcade.round"; kind: "recruitment"; secondsPerItem: number }
   | { name: "arcade.round"; kind: "plan_apply"; target: number; seconds: number }
+  /**
+   * The Glass Bridge. Only the three step timers are the host's to set.
+   *
+   * The eighteen panes are *not* on this command, for the reason Recruitment's
+   * six items are not: the content lives on the server, is attached when the
+   * event is built, and therefore never travels towards a browser. Here that
+   * is not merely tidy — the steps carry `real` and both reveal notes, so a
+   * round config on the wire would be the answer key leaving the server on a
+   * frame the console could be made to echo.
+   */
+  | { name: "arcade.round"; kind: "glass_bridge"; waveSeconds: WaveSeconds }
   /** The round card is up; this opens the Floor. */
   | { name: "arcade.begin" }
   /** Recruitment: next emoji. */
   | { name: "arcade.next" }
+  /**
+   * The Glass Bridge: close the open step and open the next one.
+   *
+   * The server's step timer sends the identical event at `stepEndsAt`, so this
+   * is the host cutting a step short — every runner has already stepped and
+   * nobody wants to watch the clock run out — and not a second code path.
+   */
+  | { name: "arcade.nextStep" }
+  /** The Glass Bridge: close the wave and send the next one onto the bridge. */
+  | { name: "arcade.nextWave" }
   | { name: "arcade.end" }
   | { name: "arcade.reveal" };
 
@@ -439,6 +486,141 @@ export interface ArcadePlanApplyView {
 }
 
 /**
+ * Round 5, The Glass Bridge: one step of the bridge, as the room may see it.
+ *
+ * The product and the two labels, in display order, and nothing else. This is
+ * `GlassBoardStep` from the engine, on the wire — the type exists so the
+ * answer is *absent* from the value a projection is handed rather than merely
+ * withheld by it. A projection that spreads one of these cannot leak the
+ * round; a projection that spread a whole step would leak it on its first
+ * line.
+ */
+export interface ArcadeGlassStep {
+  readonly product: string;
+  /** Left, then right. `choice` on `arcade.step` indexes this pair. */
+  readonly labels: readonly [string, string];
+}
+
+/**
+ * The same step at the reveal, with the answer attached: which pane was real,
+ * and why the other one was not.
+ *
+ * SPEC.md: "The reveal note for each pane reads out why the fake was fake."
+ * Both notes, because the big screen reads out both — the fake's is the joke
+ * and the real one's is the thing somebody learns.
+ */
+export interface ArcadeGlassRecapStep {
+  readonly product: string;
+  readonly labels: readonly [string, string];
+  readonly real: 0 | 1;
+  readonly notes: readonly [string, string];
+}
+
+/**
+ * Round 5, The Glass Bridge — the projection this round lives or dies on.
+ *
+ * **There is no screen-only secret in a room with a projector in it.** The
+ * big screen is the surface waves 2 and 3 are told to read, and it is three
+ * metres from the people still deciding, so whatever it carries the whole
+ * room carries. That makes `glassFloorView()` in engine/arcade.ts the *only*
+ * public view of the round, and everything here a subset of it: a
+ * participant's frame is narrower than the screen's, never a different cut of
+ * the same state.
+ *
+ * Absent from every role but the host until the reveal:
+ *
+ * - **the answer key.** `real` and the two notes live in `ArcadePlay.key` and
+ *   reach a phone and the big screen at `revealRound` and not one frame
+ *   earlier — including the phone of somebody who fell at step 1 and is
+ *   sitting next to somebody who has not.
+ * - **which pane anyone chose.** The engine never stores it, because with two
+ *   panes *a pane that held identifies the real pane exactly as well as one
+ *   that broke*. Nothing on this wire reintroduces it: there is no per-player
+ *   choice, and there is no "who is standing where" that can be joined
+ *   against a break to recover one.
+ *
+ * `broken` is the exception that proves it. It is written by the engine only
+ * when a step **closes**, never as a player falls, so by the time an entry is
+ * non-null every player who could have used it has already stepped past it.
+ * That one rule is what keeps wave 1 blind and what waves 2 and 3 are
+ * promised, and it is why this field is safe to send to everybody.
+ *
+ * `position` is safe for the same reason and needs saying, because it looks
+ * like the dangerous one. It says how far along the bridge each player is,
+ * which is "X survived step 3" — and that is only the answer to step 3 once
+ * `broken[3]` is public, which is once step 3 has closed, which is once the
+ * answer is public anyway. During an open step it says somebody is still
+ * standing and says nothing whatever about which pane they are standing on.
+ *
+ * | field | participant | screen | host |
+ * | --- | --- | --- | --- |
+ * | `wave` / `waveCuts` / `waveSeconds` / `of` | always | always | always |
+ * | `broken` | always | always | always |
+ * | `board` | running, reveal | running, reveal | always |
+ * | `step` / `stepStartedAt` / `stepEndsAt` / `waveStartedAt` | running | running | always |
+ * | `position` | running, reveal | running, reveal | always |
+ * | `crossed` / `fastest` | never | always | always |
+ * | `elapsedMs` | never | never | always |
+ * | `recap` | reveal | reveal | always |
+ */
+export interface ArcadeGlassView {
+  /** Which wave is on the bridge. */
+  readonly wave: GlassWave;
+  /**
+   * The last arcade player number in wave 1, and in wave 2.
+   *
+   * Two numbers rather than a per-player map, so the room can work out its
+   * own wave off the big screen — which is how SPEC.md's "three waves by
+   * player number" is actually read by thirty people at once.
+   */
+  readonly waveCuts: readonly [number, number];
+  /** Seconds per step for waves 1, 2 and 3. SPEC.md tunes them to 12 / 9 / 6. */
+  readonly waveSeconds: WaveSeconds;
+  /** How many steps the bridge has. Present even while the round card is up. */
+  readonly of: number;
+  /**
+   * Which pane broke, per step, or null for a step nobody has fallen at.
+   *
+   * The information wave 2 and wave 3 are promised, and the reason going
+   * first is worse. Safe on every surface because of *when* the engine writes
+   * it: see the note on this interface.
+   */
+  readonly broken: readonly (0 | 1 | null)[];
+  /**
+   * The eighteen panes, in bridge order. Absent while the round card is up,
+   * for the reason Recruitment's cue is: the room is looking at the card, and
+   * six pairs of labels sitting in a phone's JSON twenty seconds early is
+   * twenty seconds of reading nobody else gets.
+   */
+  readonly board?: readonly ArcadeGlassStep[];
+  /** 0-based index into `board`, for the wave that is crossing. */
+  readonly step?: number;
+  /** Absolute server epochs, never durations. Absent unless a step is open. */
+  readonly waveStartedAt?: number;
+  readonly stepStartedAt?: number;
+  readonly stepEndsAt?: number;
+  /**
+   * Steps completed, per player; `of` means across. This is the bridge
+   * filling in, which is what SPEC.md asks a waiting wave to watch.
+   */
+  readonly position?: Readonly<Record<ParticipantId, number>>;
+  /** Screen and host: who reached the far side, in order, as player numbers. */
+  readonly crossed?: readonly number[];
+  /** Screen and host: the fastest full crossing, as a player number. */
+  readonly fastest?: number;
+  /**
+   * Host only: summed decision time per player, in ms.
+   *
+   * Not a secret — anyone in the room could hold a stopwatch — but it is the
+   * raw material of an award, and DESIGN.md puts every number on the console
+   * and nowhere else.
+   */
+  readonly elapsedMs?: Readonly<Record<ParticipantId, number>>;
+  /** The answer, at the reveal. The host has it throughout: they read it out. */
+  readonly recap?: readonly ArcadeGlassRecapStep[];
+}
+
+/**
  * The arcade, as one role may see it right now.
  *
  * | field | participant | screen | host |
@@ -450,6 +632,10 @@ export interface ArcadePlanApplyView {
  * | `planApply.light` | always | always | always |
  * | `planApply.nextChangeAt` / `headTurnsAt` | **never** | always | always |
  * | `planApply.crossed` / `finishOrder` | never | always | always |
+ * | `glass.broken` | always | always | always |
+ * | `glass.board` | running, reveal | running, reveal | always |
+ * | `glass.crossed` / `fastest` | never | always | always |
+ * | `glass.recap` (**the answer**) | reveal | reveal | always |
  */
 export interface ArcadeView {
   readonly activityId: string;
@@ -465,6 +651,7 @@ export interface ArcadeView {
   readonly inLounge: number;
   readonly recruitment?: ArcadeRecruitmentView;
   readonly planApply?: ArcadePlanApplyView;
+  readonly glass?: ArcadeGlassView;
 }
 
 /** Recruitment, for the one phone it belongs to. */
@@ -489,6 +676,38 @@ export interface ArcadeMinePlanApply {
   readonly place?: number;
 }
 
+/**
+ * The Glass Bridge, for the one phone it belongs to.
+ *
+ * This is `glassMeView()` from engine/arcade.ts on the wire, and it is
+ * deliberately the *whole* of what one player is told that the room is not:
+ * their wave, whether it is their turn, how far they have got, and whether
+ * the pane they put their weight on held.
+ *
+ * `held` is their own fact about their own step and nothing else. It is not
+ * the answer to the step — the phone is never told which pane was real, only
+ * that the one they chose did or did not take their weight — and it tells
+ * them nothing they would not know a second later from being drained or not.
+ * It is absent, not null, until they commit.
+ *
+ * What is *not* here is the choice itself. The phone knows which pane it
+ * pressed; the server never stores it and never sends it back, so there is no
+ * frame anywhere on this wire that pairs a player with a pane.
+ */
+export interface ArcadeMineGlass {
+  /** Theirs for the round, from their player number. Wave 1 goes blind. */
+  readonly wave: GlassWave;
+  /** Their wave is the one crossing, they are not drained, not yet across. */
+  readonly onTheBridge: boolean;
+  /** Steps completed. Also where they are standing. */
+  readonly step: number;
+  /** They have put their weight on a pane at the step that is open. */
+  readonly committed: boolean;
+  /** Whether that pane held. Absent until they commit. */
+  readonly held?: boolean;
+  readonly across: boolean;
+}
+
 /** The participant's own arcade standing. Participants only. */
 export interface ArcadeMine {
   /** Theirs for the whole arcade. Rendered zero-padded to three digits. */
@@ -503,6 +722,7 @@ export interface ArcadeMine {
   readonly drainedAt?: number;
   readonly recruitment?: ArcadeMineRecruitment;
   readonly planApply?: ArcadeMinePlanApply;
+  readonly glass?: ArcadeMineGlass;
 }
 
 /**
@@ -569,6 +789,13 @@ export interface RenderState {
      * because the host is running the round and settling the score.
      */
     readonly arcade?: {
+      /**
+       * Who has committed at whatever is open — an item in Recruitment, the
+       * step on the bridge in the Glass Bridge. *Who*, never *what*: this is
+       * a list of pids and it stays one, because on the bridge the answer to
+       * "what" is the answer to the round. The console's job is to decide
+       * whether to advance or wait.
+       */
       readonly answeredBy: readonly ParticipantId[];
       readonly drained: readonly ParticipantId[];
       /** pid -> the pid they are backing. */
@@ -704,6 +931,26 @@ export function parseClientMessage(raw: string): ClientMessage | null {
       }
       return { t: "arcade.tap", cid, round };
     }
+    case "arcade.step": {
+      const cid = str("cid");
+      const round = m["round"];
+      const step = m["step"];
+      const choice = m["choice"];
+      // Non-negative integers or nothing, and `choice` is one of exactly two
+      // panes. The engine refuses an out-of-range choice as well; refusing it
+      // here keeps a fractional index off a `===` comparison that would
+      // otherwise never match, which is a silent drop rather than an error.
+      const nat = (v: unknown): boolean =>
+        typeof v === "number" && Number.isInteger(v) && v >= 0;
+      if (cid === null || !nat(round) || !nat(step) || !nat(choice)) return null;
+      return {
+        t: "arcade.step",
+        cid,
+        round: round as number,
+        step: step as number,
+        choice: choice as number,
+      };
+    }
     case "arcade.back": {
       const cid = str("cid");
       const pid = str("pid");
@@ -838,7 +1085,22 @@ function parseHostCommand(v: unknown): HostCommand | null {
           ? null
           : { name: "arcade.round", kind: "plan_apply", target, seconds };
       }
-      // The other four rounds are designed but not built. Refusing the frame
+      if (c["kind"] === "glass_bridge") {
+        // Exactly three, in wave order, each above zero. A wave with a
+        // zero-second step is a wave that is drained for not answering a
+        // question it was never shown.
+        const ws = c["waveSeconds"];
+        if (!Array.isArray(ws) || ws.length !== 3) return null;
+        if (!ws.every((v) => typeof v === "number" && Number.isInteger(v) && v > 0)) {
+          return null;
+        }
+        return {
+          name: "arcade.round",
+          kind: "glass_bridge",
+          waveSeconds: [ws[0], ws[1], ws[2]] as WaveSeconds,
+        };
+      }
+      // The other three rounds are designed but not built. Refusing the frame
       // is how the console finds that out, rather than a round that starts
       // and does nothing.
       return null;
@@ -847,6 +1109,10 @@ function parseHostCommand(v: unknown): HostCommand | null {
       return { name: "arcade.begin" };
     case "arcade.next":
       return { name: "arcade.next" };
+    case "arcade.nextStep":
+      return { name: "arcade.nextStep" };
+    case "arcade.nextWave":
+      return { name: "arcade.nextWave" };
     case "arcade.end":
       return { name: "arcade.end" };
     case "arcade.reveal":

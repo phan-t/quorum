@@ -640,6 +640,280 @@ body {
   letter-spacing: 0.08em;
 }
 
+/* ---- The Glass Bridge ------------------------------------------------ *
+ *
+ * The room's shared picture: six steps across, both pane labels in each, the
+ * pane that broke struck through, and the player numbers standing on them.
+ * Below it the three waves, so anybody can find their own number and work out
+ * when they walk on.
+ *
+ * In ordinary flow, taking the space the dormitory grid was using. Plan /
+ * Apply's light is the only thing on this surface that covers the screen, and
+ * it does it because in that round the screen *is* the light.
+ *
+ * Seen as an 800px tile after two rounds of compression, so: luminance edges
+ * rather than colour edges, a strike through a broken pane as well as the
+ * coral, and nothing under 18px.
+ * -------------------------------------------------------------------- */
+
+.s-bridge {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1.6vh;
+}
+.s-bridge[hidden] {
+  display: none;
+}
+.s-bridge-clock {
+  margin: 0;
+  flex: none;
+  color: var(--muted);
+  font-size: clamp(18px, 1.5vw, 28px);
+  letter-spacing: 0.14em;
+}
+.s-bridge-row {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  gap: 8px;
+  align-items: stretch;
+}
+/* Both of these are flex containers, so `hidden` has to be said out loud.
+   They step aside at the reveal and the recap takes the stage. */
+.s-bridge-row[hidden],
+.s-waves[hidden] {
+  display: none;
+}
+.s-bridge-step,
+.s-bridge-far {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px 8px;
+  border: 2px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel);
+}
+.s-bridge-far {
+  flex: 0 0 14%;
+  border-color: var(--arc-lounge);
+}
+.s-bridge-far-mark {
+  margin: 0;
+  font-size: 30px;
+  line-height: 1;
+  color: var(--arc-lounge);
+}
+/* The open step, said three ways: a green border, a heavier ground, and the
+   number in green rather than grey. */
+.s-bridge-step[data-open="yes"] {
+  border-color: var(--arc-players);
+  background: var(--panel-2);
+}
+.s-bridge-step[data-open="yes"] .s-bridge-num {
+  color: var(--arc-players);
+}
+.s-bridge-num {
+  margin: 0;
+  font-size: 22px;
+  font-weight: 600;
+  color: var(--muted);
+  line-height: 1;
+}
+.s-bridge-product {
+  margin: 0;
+  font-size: 18px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--muted);
+  line-height: 1.1;
+}
+.s-bridge-panes {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.s-bridge-pane {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  align-items: center;
+  padding: 6px 8px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--panel-2);
+  overflow: hidden;
+}
+.s-bridge-label {
+  font-size: clamp(16px, 1.15vw, 22px);
+  line-height: 1.25;
+  color: var(--ink);
+}
+/* A pane that broke: struck through and dimmed as well as coral, because
+   nothing on this surface may be conveyed by colour alone. */
+.s-bridge-pane[data-broken="yes"] {
+  border-color: var(--miss);
+  background: transparent;
+}
+.s-bridge-pane[data-broken="yes"] .s-bridge-label {
+  color: var(--muted);
+  text-decoration: line-through;
+  text-decoration-color: var(--miss);
+  text-decoration-thickness: 2px;
+}
+.s-bridge-who {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  min-height: 22px;
+}
+.s-bridge-tag {
+  font-size: 20px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  padding: 1px 5px;
+  border-radius: 4px;
+  background: var(--nomad);
+  color: var(--on-fill-dark);
+}
+
+/* The three waves, by player number, with the two cuts implicit in the
+   grouping — which is how SPEC.md asks the room to read itself. */
+.s-waves {
+  flex: none;
+  display: flex;
+  gap: 1.5vw;
+}
+.s-wave {
+  flex: 1;
+  min-width: 0;
+  padding: 8px 10px;
+  border: 2px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel);
+}
+.s-wave[data-on="yes"] {
+  border-color: var(--arc-players);
+  background: var(--panel-2);
+}
+.s-wave-head {
+  margin: 0 0 4px;
+  display: flex;
+  gap: 0.8rem;
+  align-items: baseline;
+  font-size: 20px;
+  letter-spacing: 0.14em;
+  color: var(--muted);
+}
+.s-wave[data-on="yes"] .s-wave-head {
+  color: var(--arc-players);
+}
+.s-wave-secs,
+.s-wave-blind {
+  font-size: 16px;
+  letter-spacing: 0.1em;
+}
+.s-wave-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+.s-wave-tag {
+  font-size: 18px;
+  padding: 1px 5px;
+  border-radius: 4px;
+  background: var(--nomad);
+  color: var(--on-fill-dark);
+  border: 1px solid #00996c;
+}
+.s-wave-tag[data-standing="drained"] {
+  background: var(--vault);
+  border-color: #c69f00;
+  text-decoration: line-through;
+  text-decoration-color: var(--consul);
+  text-decoration-thickness: 2px;
+}
+.s-wave-tag[data-away="yes"] {
+  background: var(--panel-2);
+  color: var(--muted);
+  border-color: var(--line);
+}
+/* Across is the one good outcome, so it is gold-ringed rather than restyled:
+   they are still on the Floor and the grid still says so. */
+.s-wave-tag[data-across="yes"] {
+  box-shadow: 0 0 0 2px var(--arc-lounge);
+}
+
+/* The reveal: both notes per step, the real pane marked by a glyph as well as
+   by weight. This is the only frame on which any of it has existed. */
+.s-bridge-recap {
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  /* Three columns of two, so six steps and twelve notes fit the stage at
+     1080p without a scrollbar the room cannot reach. */
+  grid-template-columns: repeat(3, 1fr);
+  grid-auto-rows: 1fr;
+  gap: 1.4vh 1.6vw;
+  align-content: stretch;
+}
+.s-bridge-recap[hidden] {
+  display: none;
+}
+.s-bridge-recap-row {
+  display: flex;
+  gap: 0.6rem;
+  align-items: flex-start;
+}
+.s-bridge-recap-num {
+  font-size: 20px;
+  font-weight: 600;
+  color: var(--muted);
+}
+.s-bridge-recap-panes {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.s-bridge-recap-pane {
+  display: grid;
+  grid-template-columns: 1.4rem 1fr;
+  gap: 0 0.4rem;
+  font-size: 18px;
+  line-height: 1.3;
+}
+.s-bridge-recap-mark {
+  grid-row: span 2;
+  color: var(--muted);
+}
+.s-bridge-recap-pane[data-real="yes"] .s-bridge-recap-mark {
+  color: var(--arc-players);
+}
+.s-bridge-recap-label {
+  font-weight: 600;
+  color: var(--muted);
+}
+.s-bridge-recap-pane[data-real="yes"] .s-bridge-recap-label {
+  color: var(--ink);
+}
+.s-bridge-recap-note {
+  font-size: 16px;
+  color: var(--muted);
+}
+
 /* ---- a drain, verbatim, the way it looks in a terminal --------------- */
 
 .s-drain-log {
@@ -653,12 +927,28 @@ body {
   border: 1px solid var(--miss);
   border-radius: 6px;
 }
+/* On the bridge it is in the flow, beneath the bridge, and covers nothing.
+   `.s-bridge` is `flex: 1`, so it gives up the space for the four seconds the
+   log is on screen and takes it straight back. */
+.s-drain-log.inline {
+  position: static;
+  left: auto;
+  right: auto;
+  bottom: auto;
+  flex: none;
+  margin-top: 0.6vh;
+  padding: 0.6rem 1rem;
+}
 .s-drain-error,
 .s-drain-who {
   margin: 0;
   color: var(--miss);
   font-size: 28px;
   line-height: 1.5;
+}
+.s-drain-log.inline .s-drain-who {
+  font-size: 24px;
+  line-height: 1.35;
 }
 
 /* ---- the light: the screen *is* the light ---------------------------- */

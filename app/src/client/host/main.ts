@@ -32,10 +32,12 @@ import {
   SEGMENT_LABEL,
   SEGMENT_PHASE,
   answerTiles,
+  bridgeEntries,
   formatCountdown,
   gridEntries,
   itemEndsAt,
   nextSegment,
+  playerTag,
   questionLabel,
   remainingMs,
 } from "../shared/view.ts";
@@ -505,10 +507,12 @@ const ARCADE_BUILT: Readonly<Record<ArcadeRoundKind, boolean>> = {
   unseal: false,
   tug_of_raft: false,
   gganbu: false,
-  glass_bridge: false,
+  glass_bridge: true,
 };
 
-let arcadePick: "recruitment" | "plan_apply" = "recruitment";
+type ArcadePick = "recruitment" | "plan_apply" | "glass_bridge";
+
+let arcadePick: ArcadePick = "recruitment";
 
 const arcadePicker = h("div", { class: "a-picker", role: "radiogroup" });
 const arcadePickButtons = new Map<ArcadeRoundKind, HTMLButtonElement>();
@@ -529,7 +533,7 @@ for (const kind of ARCADE_ROUNDS) {
   ]) as HTMLButtonElement;
   if (built) {
     button.addEventListener("click", () => {
-      arcadePick = kind as "recruitment" | "plan_apply";
+      arcadePick = kind as ArcadePick;
       if (lastState) render(lastState);
     });
   }
@@ -578,6 +582,61 @@ const arcadePlanCfg = h("div", { class: "a-cfg" }, [
   }),
 ]);
 
+/**
+ * The Glass Bridge's three step timers, and nothing else.
+ *
+ * The eighteen panes are not a host setting and are not on the wire: they
+ * carry which pane is real and both reveal notes, so a console that could
+ * choose them would be a console the answer key travels through. SPEC.md
+ * tunes the three waves to 12 / 9 / 6, which is the asymmetry the round is
+ * built on — wave 1 goes blind and slowest, wave 3 goes last and fastest.
+ */
+const arcadeWave1 = h("input", {
+  class: "field field-num",
+  type: "number",
+  value: "12",
+  attrs: { min: "3", max: "60", "aria-label": "Seconds a step, wave 1" },
+}) as HTMLInputElement;
+const arcadeWave2 = h("input", {
+  class: "field field-num",
+  type: "number",
+  value: "9",
+  attrs: { min: "3", max: "60", "aria-label": "Seconds a step, wave 2" },
+}) as HTMLInputElement;
+const arcadeWave3 = h("input", {
+  class: "field field-num",
+  type: "number",
+  value: "6",
+  attrs: { min: "3", max: "60", "aria-label": "Seconds a step, wave 3" },
+}) as HTMLInputElement;
+
+const arcadeGlassCfg = h("div", { class: "a-cfg" }, [
+  // One row, not three. The console's panel scrolls, and every row this
+  // block spends is a row the round's own controls are pushed below the fold
+  // by — which is a button the host cannot press while the bridge is running.
+  h("div", { class: "a-cfg-row" }, [
+    h("label", { class: "a-cfg-cell" }, [
+      h("span", { class: "label", text: "Wave 1 · s" }),
+      arcadeWave1,
+    ]),
+    h("label", { class: "a-cfg-cell" }, [
+      h("span", { class: "label", text: "Wave 2 · s" }),
+      arcadeWave2,
+    ]),
+    h("label", { class: "a-cfg-cell" }, [
+      h("span", { class: "label", text: "Wave 3 · s" }),
+      arcadeWave3,
+    ]),
+  ]),
+  h("p", {
+    class: "pb-note",
+    text: "Six steps, two panes each. Waves are thirds of the room by player number. The server walks the eighteen deadlines; the two buttons below are for cutting one short.",
+  }),
+]);
+
+/** The bridge, as the host reads it out: the step, the clock and the answer. */
+const arcadeBridge = h("div", { class: "a-bridge-host", attrs: { hidden: true } });
+
 const arcadeState = h("p", { class: "mono t-head-line" });
 const arcadeSplit = h("div", { class: "a-split" });
 const arcadeFloorList = h("p", { class: "mono a-floor-list" });
@@ -597,19 +656,44 @@ const arcadeNext = control({
   title: "Recruitment only. The item timer does this on its own.",
   onFire: (c) => issue({ name: "arcade.next" }, c),
 });
+const arcadeNextStep = control({
+  label: "Close the step",
+  className: "ctl-secondary",
+  title:
+    "The Glass Bridge. Closes the open step — which drains whoever has not moved and publishes the pane that broke — and opens the next. The step timer does this on its own.",
+  onFire: (c) => issue({ name: "arcade.nextStep" }, c),
+});
+const arcadeNextWave = control({
+  label: "Send the next wave",
+  className: "ctl-secondary",
+  title:
+    "The Glass Bridge. Closes the wave's open step and walks the next wave on. Use it when everyone left in this wave has already fallen.",
+  onFire: (c) => issue({ name: "arcade.nextWave" }, c),
+});
 
 const bodyArcade = h("section", { class: "pb pb-arcade" }, [
   arcadeState,
   arcadePicker,
   arcadeRecruitCfg,
   arcadePlanCfg,
+  arcadeGlassCfg,
   arcadeItem,
   arcadeNote,
+  arcadeBridge,
   arcadeSplit,
   arcadeFloorList,
+  // Above the Backing list, not below it. The list grows by a row for every
+  // person the round drains, and a control that walks away down a scrolling
+  // panel as the round goes on is a control the host cannot press at the
+  // moment they need it — which on this bridge is eighteen times.
+  h("div", { class: "field-actions" }, [
+    arcadeEnd.el,
+    arcadeNext.el,
+    arcadeNextStep.el,
+    arcadeNextWave.el,
+  ]),
   h("p", { class: "label", text: "Backing" }),
   arcadeBacking,
-  h("div", { class: "field-actions" }, [arcadeEnd.el, arcadeNext.el]),
 ]);
 
 /** The round command the picker and its fields currently describe. */
@@ -618,18 +702,30 @@ function arcadeRoundCommand(): HostCommand {
     const v = Number(el.value);
     return Number.isFinite(v) && Number.isInteger(v) && v > 0 ? v : dflt;
   };
-  return arcadePick === "recruitment"
-    ? {
-        name: "arcade.round",
-        kind: "recruitment",
-        secondsPerItem: int(arcadeSeconds, 20),
-      }
-    : {
-        name: "arcade.round",
-        kind: "plan_apply",
-        target: int(arcadeTarget, 120),
-        seconds: int(arcadeFloorSeconds, 75),
-      };
+  if (arcadePick === "recruitment") {
+    return {
+      name: "arcade.round",
+      kind: "recruitment",
+      secondsPerItem: int(arcadeSeconds, 20),
+    };
+  }
+  if (arcadePick === "glass_bridge") {
+    return {
+      name: "arcade.round",
+      kind: "glass_bridge",
+      waveSeconds: [
+        int(arcadeWave1, 12),
+        int(arcadeWave2, 9),
+        int(arcadeWave3, 6),
+      ],
+    };
+  }
+  return {
+    name: "arcade.round",
+    kind: "plan_apply",
+    target: int(arcadeTarget, 120),
+    seconds: int(arcadeFloorSeconds, 75),
+  };
 }
 
 function renderArcade(s: RenderState): void {
@@ -639,8 +735,17 @@ function renderArcade(s: RenderState): void {
     button.classList.toggle("on", on);
     setAttr(button, "aria-checked", on ? "true" : "false");
   }
-  arcadeRecruitCfg.hidden = arcadePick !== "recruitment";
-  arcadePlanCfg.hidden = arcadePick !== "plan_apply";
+  // The picker and the settings are for choosing a round, and once the card
+  // is up the choice is made: `startRound` refuses a second one. They come
+  // off the panel for the duration, so the controls that *are* live during a
+  // round are not pushed below the fold of a panel that scrolls — the Glass
+  // Bridge added three settings and two buttons, and the two buttons are the
+  // ones the host needs at 14:40.
+  const inPlay = a !== undefined && (a.phase === "card" || a.phase === "running");
+  arcadePicker.hidden = inPlay;
+  arcadeRecruitCfg.hidden = inPlay || arcadePick !== "recruitment";
+  arcadePlanCfg.hidden = inPlay || arcadePick !== "plan_apply";
+  arcadeGlassCfg.hidden = inPlay || arcadePick !== "glass_bridge";
 
   if (a === undefined) {
     setText(arcadeState, "NOT IN THE ARCADE");
@@ -652,8 +757,11 @@ function renderArcade(s: RenderState): void {
     replace(arcadeSplit, []);
     setText(arcadeFloorList, "");
     replace(arcadeBacking, []);
+    arcadeBridge.hidden = true;
     arcadeEnd.setDisabled(true);
     arcadeNext.setDisabled(true);
+    arcadeNextStep.setDisabled(true);
+    arcadeNextWave.setDisabled(true);
     // The picker is still live: the host chooses the round before entering.
     return;
   }
@@ -705,6 +813,8 @@ function renderArcade(s: RenderState): void {
   // open, because the host is the one about to read it out.
   const r = a.recruitment;
   const pa = a.planApply;
+  const gl = a.glass;
+  if (!gl) arcadeBridge.hidden = true;
   if (r) {
     // The item's own clock, not the round's: the host is timing when to read
     // the answer out, and the round header already carries the round's.
@@ -731,6 +841,69 @@ function renderArcade(s: RenderState): void {
         ? "The light turns back to PLAN on its own."
         : `The head starts to turn in ${Math.max(0, Math.round((pa.headTurnsAt - (client?.now() ?? Date.now())) / 100) / 10)}s.`,
     );
+  } else if (gl) {
+    // The console is the one surface that may hold the answer while the
+    // round is running, because the host is the one who reads it out at the
+    // reveal — the same rule Recruitment's answer and trivia's `correct`
+    // follow. It is also the only surface in the building that is not in the
+    // room, which is why it is the only one that has it.
+    const stepLeft = remainingMs(
+      gl.stepEndsAt ?? null,
+      client?.now() ?? Date.now(),
+    );
+    const step = (gl.step ?? 0);
+    const pane = gl.board?.[step];
+    const answer = gl.recap?.[step];
+    setText(
+      arcadeItem,
+      [
+        `WAVE ${gl.wave} OF 3`,
+        `STEP ${step + 1} OF ${gl.of}`,
+        `${gl.waveSeconds[gl.wave - 1] ?? 0}s`,
+        stepLeft === null ? null : formatCountdown(stepLeft),
+        pane ? `— ${pane.product}` : null,
+      ]
+        .filter((x) => x !== null)
+        .join(" · "),
+    );
+    arcadeNote.hidden = true;
+    // A running-round tool. At the reveal the big screen carries the whole
+    // recap, both notes and all, and the host reads it off that.
+    arcadeBridge.hidden = a.phase !== "running" && a.phase !== "card";
+    // Who has put their weight on something, out of who the step is waiting
+    // for. Who, never what: `answeredBy` is a list of pids and stays one.
+    const waiting = bridgeEntries(a, s.roster, gl).filter((e) => e.onBridge);
+    const stepped = new Set(s.hostExtras?.arcade?.answeredBy ?? []);
+    const broken = gl.broken
+      .map((b, i) => (b === null ? null : `${i + 1}${b === 0 ? "L" : "R"}`))
+      .filter((x) => x !== null);
+    replace(arcadeBridge, [
+      ...(pane
+        ? [0, 1].map((side) =>
+            h("p", {
+              class: "a-bridge-answer",
+              attrs: { "data-real": answer?.real === side ? "yes" : "no" },
+            }, [
+              h("span", {
+                class: "mono a-bridge-mark",
+                text: answer === undefined ? "·" : answer.real === side ? "REAL" : "FAKE",
+              }),
+              h("span", { class: "a-bridge-answer-label", text: pane.labels[side] ?? "" }),
+            ]),
+          )
+        : []),
+      h("p", { class: "mono a-bridge-broken" }, [
+        [
+          `${waiting.filter((e) => stepped.has(e.pid)).length}/${waiting.length} stepped`,
+          `broken ${broken.length === 0 ? "—" : broken.join(" ")}`,
+          `across ${
+            (gl.crossed ?? []).length === 0
+              ? "—"
+              : (gl.crossed ?? []).map((n) => playerTag(n)).join(" ")
+          }${gl.fastest === undefined ? "" : ` · fastest ${playerTag(gl.fastest)}`}`,
+        ].join(" · "),
+      ]),
+    ]);
   } else {
     setText(arcadeItem, "");
     arcadeNote.hidden = true;
@@ -764,6 +937,15 @@ function renderArcade(s: RenderState): void {
 
   arcadeEnd.setDisabled(a.phase !== "running");
   arcadeNext.setDisabled(a.phase !== "running" || a.round !== "recruitment");
+  const bridging = a.phase === "running" && a.round === "glass_bridge";
+  const g = a.glass;
+  // "Close the step" is refused by the engine on the wave's last step — there
+  // is no next step to open — and "send the next wave" is refused after wave
+  // 3. Both say so by being unpressable rather than by being pressed.
+  arcadeNextStep.setDisabled(
+    !bridging || g === undefined || (g.step ?? 0) + 1 >= g.of,
+  );
+  arcadeNextWave.setDisabled(!bridging || g === undefined || g.wave >= 3);
 }
 
 const bodies: Record<string, HTMLElement> = {

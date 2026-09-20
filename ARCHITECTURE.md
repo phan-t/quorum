@@ -251,7 +251,30 @@ nothing about anyone else's.
 | `unseal` | `shapes: { pid: "circle" }`, `progress: { pid: k }`, `cracked: [pid]` | `word` (scrambled), `taps`, `hintsUsed` |
 | `tug_of_raft` | `pull: 1..3`, `sides: { a: [pid], b: [pid] }`, `rope: -1..1`, `beatEpoch`, `bpm` | `side`, `onBeat`, `misses`, `electing` |
 | `gganbu` | `item { prompt, line }`, `itemEndsAt`, `tokens: { pid: n }` | `rival`, `tokens`, `wager` |
-| `glass_bridge` | `step`, `wave`, `waveEndsAt`, `broken: [[step, choice]]`, `position: { pid: step }` | `wave`, `step`, `fallen` |
+| `glass_bridge` | `step`, `wave`, `stepEndsAt`, `broken: (0\|1\|null)[]` indexed by step, `position: { pid: step }` | `wave`, `step`, `fallen` |
+
+**The Glass Bridge's public payload is the whole game, so three things are
+deliberately absent from it.**
+
+The answer key never travels: each step is split at `startRound` into a
+showable half (the product and the two labels) and a key (which pane is real,
+and *both* notes — the fake's note says why it is fake, so it is the answer
+too). Nothing outside the reveal may read the key.
+
+`broken` is written only when a step **closes**, never as a player falls. With
+two panes, "the left one broke" is "the right one is real", so publishing a
+break live would hand the answer to everyone still standing on that step. By
+the time an entry is non-null, everyone who could have used it has stepped —
+which is exactly what waves 2 and 3 are promised, and no more.
+
+No per-player pane choice appears anywhere, because **a pane that held
+identifies the real pane just as completely as a pane that broke**. The engine
+does not store one: a pane that holds advances you and a pane that breaks
+drains you, so `position` is a count and nothing can be joined back to a pane.
+
+There is also no screen-only secret here — the big screen is in the room — so
+a participant's view must be a *subset* of the public one rather than a
+different cut of it.
 
 **Taps, as built.** This section used to describe batching ten taps into one
 `arcade.input` per 100 ms carrying a *client* timestamp, and a 10 Hz

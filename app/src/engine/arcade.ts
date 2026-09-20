@@ -20,6 +20,11 @@ import type {
   ArcadeStanding,
   ArcadeState,
   EmojiItem,
+  GlassAnswer,
+  GlassBoardStep,
+  GlassStep,
+  GlassWave,
+  LoungeSeat,
   Participant,
   ParticipantId,
   SessionState,
@@ -136,6 +141,349 @@ export function finishBonus(place: number): number {
 }
 
 /* ------------------------------------------------------------------ */
+/* Round 5 — The Glass Bridge                                          */
+/* ------------------------------------------------------------------ */
+
+/** "Each step crossed banks 5." Banked means banked: a fall cannot take it. */
+export const GLASS_STEP_BANK = 5;
+
+/** "Reaching the far side +15." */
+export const GLASS_FAR_SIDE = 15;
+
+/**
+ * "Wave 1 banks +3 per step for going blind."
+ *
+ * The compensation for an asymmetry the round is built on rather than an
+ * apology for it: 6 × (5 + 3) + 15 = 63, which is the Floor max in SPEC.md's
+ * scoring table, and waves 2 and 3 top out at 45.
+ */
+export const GLASS_BLIND_BONUS = 3;
+
+/** The Lounge: the runner you backed reached the far side. */
+export const GLASS_BACKED_CROSSES = 10;
+
+/**
+ * The Lounge: the runner you backed made the fastest full crossing.
+ *
+ * As in Plan / Apply, **the better of the two and never their sum** — SPEC.md
+ * is explicit that the Lounge rule must not change between rounds, "it is hard
+ * enough to explain once". A perfect Lounge round is 15.
+ */
+export const GLASS_BACKED_FASTEST = 15;
+
+/** One committed step, for a player in `wave`. */
+export function glassStepBank(wave: GlassWave): number {
+  return GLASS_STEP_BANK + (wave === 1 ? GLASS_BLIND_BONUS : 0);
+}
+
+/** The Glass Bridge's own play state, which several helpers here want. */
+export type GlassPlay = Extract<ArcadePlay, { kind: "glass_bridge" }>;
+
+/**
+ * Split content into the half that may be shown and the half that may not.
+ *
+ * Done once, at `startRound`, so that from then on the answer lives in exactly
+ * one field with one name. The alternative — keeping `GlassStep` whole in the
+ * play state and trusting every projection to pick fields out of it — puts the
+ * answer one careless object spread away from thirty phones.
+ */
+export function splitBoard(steps: readonly GlassStep[]): {
+  board: readonly GlassBoardStep[];
+  key: readonly GlassAnswer[];
+} {
+  return {
+    board: steps.map((s) => ({
+      product: s.product,
+      labels: [s.panes[0].label, s.panes[1].label] as const,
+    })),
+    key: steps.map((s) => ({
+      real: s.real,
+      notes: [s.panes[0].note, s.panes[1].note] as const,
+    })),
+  };
+}
+
+/**
+ * Where the wave boundaries fall, as the last arcade player number in wave 1
+ * and the last in wave 2.
+ *
+ * Contiguous thirds in player-number order, earlier waves taking the
+ * remainder. Contiguous rather than round-robin because SPEC says the waves
+ * are "by player number" and because the room can work out its own wave from
+ * two numbers on the big screen, which a modulo cannot give them.
+ *
+ * Awkward rosters fall out of `floor(i × 3 / n)` without a special case: one
+ * player is wave 1 alone, two players are waves 1 and 2 with wave 3 empty,
+ * four are 2 / 1 / 1. An empty wave is not a problem — it crosses instantly
+ * and the round moves on.
+ *
+ * Cuts rather than a per-player map so that a latecomer, whose number is
+ * necessarily above both, is in wave 3 by arithmetic rather than by being
+ * re-assigned mid-round.
+ */
+export function waveCutsFor(numbers: readonly number[]): readonly [number, number] {
+  const sorted = [...numbers].sort((a, b) => a - b);
+  const n = sorted.length;
+  if (n === 0) return [0, 0];
+  let cut1 = 0;
+  let cut2 = 0;
+  for (let i = 0; i < n; i++) {
+    const wave = Math.floor((i * 3) / n);
+    const number = sorted[i]!;
+    if (wave === 0) cut1 = number;
+    if (wave <= 1) cut2 = number;
+  }
+  // An empty wave 2 leaves cut2 where cut1 is, which is what "wave 2 is
+  // nobody" has to mean for `waveOf` to keep working.
+  if (cut2 < cut1) cut2 = cut1;
+  return [cut1, cut2];
+}
+
+/**
+ * Which wave a player number crosses in.
+ *
+ * An undefined number — somebody who joined after the round started and has
+ * not been handed an arcade number yet — is wave 3, which is where their
+ * number would have put them anyway.
+ */
+export function waveOf(
+  playerNumber: number | undefined,
+  cuts: readonly [number, number],
+): GlassWave {
+  if (playerNumber === undefined) return 3;
+  if (playerNumber <= cuts[0]) return 1;
+  if (playerNumber <= cuts[1]) return 2;
+  return 3;
+}
+
+/**
+ * How much round is left after the open step's deadline: the rest of this
+ * wave, plus every wave that has not walked on yet.
+ *
+ * Recomputed every time a step opens rather than fixed at `beginPlay`, for the
+ * reason `nextItem` recomputes Recruitment's: each step opens a little after
+ * its predecessor's deadline, because the timer that opens it has event-loop
+ * lag, and a round end guessed up front drifts earlier than the truth by the
+ * accumulated lag. Left alone that is wave 3 losing the tail of its last step,
+ * which is the one it can least afford at six seconds.
+ */
+export function glassRemainingMs(
+  play: GlassPlay,
+  wave: GlassWave,
+  step: number,
+): number {
+  const steps = play.board.length;
+  let ms = Math.max(0, steps - step - 1) * (play.waveSeconds[wave - 1] ?? 0) * 1000;
+  for (let w = wave + 1; w <= 3; w++) {
+    ms += steps * (play.waveSeconds[w - 1] ?? 0) * 1000;
+  }
+  return ms;
+}
+
+/**
+ * Everyone the open step is waiting for: in the wave that is on the bridge,
+ * still on the Floor, and not already across.
+ *
+ * "Not already across" is load-bearing. A player who reached the far side is
+ * still `floor` — they were never drained — and without this they would be
+ * drained at the next step close for failing to step onto a bridge they had
+ * already finished.
+ */
+export function bridgeRunners(
+  state: SessionState,
+  arcade: ArcadeState,
+  play: GlassPlay,
+): readonly ParticipantId[] {
+  return rosterOrder(state)
+    .map((p) => p.pid)
+    .filter(
+      (pid) =>
+        arcade.standing[pid] !== "drained" &&
+        waveOf(arcade.playerNumbers[pid], play.waveCuts) === play.wave &&
+        (play.position[pid] ?? 0) < play.board.length,
+    );
+}
+
+export interface GlassStepClose {
+  readonly standing: Readonly<Record<ParticipantId, ArcadeStanding>>;
+  readonly lounge: Readonly<Record<ParticipantId, LoungeSeat>>;
+  readonly broken: readonly (0 | 1 | null)[];
+  /** Who this close drained, for the caller's effects and for tests. */
+  readonly drained: readonly ParticipantId[];
+}
+
+/**
+ * Close the open step: drain whoever did not step, and publish the pane that
+ * broke.
+ *
+ * Both halves happen *here* rather than as they occur, and that is the round's
+ * one real secrecy rule. A pane that broke is the complete answer for that
+ * step — with two panes, "the left one broke" is "the right one is real" — so
+ * publishing it the instant somebody fell would hand it to the half of their
+ * own wave who are still deciding. Held until the step closes, it reaches only
+ * players who have already stepped past it, which is precisely the promise
+ * SPEC makes to waves 2 and 3.
+ *
+ * Failing to step drains you. SPEC does not say so in as many words, but the
+ * alternatives are worse: leaving a non-stepper standing on the bridge breaks
+ * the wave apart (a wave crosses as a unit, which is what makes one `step` and
+ * one deadline meaningful) and leaves them sitting out the rest of the round,
+ * which is the one thing the Floor and the Lounge exist to prevent. Drained,
+ * they are in the Lounge backing somebody within a second.
+ */
+export function closeGlassStep(
+  state: SessionState,
+  arcade: ArcadeState,
+  play: GlassPlay,
+  now: number,
+): GlassStepClose {
+  const drained = bridgeRunners(state, arcade, play).filter(
+    (pid) => !(pid in play.stepped),
+  );
+
+  const standing: Record<ParticipantId, ArcadeStanding> = { ...arcade.standing };
+  const lounge: Record<ParticipantId, LoungeSeat> = { ...arcade.lounge };
+  for (const pid of drained) {
+    standing[pid] = "drained";
+    lounge[pid] = arcade.lounge[pid] ?? { backing: null, at: now };
+  }
+
+  const answer = play.key[play.step];
+  const fell = Object.values(play.stepped).some((held) => !held);
+  let broken = play.broken;
+  if (fell && answer !== undefined && play.broken[play.step] !== undefined) {
+    const next = [...play.broken];
+    // The pane that broke is the one that is not real. A second wave falling
+    // at the same step writes the same value, so this is idempotent.
+    next[play.step] = answer.real === 0 ? 1 : 0;
+    broken = next;
+  }
+
+  return { standing, lounge, broken, drained };
+}
+
+/**
+ * The fastest full crossing: the lowest total decision time among the players
+ * who reached the far side, ties broken by who got there first.
+ *
+ * SPEC says "fastest full crossing" and leaves what "fastest" means to the
+ * round, which runs three waves at three different step lengths. Two readings
+ * were available and both are degenerate:
+ *
+ *   - **First across in wall-clock order.** Wave 1 crosses before wave 2 is
+ *     on the bridge, so the award is settled before most of the Lounge has
+ *     sat down — and the Lounge may only back a *later* wave, so nobody in it
+ *     could ever win the 15.
+ *   - **Elapsed time from your own wave's start.** A wave cannot advance
+ *     before its step closes, so a wave-1 crossing takes at least five full
+ *     12 s steps and a wave-3 crossing at most five 6 s ones. Wave 3 wins by
+ *     construction, every time.
+ *
+ * Decision time — the six reaction times added up — is the only measure that
+ * is comparable across waves, stays live until the last wave is off the
+ * bridge, and rewards the thing the round is about. A decisive wave-1 player
+ * can hold the record against a dithering wave-3 one.
+ */
+export function fastestCrossing(play: GlassPlay): ParticipantId | null {
+  let best: ParticipantId | null = null;
+  let bestMs = Infinity;
+  // crossOrder is in crossing order, so a strict `<` keeps the earliest
+  // crosser on a tie without a second comparison.
+  for (const pid of play.crossOrder) {
+    const ms = play.elapsedMs[pid] ?? Infinity;
+    if (ms < bestMs) {
+      best = pid;
+      bestMs = ms;
+    }
+  }
+  return best;
+}
+
+/* ------------------------------------------------------------------ */
+/* Round 5 — projections                                               */
+/* ------------------------------------------------------------------ */
+
+/**
+ * The round's public state: what the big screen may show, which is the same
+ * thing as what every player in the room may know.
+ *
+ * There is no "screen only" secret in a room with a projector in it, so this
+ * is the *only* public view and the phone's round view is a subset of it. It
+ * is built by naming fields rather than by deleting them from `play`, so a
+ * field added to the play state later is private until somebody decides
+ * otherwise.
+ *
+ * Deliberately absent: `key` (the answer), and `stepped` (who has committed at
+ * the open step). `stepped` would add nothing that `position` and the drained
+ * grid do not already show, and a field that says "X survived this step" is
+ * one accidental join away from the field that says which pane X chose —
+ * which is why that field does not exist at all.
+ */
+export interface GlassFloorView {
+  readonly board: readonly GlassBoardStep[];
+  readonly wave: GlassWave;
+  readonly waveCuts: readonly [number, number];
+  readonly step: number;
+  readonly waveStartedAt: number;
+  readonly stepStartedAt: number;
+  readonly stepEndsAt: number;
+  readonly broken: readonly (0 | 1 | null)[];
+  readonly position: Readonly<Record<ParticipantId, number>>;
+  readonly elapsedMs: Readonly<Record<ParticipantId, number>>;
+  readonly crossed: readonly ParticipantId[];
+  readonly fastest: ParticipantId | null;
+}
+
+export function glassFloorView(play: GlassPlay): GlassFloorView {
+  return {
+    board: play.board,
+    wave: play.wave,
+    waveCuts: play.waveCuts,
+    step: play.step,
+    waveStartedAt: play.waveStartedAt,
+    stepStartedAt: play.stepStartedAt,
+    stepEndsAt: play.stepEndsAt,
+    broken: play.broken,
+    position: play.position,
+    elapsedMs: play.elapsedMs,
+    crossed: play.crossOrder,
+    fastest: fastestCrossing(play),
+  };
+}
+
+/** One player's private view: their own wave, their own step, their own step. */
+export interface GlassMeView {
+  readonly wave: GlassWave;
+  readonly onTheBridge: boolean;
+  readonly step: number;
+  readonly committed: boolean;
+  /** Null until they commit; then whether the pane held. */
+  readonly held: boolean | null;
+  readonly across: boolean;
+}
+
+export function glassMeView(
+  arcade: ArcadeState,
+  play: GlassPlay,
+  pid: ParticipantId,
+): GlassMeView {
+  const wave = waveOf(arcade.playerNumbers[pid], play.waveCuts);
+  const position = play.position[pid] ?? 0;
+  const committed = pid in play.stepped;
+  return {
+    wave,
+    onTheBridge:
+      wave === play.wave &&
+      arcade.standing[pid] !== "drained" &&
+      position < play.board.length,
+    step: position,
+    committed,
+    held: committed ? play.stepped[pid]! : null,
+    across: position >= play.board.length,
+  };
+}
+
+/* ------------------------------------------------------------------ */
 /* Player numbers                                                      */
 /* ------------------------------------------------------------------ */
 
@@ -247,6 +595,15 @@ export function loungePoints(
       if (won) return PLAN_APPLY_BACKED_WINS;
       return crossed ? PLAN_APPLY_BACKED_CROSSES : 0;
     }
+    case "glass_bridge": {
+      // The same shape as Plan / Apply, because SPEC.md says the Lounge rule
+      // must not change between rounds. A runner who was never drained but
+      // never reached the far side pays nothing — which on this bridge can
+      // only happen to a wave that the host ended early, since every other
+      // way off it is a drain.
+      if (fastestCrossing(play) === backing) return GLASS_BACKED_FASTEST;
+      return play.crossOrder.includes(backing) ? GLASS_BACKED_CROSSES : 0;
+    }
   }
 }
 
@@ -267,6 +624,13 @@ export function floorMax(config: ArcadeRoundConfig): number {
         checkpointsFor(config.target).length * PLAN_APPLY_CHECKPOINT_BANK +
         PLAN_APPLY_CROSS +
         finishBonus(0)
+      );
+    case "glass_bridge":
+      // Wave 1, all six steps: 6 × (5 + 3) + 15 = 63. Waves 2 and 3 max at
+      // 6 × 5 + 15 = 45, and the difference is what going blind is worth.
+      return (
+        config.steps.length * (GLASS_STEP_BANK + GLASS_BLIND_BONUS) +
+        GLASS_FAR_SIDE
       );
   }
 }
@@ -291,12 +655,13 @@ export function loungeMax(round: ArcadeRoundKind): number {
   switch (round) {
     case "plan_apply":
       return Math.max(PLAN_APPLY_BACKED_CROSSES, PLAN_APPLY_BACKED_WINS);
+    case "glass_bridge":
+      return Math.max(GLASS_BACKED_CROSSES, GLASS_BACKED_FASTEST);
     // Recruitment does not drain. The rest are not built yet.
     case "recruitment":
     case "unseal":
     case "tug_of_raft":
     case "gganbu":
-    case "glass_bridge":
       return 0;
   }
 }

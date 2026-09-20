@@ -14,7 +14,7 @@ import {
   topFive,
   type Standing,
 } from "../engine/scoring.ts";
-import { checkpointsFor } from "../engine/arcade.ts";
+import { checkpointsFor, glassFloorView, glassMeView } from "../engine/arcade.ts";
 import type {
   ArcadeState,
   ParticipantId,
@@ -25,7 +25,11 @@ import type {
 import type {
   ActivitySummary,
   ArcadeCell,
+  ArcadeGlassRecapStep,
+  ArcadeGlassStep,
+  ArcadeGlassView,
   ArcadeMine,
+  ArcadeMineGlass,
   ArcadeMinePlanApply,
   ArcadeMineRecruitment,
   ArcadePlanApplyView,
@@ -514,6 +518,131 @@ export function arcadePlanApplyFor(
   };
 }
 
+/**
+ * The Glass Bridge, projected. This is the round's whole security surface.
+ *
+ * Built from {@link glassFloorView}, not from `play`, and that is the point
+ * rather than a style. `glassFloorView()` is the round's **only public view**:
+ * there is no screen-only secret in a room with a projector in it, because
+ * the big screen is three metres from the people who have not stepped yet and
+ * is the surface waves 2 and 3 are told to read. So every role below takes a
+ * *subset* of that one value, and the only thing this function reaches past
+ * it for is `play.key`, once, for the host and for the reveal.
+ *
+ * Two things are therefore absent from every frame before `revealRound`, and
+ * neither is absent by being deleted:
+ *
+ * - **the answer.** `real` and the two notes live in `ArcadePlay.key`, which
+ *   `glassFloorView()` does not carry and cannot be made to carry by adding a
+ *   field to the play state. The reveal is the one read of it in this file.
+ * - **which pane anybody chose.** The engine does not store it, because with
+ *   two panes a pane that *held* identifies the real pane exactly as well as
+ *   one that broke. Nothing here puts it back: `stepped` is not projected at
+ *   all, and there is no per-player field that a break can be joined against.
+ *
+ * `broken` is public on every surface and that is safe because of *when* the
+ * engine writes it — only as a step closes, never as a player falls — so by
+ * the time an entry is non-null everyone who could have used it has stepped
+ * past it. `position` is public for the same reason read the other way round:
+ * "X survived step 3" only becomes "X chose pane 0" once `broken[3]` is
+ * published, and by then step 3's answer is public anyway.
+ *
+ * `board` waits for the Floor to open, exactly as Recruitment's cue does. The
+ * room is looking at the round card, and eighteen pane labels sitting in a
+ * phone's JSON twenty seconds early is twenty seconds of reading that
+ * whoever has devtools open gets and nobody else does.
+ */
+export function arcadeGlassFor(
+  state: SessionState,
+  arcade: ArcadeState,
+  role: Role,
+): ArcadeGlassView | undefined {
+  const play = arcade.play;
+  if (play?.kind !== "glass_bridge") return undefined;
+  const isHost = role === "host";
+  const privileged = isHost || role === "screen";
+  const running = arcade.phase === "running";
+  const revealed = arcade.phase === "reveal";
+  // The round card is not the bridge. Everything the room reads off the
+  // bridge waits for the Floor to open; the host has it throughout, because
+  // the host is the one setting the round up.
+  const shown = isHost || running || revealed;
+
+  // The only public view there is. Everything below is a subset of it.
+  const floor = glassFloorView(play);
+
+  const board: readonly ArcadeGlassStep[] = floor.board.map((b) => ({
+    product: b.product,
+    labels: b.labels,
+  }));
+
+  const base: ArcadeGlassView = {
+    wave: floor.wave,
+    waveCuts: floor.waveCuts,
+    waveSeconds: play.waveSeconds,
+    of: floor.board.length,
+    broken: floor.broken,
+  };
+
+  const extra: {
+    board?: readonly ArcadeGlassStep[];
+    step?: number;
+    waveStartedAt?: number;
+    stepStartedAt?: number;
+    stepEndsAt?: number;
+    position?: Readonly<Record<ParticipantId, number>>;
+    crossed?: readonly number[];
+    fastest?: number;
+    elapsedMs?: Readonly<Record<ParticipantId, number>>;
+    recap?: readonly ArcadeGlassRecapStep[];
+  } = {};
+
+  if (shown) {
+    extra.board = board;
+    extra.position = floor.position;
+  }
+  // Which step the bridge is on is a fact the host wants while the round card
+  // is up — it is what they are about to read out — so it follows `board`.
+  if (isHost || running) extra.step = floor.step;
+  // The three clocks are omitted rather than nulled when no step is open, and
+  // that includes for the host. The play state carries zeroes until
+  // `beginPlay`, and a surface handed a zero draws `00:00` at a room that is
+  // looking at a round card — which is what the console did until it did not.
+  if (running) {
+    extra.waveStartedAt = floor.waveStartedAt;
+    extra.stepStartedAt = floor.stepStartedAt;
+    extra.stepEndsAt = floor.stepEndsAt;
+  }
+  if (privileged) {
+    // The room's results, which belong on the big screen and the console —
+    // the same set `planApply.finishOrder` goes to, and for the same reason:
+    // the phone shows one person's round. It is not withheld as a secret,
+    // and could not be: `position` already says who is across.
+    extra.crossed = numbersOf(arcade, state, floor.crossed);
+    if (floor.fastest !== null) {
+      extra.fastest =
+        arcade.playerNumbers[floor.fastest] ??
+        state.participants[floor.fastest]?.playerNumber ??
+        0;
+    }
+  }
+  if (isHost) extra.elapsedMs = floor.elapsedMs;
+  // The one read of the answer key in this file, and the only one anywhere
+  // outside the engine. Everything above was built from the public view.
+  if (isHost || revealed) {
+    extra.recap = play.board.map((b, i) => {
+      const answer = play.key[i];
+      return {
+        product: b.product,
+        labels: b.labels,
+        real: answer?.real ?? 0,
+        notes: answer?.notes ?? ["", ""],
+      };
+    });
+  }
+  return { ...base, ...extra };
+}
+
 export function arcadeViewFor(
   state: SessionState,
   arcade: ArcadeState,
@@ -522,6 +651,7 @@ export function arcadeViewFor(
   const grid = arcadeGrid(state, arcade);
   const recruitment = arcadeRecruitmentFor(state, arcade, role);
   const planApply = arcadePlanApplyFor(state, arcade, role);
+  const glass = arcadeGlassFor(state, arcade, role);
   return {
     activityId: arcade.activityId,
     round: arcade.round,
@@ -534,6 +664,7 @@ export function arcadeViewFor(
     inLounge: grid.filter((c) => c.standing === "drained").length,
     ...(recruitment ? { recruitment } : {}),
     ...(planApply ? { planApply } : {}),
+    ...(glass ? { glass } : {}),
   };
 }
 
@@ -567,6 +698,27 @@ export function arcadeMineFor(
     };
   }
 
+  // The Glass Bridge, straight off the engine's own per-player view, which is
+  // exported as the leak-free default: it carries their wave, whether it is
+  // their turn, how far along they are and whether their own pane held. It
+  // does not carry which pane that was — the engine never stored it — so
+  // there is nothing here to strip.
+  //
+  // `held` is nulled by `glassMeView` until they commit and *omitted* here,
+  // so the key is not in the bytes rather than sitting there as null.
+  let glass: ArcadeMineGlass | undefined;
+  if (play?.kind === "glass_bridge") {
+    const me = glassMeView(arcade, play, pid);
+    glass = {
+      wave: me.wave,
+      onTheBridge: me.onTheBridge,
+      step: me.step,
+      committed: me.committed,
+      ...(me.held === null ? {} : { held: me.held }),
+      across: me.across,
+    };
+  }
+
   return {
     playerNumber:
       arcade.playerNumbers[pid] ?? state.participants[pid]?.playerNumber ?? 0,
@@ -577,6 +729,7 @@ export function arcadeMineFor(
     ...(seat ? { drainedAt: seat.at } : {}),
     ...(recruitment ? { recruitment } : {}),
     ...(planApply ? { planApply } : {}),
+    ...(glass ? { glass } : {}),
   };
 }
 
@@ -697,8 +850,17 @@ function hostArcade(arcade: ArcadeState): NonNullable<
     if (seat.backing !== null) backing[pid] = seat.backing;
   }
   return {
+    // Who has committed at whatever is open. On the bridge that is the keys
+    // of `stepped` and never its values: the value is whether their pane
+    // held, and "X survived this step" next to a published break is the one
+    // join this round exists to prevent. The host wants to know whether
+    // anybody is still deciding, which the keys answer on their own.
     answeredBy:
-      play?.kind === "recruitment" ? Object.keys(play.answered) : [],
+      play?.kind === "recruitment"
+        ? Object.keys(play.answered)
+        : play?.kind === "glass_bridge"
+          ? Object.keys(play.stepped)
+          : [],
     drained: Object.entries(arcade.standing)
       .filter(([, st]) => st === "drained")
       .map(([pid]) => pid),

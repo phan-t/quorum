@@ -91,6 +91,9 @@ const view = createParticipantView({
   onArcadeAnswer: (item, answer) => {
     client?.arcadeAnswer(item, answer);
   },
+  onArcadeStep: (round, step, choice) => {
+    client?.arcadeStep(round, step, choice);
+  },
   onArcadeBack: (pid) => {
     client?.arcadeBack(pid);
   },
@@ -348,11 +351,17 @@ function connect(): void {
     },
 
     onCommandResult(_cid, result) {
-      // The only command a phone sends is an answer. A refusal — the question
-      // closed a moment ago, the host advanced — has to take the optimistic
-      // "locked in" back off the screen, or the person believes they answered.
+      // A refusal — the question closed a moment ago, the host advanced, the
+      // step shut under the frame — has to take the optimistic state back off
+      // the screen, or the person believes they did something they did not.
+      //
+      // Both are cleared on any refusal rather than matched to the frame that
+      // caused it: only one of the two can be pending at a time (a phone is
+      // either in trivia or on the bridge), and a `cid` table is a second
+      // thing to keep in step for no gain.
       if (result.ok) return;
       view.clearPendingAnswer();
+      view.clearPendingStep();
     },
   });
 
@@ -417,5 +426,26 @@ function guardTopFive(state: RenderState): void {
   }
   if (r?.answered !== undefined || r?.eligible !== undefined) {
     console.error("protocol violation: participant received the room's answer counts");
+  }
+
+  // The Glass Bridge's version, and it is the loudest one in this function
+  // because it is the only round whose answer is worth something to the
+  // person sitting next to you. `recap` carries `real` and both reveal notes;
+  // a phone that has it while the bridge is being crossed knows every pane,
+  // and so does anybody who can see that phone.
+  const g = arcade.glass;
+  if (g === undefined) return;
+  if (arcade.phase !== "reveal" && g.recap !== undefined) {
+    console.error(
+      "protocol violation: participant received the bridge's answer key before the reveal",
+    );
+  }
+  if (g.crossed !== undefined || g.fastest !== undefined || g.elapsedMs !== undefined) {
+    console.error("protocol violation: participant received the Floor's results");
+  }
+  if (arcade.phase === "card" && g.board !== undefined) {
+    console.error(
+      "protocol violation: participant received the panes while the round card was up",
+    );
   }
 }

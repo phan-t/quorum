@@ -192,7 +192,14 @@ export interface SessionState {
  */
 export type ArcadeRoundConfig =
   | { readonly kind: "recruitment"; readonly items: readonly EmojiItem[]; readonly secondsPerItem: number }
-  | { readonly kind: "plan_apply"; readonly target: number; readonly seconds: number };
+  | { readonly kind: "plan_apply"; readonly target: number; readonly seconds: number }
+  | {
+      readonly kind: "glass_bridge";
+      /** Six steps, two panes each. Carries the answers — see {@link GlassStep}. */
+      readonly steps: readonly GlassStep[];
+      /** Seconds per step for waves 1, 2 and 3. SPEC.md tunes them to 12 / 9 / 6. */
+      readonly waveSeconds: WaveSeconds;
+    };
 
 export type ArcadeRoundKind =
   | "recruitment"
@@ -216,6 +223,68 @@ export interface EmojiItem {
   /** Shown at the reveal. The bit people actually learn from. */
   readonly note: string;
 }
+
+/**
+ * Round 5, The Glass Bridge: one pane. A real HashiCorp feature, or an
+ * invented one.
+ *
+ * `note` is the reveal line, and for a fake it says *why* it is fake. Both
+ * fields together with the step's `real` index are the answer, which is why
+ * `note` never travels with the label once a round starts: see
+ * {@link GlassBoardStep} and {@link GlassAnswer}.
+ */
+export interface GlassPane {
+  readonly label: string;
+  readonly note: string;
+}
+
+/**
+ * One step of the bridge, as content: two panes for one product, one of them
+ * real.
+ *
+ * Both panes are the same product on purpose. SPEC.md: the pairs are
+ * "re-paired **within a product**", so the step is never won by recognising
+ * the vendor's product line — only by knowing the feature.
+ */
+export interface GlassStep {
+  /** "Vault". Shown with the step; identical for both panes, so it is safe. */
+  readonly product: string;
+  readonly panes: readonly [GlassPane, GlassPane];
+  /** Index of the pane that is a real feature. **The answer.** */
+  readonly real: 0 | 1;
+}
+
+/**
+ * The half of a step that may be shown to a player who has not stepped yet:
+ * the product and the two labels, in display order, and nothing else.
+ *
+ * This type exists so that the answer is not merely *withheld* by the
+ * projection but absent from the value the projection is given. A projection
+ * that spreads a whole step object leaks the round; a projection that spreads
+ * a whole `GlassBoardStep` cannot.
+ */
+export interface GlassBoardStep {
+  readonly product: string;
+  readonly labels: readonly [string, string];
+}
+
+/**
+ * The other half: which pane holds, and both reveal notes.
+ *
+ * Everything in here is the answer. It stays in `ArcadePlay.key` and must not
+ * reach any phone before the reveal — including the phone of a player who has
+ * already fallen, who is sitting next to somebody who has not.
+ */
+export interface GlassAnswer {
+  readonly real: 0 | 1;
+  readonly notes: readonly [string, string];
+}
+
+/** Which wave a player crosses in. Wave 1 goes blind. */
+export type GlassWave = 1 | 2 | 3;
+
+/** Seconds per step, for waves 1, 2 and 3 in that order. */
+export type WaveSeconds = readonly [number, number, number];
 
 /**
  * Where a person is this round.
@@ -312,6 +381,82 @@ export type ArcadePlay =
       readonly seconds: number;
       /** Who has crossed, in order, for the +15/+10/+5. */
       readonly finishOrder: readonly ParticipantId[];
+    }
+  | {
+      readonly kind: "glass_bridge";
+      /**
+       * What may be shown: product and two labels per step. Deliberately
+       * separate from {@link key} — see {@link GlassBoardStep}.
+       */
+      readonly board: readonly GlassBoardStep[];
+      /**
+       * **The answer key.** Which pane holds at each step, and both notes.
+       *
+       * This is the only field in the round that a projection must withhold,
+       * and it is the only field it *can* leak: no other field in this
+       * variant identifies a pane. Nothing here reaches a phone before
+       * `revealRound`, and nothing here reaches the big screen before it
+       * either, because the big screen is in the room and the room contains
+       * players who have not stepped yet.
+       */
+      readonly key: readonly GlassAnswer[];
+      readonly waveSeconds: WaveSeconds;
+      /**
+       * The last arcade player number in wave 1, and in wave 2. Stored rather
+       * than a per-player map so a latecomer — whose number is necessarily
+       * higher than both — lands in wave 3 without anything having to
+       * re-run. Waves are "by player number", and this is that sentence.
+       */
+      readonly waveCuts: readonly [number, number];
+      /** Which wave is on the bridge. */
+      readonly wave: GlassWave;
+      /** 0-based index into `board` for the wave that is crossing. */
+      readonly step: number;
+      /**
+       * The round's own clocks. The wave's start is needed by nothing but the
+       * big screen; the step's start is what a decision time is measured
+       * from, and the step's end is what closes it. `ArcadeState.endsAt` is
+       * the whole round and is far too coarse to judge a step against.
+       */
+      readonly waveStartedAt: number;
+      readonly stepStartedAt: number;
+      readonly stepEndsAt: number;
+      /**
+       * Which pane broke, per step, or null for a step nobody has fallen at.
+       *
+       * Written **only when a step closes**, never when a player falls. That
+       * one-line rule is what keeps wave 1 blind: a pane that broke ten
+       * seconds ago is the whole answer, and half the wave is still deciding.
+       * By the time an entry is non-null every player who could use it has
+       * already stepped past it, so this array is safe to show to everybody —
+       * which is exactly what wave 2 and wave 3 are promised.
+       */
+      readonly broken: readonly (0 | 1 | null)[];
+      /**
+       * The *current* step only: who has committed, and whether their pane
+       * held. Cleared when the step closes.
+       *
+       * Note what is not here: which pane they picked. It is never stored,
+       * because it is never needed — a pane that holds advances the player
+       * and a pane that breaks drains them — and because "X stepped and
+       * survived" plus X's choice would be the answer, on a screen the whole
+       * room can see.
+       */
+      readonly stepped: Readonly<Record<ParticipantId, boolean>>;
+      /** Steps completed, per player. `board.length` means across. */
+      readonly position: Readonly<Record<ParticipantId, number>>;
+      /**
+       * Time spent deciding, summed over every step a player committed, in ms.
+       *
+       * This is what "the fastest full crossing" is measured with. Wall-clock
+       * cannot be: the waves run at 12, 9 and 6 seconds a step and a wave
+       * cannot advance before its step closes, so elapsed time would hand the
+       * award to wave 3 every time and first-across would hand it to wave 1
+       * every time. Six reaction times added up is comparable between waves.
+       */
+      readonly elapsedMs: Readonly<Record<ParticipantId, number>>;
+      /** Who reached the far side, in the order they got there. */
+      readonly crossOrder: readonly ParticipantId[];
     };
 
 /* ------------------------------------------------------------------ */
@@ -368,6 +513,17 @@ export type Event =
   | { type: "setLight"; light: "plan" | "apply"; until: number }
   /** One tap. `ms` is the corrected instant, as with a trivia answer. */
   | { type: "tap"; pid: ParticipantId; at: number }
+  /**
+   * Glass Bridge: commit to a pane. `step` is the step the phone believed was
+   * open, and a mismatch is refused rather than applied to whatever is open
+   * now — a frame that crossed a step boundary is a tap on a pane the player
+   * never saw.
+   */
+  | { type: "stepPane"; pid: ParticipantId; step: number; choice: number }
+  /** Glass Bridge: close the open step and open the next one. */
+  | { type: "nextStep" }
+  /** Glass Bridge: close the wave and send the next one onto the bridge. */
+  | { type: "nextWave" }
   /** Lounge: back a player, or change who you are backing. */
   | { type: "backPlayer"; pid: ParticipantId; backing: ParticipantId }
   | { type: "endRound" }
@@ -425,6 +581,17 @@ export type RejectCode =
   | "cannot_back_yourself"
   | "cannot_back_a_drained_player"
   | "floor_locked"
+  // arcade — the Glass Bridge
+  /** Stepping while somebody else's wave is on the bridge. */
+  | "not_your_wave"
+  /** One pane per step. A second frame is not a change of mind. */
+  | "already_stepped"
+  /** The phone committed to a step that is no longer the open one. */
+  | "wrong_step"
+  /** SPEC: drained players back someone in a **later** wave. */
+  | "must_back_a_later_wave"
+  /** Your runner's wave has started. The bet was placed before they stepped. */
+  | "backing_locked"
   /** `startRound` for one of the four rounds that are designed but not built. */
   | "round_not_built"
   /** A round config the round itself rejects — a target of zero, say. */

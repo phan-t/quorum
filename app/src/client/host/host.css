@@ -1092,6 +1092,12 @@ body {
   flex-wrap: wrap;
   gap: 0.4rem;
 }
+/* Off the panel while a round is in play: the choice has been made, and the
+   rows it takes are rows the round's own controls would be pushed below the
+   fold by. A flex container needs this said explicitly. */
+.a-picker[hidden] {
+  display: none;
+}
 .a-pick {
   appearance: none;
   display: inline-flex;
@@ -1128,6 +1134,10 @@ body {
   flex-direction: column;
   gap: 0.4rem;
 }
+/* A flex container needs this said explicitly, or `hidden` does nothing. */
+.a-cfg[hidden] {
+  display: none;
+}
 .field-num {
   width: 7rem;
 }
@@ -1138,6 +1148,74 @@ body {
 }
 .a-note {
   margin: 0;
+}
+
+/* ---- The Glass Bridge ----------------------------------------------- *
+ *
+ * The console is the only surface in the building that is not in the room,
+ * which is why it is the only one that holds the answer while the round is
+ * running. It is also a surface a host sometimes shares by accident, so the
+ * two panes are labelled in words — REAL / FAKE — rather than by colour, and
+ * the host can see at a glance what they are about to read out.
+ * -------------------------------------------------------------------- */
+
+.a-bridge-host {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  padding: 0.5rem 0.6rem;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--panel-2);
+}
+.a-bridge-host[hidden] {
+  display: none;
+}
+.a-bridge-waiting,
+.a-bridge-broken,
+.a-bridge-across {
+  margin: 0;
+  font-size: 12px;
+  color: var(--muted);
+}
+.a-bridge-answer {
+  margin: 0;
+  display: grid;
+  grid-template-columns: 3.2rem 1fr;
+  gap: 0 0.5rem;
+  font-size: 13px;
+  line-height: 1.35;
+}
+.a-bridge-mark {
+  grid-row: span 2;
+  font-size: 10px;
+  letter-spacing: 0.1em;
+  color: var(--muted);
+}
+.a-bridge-answer[data-real="yes"] .a-bridge-mark {
+  color: var(--arc-players);
+  font-weight: 600;
+}
+.a-bridge-answer-label {
+  color: var(--muted);
+}
+.a-bridge-answer[data-real="yes"] .a-bridge-answer-label {
+  color: var(--ink);
+  font-weight: 600;
+}
+.a-cfg-row {
+  display: flex;
+  gap: 0.5rem;
+}
+.a-cfg-cell {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+}
+.a-cfg-cell .field-num {
+  width: 100%;
 }
 
 .a-split-bar {

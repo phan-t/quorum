@@ -15,9 +15,11 @@ import type {
   ActivityId,
   ArcadePlay,
   ArcadeStanding,
+  ArcadeState,
   Audience,
   Effect,
   Event,
+  GlassWave,
   Participant,
   ParticipantId,
   RawScore,
@@ -32,7 +34,11 @@ import {
   assignPlayerNumbers,
   checkpointBank,
   checkpointsFor,
+  closeGlassStep,
   finishBonus,
+  GLASS_FAR_SIDE,
+  glassRemainingMs,
+  glassStepBank,
   lockInForceAt,
   matchesItem,
   PLAN_APPLY_CROSS,
@@ -41,7 +47,11 @@ import {
   RECRUITMENT_FIRST_PLACES,
   rosterOrder,
   settleRound,
+  splitBoard,
+  waveCutsFor,
+  waveOf,
 } from "./arcade.ts";
+import type { GlassPlay } from "./arcade.ts";
 import { clampMs, idleQuestion, isCorrect, settleQuestion,
   triviaHasBegun,
 } from "./trivia.ts";
@@ -1028,11 +1038,14 @@ export function reduce(
           reject("host", "wrong_round_phase", "A round is already in play."),
         );
       }
-      // Two of the six rounds are built. The config union carries only those
-      // two, so a mismatch is both "that is the wrong config" and "that round
+      // Three of the six rounds are built. The config union carries only those
+      // three, so a mismatch is both "that is the wrong config" and "that round
       // does not exist yet" — the message says which.
       if (event.config.kind !== event.round) {
-        const built = event.round === "recruitment" || event.round === "plan_apply";
+        const built =
+          event.round === "recruitment" ||
+          event.round === "plan_apply" ||
+          event.round === "glass_bridge";
         return unchanged(
           reject(
             "host",
@@ -1057,7 +1070,7 @@ export function reduce(
             reject("host", "wrong_phase", "Each item needs a timer above zero."),
           );
         }
-      } else {
+      } else if (config.kind === "plan_apply") {
         // A target of zero would have everybody across the line on their first
         // tap, before the light had ever turned.
         if (!Number.isInteger(config.target) || config.target <= 0) {
@@ -1070,6 +1083,44 @@ export function reduce(
             reject("host", "wrong_phase", "The round needs a length above zero."),
           );
         }
+      } else {
+        // A bridge with no steps is a far side you are standing on.
+        if (config.steps.length === 0) {
+          return unchanged(
+            reject("host", "invalid_round_config", "That bridge has no steps."),
+          );
+        }
+        // Two panes and a `real` that points at one of them. A step that says
+        // `real: 2` would drain the whole wave for answering correctly, and
+        // the content is hand-written, so it is checked once here rather than
+        // discovered at 14:40 in front of the room.
+        const badStep = config.steps.findIndex(
+          (s) =>
+            s.panes.length !== 2 ||
+            (s.real !== 0 && s.real !== 1) ||
+            s.panes.some((p) => p.label.trim() === ""),
+        );
+        if (badStep !== -1) {
+          return unchanged(
+            reject(
+              "host",
+              "invalid_round_config",
+              `Step ${badStep + 1} needs two labelled panes and a real pane of 0 or 1.`,
+            ),
+          );
+        }
+        if (
+          config.waveSeconds.length !== 3 ||
+          config.waveSeconds.some((s) => !Number.isFinite(s) || s <= 0)
+        ) {
+          return unchanged(
+            reject(
+              "host",
+              "invalid_round_config",
+              "Each of the three waves needs a step timer above zero.",
+            ),
+          );
+        }
       }
 
       // Every round starts with everyone back on the Floor. SPEC.md is
@@ -1078,37 +1129,69 @@ export function reduce(
       const standing: Record<ParticipantId, ArcadeStanding> = {};
       for (const p of rosterOrder(state)) standing[p.pid] = "floor";
 
-      const play: ArcadePlay =
-        config.kind === "recruitment"
-          ? {
-              kind: "recruitment",
-              items: config.items,
-              at: 0,
-              secondsPerItem: config.secondsPerItem,
-              // The clocks start at `beginPlay`, not here: the round card is
-              // up for twenty seconds and nobody is playing against it.
-              itemEndsAt: 0,
-              solvedOrder: [],
-              answered: {},
-            }
-          : {
-              kind: "plan_apply",
-              light: "plan",
-              lightChangedAt: 0,
-              nextChangeAt: 0,
-              applySince: null,
-              resources: {},
-              target: config.target,
-              seconds: config.seconds,
-              finishOrder: [],
-            };
+      const playerNumbers = assignPlayerNumbers(state, arcade.playerNumbers);
+
+      let play: ArcadePlay;
+      if (config.kind === "recruitment") {
+        play = {
+          kind: "recruitment",
+          items: config.items,
+          at: 0,
+          secondsPerItem: config.secondsPerItem,
+          // The clocks start at `beginPlay`, not here: the round card is
+          // up for twenty seconds and nobody is playing against it.
+          itemEndsAt: 0,
+          solvedOrder: [],
+          answered: {},
+        };
+      } else if (config.kind === "plan_apply") {
+        play = {
+          kind: "plan_apply",
+          light: "plan",
+          lightChangedAt: 0,
+          nextChangeAt: 0,
+          applySince: null,
+          resources: {},
+          target: config.target,
+          seconds: config.seconds,
+          finishOrder: [],
+        };
+      } else {
+        // The answer is separated from the labels once, here, and never put
+        // back together outside `revealRound`. See splitBoard().
+        const { board, key } = splitBoard(config.steps);
+        play = {
+          kind: "glass_bridge",
+          board,
+          key,
+          waveSeconds: config.waveSeconds,
+          // Fixed now, from the roster that is in the room now, so that the
+          // waves the big screen announces on the round card are the waves
+          // that cross. Someone joining during the round is above both cuts
+          // and is therefore in wave 3, without anything being recomputed.
+          waveCuts: waveCutsFor(Object.values(playerNumbers)),
+          wave: 1,
+          step: 0,
+          // Clocks of its own, all starting at `beginPlay`. Borrowing the
+          // round's `endsAt` for the step would make every step the length of
+          // the round; borrowing it for the wave would make every wave so.
+          waveStartedAt: 0,
+          stepStartedAt: 0,
+          stepEndsAt: 0,
+          broken: config.steps.map(() => null),
+          stepped: {},
+          position: {},
+          elapsedMs: {},
+          crossOrder: [],
+        };
+      }
 
       return applied(
         {
           ...state,
           arcade: {
             ...arcade,
-            playerNumbers: assignPlayerNumbers(state, arcade.playerNumbers),
+            playerNumbers,
             round: event.round,
             roundIndex: arcade.round === null ? 0 : arcade.roundIndex + 1,
             phase: "card",
@@ -1139,16 +1222,30 @@ export function reduce(
           reject("host", "wrong_round_phase", "No round card is up."),
         );
       }
-      const started: ArcadePlay =
-        play.kind === "recruitment"
-          ? { ...play, itemEndsAt: now + play.secondsPerItem * 1000 }
-          : // The first light is PLAN and the boundary schedules the turn:
-            // durations are random 2–6 s and the engine has no randomness.
-            { ...play, light: "plan", lightChangedAt: now, nextChangeAt: now };
-      const endsAt =
-        play.kind === "recruitment"
-          ? now + play.items.length * play.secondsPerItem * 1000
-          : now + play.seconds * 1000;
+      let started: ArcadePlay;
+      let endsAt: number;
+      if (play.kind === "recruitment") {
+        started = { ...play, itemEndsAt: now + play.secondsPerItem * 1000 };
+        endsAt = now + play.items.length * play.secondsPerItem * 1000;
+      } else if (play.kind === "plan_apply") {
+        // The first light is PLAN and the boundary schedules the turn:
+        // durations are random 2–6 s and the engine has no randomness.
+        started = { ...play, light: "plan", lightChangedAt: now, nextChangeAt: now };
+        endsAt = now + play.seconds * 1000;
+      } else {
+        // Wave 1 walks onto the bridge blind, with the longest step it will
+        // ever get.
+        const stepEndsAt = now + play.waveSeconds[0] * 1000;
+        started = {
+          ...play,
+          wave: 1,
+          step: 0,
+          waveStartedAt: now,
+          stepStartedAt: now,
+          stepEndsAt,
+        };
+        endsAt = stepEndsAt + glassRemainingMs(play, 1, 0);
+      }
       return applied(
         {
           ...state,
@@ -1508,6 +1605,255 @@ export function reduce(
       );
     }
 
+    case "stepPane": {
+      const arcade = state.arcade;
+      if (!arcade) {
+        return unchanged(
+          reject({ pid: event.pid }, "not_in_arcade", "The arcade is not open."),
+        );
+      }
+      const play = arcade.play;
+      if (arcade.phase !== "running" || play?.kind !== "glass_bridge") {
+        return unchanged(
+          reject({ pid: event.pid }, "wrong_round_phase", "There is no bridge."),
+        );
+      }
+      const p = state.participants[event.pid];
+      if (!p || p.kicked) {
+        return unchanged(
+          reject(
+            { pid: event.pid },
+            "unknown_participant",
+            `No participant ${event.pid}.`,
+          ),
+        );
+      }
+      if (arcade.standing[event.pid] === "drained") {
+        return unchanged(
+          reject(
+            { pid: event.pid },
+            "not_on_the_floor",
+            "You are in the Lounge. Back a player.",
+          ),
+        );
+      }
+      // Waves are by player number, and a number that has not been handed out
+      // yet is wave 3 — see waveOf(). Nobody steps out of turn: the whole
+      // round is the asymmetry between the waves, and a wave 3 player taking
+      // wave 1's step would be taking wave 1's information as well.
+      const wave = waveOf(arcade.playerNumbers[event.pid], play.waveCuts);
+      if (wave !== play.wave) {
+        return unchanged(
+          reject(
+            { pid: event.pid },
+            "not_your_wave",
+            wave > play.wave
+              ? `Wave ${wave} is not on the bridge yet. Watch.`
+              : `Wave ${wave} has already crossed.`,
+          ),
+        );
+      }
+      // Already on the far side. Their bridge is done; a stray frame is not a
+      // fall, exactly as a stray tap is not one in Plan / Apply.
+      if ((play.position[event.pid] ?? 0) >= play.board.length) {
+        return unchanged();
+      }
+      if (now >= play.stepEndsAt) {
+        return unchanged(
+          reject({ pid: event.pid }, "floor_locked", "That step has closed."),
+        );
+      }
+      // The step the phone believed was open. A frame that crossed a step
+      // boundary is a commitment to a pane the player never saw, and applying
+      // it to whatever is open now would drain people for their network.
+      if (event.step !== play.step) {
+        return unchanged(
+          reject(
+            { pid: event.pid },
+            "wrong_step",
+            `Step ${play.step + 1} is the one that is open.`,
+          ),
+        );
+      }
+      // One pane per step. A second frame is not a change of mind: you have
+      // put your weight on it.
+      if (event.pid in play.stepped) {
+        return unchanged(
+          reject({ pid: event.pid }, "already_stepped", "You are on the pane."),
+        );
+      }
+      if (event.choice !== 0 && event.choice !== 1) {
+        return unchanged(
+          reject({ pid: event.pid }, "invalid_choice", "There are two panes."),
+        );
+      }
+      const answer = play.key[play.step];
+      if (!answer) {
+        return unchanged(
+          reject({ pid: event.pid }, "wrong_round_phase", "No step is open."),
+        );
+      }
+
+      const held = event.choice === answer.real;
+      // Decision time, which is what the fastest crossing is measured in. The
+      // step's own start, never the wave's and never the round's.
+      const decidedIn = Math.max(0, now - play.stepStartedAt);
+      const position = (play.position[event.pid] ?? 0) + (held ? 1 : 0);
+      const across = held && position >= play.board.length;
+      const gained = held ? glassStepBank(wave) + (across ? GLASS_FAR_SIDE : 0) : 0;
+
+      const nextPlay: GlassPlay = {
+        ...play,
+        stepped: { ...play.stepped, [event.pid]: held },
+        position: held ? { ...play.position, [event.pid]: position } : play.position,
+        elapsedMs: {
+          ...play.elapsedMs,
+          [event.pid]: (play.elapsedMs[event.pid] ?? 0) + decidedIn,
+        },
+        crossOrder: across ? [...play.crossOrder, event.pid] : play.crossOrder,
+        // `broken` is untouched. A pane that has just shattered is the whole
+        // answer for this step and half this wave is still standing on the
+        // other side of it — it is published when the step closes, and not
+        // one moment earlier. See closeGlassStep().
+      };
+
+      return applied(
+        {
+          ...state,
+          arcade: {
+            ...arcade,
+            standing: held
+              ? arcade.standing
+              : { ...arcade.standing, [event.pid]: "drained" },
+            lounge: held
+              ? arcade.lounge
+              : { ...arcade.lounge, [event.pid]: { backing: null, at: now } },
+            banked:
+              gained > 0
+                ? {
+                    ...arcade.banked,
+                    [event.pid]: (arcade.banked[event.pid] ?? 0) + gained,
+                  }
+                : arcade.banked,
+            play: nextPlay,
+          },
+        },
+        // A fall moves the dormitory grid, which is the whole room's surface,
+        // so it goes everywhere — and it leaks nothing, because no projection
+        // of this state says which pane anybody chose. A pane that held moves
+        // only the stepper's own phone, the console and the big screen's
+        // position row, which is the same set `submitAnswer` sends to.
+        held
+          ? [
+              { kind: "broadcast", to: { pid: event.pid }, what: "state" },
+              { kind: "broadcast", to: "host", what: "state" },
+              { kind: "broadcast", to: "screen", what: "state" },
+              PERSIST,
+            ]
+          : [BROADCAST_STATE, PERSIST],
+      );
+    }
+
+    case "nextStep": {
+      const arcade = state.arcade;
+      if (!arcade) {
+        return unchanged(
+          reject("host", "not_in_arcade", "Enter the arcade first."),
+        );
+      }
+      const play = arcade.play;
+      if (arcade.phase !== "running" || play?.kind !== "glass_bridge") {
+        return unchanged(
+          reject("host", "wrong_round_phase", "No bridge round is running."),
+        );
+      }
+      const step = play.step + 1;
+      if (step >= play.board.length) {
+        return unchanged(
+          reject(
+            "host",
+            "wrong_round_phase",
+            "That was the last step. Send the next wave.",
+          ),
+        );
+      }
+      // Closing drains whoever did not step and publishes the pane that broke.
+      const close = closeGlassStep(state, arcade, play, now);
+      const stepEndsAt = now + play.waveSeconds[play.wave - 1]! * 1000;
+      return applied(
+        {
+          ...state,
+          arcade: {
+            ...arcade,
+            standing: close.standing,
+            lounge: close.lounge,
+            endsAt: stepEndsAt + glassRemainingMs(play, play.wave, step),
+            play: {
+              ...play,
+              step,
+              stepStartedAt: now,
+              stepEndsAt,
+              stepped: {},
+              broken: close.broken,
+            },
+          },
+        },
+        [BROADCAST_STATE, PERSIST],
+      );
+    }
+
+    case "nextWave": {
+      const arcade = state.arcade;
+      if (!arcade) {
+        return unchanged(
+          reject("host", "not_in_arcade", "Enter the arcade first."),
+        );
+      }
+      const play = arcade.play;
+      if (arcade.phase !== "running" || play?.kind !== "glass_bridge") {
+        return unchanged(
+          reject("host", "wrong_round_phase", "No bridge round is running."),
+        );
+      }
+      if (play.wave >= 3) {
+        return unchanged(
+          reject(
+            "host",
+            "wrong_round_phase",
+            "That was the last wave. End the round.",
+          ),
+        );
+      }
+      // The wave's last step is closed by the wave ending, which is also what
+      // closes it when the host cuts a wave short because everyone in it has
+      // already fallen.
+      const close = closeGlassStep(state, arcade, play, now);
+      const wave = (play.wave + 1) as GlassWave;
+      const stepEndsAt = now + play.waveSeconds[wave - 1]! * 1000;
+      return applied(
+        {
+          ...state,
+          arcade: {
+            ...arcade,
+            standing: close.standing,
+            lounge: close.lounge,
+            endsAt: stepEndsAt + glassRemainingMs(play, wave, 0),
+            play: {
+              ...play,
+              wave,
+              step: 0,
+              waveStartedAt: now,
+              stepStartedAt: now,
+              stepEndsAt,
+              stepped: {},
+              broken: close.broken,
+            },
+          },
+        },
+        [BROADCAST_STATE, PERSIST],
+      );
+    }
+
     case "backPlayer": {
       const arcade = state.arcade;
       if (!arcade) {
@@ -1570,6 +1916,45 @@ export function reduce(
           ),
         );
       }
+      // The Glass Bridge narrows who is backable, because SPEC narrows it:
+      // "Drained players back someone in a **later** wave."
+      //
+      // Both halves of that are needed and neither is decoration. Without the
+      // first, every backer waits for wave 1 to produce a crosser and then
+      // backs them — a runner already on the far side is still on the Floor,
+      // so the 10 would be a certainty rather than a bet. Without the second,
+      // a backer watches their wave-2 runner fall and switches to a wave-3
+      // one, which is the same certainty wearing a hat. A bet is placed
+      // before the runner steps onto the bridge, and then it stands.
+      const bridge = arcade.play;
+      if (bridge?.kind === "glass_bridge") {
+        const held = arcade.lounge[event.pid]?.backing;
+        if (
+          held &&
+          waveOf(arcade.playerNumbers[held], bridge.waveCuts) <= bridge.wave
+        ) {
+          return unchanged(
+            reject(
+              { pid: event.pid },
+              "backing_locked",
+              "Your runner is on the bridge. The bet stands.",
+            ),
+          );
+        }
+        const targetWave = waveOf(
+          arcade.playerNumbers[event.backing],
+          bridge.waveCuts,
+        );
+        if (targetWave <= bridge.wave) {
+          return unchanged(
+            reject(
+              { pid: event.pid },
+              "must_back_a_later_wave",
+              `Wave ${targetWave} is already on the bridge. Back a later wave.`,
+            ),
+          );
+        }
+      }
       const seat = arcade.lounge[event.pid];
       if (seat?.backing === event.backing) return unchanged();
       return applied(
@@ -1608,16 +1993,34 @@ export function reduce(
           reject("host", "wrong_round_phase", "No round is running."),
         );
       }
+      // The Glass Bridge's last step has no `nextStep` or `nextWave` after it
+      // to close it, so the round's end closes it — which is also what
+      // happens when the host ends a round early with a wave still on the
+      // bridge. Anyone who had not stepped is drained, and the pane that broke
+      // is published, before the Lounge is settled against the result.
+      const closing =
+        arcade.play?.kind === "glass_bridge"
+          ? closeGlassStep(state, arcade, arcade.play, now)
+          : null;
+      const closed: ArcadeState = closing
+        ? {
+            ...arcade,
+            standing: closing.standing,
+            lounge: closing.lounge,
+            play: { ...(arcade.play as GlassPlay), broken: closing.broken },
+          }
+        : arcade;
+
       // The Floor locks, the Lounge is paid, and the round folds into the
       // arcade total. Who is drained is *not* reset here: the big screen keeps
       // the gold seats and the pink strike up between rounds, and everyone
       // returns to the Floor at the next `startRound`.
-      const settled = settleRound(arcade);
+      const settled = settleRound(closed);
       return applied(
         {
           ...state,
           arcade: {
-            ...arcade,
+            ...closed,
             phase: "idle",
             startedAt: null,
             endsAt: null,

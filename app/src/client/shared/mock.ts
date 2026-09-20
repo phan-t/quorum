@@ -10,6 +10,19 @@
  * that are awkward to produce on purpose — a dropped socket, a `seq` gap, and
  * a clock that disagrees with the phone's.
  *
+ * Two things to know before verifying anything through it:
+ *
+ * **A backgrounded tab throttles it.** The whole mock runs on `setTimeout`,
+ * and Chrome clamps timers in a tab that is not in the foreground — so a round
+ * appears to freeze, and it looks exactly like a hung surface. More than one
+ * verification pass has lost time to that. Keep the tab in front, or drive it
+ * from a foreground iframe.
+ *
+ * **Do not raise `speed` for the arcade.** The scripted director's schedule
+ * scales but the arcade's own item, light and step timers do not, so above
+ * `speed=1` a round starts on top of the one still running. It is demo pacing,
+ * not a product bug, but it makes the arcade unverifiable.
+ *
  * Turn it on with `?mock=1`. Flags:
  *
  *   ?mock=1          scripted session: bots arrive, the host advances, it loops
@@ -45,7 +58,9 @@
 import type {
   ActivitySummary,
   ArcadeCell,
+  ArcadeGlassView,
   ArcadeMine,
+  ArcadeMineGlass,
   ArcadeRecruitmentView,
   ArcadeView,
   ClientMessage,
@@ -66,13 +81,17 @@ import type {
   ArcadeRoundKind,
   ArcadeStanding,
   EmojiItem,
+  GlassStep,
+  GlassWave,
   QuestionPhase,
   Seal,
   ScoreStatus,
   Segment,
   SessionPhase,
+  WaveSeconds,
 } from "../../engine/types.ts";
 import { RECRUITMENT_ITEMS } from "../../arcade/recruitment.ts";
+import { GLASS_BRIDGE_STEPS } from "../../arcade/glass-bridge.ts";
 import type { Transport, TransportFactory, TransportHandlers } from "./transport.ts";
 
 export interface MockConfig {
@@ -256,7 +275,114 @@ interface MockPlanPlay {
   finishOrder: string[];
 }
 
-type MockPlay = MockRecruitPlay | MockPlanPlay;
+/**
+ * The Glass Bridge, mocked.
+ *
+ * Written from SPEC.md and DESIGN.md, like everything else here, and the
+ * split between `board` and `key` is written again rather than borrowed:
+ * that split is the whole of the round's security, and a mock that imported
+ * it could never catch the server failing to make it. The *content* is
+ * imported, because content is not a rule and a second copy of twelve pane
+ * labels is how one of them silently rots.
+ */
+interface MockGlassPlay {
+  kind: "glass_bridge";
+  /** Showable: the product and the two labels. */
+  board: { product: string; labels: [string, string] }[];
+  /** **The answer.** Never projected to anybody but the host and the reveal. */
+  key: { real: 0 | 1; notes: [string, string] }[];
+  waveSeconds: WaveSeconds;
+  waveCuts: [number, number];
+  wave: GlassWave;
+  step: number;
+  waveStartedAt: number;
+  stepStartedAt: number;
+  stepEndsAt: number;
+  /** Written only when a step CLOSES. See `#closeGlassStep`. */
+  broken: (0 | 1 | null)[];
+  /** The open step only: who committed, and whether it held. Never which pane. */
+  stepped: Record<string, boolean>;
+  position: Record<string, number>;
+  elapsedMs: Record<string, number>;
+  crossOrder: string[];
+}
+
+type MockPlay = MockRecruitPlay | MockPlanPlay | MockGlassPlay;
+
+/** SPEC.md: each step crossed banks 5, and wave 1 banks +3 per step. */
+const GLASS_STEP_BANK = 5;
+const GLASS_BLIND_BONUS = 3;
+/** SPEC.md: reaching the far side, +15. */
+const GLASS_FAR_SIDE = 15;
+
+/**
+ * The wave cuts: contiguous thirds in player-number order, earlier waves
+ * taking the remainder.
+ *
+ * Contiguous rather than round-robin because SPEC.md has the waves "by player
+ * number", and because the room can work out its own wave from two numbers on
+ * the big screen — which a modulo cannot give them.
+ */
+function mockWaveCuts(numbers: readonly number[]): [number, number] {
+  const sorted = [...numbers].sort((a, b) => a - b);
+  const n = sorted.length;
+  if (n === 0) return [0, 0];
+  let cut1 = 0;
+  let cut2 = 0;
+  for (let i = 0; i < n; i += 1) {
+    const wave = Math.floor((i * 3) / n);
+    const number = sorted[i] ?? 0;
+    if (wave === 0) cut1 = number;
+    if (wave <= 1) cut2 = number;
+  }
+  return [cut1, Math.max(cut1, cut2)];
+}
+
+function mockWaveOf(playerNumber: number, cuts: readonly [number, number]): GlassWave {
+  if (playerNumber <= cuts[0]) return 1;
+  if (playerNumber <= cuts[1]) return 2;
+  return 3;
+}
+
+/**
+ * The fastest full crossing: the lowest total decision time among those who
+ * reached the far side, ties going to whoever got there first.
+ *
+ * Wall-clock cannot be used for this, and the reason is the round's own
+ * shape: the waves run at 12, 9 and 6 seconds a step and a wave cannot
+ * advance before its step closes, so elapsed time would hand the award to
+ * wave 3 every time and first-across would hand it to wave 1 every time. Six
+ * reaction times added up is the only measure comparable between waves.
+ */
+function mockFastestCrossing(play: MockGlassPlay): string | null {
+  let best: string | null = null;
+  let bestMs = Infinity;
+  for (const pid of play.crossOrder) {
+    const ms = play.elapsedMs[pid] ?? Infinity;
+    if (ms < bestMs) {
+      best = pid;
+      bestMs = ms;
+    }
+  }
+  return best;
+}
+
+/** Split the content into the half that may be shown and the half that may not. */
+function mockSplitBoard(steps: readonly GlassStep[]): {
+  board: { product: string; labels: [string, string] }[];
+  key: { real: 0 | 1; notes: [string, string] }[];
+} {
+  return {
+    board: steps.map((s) => ({
+      product: s.product,
+      labels: [s.panes[0].label, s.panes[1].label],
+    })),
+    key: steps.map((s) => ({
+      real: s.real,
+      notes: [s.panes[0].note, s.panes[1].note],
+    })),
+  };
+}
 
 /** SPEC.md: 2–6 seconds, drawn at the boundary because the engine is pure. */
 const LIGHT_MIN_MS = 2_000;
@@ -476,6 +602,81 @@ class MockSession {
       return { ...base, recruitment };
     }
 
+    if (play?.kind === "glass_bridge") {
+      // THE projection of this mock, and the one worth writing twice.
+      //
+      // The rules, from SPEC.md and the round's own design, none of them read
+      // off views.ts:
+      //
+      // - `key` — which pane is real, and both reveal notes — reaches nobody
+      //   but the host until the reveal. Not the big screen either: the big
+      //   screen is in the room, and the room contains two waves who have not
+      //   crossed.
+      // - `stepped` is not projected at all. It says whether somebody's pane
+      //   held, and with two panes that is the answer to the step.
+      // - `broken` goes to everybody, because the play state only ever writes
+      //   an entry when a step *closes* — by then everyone who could use it
+      //   has walked past it. That is what waves 2 and 3 are promised.
+      // - `board` waits for the Floor to open, as Recruitment's cue does.
+      // - the results — who crossed, and the fastest — are the big screen's
+      //   and the console's, as `finishOrder` is in Plan / Apply.
+      const running = this.arcadePhase === "running";
+      const shown = host || running || revealed;
+      const glass: ArcadeGlassView = {
+        wave: play.wave,
+        waveCuts: play.waveCuts,
+        waveSeconds: play.waveSeconds,
+        of: play.board.length,
+        broken: play.broken,
+        ...(shown
+          ? {
+              board: play.board.map((b) => ({
+                product: b.product,
+                labels: b.labels,
+              })),
+              position: { ...play.position },
+            }
+          : {}),
+        // Which step the bridge is on follows `board`; the host wants it
+        // while the card is up, because it is what they are about to read
+        // out. The three clocks do not follow it: the play state carries
+        // zeroes until the Floor opens, and a surface handed a zero draws
+        // `00:00` at a room that is looking at a round card.
+        ...(host || running ? { step: play.step } : {}),
+        ...(running
+          ? {
+              waveStartedAt: play.waveStartedAt,
+              stepStartedAt: play.stepStartedAt,
+              stepEndsAt: play.stepEndsAt,
+            }
+          : {}),
+        ...(privileged
+          ? {
+              crossed: play.crossOrder.map((pid) => this.arcadeNumber(pid)),
+              ...(mockFastestCrossing(play) === null
+                ? {}
+                : {
+                    fastest: this.arcadeNumber(
+                      mockFastestCrossing(play) as string,
+                    ),
+                  }),
+            }
+          : {}),
+        ...(host ? { elapsedMs: { ...play.elapsedMs } } : {}),
+        ...(host || revealed
+          ? {
+              recap: play.board.map((b, i) => ({
+                product: b.product,
+                labels: b.labels,
+                real: play.key[i]?.real ?? 0,
+                notes: play.key[i]?.notes ?? ["", ""],
+              })),
+            }
+          : {}),
+      };
+      return { ...base, glass };
+    }
+
     if (play?.kind === "plan_apply") {
       return {
         ...base,
@@ -530,8 +731,36 @@ class MockSession {
             },
           }
         : {}),
+      ...(play?.kind === "glass_bridge" ? { glass: this.glassMine(play, pid) } : {}),
     };
   }
+
+  /**
+   * One phone's own line on the bridge: their wave, whether it is their turn,
+   * how far they have got, and whether the pane they chose held.
+   *
+   * Not which pane they chose. This mock does not store it, for the reason the
+   * server does not: with two panes, a pane that *held* identifies the real
+   * pane exactly as well as one that broke.
+   */
+  glassMine(play: MockGlassPlay, pid: string): ArcadeMineGlass {
+    const wave = mockWaveOf(this.arcadeNumber(pid), play.waveCuts);
+    const position = play.position[pid] ?? 0;
+    const committed = pid in play.stepped;
+    return {
+      wave,
+      onTheBridge:
+        wave === play.wave &&
+        this.arcadeStanding[pid] !== "drained" &&
+        position < play.board.length,
+      step: position,
+      committed,
+      ...(committed ? { held: play.stepped[pid] === true } : {}),
+      across: position >= play.board.length,
+    };
+  }
+
+
 
   reset(): void {
     this.phase = "draft";
@@ -1106,6 +1335,9 @@ class MockHub {
       case "arcade.tap":
         this.#arcadeTap(conn, msg.cid, msg.round);
         return;
+      case "arcade.step":
+        this.#arcadeStep(conn, msg.cid, msg.round, msg.step, msg.choice);
+        return;
       case "arcade.back":
         this.#arcadeBack(conn, msg.cid, msg.pid);
         return;
@@ -1441,6 +1673,32 @@ class MockHub {
         this.#broadcastState();
         return;
       }
+      case "arcade.nextStep": {
+        const play = s.arcadePlay;
+        if (s.arcadePhase !== "running" || play?.kind !== "glass_bridge") {
+          return reject("wrong_round_phase", "No bridge round is running.");
+        }
+        if (play.step + 1 >= play.board.length) {
+          return reject("wrong_round_phase", "That was the last step. Send the next wave.");
+        }
+        this.#nextStep(play);
+        this.#send(conn, { t: "ack", cid, applied: true });
+        this.#broadcastState();
+        return;
+      }
+      case "arcade.nextWave": {
+        const play = s.arcadePlay;
+        if (s.arcadePhase !== "running" || play?.kind !== "glass_bridge") {
+          return reject("wrong_round_phase", "No bridge round is running.");
+        }
+        if (play.wave >= 3) {
+          return reject("wrong_round_phase", "That was the last wave. End the round.");
+        }
+        this.#nextWave(play);
+        this.#send(conn, { t: "ack", cid, applied: true });
+        this.#broadcastState();
+        return;
+      }
       case "arcade.end": {
         if (s.arcadePhase !== "running") {
           return reject("wrong_round_phase", "No round is running.");
@@ -1646,27 +1904,57 @@ class MockHub {
     s.arcadePhase = "card";
     s.arcadeStartedAt = null;
     s.arcadeEndsAt = null;
-    s.arcadePlay =
-      cmd.kind === "recruitment"
-        ? {
-            kind: "recruitment",
-            items: RECRUITMENT_ITEMS,
-            at: 0,
-            secondsPerItem: cmd.secondsPerItem,
-            itemEndsAt: 0,
-            solvedOrder: [],
-            answered: {},
-          }
-        : {
-            kind: "plan_apply",
-            light: "plan",
-            lightChangedAt: 0,
-            nextChangeAt: 0,
-            resources: {},
-            target: cmd.target,
-            seconds: cmd.seconds,
-            finishOrder: [],
-          };
+    if (cmd.kind === "recruitment") {
+      s.arcadePlay = {
+        kind: "recruitment",
+        items: RECRUITMENT_ITEMS,
+        at: 0,
+        secondsPerItem: cmd.secondsPerItem,
+        itemEndsAt: 0,
+        solvedOrder: [],
+        answered: {},
+      };
+      return;
+    }
+    if (cmd.kind === "glass_bridge") {
+      // The answer is separated from the labels once, here, and never put
+      // back together outside the reveal. The content comes from src/arcade/,
+      // never from the command — a round config on the wire would be the
+      // answer key arriving from a browser.
+      const { board, key } = mockSplitBoard(GLASS_BRIDGE_STEPS);
+      s.arcadePlay = {
+        kind: "glass_bridge",
+        board,
+        key,
+        waveSeconds: cmd.waveSeconds,
+        // Fixed now, from the roster that is in the room now, so the waves
+        // the round card announces are the waves that cross.
+        waveCuts: mockWaveCuts(Object.values(s.arcadeNumbers)),
+        wave: 1,
+        step: 0,
+        // The clocks all start at `beginPlay`. Borrowing the round's for the
+        // step would make every step the length of the round.
+        waveStartedAt: 0,
+        stepStartedAt: 0,
+        stepEndsAt: 0,
+        broken: board.map(() => null),
+        stepped: {},
+        position: {},
+        elapsedMs: {},
+        crossOrder: [],
+      };
+      return;
+    }
+    s.arcadePlay = {
+      kind: "plan_apply",
+      light: "plan",
+      lightChangedAt: 0,
+      nextChangeAt: 0,
+      resources: {},
+      target: cmd.target,
+      seconds: cmd.seconds,
+      finishOrder: [],
+    };
   }
 
   #beginPlay(): void {
@@ -1681,6 +1969,17 @@ class MockHub {
       s.arcadeEndsAt = now + play.items.length * play.secondsPerItem * 1000;
       this.#armItemTimer();
       this.#botsAnswerItem();
+    } else if (play.kind === "glass_bridge") {
+      // Wave 1 walks onto the bridge blind, with the longest step it will
+      // ever get.
+      play.wave = 1;
+      play.step = 0;
+      play.waveStartedAt = now;
+      play.stepStartedAt = now;
+      play.stepEndsAt = now + (play.waveSeconds[0] ?? 0) * 1000;
+      s.arcadeEndsAt = play.stepEndsAt + this.#glassRemainingMs(play, 1, 0);
+      this.#armStepTimer();
+      this.#botsStep();
     } else {
       play.light = "plan";
       play.lightChangedAt = now;
@@ -1748,6 +2047,11 @@ class MockHub {
     if (this.#floorTimer !== null) clearTimeout(this.#floorTimer);
     this.#floorTimer = null;
     if (s.arcadePhase !== "running" || s.arcadeEndsAt === null) return;
+    // The step timer owns the Glass Bridge's ending, for the reason the item
+    // timer owns Recruitment's: eighteen deadlines accumulate eighteen lots
+    // of lag, and a Floor timer at the nominal instant would land on top of
+    // wave 3's last step — the six-second one.
+    if (s.arcadePlay?.kind === "glass_bridge") return;
     const at = s.arcadeEndsAt;
     this.#floorTimer = setTimeout(
       () => {
@@ -1758,6 +2062,158 @@ class MockHub {
       },
       Math.max(0, at - this.#now()),
     );
+  }
+
+  /* ---- the Glass Bridge ---- */
+
+  #stepTimer: ReturnType<typeof setTimeout> | null = null;
+
+  /**
+   * How much round is left after the open step's deadline: the rest of this
+   * wave, plus every wave that has not walked on yet. Recomputed every time a
+   * step opens, so the accumulated lag of eighteen deadlines does not drift
+   * the round's end earlier than the truth.
+   */
+  #glassRemainingMs(play: MockGlassPlay, wave: GlassWave, step: number): number {
+    const steps = play.board.length;
+    let ms = Math.max(0, steps - step - 1) * (play.waveSeconds[wave - 1] ?? 0) * 1000;
+    for (let w = wave + 1; w <= 3; w += 1) {
+      ms += steps * (play.waveSeconds[w - 1] ?? 0) * 1000;
+    }
+    return ms;
+  }
+
+  /** Everyone the open step is waiting for. "Not already across" is load-bearing. */
+  #bridgeRunners(play: MockGlassPlay): string[] {
+    const s = this.session;
+    return s.participants
+      .filter(
+        (p) =>
+          s.arcadeStanding[p.pid] !== "drained" &&
+          mockWaveOf(s.arcadeNumber(p.pid), play.waveCuts) === play.wave &&
+          (play.position[p.pid] ?? 0) < play.board.length,
+      )
+      .map((p) => p.pid);
+  }
+
+  /**
+   * Close the open step: drain whoever did not step, and publish the pane
+   * that broke.
+   *
+   * Both halves happen *here* rather than as they occur, and that is the
+   * round's one secrecy rule. A pane that broke is the complete answer for
+   * that step — with two panes, "the left one broke" is "the right one is
+   * real" — so publishing it the instant somebody fell would hand it to the
+   * half of their own wave who are still deciding.
+   */
+  #closeGlassStep(play: MockGlassPlay): void {
+    const s = this.session;
+    const now = this.#now();
+    for (const pid of this.#bridgeRunners(play)) {
+      if (pid in play.stepped) continue;
+      // Failing to step drains you: a wave crosses as a unit, and somebody
+      // left standing on the bridge sits out the rest of the round, which is
+      // the one thing the Floor and the Lounge exist to prevent.
+      s.drain(pid, now);
+    }
+    const fell = Object.values(play.stepped).some((held) => !held);
+    const answer = play.key[play.step];
+    if (fell && answer !== undefined) {
+      play.broken[play.step] = answer.real === 0 ? 1 : 0;
+    }
+    play.stepped = {};
+  }
+
+  #armStepTimer(): void {
+    const s = this.session;
+    const play = s.arcadePlay;
+    if (this.#stepTimer !== null) clearTimeout(this.#stepTimer);
+    this.#stepTimer = null;
+    if (s.arcadePhase !== "running" || play?.kind !== "glass_bridge") return;
+    const at = play.stepEndsAt;
+    const wave = play.wave;
+    const step = play.step;
+    this.#stepTimer = setTimeout(
+      () => {
+        this.#stepTimer = null;
+        const p = s.arcadePlay;
+        if (s.arcadePhase !== "running" || p?.kind !== "glass_bridge") return;
+        if (p.wave !== wave || p.step !== step || p.stepEndsAt !== at) return;
+        if (p.step + 1 < p.board.length) this.#nextStep(p);
+        else if (p.wave < 3) this.#nextWave(p);
+        else this.#endRound();
+        this.#broadcastState();
+      },
+      Math.max(0, at - this.#now()),
+    );
+  }
+
+  #nextStep(play: MockGlassPlay): void {
+    const s = this.session;
+    this.#closeGlassStep(play);
+    const now = this.#now();
+    play.step += 1;
+    play.stepStartedAt = now;
+    play.stepEndsAt = now + (play.waveSeconds[play.wave - 1] ?? 0) * 1000;
+    s.arcadeEndsAt =
+      play.stepEndsAt + this.#glassRemainingMs(play, play.wave, play.step);
+    this.#armStepTimer();
+    this.#botsStep();
+  }
+
+  #nextWave(play: MockGlassPlay): void {
+    const s = this.session;
+    this.#closeGlassStep(play);
+    const now = this.#now();
+    play.wave = (play.wave + 1) as GlassWave;
+    play.step = 0;
+    play.waveStartedAt = now;
+    play.stepStartedAt = now;
+    play.stepEndsAt = now + (play.waveSeconds[play.wave - 1] ?? 0) * 1000;
+    s.arcadeEndsAt = play.stepEndsAt + this.#glassRemainingMs(play, play.wave, 0);
+    this.#armStepTimer();
+    this.#botsStep();
+  }
+
+  /**
+   * One commitment. The pane is judged, and which pane it was is not kept.
+   *
+   * Returns whether it held, because the caller has to decide who hears about
+   * it and cannot ask afterwards: a fall goes to the whole room and a pane
+   * that held goes to three sockets.
+   */
+  #recordStep(pid: string, choice: 0 | 1, at: number): boolean {
+    const s = this.session;
+    const play = s.arcadePlay;
+    if (play?.kind !== "glass_bridge") return false;
+    if (pid in play.stepped) return false;
+    const answer = play.key[play.step];
+    if (!answer) return false;
+    const wave = mockWaveOf(s.arcadeNumber(pid), play.waveCuts);
+    const held = choice === answer.real;
+    // Decision time, measured from the step's own start. Six of these added
+    // up are what "the fastest full crossing" means, because the three waves
+    // run at three different step lengths and wall-clock cannot compare them.
+    play.elapsedMs[pid] =
+      (play.elapsedMs[pid] ?? 0) + Math.max(0, at - play.stepStartedAt);
+    play.stepped[pid] = held;
+    if (!held) {
+      // `broken` is untouched. The pane that has just shattered is the whole
+      // answer for this step and half this wave is still deciding.
+      s.drain(pid, this.#now());
+      return false;
+    }
+    const position = (play.position[pid] ?? 0) + 1;
+    play.position[pid] = position;
+    const across = position >= play.board.length;
+    // SPEC.md: each step crossed banks 5, wave 1 banks +3 per step for going
+    // blind, and the far side is +15. 6 × 8 + 15 = 63, the Floor max.
+    s.bank(pid, GLASS_STEP_BANK + (wave === 1 ? GLASS_BLIND_BONUS : 0));
+    if (across) {
+      s.bank(pid, GLASS_FAR_SIDE);
+      play.crossOrder.push(pid);
+    }
+    return true;
   }
 
   #nextItem(): void {
@@ -1781,12 +2237,29 @@ class MockHub {
     const s = this.session;
     const play = s.arcadePlay;
     this.#clearArcadeTimers();
-    if (play?.kind === "plan_apply") {
-      const winner = play.finishOrder[0];
+    // The Glass Bridge's last step has nothing after it to close it, so the
+    // round's end closes it — which is also what happens when the host ends
+    // a round early with a wave still on the bridge.
+    if (play?.kind === "glass_bridge") this.#closeGlassStep(play);
+    if (play?.kind === "plan_apply" || play?.kind === "glass_bridge") {
+      // The Lounge pays the better of the two and **never their sum**.
+      // SPEC.md is explicit that the rule must not change between rounds, and
+      // that crossing the line always beats a perfect Lounge: stacking made
+      // 25, which tied the 25 a player scores for crossing in fourth place,
+      // and let a drained backer finish level with the player who won the
+      // Floor. A perfect Lounge round is 15.
+      const crossers =
+        play.kind === "plan_apply" ? play.finishOrder : play.crossOrder;
+      const winner =
+        play.kind === "plan_apply"
+          ? play.finishOrder[0]
+          : mockFastestCrossing(play);
       for (const [pid, seat] of Object.entries(s.arcadeLounge)) {
-        if (seat.backing === null) continue;
-        if (play.finishOrder.includes(seat.backing)) s.bank(pid, 10);
-        if (seat.backing === winner) s.bank(pid, 15);
+        const backing = seat.backing;
+        if (backing === null) continue;
+        if (s.arcadeStanding[backing] !== "floor") continue;
+        if (backing === winner) s.bank(pid, 15);
+        else if (crossers.includes(backing)) s.bank(pid, 10);
       }
     }
     for (const p of s.participants) {
@@ -1799,12 +2272,18 @@ class MockHub {
   }
 
   #clearArcadeTimers(): void {
-    for (const t of [this.#lightTimer, this.#itemTimer, this.#floorTimer]) {
+    for (const t of [
+      this.#lightTimer,
+      this.#itemTimer,
+      this.#floorTimer,
+      this.#stepTimer,
+    ]) {
       if (t !== null) clearTimeout(t);
     }
     this.#lightTimer = null;
     this.#itemTimer = null;
     this.#floorTimer = null;
+    this.#stepTimer = null;
     if (this.#botTapTimer !== null) clearInterval(this.#botTapTimer);
     this.#botTapTimer = null;
   }
@@ -1914,6 +2393,71 @@ class MockHub {
     }
   }
 
+  #arcadeStep(
+    conn: MockConn,
+    cid: string,
+    round: number,
+    step: number,
+    choice: number,
+  ): void {
+    const s = this.session;
+    const pid = conn.pid;
+    const refuse = (code: string, message: string): void => {
+      this.#send(conn, { t: "refusedCmd", cid, code, message });
+    };
+    if (conn.role !== "participant" || pid === null) {
+      return refuse("forbidden", "Only a participant plays the arcade.");
+    }
+    if (!s.arcadeOn) return refuse("not_in_arcade", "The arcade is not open.");
+    if (round !== s.arcadeRoundIndex) {
+      return refuse("wrong_round_phase", "That round has moved on.");
+    }
+    const play = s.arcadePlay;
+    if (s.arcadePhase !== "running" || play?.kind !== "glass_bridge") {
+      return refuse("wrong_round_phase", "There is no bridge.");
+    }
+    if (s.arcadeStanding[pid] === "drained") {
+      return refuse("not_on_the_floor", "You are in the Lounge. Back a player.");
+    }
+    // Nobody steps out of turn: the whole round is the asymmetry between the
+    // waves, and a wave-3 player taking wave 1's step would be taking wave
+    // 1's information as well.
+    const wave = mockWaveOf(s.arcadeNumber(pid), play.waveCuts);
+    if (wave !== play.wave) {
+      return refuse(
+        "not_your_wave",
+        wave > play.wave
+          ? `Wave ${wave} is not on the bridge yet. Watch.`
+          : `Wave ${wave} has already crossed.`,
+      );
+    }
+    if ((play.position[pid] ?? 0) >= play.board.length) {
+      return refuse("wrong_round_phase", "You are already across.");
+    }
+    if (this.#now() >= play.stepEndsAt) {
+      return refuse("floor_locked", "That step has closed.");
+    }
+    // A frame that crossed a step boundary is a commitment to a pane the
+    // player never saw.
+    if (step !== play.step) {
+      return refuse("wrong_step", `Step ${play.step + 1} is the one that is open.`);
+    }
+    if (pid in play.stepped) {
+      return refuse("already_stepped", "You are on the pane.");
+    }
+    if (choice !== 0 && choice !== 1) {
+      return refuse("invalid_choice", "There are two panes.");
+    }
+    const held = this.#recordStep(pid, choice, this.#now());
+    this.#send(conn, { t: "ack", cid, applied: true });
+    // A fall moves the dormitory grid, which is the whole room's surface, so
+    // it goes everywhere — and it leaks nothing, because nothing projected
+    // from this state says which pane anybody chose. A pane that held moves
+    // only the stepper's phone, the console and the big screen.
+    if (!held) this.#broadcastState();
+    else this.#sendStateTo((c) => c.role !== "participant" || c.pid === pid);
+  }
+
   #arcadeBack(conn: MockConn, cid: string, backing: string): void {
     const s = this.session;
     const pid = conn.pid;
@@ -1931,6 +2475,25 @@ class MockHub {
     }
     if (s.arcadePhase !== "running") {
       return refuse("floor_locked", "The Floor has closed.");
+    }
+    // SPEC.md narrows the Lounge on the bridge: "Drained players back someone
+    // in a **later** wave." Without the first half, every backer waits for
+    // wave 1 to produce a crosser and backs them, which is a certainty rather
+    // than a bet; without the second, they switch when their runner falls,
+    // which is the same certainty wearing a hat.
+    const bridge = s.arcadePlay;
+    if (bridge?.kind === "glass_bridge") {
+      const held = seat.backing;
+      if (held && mockWaveOf(s.arcadeNumber(held), bridge.waveCuts) <= bridge.wave) {
+        return refuse("backing_locked", "Your runner is on the bridge. The bet stands.");
+      }
+      const target = mockWaveOf(s.arcadeNumber(backing), bridge.waveCuts);
+      if (target <= bridge.wave) {
+        return refuse(
+          "must_back_a_later_wave",
+          `Wave ${target} is already on the bridge. Back a later wave.`,
+        );
+      }
     }
     seat.backing = backing;
     this.#send(conn, { t: "ack", cid, applied: true });
@@ -1962,6 +2525,98 @@ class MockHub {
           (500 + i * 260 + Math.random() * 900) / this.#cfg.speed,
         );
       });
+  }
+
+  /**
+   * The bots step onto panes, and the asymmetry SPEC.md builds the round on
+   * is the thing they demonstrate.
+   *
+   * Wave 1 goes blind and guesses. Waves 2 and 3 read `broken` off the same
+   * projection the room reads it off — the mock's bots are given no more than
+   * a participant's frame carries — so they take a published break when there
+   * is one and guess when there is not. That is why wave 1 fills the Lounge
+   * and why going first is worse, and it is the only way to see it without
+   * thirty people in a room.
+   *
+   * One bot in nine never steps at all, so the timeout drain has something to
+   * show, and one drained bot backs somebody in a later wave, so the Lounge
+   * and the big screen's backing counts have something to show too.
+   */
+  #botsStep(): void {
+    const s = this.session;
+    const play = s.arcadePlay;
+    if (play?.kind !== "glass_bridge") return;
+    const step = play.step;
+    const wave = play.wave;
+    const seconds = play.waveSeconds[wave - 1] ?? 6;
+    s.participants
+      .filter(
+        (p) =>
+          p.bot &&
+          s.arcadeStanding[p.pid] !== "drained" &&
+          mockWaveOf(s.arcadeNumber(p.pid), play.waveCuts) === wave &&
+          (play.position[p.pid] ?? 0) < play.board.length,
+      )
+      .forEach((p, i) => {
+        // Somebody always freezes. Drained for not stepping, which is a
+        // different line on the phone from falling through a pane.
+        if ((i + step) % 9 === 3) return;
+        // What this bot can see, which is exactly what the wire carries.
+        const broke = play.broken[step];
+        const known = broke === null ? null : broke === 0 ? 1 : 0;
+        const choice: 0 | 1 =
+          known !== null
+            ? (known as 0 | 1)
+            : Math.random() < 0.5
+              ? 0
+              : 1;
+        this.#later(
+          () => {
+            const now = s.arcadePlay;
+            if (now?.kind !== "glass_bridge") return;
+            if (s.arcadePhase !== "running") return;
+            if (now.wave !== wave || now.step !== step) return;
+            if (s.arcadeStanding[p.pid] === "drained") return;
+            const held = this.#recordStep(p.pid, choice, this.#now());
+            if (!held) this.#broadcastState();
+            else {
+              this.#sendStateTo((c) => c.role !== "participant" || c.pid === p.pid);
+            }
+            this.#botsBackFromTheLounge();
+          },
+          // Spread across the step, and never past its deadline: a bot that
+          // commits after the close would be refused by the same guard a
+          // phone is, and would look like a bug rather than a bot.
+          Math.min(seconds * 900, 300 + i * 220 + Math.random() * seconds * 400) /
+            this.#cfg.speed,
+        );
+      });
+  }
+
+  /** A drained bot backs somebody in a later wave, which is the only bet the
+   * bridge allows. */
+  #botsBackFromTheLounge(): void {
+    const s = this.session;
+    const play = s.arcadePlay;
+    if (play?.kind !== "glass_bridge") return;
+    let moved = false;
+    for (const p of s.participants) {
+      if (!p.bot) continue;
+      const seat = s.arcadeLounge[p.pid];
+      if (!seat || seat.backing !== null) continue;
+      const later = s.participants.filter(
+        (x) =>
+          s.arcadeStanding[x.pid] === "floor" &&
+          x.pid !== p.pid &&
+          mockWaveOf(s.arcadeNumber(x.pid), play.waveCuts) > play.wave,
+      );
+      const pick = later[Math.floor(Math.random() * later.length)];
+      if (pick) {
+        seat.backing = pick.pid;
+        moved = true;
+      }
+    }
+    if (moved) this.#broadcastState();
   }
 
   /**
@@ -2271,6 +2926,40 @@ class MockHub {
     this.#at(133, () => {
       if (this.session.arcadePhase !== "idle") return;
       this.session.arcadePhase = "reveal";
+      this.#broadcastState();
+    });
+
+    /**
+     * Round 5, The Glass Bridge: three waves across six steps.
+     *
+     * At demo pace — 6 / 4 / 3 seconds a step instead of SPEC.md's 12 / 9 / 6
+     * — fast enough that the loop is not mostly this round, slow enough that
+     * somebody watching can read two long product names and decide, which is
+     * the thing the round is. The *shape* is the real one: wave 1 guesses,
+     * wave 2 and wave 3 read the breaks wave 1 left behind off exactly the
+     * frame a participant is sent, and the Lounge fills up with wave 1.
+     *
+     * The scripted mock desynchronises above `speed=1` for the arcade — the
+     * bots' own delays are divided by the speed and the server's timers are
+     * not — so drive the arcade at `speed=1`.
+     */
+    this.#at(139, () => {
+      this.#startRound({
+        name: "arcade.round",
+        kind: "glass_bridge",
+        waveSeconds: [6, 4, 3],
+      });
+      this.#broadcastState();
+    });
+    this.#at(142, () => {
+      this.#beginPlay();
+      this.#broadcastState();
+    });
+    // 6 × 6 + 6 × 4 + 6 × 3 = 78 s of bridge, walked by the step timer on its
+    // own, exactly as the server's does.
+    this.#at(224, () => {
+      if (this.session.arcadePhase !== "idle") return;
+      this.session.arcadePhase = "reveal";
       for (const p of this.session.participants) {
         if (p.status["arcade"] === "bench") continue;
         p.raw["arcade"] = this.session.arcadeTotals[p.pid] ?? 0;
@@ -2279,12 +2968,12 @@ class MockHub {
       this.#broadcastState();
     });
 
-    this.#at(140, () => {
+    this.#at(232, () => {
       this.session.segment = "standings";
       this.#broadcastState();
     });
 
-    this.#at(142, () => {
+    this.#at(234, () => {
       const p = this.session.participants[4];
       if (!p) return;
       const spot = this.session.grantSpot(
@@ -2296,12 +2985,12 @@ class MockHub {
       this.#toast("spot", `Spot Award — ${p.nickname} — ${spot.reason}`);
     });
 
-    this.#at(144, () => {
+    this.#at(236, () => {
       this.session.seal = "sealed";
       this.#broadcastState();
     });
 
-    this.#at(156, () => {
+    this.#at(248, () => {
       this.session.seal = "revealed";
       this.session.segment = "final";
       this.#broadcastState();
@@ -2309,7 +2998,7 @@ class MockHub {
 
     // Long enough for the big screen's final reveal to actually finish: four
     // four-second dwells, then the hold on the empty first slot.
-    this.#at(192, () => {
+    this.#at(284, () => {
       this.#clearArcadeTimers();
       this.session.reset();
       this.#directorStarted = false;

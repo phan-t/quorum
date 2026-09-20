@@ -250,6 +250,13 @@ export class SessionRuntime {
   #itemTimerFor: { round: number; item: number; at: number } | null = null;
   #floorTimer: ReturnType<typeof setTimeout> | null = null;
   #floorTimerFor: { round: number; at: number } | null = null;
+  #stepTimer: ReturnType<typeof setTimeout> | null = null;
+  #stepTimerFor: {
+    round: number;
+    wave: number;
+    step: number;
+    at: number;
+  } | null = null;
   /**
    * Where the light durations come from. A field rather than a parameter so a
    * test can make the round deterministic without the production path growing
@@ -520,12 +527,15 @@ export class SessionRuntime {
   /* ---------------- the arcade's clocks ---------------- */
 
   /**
-   * Three timers, for the three things the engine cannot do for itself.
+   * Four timers, for the four things the engine cannot do for itself.
    *
    * - **the light**, because the durations are random and the engine has no
    *   randomness;
    * - **the item**, because Recruitment's six items are twenty seconds each
    *   and nobody should have to press a button six times to run them;
+   * - **the step**, because the Glass Bridge is eighteen deadlines — six
+   *   steps for each of three waves — and a host pressing a button eighteen
+   *   times is a host who is not watching the room;
    * - **the Floor**, because Plan / Apply is seventy-five seconds and then it
    *   is over whether or not anyone is looking at the console.
    *
@@ -540,6 +550,7 @@ export class SessionRuntime {
   armArcadeTimers(now = Date.now()): void {
     this.#armLightTimer(now);
     this.#armItemTimer(now);
+    this.#armStepTimer(now);
     this.#armFloorTimer(now);
   }
 
@@ -659,6 +670,96 @@ export class SessionRuntime {
   }
 
   /**
+   * The Glass Bridge's step clock: close the open step at `stepEndsAt`, and
+   * open whatever comes next.
+   *
+   * Three things come next and the timer picks between them, because they are
+   * three different engine events and the engine will refuse the wrong one:
+   *
+   * - another step in this wave — `nextStep`;
+   * - the wave's last step, with waves still waiting — `nextWave`;
+   * - wave 3's last step — `endRound`, which closes the step on its way past.
+   *
+   * All three close the open step, and closing is what drains whoever did not
+   * step and publishes the pane that broke. That is the round's one secrecy
+   * rule and it lives in the engine (`closeGlassStep`), not here: this timer
+   * decides only *when*.
+   *
+   * Keyed on the round, the wave, the step and the deadline, so re-arming is
+   * idempotent, a host advancing early clears it, and a timeout in flight
+   * when the bridge moved checks the state before it does anything. Node's
+   * loop is single-threaded, so by the time the callback runs the state is
+   * settled: it either still matches or it is moot.
+   */
+  #armStepTimer(now: number): void {
+    const arcade = arcadeStateOf(this.state);
+    const play = arcade?.play;
+    if (!arcade || arcade.phase !== "running" || play?.kind !== "glass_bridge") {
+      return this.#clearStepTimer();
+    }
+    const want = {
+      round: arcade.roundIndex,
+      wave: play.wave,
+      step: play.step,
+      at: play.stepEndsAt,
+    };
+    const armed = this.#stepTimerFor;
+    if (
+      armed !== null &&
+      armed.round === want.round &&
+      armed.wave === want.wave &&
+      armed.step === want.step &&
+      armed.at === want.at
+    ) {
+      return;
+    }
+    this.#clearStepTimer();
+    this.#stepTimerFor = want;
+    const lastStep = play.step + 1 >= play.board.length;
+    const lastWave = play.wave >= 3;
+    const timer = setTimeout(
+      () => {
+        this.#stepTimer = null;
+        this.#stepTimerFor = null;
+        const at = arcadeStateOf(this.state);
+        if (
+          !at ||
+          at.phase !== "running" ||
+          at.roundIndex !== want.round ||
+          at.play?.kind !== "glass_bridge" ||
+          at.play.wave !== want.wave ||
+          at.play.step !== want.step ||
+          at.play.stepEndsAt !== want.at
+        ) {
+          return; // the host got there first, or the bridge moved on
+        }
+        this.apply(
+          !lastStep
+            ? { type: "nextStep" }
+            : !lastWave
+              ? { type: "nextWave" }
+              : { type: "endRound" },
+          Date.now(),
+        );
+      },
+      Math.max(0, want.at - now),
+    );
+    timer.unref?.();
+    this.#stepTimer = timer;
+  }
+
+  #clearStepTimer(): void {
+    if (this.#stepTimer !== null) clearTimeout(this.#stepTimer);
+    this.#stepTimer = null;
+    this.#stepTimerFor = null;
+  }
+
+  /** What the step timer is armed for. Null outside the Glass Bridge. */
+  get armedStepAt(): number | null {
+    return this.#stepTimerFor?.at ?? null;
+  }
+
+  /**
    * The Floor's close — for the rounds the Floor's clock actually owns.
    *
    * Recruitment's is owned by the item timer instead, and only one of them may
@@ -670,6 +771,15 @@ export class SessionRuntime {
    * — the last item, every time, and only the last item. The item timer ends
    * the round on the last item (see {@link #armItemTimer}) and `nextItem`
    * keeps `endsAt` in step for the countdown, so nothing is left unowned.
+   *
+   * The Glass Bridge is excluded for exactly the same reason and it matters
+   * more there: eighteen deadlines accumulate eighteen lots of event-loop
+   * lag, so the round's nominal end is always a little before the truth. The
+   * Floor timer firing at the nominal instant would end the round on top of
+   * wave 3's last step — the six-second one, the one it can least afford to
+   * lose the tail of. The step timer ends the round after that step (see
+   * {@link #armStepTimer}) and `nextStep`/`nextWave` keep `endsAt` in step
+   * for the countdown, so nothing is unowned here either.
    */
   #armFloorTimer(now: number): void {
     const arcade = arcadeStateOf(this.state);
@@ -677,7 +787,8 @@ export class SessionRuntime {
       !arcade ||
       arcade.phase !== "running" ||
       arcade.endsAt === null ||
-      arcade.play?.kind === "recruitment"
+      arcade.play?.kind === "recruitment" ||
+      arcade.play?.kind === "glass_bridge"
     ) {
       return this.#clearFloorTimer();
     }
@@ -721,6 +832,7 @@ export class SessionRuntime {
   clearArcadeTimers(): void {
     this.#clearLightTimer();
     this.#clearItemTimer();
+    this.#clearStepTimer();
     this.#clearFloorTimer();
   }
 
@@ -735,8 +847,9 @@ export class SessionRuntime {
   }
 
   /**
-   * What the Floor timer is armed for. Null in Recruitment, whose ending the
-   * item timer owns — see {@link #armFloorTimer}.
+   * What the Floor timer is armed for. Null in Recruitment and on the Glass
+   * Bridge, whose endings the item and step timers own — see
+   * {@link #armFloorTimer}.
    */
   get armedFloorAt(): number | null {
     return this.#floorTimerFor?.at ?? null;
@@ -803,6 +916,73 @@ export class SessionRuntime {
     const judgeAt =
       arcade.endsAt !== null && corrected >= arcade.endsAt ? corrected : at;
     return this.apply({ type: "tap", pid: client.pid, at: judgeAt }, receivedAt);
+  }
+
+  /**
+   * One step onto a pane, turned into an engine event.
+   *
+   * The instant matters here for a reason Recruitment's answer has no
+   * equivalent of: the engine measures the decision time from `stepStartedAt`
+   * to `now`, and six decision times added up are what "the fastest full
+   * crossing" is settled on — 15 points to somebody's backer. Measured from
+   * the frame's arrival that number carries the player's network, which is
+   * the exact unfairness ARCHITECTURE.md's latency correction exists to take
+   * out of a trivia answer.
+   *
+   * So the corrected instant is passed as the event's `now`, rather than on
+   * the event. `stepPane` carries no instant of its own — unlike `tap`, whose
+   * `at` the boundary computes — and the engine is not this task's to change.
+   * The two uses `now` has in this event are both ones that should be
+   * corrected: the decision time, and whether the commitment beat the step's
+   * deadline. A player on a 400 ms link who chose a pane with 200 ms left
+   * stepped in time, and the deadline check now agrees with them.
+   *
+   * The correction is capped at 250 ms and never pushes an instant forward,
+   * so it cannot manufacture a decision time of zero or reach back into a
+   * step that had already closed — a frame for a step that is no longer open
+   * is refused by the engine on `step`, whatever its instant.
+   *
+   * `round` is checked here rather than in the reducer, exactly as it is for
+   * a tap: `stepPane` carries no round id, and the bridge resets to step 0 at
+   * every wave and every round, so step 0 is precisely the index a stale
+   * frame carries. Everything else — drained, not your wave, already stepped,
+   * already across, a pane that is not one of two — is the engine's, and is
+   * left to it.
+   */
+  step(
+    client: Client,
+    round: number,
+    step: number,
+    choice: number,
+    receivedAt: number,
+  ): { applied: boolean; rejection?: { code: string; message: string } } {
+    if (client.pid === undefined) {
+      return {
+        applied: false,
+        rejection: { code: "unknown_participant", message: "Not a participant." },
+      };
+    }
+    const arcade = arcadeStateOf(this.state);
+    if (!arcade) {
+      return {
+        applied: false,
+        rejection: { code: "not_in_arcade", message: "The arcade is not open." },
+      };
+    }
+    if (round !== arcade.roundIndex) {
+      return {
+        applied: false,
+        rejection: {
+          code: "wrong_round_phase",
+          message: "That round has moved on.",
+        },
+      };
+    }
+    const corrected = receivedAt - latencyCorrection(medianRtt(client.rtt));
+    return this.apply(
+      { type: "stepPane", pid: client.pid, step, choice },
+      corrected,
+    );
   }
 
   /**

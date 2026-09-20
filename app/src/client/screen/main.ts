@@ -30,6 +30,7 @@ import {
   STATE_LOCK_ERROR,
   activityHue,
   answerTiles,
+  bridgeSteps,
   formatCountdown,
   gridEntries,
   playerName,
@@ -38,6 +39,7 @@ import {
   resolveView,
   stackedBar,
   timerFraction,
+  waveRosters,
   wipeFraction,
   type ViewKind,
 } from "../shared/view.ts";
@@ -524,6 +526,29 @@ function sceneArcade(): Scene {
     crossed,
   ]);
 
+  /* the Glass Bridge */
+  const bridgeClock = h("p", { class: "mono s-bridge-clock" });
+  const bridgeRow = h("div", { class: "s-bridge-row", role: "list" });
+  const bridgeWaves = h("div", { class: "s-waves" });
+  const bridgeRecap = h("ol", { class: "s-bridge-recap", attrs: { hidden: true } });
+  /**
+   * The bridge sits in the ordinary document flow and the dormitory grid
+   * steps aside for it, rather than the bridge being laid over the top.
+   *
+   * Plan / Apply's `.s-light` is `position: absolute; inset: 0` because in
+   * that round the screen *is* the light — that is the round's whole design.
+   * Nothing else on this surface may do it: a full-bleed panel over the grid
+   * is how the big screen ends up showing an empty room, and it is a bug no
+   * test can see. The bridge is the round's picture, so it takes the space
+   * the grid was using and gives it back at the reveal.
+   */
+  const bridge = h("section", { class: "s-bridge", attrs: { hidden: true } }, [
+    bridgeClock,
+    bridgeRow,
+    bridgeRecap,
+    bridgeWaves,
+  ]);
+
   /* the drain, verbatim */
   const drainLog = h("div", { class: "s-drain-log", attrs: { hidden: true } });
 
@@ -538,6 +563,7 @@ function sceneArcade(): Scene {
     stair,
     h("div", { class: "s-arc-head" }, [kicker, title]),
     main,
+    bridge,
     grid,
     counts,
     light,
@@ -599,13 +625,52 @@ function sceneArcade(): Scene {
     const fresh = [...now].filter((n) => !struck.has(n));
     struck = now;
     if (fresh.length === 0) return;
+    const g = arcade.glass;
+    /**
+     * The bridge's own error, which DESIGN.md writes per player: *Pane 4 was
+     * not tempered. Player 017 drained.*
+     *
+     * The pane it names is that player's own `position` — the step they were
+     * facing — and never the bridge's open step: a drain for not stepping
+     * arrives on the frame that has already moved the bridge on, so the open
+     * step is one too far by the time this runs.
+     *
+     * Two ways off the bridge and two lines, told apart by whether the step
+     * they were facing is still the open one. Falling is a pane that was not
+     * tempered; running the clock out is a pane that was not chosen, and
+     * telling somebody they stood on a pane they never touched would be the
+     * screen making something up.
+     *
+     * *Which* of the two panes it was is not said, and is not known here —
+     * see `ArcadeGlassView`. The room still has two waves in it who have not
+     * crossed.
+     */
+    const glassLine = (n: number): string => {
+      const cell = arcade.grid.find((c) => c.playerNumber === n);
+      const at = (cell ? (g?.position?.[cell.pid] ?? 0) : 0) + 1;
+      return g?.step === at - 1 ? HOUSE.glassFall(at, n) : HOUSE.glassTimeout(at, n);
+    };
+    // On the bridge the log goes *in the flow*, under the bridge, rather than
+    // over the top of it. A panel laid over this surface is how the big
+    // screen ends up showing the room an empty rectangle, and here it would
+    // cover the one thing waves 2 and 3 are told to read — the pane labels,
+    // and which of them broke. The bridge shrinks for four seconds instead.
+    //
+    // Three lines at most, because a step that closes can drain half a wave
+    // and the room reads two lines of a terminal, not nine.
+    setClass(drainLog, "inline", g !== undefined);
     replace(drainLog, [
-      h("p", { class: "mono s-drain-error", text: STATE_LOCK_ERROR }),
+      g ? null : h("p", { class: "mono s-drain-error", text: STATE_LOCK_ERROR }),
       ...fresh
         .map(Number)
         .sort((a, b) => a - b)
-        .slice(0, 6)
-        .map((n) => h("p", { class: "mono s-drain-who", text: HOUSE.drained(n) })),
+        .slice(0, g ? 3 : 6)
+        .map((n) =>
+          h("p", {
+            class: "mono s-drain-who",
+            text: g ? glassLine(n) : HOUSE.drained(n),
+          }),
+        ),
     ]);
     drainLog.hidden = false;
     if (drainTimer !== null) clearTimeout(drainTimer);
@@ -615,6 +680,187 @@ function sceneArcade(): Scene {
       drainLog.hidden = true;
       drainTimer = null;
     }, 4_000);
+  };
+
+  /**
+   * The bridge: the room's shared picture, and the thing waves 2 and 3 are
+   * legitimately reading.
+   *
+   * Six steps across, both pane labels in each, the pane that broke struck
+   * through, and the player numbers standing on each step. Numbers and never
+   * nicknames — DESIGN.md: "the nickname is on the phone only, where the
+   * person it belongs to is the only reader."
+   *
+   * What is on this screen is what the whole room knows, which is why the
+   * server treats it as the *only* public view of the round: this surface is
+   * three metres from people who have not stepped yet. The pane that broke is
+   * here only because the server does not send it until the step has closed.
+   */
+  const paintBridge = (state: RenderState, arcade: ArcadeView): void => {
+    const g = arcade.glass;
+    if (!g) {
+      bridge.hidden = true;
+      return;
+    }
+    bridge.hidden = false;
+    const revealed = arcade.phase === "reveal";
+    const { steps, across } = bridgeSteps(arcade, state.roster, g);
+
+    // At the reveal the bridge has done its job and the room is reading the
+    // answers, so the bridge row and the three waves step aside and the recap
+    // takes the stage. Six steps, two notes each, squeezed under a bridge is
+    // four steps nobody can read — which is the whole lesson of the round
+    // going past at 1080p.
+    bridgeRow.hidden = revealed;
+    bridgeWaves.hidden = revealed;
+
+    const left = remainingMs(g.stepEndsAt ?? null, serverNow());
+    setText(
+      bridgeClock,
+      revealed
+        ? "EIGHTEEN PANES. NINE ARE TEMPERED."
+        : [
+            `WAVE ${g.wave} OF 3`,
+            `STEP ${(g.step ?? 0) + 1} OF ${g.of}`,
+            `${g.waveSeconds[g.wave - 1] ?? 0}s A STEP`,
+            left === null ? null : formatCountdown(left),
+          ]
+            .filter((x) => x !== null)
+            .join(" · "),
+    );
+
+    replace(
+      bridgeRow,
+      [
+        ...steps.map((step) =>
+          h(
+            "div",
+            {
+              class: "s-bridge-step",
+              role: "listitem",
+              attrs: {
+                "data-open": step.open && !revealed ? "yes" : "no",
+                "aria-label": `Step ${step.index + 1}${
+                  step.broken === null
+                    ? ""
+                    : `, the ${step.broken === 0 ? "left" : "right"} pane broke`
+                }${
+                  step.standing.length === 0
+                    ? ""
+                    : `, ${step.standing.map((e) => playerName(e.playerNumber)).join(", ")} at this step`
+                }`,
+              },
+            },
+            [
+              h("p", { class: "mono s-bridge-num", text: String(step.index + 1) }),
+              h("p", { class: "s-bridge-product", text: step.product }),
+              h(
+                "div",
+                { class: "s-bridge-panes" },
+                [0, 1].map((side) =>
+                  h("div", {
+                    class: "s-bridge-pane",
+                    attrs: { "data-broken": step.broken === side ? "yes" : "no" },
+                  }, [
+                    h("span", { class: "s-bridge-label", text: step.labels[side] ?? "" }),
+                  ]),
+                ),
+              ),
+              h(
+                "div",
+                { class: "mono s-bridge-who" },
+                step.standing.map((e) =>
+                  h("span", { class: "s-bridge-tag", text: e.tag }),
+                ),
+              ),
+            ],
+          ),
+        ),
+        h("div", { class: "s-bridge-far", role: "listitem" }, [
+          h("p", { class: "s-bridge-far-mark", attrs: { "aria-hidden": "true" }, text: "▣" }),
+          h("p", { class: "s-bridge-product", text: "THE FAR SIDE" }),
+          h(
+            "div",
+            { class: "mono s-bridge-who" },
+            across.map((e) => h("span", { class: "s-bridge-tag", text: e.tag })),
+          ),
+        ]),
+      ],
+    );
+
+    // The three waves, which is how SPEC.md asks the room to read itself:
+    // "by player number", with two cuts anybody can check against their own
+    // badge. Wave 1 is labelled blind because that is what it is paid for.
+    replace(
+      bridgeWaves,
+      waveRosters(arcade, state.roster, g).map((w) =>
+        h(
+          "div",
+          {
+            class: "s-wave",
+            attrs: { "data-on": w.wave === g.wave && !revealed ? "yes" : "no" },
+          },
+          [
+            h("p", { class: "mono s-wave-head" }, [
+              h("span", { text: `WAVE ${w.wave}` }),
+              h("span", { class: "s-wave-secs", text: `${w.seconds}s` }),
+              w.wave === 1
+                ? h("span", { class: "s-wave-blind", text: "BLIND" })
+                : null,
+            ]),
+            h(
+              "div",
+              { class: "mono s-wave-tags" },
+              w.members.map((e) =>
+                h("span", {
+                  class: "s-wave-tag",
+                  text: e.tag,
+                  attrs: {
+                    "data-standing": e.standing,
+                    "data-across": e.across ? "yes" : "no",
+                    "data-away": e.away ? "yes" : "no",
+                  },
+                }),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+
+    // The reveal, which is the round's lesson and the only frame on which any
+    // of this has existed. Both notes: the fake's is the joke and the real
+    // one's is the thing somebody learns.
+    const glassRecap = g.recap ?? [];
+    bridgeRecap.hidden = glassRecap.length === 0;
+    if (glassRecap.length > 0) {
+      replace(
+        bridgeRecap,
+        glassRecap.map((step, i) =>
+          h("li", { class: "s-bridge-recap-row" }, [
+            h("span", { class: "mono s-bridge-recap-num", text: String(i + 1) }),
+            h(
+              "div",
+              { class: "s-bridge-recap-panes" },
+              [0, 1].map((side) =>
+                h("div", {
+                  class: "s-bridge-recap-pane",
+                  attrs: { "data-real": step.real === side ? "yes" : "no" },
+                }, [
+                  h("span", {
+                    class: "mono s-bridge-recap-mark",
+                    attrs: { "aria-hidden": "true" },
+                    text: step.real === side ? "○" : "□",
+                  }),
+                  h("span", { class: "s-bridge-recap-label", text: step.labels[side] ?? "" }),
+                  h("span", { class: "s-bridge-recap-note", text: step.notes[side] ?? "" }),
+                ]),
+              ),
+            ),
+          ]),
+        ),
+      );
+    }
   };
 
   const paintLight = (arcade: ArcadeView): void => {
@@ -652,20 +898,33 @@ function sceneArcade(): Scene {
       setText(title, "The next game will begin shortly.");
       replace(cardLines, []);
       replace(grid, []);
+      bridge.hidden = true;
       setText(counts, "");
       light.hidden = true;
       recap.hidden = true;
+      bridge.hidden = true;
+      grid.hidden = false;
+      counts.hidden = false;
       stair.hidden = false;
       return;
     }
 
     const roundLabel = arcade.round ? ARCADE_ROUND_LABEL[arcade.round] : "Hashi Arcade";
     setText(kicker, roundLabel.toUpperCase());
+    // The bridge is the round's own picture and it takes the space the
+    // dormitory grid was using — it is never laid over the top of it. Between
+    // rounds the grid comes straight back, which is where the host leaves it.
+    const onBridge =
+      arcade.round === "glass_bridge" &&
+      (arcade.phase === "running" || arcade.phase === "reveal");
+    grid.hidden = onBridge;
+    counts.hidden = onBridge;
     paintGrid(state, arcade);
     paintDrains(arcade);
 
     if (arcade.phase === "card" || arcade.phase === "idle") {
       stair.hidden = false;
+      bridge.hidden = true;
       // Between rounds the headline is always the next game, never a count of
       // who is left — DESIGN.md is explicit that the grid says that, quietly.
       const between = arcade.phase === "idle";
@@ -705,6 +964,22 @@ function sceneArcade(): Scene {
 
     stair.hidden = true;
     replace(cardLines, []);
+
+    if (arcade.round === "glass_bridge") {
+      // SPEC.md's own epigraph for the round, which is also the answer to
+      // the question the room has been asking for three minutes.
+      setText(
+        title,
+        arcade.phase === "reveal" ? "The tempered ones are real." : "",
+      );
+      setText(cue, "");
+      setText(recruitCount, "");
+      recap.hidden = true;
+      light.hidden = true;
+      paintBridge(state, arcade);
+      return;
+    }
+    bridge.hidden = true;
 
     if (arcade.round === "plan_apply") {
       setText(title, "");
@@ -751,9 +1026,25 @@ function sceneArcade(): Scene {
   };
 
   ticker = setInterval(() => {
-    // Only the wipe needs this, and only while a light round is running.
+    // Only two things move without a frame arriving: the wipe, and the step's
+    // countdown. Both are drawn off the absolute epochs the server sent.
     const a = lastState?.arcade;
     if (a?.round === "plan_apply" && a.phase === "running") paintLight(a);
+    else if (a?.round === "glass_bridge" && a.phase === "running" && lastState) {
+      const g = a.glass;
+      const left = remainingMs(g?.stepEndsAt ?? null, serverNow());
+      setText(
+        bridgeClock,
+        [
+          `WAVE ${g?.wave ?? 1} OF 3`,
+          `STEP ${(g?.step ?? 0) + 1} OF ${g?.of ?? 0}`,
+          `${g?.waveSeconds[(g?.wave ?? 1) - 1] ?? 0}s A STEP`,
+          left === null ? null : formatCountdown(left),
+        ]
+          .filter((x) => x !== null)
+          .join(" · "),
+      );
+    }
   }, ARCADE_TICK_MS);
 
   return {

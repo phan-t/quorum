@@ -347,7 +347,7 @@ Round cards, in order:
 > Tokens expire at the end of the round. Wager accordingly.
 
 > Game 5 — The Glass Bridge
-> Eighteen panes. Nine are tempered. The tempered ones are real.
+> Twelve panes. Six are tempered. The tempered ones are real.
 > Wave 1 goes first. Wave 1 has our sympathy.
 ```
 

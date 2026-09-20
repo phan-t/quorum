@@ -158,7 +158,7 @@ Iterative, and the order matters. Each round is a day or two, not a week.
    second game. It is the mechanic the whole format rests on, and it is the one
    most likely to need redesign after you see it with real people
 3. **Plan / Apply** — the first drain round, and the timing-sensitive one
-4. **The Glass Bridge** — reuses Real-or-Fake content
+4. **The Glass Bridge** — reuses Real-or-Fake content *(built 20 Sep 2026)*
 5. **Unseal**, **Tug of Raft**, **Gganbu** — in whatever order appeals
 
 **Done when:** five rounds run end to end and nobody who gets drained in round
@@ -221,6 +221,18 @@ and it needs humans, not bots.
 >   director's schedule scales but the item and light timers do not, so
 >   Plan/Apply starts on top of a still-running Recruitment. Demo pacing, not a
 >   product bug — but run arcade work at `speed=1`.
+>
+> **The Glass Bridge (round 5) followed on 20 Sep**, which makes three rounds
+> built — the point BUILD-PLAN says to stop and play them with real people
+> before deciding whether the other three are wanted. Its leak is closed
+> structurally rather than carefully: the engine never records which pane a
+> player chose, because a pane that *held* identifies the real one exactly as
+> well as a pane that broke, and `broken` is published only when a step closes.
+>
+> One thing left untidy: `stepPane` takes no `at`, unlike `tap`, so the
+> latency-corrected instant is passed as the event's `now`. It is correct and
+> confined to one call site, but decision time decides a 15-point award and the
+> event should carry it explicitly.
 
 ## Phase 5 — Operations
 

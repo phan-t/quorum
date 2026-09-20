@@ -535,7 +535,7 @@ are flagged VERIFY exactly as the trivia bank flags dates.
 
 #### Round 5 — The Glass Bridge
 
-*Eighteen panes. Nine are tempered. The tempered ones are real.*
+*Twelve panes. Six are tempered. The tempered ones are real.*
 
 Six steps. At each step, two panes: one is a real HashiCorp feature (*Vault
 Transit Secrets Engine*), one is invented (*Vault Lease Broker Mesh*). Step on
@@ -549,12 +549,44 @@ show — going first is worse — and it turns waiting for your wave into
 watching intently.
 
 Each step crossed banks **5**; reaching the far side **+15**; wave 1 banks
-**+3 per step** for going blind. Drained players back someone in a later wave:
-crosses **+10**, fastest full crossing **+15**.
+**+3 per step** for going blind.
+
+**A drained player may only back a *later* wave, and the bet locks when that
+wave walks on.** Both halves are load-bearing and neither is optional. Without
+the first, every backer simply waits for a wave 1 runner who is already across
+— still on the Floor, never drained, therefore backable — and collects as a
+certainty; the Lounge stops being a bet. Without the second, a backer watches
+their runner fall and switches to the next wave, which is the same certainty
+wearing a hat. A consequence worth stating: someone drained during wave 3 has
+no later wave to back and scores nothing in the Lounge.
+
+Drained players back someone in a later wave:
+crosses **+10**, fastest full crossing **+15** — the better of the two, not
+their sum, as in Plan / Apply. A backer is never paid twice for one runner,
+and the Lounge rule should not change between rounds: it is hard enough to
+explain once.
 
 Launch content: the existing three real and three fake Real-or-Fake items,
-re-paired within a product and made up to six pairs with three additions. The
-reveal note for each pane reads out why the fake was fake.
+re-paired **within a product** and made up to six pairs. That needs six
+additions, not three — the existing six are three reals and three fakes across
+six *different* products, so each one needs its opposite number written for it.
+Pairing across products would give the round away: *Vault Transit Secrets
+Engine* beside *Packer Provisioner Mesh* asks which product you have heard of,
+not which feature is real.
+
+The reveal note for each pane reads out why the fake was fake, and the notes
+travel separately from the labels — a note explaining why a pane is fake is the
+answer, so it cannot be attached to the thing being shown.
+
+**"Fastest full crossing" means the lowest total decision time**: the six
+reaction times added up, each measured from its step opening. The obvious
+readings are both degenerate. First across in wall-clock is always a wave 1
+player, and is settled before the Lounge has anyone in it. Elapsed since your
+own wave started is always wave 3, because a wave cannot advance until its step
+closes. Total decision time is the only measure comparable across three waves
+running at three speeds, it stays live until the last wave is off the bridge,
+and it lets a decisive wave 1 runner hold the record against a dithering wave 3
+one. Ties go to whoever crossed first.
 
 ### Arcade scoring summary
 
@@ -565,7 +597,7 @@ reveal note for each pane reads out why the fake was fake.
 | Unseal | 60 | 25 |
 | Tug of Raft | 45 | — |
 | Gganbu | 50 | 25 |
-| Glass Bridge | 63 | 25 |
+| Glass Bridge | 63 | 15 |
 
 The raw arcade score is the sum. It is normalised like any other activity, so
 the absolute numbers only matter relative to each other. The tuning target is
