@@ -65,7 +65,7 @@ export const SEGMENTS: readonly Segment[] = [
 
 export const SEGMENT_LABEL: Readonly<Record<Segment, string>> = {
   lobby: "Lobby",
-  holding: "Holding",
+  holding: "Holding card",
   trivia: "Trivia",
   arcade: "Arcade",
   standings: "Standings",

@@ -1155,7 +1155,7 @@ function sceneSealed(): Scene {
   const line = h("p", { class: "s-line s-line-big" });
   const node = h("section", { class: "s-stage s-sealed" }, [
     h("div", { class: "s-lock" }, [lockGlyph("s-lock-glyph")]),
-    h("h1", { class: "display s-title s-title-huge", text: "Standings are sealed" }),
+    h("h1", { class: "display s-title s-title-huge", text: "Scores are hidden" }),
     line,
   ]);
   return {

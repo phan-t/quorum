@@ -52,7 +52,18 @@ and the host's attention one thing (a console, not four windows).
 | --- | --- | --- | --- |
 | **Participant** | `/` and `/j/<CODE>` | Laptop, a second window beside the call | Everyone playing |
 | **Host console** | `/host#<token>` | Laptop, *not* screen-shared | Facilitator, co-host |
-| **Big screen** | `/screen#<token>` | The tab that gets screen-shared | Nobody touches it |
+| **Desktop** | `/screen#<token>` | The tab that gets screen-shared | Nobody touches it |
+
+**The Desktop was called the "big screen" until 21 Sep 2026.** It was renamed
+for the same reason the participant surface stopped being a phone: these events
+are virtual, so there is no big screen in a room. It is a window the host
+shares from their desktop, and naming it after furniture that does not exist is
+the kind of thing that leaves a first-time facilitator looking for a projector.
+
+Its path stays `/screen`, its role on the wire stays `screen`, its token stays
+`screenToken`, and its source stays `client/screen/`. That is deliberate:
+renaming plumbing would invalidate every link and token already issued, and buy
+nothing anyone can see. The rename is vocabulary, not addressing.
 
 **The participant surface is a laptop, not a phone.** This said "phone, one
 thumb" until 20 Sep 2026, and the whole participant design was built on it.
@@ -73,12 +84,12 @@ Three things follow, and two of them are load-bearing:
   green is visible to the person next to you" is the stated reason the
   participant surface reveals nothing until the reveal — and in a virtual event
   nobody is next to anyone. Keep the rule: it still protects the reveal, and it
-  matters the moment someone screen-shares. And the big screen's join QR is
+  matters the moment someone screen-shares. And the Desktop's join QR is
   decoration now; the join link goes over chat.
 
-The split between console and big screen is the important one. In the current
+The split between console and Desktop is the important one. In the current
 arcade the host shares the board *and* drives it, so the room sees the roster
-box, the suggestions, the undo chips. The big screen is a pure output: it
+box, the suggestions, the undo chips. The Desktop is a pure output: it
 shows what the room should see and nothing else. The console is a pure input,
 dense and private. Share the wrong tab and you have shared the answers, so the
 console's title bar says **DO NOT SHARE** in the tab title.
@@ -86,7 +97,7 @@ console's title bar says **DO NOT SHARE** in the tab title.
 ### Participant
 
 Loads, asks for a code (skipped if they came through `/j/<CODE>` or the QR on
-the big screen), asks for a nickname, lands in the lobby. From then on the
+the Desktop), asks for a nickname, lands in the lobby. From then on the
 page renders whatever segment the host has running. Their own points are
 always visible in a strip at the bottom. A reconnect banner appears if the
 socket drops and disappears when it is back; nothing else on the page changes.
@@ -100,7 +111,7 @@ the room sees without switching tabs. One primary button, always labelled with
 what it will do next ("Open question 7 of 20"). Full detail in
 [DESIGN.md](DESIGN.md#host-console).
 
-### Big screen
+### Desktop
 
 The participant view, redrawn for a 1080p tile inside a compressed video call:
 huge type, few words, answer counts as bars, a timer you can read from the
@@ -199,7 +210,7 @@ excluded from the `top` calculation. This is computed live, so the standings
 after every activity are already in Huddle Points.
 
 **Spot Awards.** 10 points each, granted from the console with a **required
-reason**, which the big screen shows as a toast: *Spot Award — Kenji — best
+reason**, which the Desktop shows as a toast: *Spot Award — Kenji — best
 recovery of the afternoon*. The reason is mandatory because the existing
 design says to announce it with one, and a field that may be blank will be
 blank. The default cap is two per activity; the host can raise it, and the
@@ -223,7 +234,7 @@ answer wins, no points. Never a coin flip; the software does not have one.
 
 ### What participants see of the standings
 
-**Top five only, never the full ranking.** On the big screen and on every
+**Top five only, never the full ranking.** On the Desktop and on every
 phone. The bottom of an individual leaderboard has someone's name on it in
 front of their team, and this is enforced by the software rather than by the
 scorekeeper remembering.
@@ -235,14 +246,14 @@ number to add to; a rank of 23rd is a reason to stop playing.
 
 The seal is a session-level state with three values:
 
-| State | Big screen and phones show |
+| State | Desktop and phones show |
 | --- | --- |
 | `live` | Top five, updated as activities complete |
 | `sealed` | "Standings are sealed" — nothing else, on every surface |
 | `revealed` | The final reveal, 5 → 1, then the winner |
 
 The host seals before the last activity. From then on no surface shows
-cumulative standings — not the big screen, not the phones, not the participant's
+cumulative standings — not the Desktop, not the phones, not the participant's
 own total strip (it shows the last value before sealing, frozen, with a lock
 icon). The console still shows everything, because the host needs to know.
 
@@ -266,12 +277,12 @@ being right and more for being right fast.
 on the shared screen, which assumes everyone can read the shared screen. Over
 a video call the shared screen is a compressed tile next to nine faces. The
 phone shows the question text, the four answers with shape and colour, and the
-timer. The big screen shows the same plus the answer count as it climbs.
+timer. The Desktop shows the same plus the answer count as it climbs.
 
 **Per question:**
 
 1. Host opens the question. Timer starts on the server. Phones show the
-   answers; the big screen shows the question large.
+   answers; the Desktop shows the question large.
 2. Participants tap once. The tap is final. The phone shows "locked in" and
    nothing else — no hint of correctness until the reveal, because a phone that
    turns green is visible to the person next to you.
@@ -299,7 +310,7 @@ any listed answer is correct. Kahoot semantics.
 **Two- and three-answer questions** are allowed by leaving answer columns blank.
 
 **Sudden death** is a mode on any question: no timer, first correct answer
-wins, the big screen shows the winner's name, no points change.
+wins, the Desktop shows the winner's name, no points change.
 
 ### CSV format
 
@@ -357,8 +368,8 @@ tapped during a state lock".
 
 **Player numbers.** On entering the arcade every participant gets a
 three-digit number (roster order, zero-padded). It appears on their phone,
-on the big screen grid, and in the announcer's copy. *Player 017 has been
-drained.* The number is doing real work: it lets the big screen show sixty
+on the Desktop grid, and in the announcer's copy. *Player 017 has been
+drained.* The number is doing real work: it lets the Desktop show sixty
 people as a grid you can read, and it gives the elimination copy something to
 say that is not a colleague's name in red.
 
@@ -380,7 +391,7 @@ VIPs are the masked rich who bet on the players from a sofa. That is now you.
 
 In the Lounge you **back a player** still on the Floor. Tap a name; change it
 freely until the Floor locks. If your player survives the round, you score. If
-your player wins the round, you score more. The big screen shows who has
+your player wins the round, you score more. The Desktop shows who has
 backed whom, so being backed by six people is its own small pressure, and the
 Lounge is the loudest part of the room.
 
@@ -443,7 +454,7 @@ The phone is one big button. During **PLAN** (green), tap to advance — each
 tap is a resource, and the finish line is 120 resources. During **APPLY**
 (pink), any tap is `Error: state lock held by another process` and you are
 drained. Phases alternate on random durations between 2 and 6 seconds; the
-big screen shows the head beginning to turn 400 ms before the lock, and the
+Desktop shows the head beginning to turn 400 ms before the lock, and the
 phone vibrates on the turn. There is a 250 ms grace after the lock for
 network latency, because a fair game over a video call is one where the last
 tap before the light changed is not a loss.
@@ -490,11 +501,11 @@ everyone means to write and never does* survives intact.
 *Two clusters. One rope. The rope is leadership.*
 
 The room is split by player-number parity, then reshuffled by seed before each
-of three pulls. A **heartbeat** pulses on the big screen and on every phone at
+of three pulls. A **heartbeat** pulses on the Desktop and on every phone at
 100 bpm. Tap *on the beat* and your side pulls. Tap off the beat and nothing
 happens. Miss three beats in a row and your node **times out and calls an
 election**, which in this game as in Raft achieves nothing useful for two
-seconds. The rope on the big screen moves with the net on-beat rate.
+seconds. The rope on the Desktop moves with the net on-beat rate.
 
 Each pull is 25 seconds. Every member of the winning side banks **10**; the
 best on-beat rate on each side (the **leader**) banks **+5**, win or lose. Three
@@ -542,7 +553,7 @@ Transit Secrets Engine*), one is invented (*Vault Lease Broker Mesh*). Step on
 the real one. Wrong pane and you fall — drained, with everything banked so far.
 
 Players cross in **three waves** by player number. Wave 1 goes blind, 12
-seconds per step. Wave 2 goes after, 9 seconds, and can see on the big screen
+seconds per step. Wave 2 goes after, 9 seconds, and can see on the Desktop
 which panes broke under wave 1. Wave 3 goes last with 6 seconds and near-total
 information. The information asymmetry is the whole point of the game in the
 show — going first is worse — and it turns waiting for your wave into
@@ -693,7 +704,7 @@ that explains the release flow, above.
 console. Kicked participants can rejoin under another name unless the lobby
 is locked, which it should be once the first activity starts.
 
-**The big screen tab dies.** Reopen the screen link. It is a pure output and
+**The Desktop tab dies.** Reopen the screen link. It is a pure output and
 has no state of its own.
 
 **The join code leaks.** It is four letters; it will. Lock the lobby after the

@@ -161,7 +161,7 @@ are the ones nobody notices until a live session.
 
 The second is that the sketch broadcast too widely. `trivia.open` and
 `trivia.count` were `S→all`, and `trivia.reveal` carried `distribution` to
-everyone — but DESIGN says the distribution is a big-screen thing, and SPEC
+everyone — but DESIGN says the distribution is a Desktop thing, and SPEC
 says a phone must reveal nothing about correctness until the reveal, because a
 phone that turns green is visible to the person sitting next to you.
 
@@ -230,7 +230,7 @@ share an envelope and differ in `floor`:
   "line": "Error: state lock held by another process" }
 ```
 
-Round-specific `floor` payloads, briefly. **"Public" here means the big screen
+Round-specific `floor` payloads, briefly. **"Public" here means the Desktop
 and the host, not a phone.** The projection is per role and enforced by leaving
 a field out rather than nulling it, so a key a phone may not have never appears
 in its bytes.
@@ -272,7 +272,7 @@ identifies the real pane just as completely as a pane that broke**. The engine
 does not store one: a pane that holds advances you and a pane that breaks
 drains you, so `position` is a count and nothing can be joined back to a pane.
 
-There is also no screen-only secret here — the big screen is in the room — so
+There is also no screen-only secret here — the Desktop is in the room — so
 a participant's view must be a *subset* of the public one rather than a
 different cut of it.
 

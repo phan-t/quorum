@@ -79,7 +79,7 @@ Now it is useful even with no games in it.
 - Seal and reveal as a real state across all three surfaces
 - Spot Awards with a required reason
 - Bench Credit
-- Big screen surface
+- Desktop surface
 - CSV export at the end of a session
 
 **Done when:** you could run the 25 September huddle on it with Kahoot and the
@@ -144,7 +144,7 @@ hand-computed expectation.
 >
 > One engine/mock divergence left standing: the engine does not auto-close a
 > sudden-death question on the first correct tap — the host closes it, and the
-> big screen shows the winner's name as soon as it is known — while the mock
+> Desktop shows the winner's name as soon as it is known — while the mock
 > closes it automatically. The engine's behaviour is the one to keep; the mock
 > should follow it.
 
@@ -175,7 +175,7 @@ and it needs humans, not bots.
 >   `dist/client`, and both servers served only `/client/*`. The module graph
 >   404'd, the page stayed empty, and nothing threw. Fixed by serving the whole
 >   emitted tree.
-> - **The big screen's sixty-player grid was never visible.** `.s-light` set
+> - **The Desktop's sixty-player grid was never visible.** `.s-light` set
 >   `display: flex`, which silently beats the UA's `[hidden]` rule, so a
 >   full-bleed light sat on top of the grid for every segment. Eleven other
 >   elements each had a hand-written `[hidden]` rule; the twelfth was missed.
@@ -214,7 +214,7 @@ and it needs humans, not bots.
 >   over" command — the host simply moves the segment on — so "the games have
 >   concluded" is inferred from being outside the arcade with a round behind
 >   us, and it does not appear at all if the host seals the standings first.
-> - **The big screen has no Recruitment item clock.** `itemEndsAt` now reaches
+> - **The Desktop has no Recruitment item clock.** `itemEndsAt` now reaches
 >   every role, so the room's own twenty-second countdown is available; putting
 >   one on the screen is a design choice, not a fix.
 > - **The scripted mock desynchronises above `speed=1` for the arcade**: the

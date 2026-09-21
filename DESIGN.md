@@ -9,7 +9,7 @@ and the Squid Game register.
 
 Everything in this repo already shares a look: IBM Plex on near-black,
 HashiCorp product hues as accents, mono for anything that is a label or a
-number. Quorum keeps it, because the big screen, the console and the phone
+number. Quorum keeps it, because the Desktop, the console and the phone
 will be screenshotted side by side and need to read as one product.
 
 ### Tokens
@@ -38,8 +38,8 @@ uses. Once a participant learns that pink is trivia, pink is trivia on the
 phone, on the screen and in the console.
 
 **Dark only.** The existing pages declare `color-scheme: dark` and Quorum
-does the same, deliberately. A light phone next to a dark big screen in a
-video call looks like two products; and the big screen is dark because
+does the same, deliberately. A light phone next to a dark Desktop in a
+video call looks like two products; and the Desktop is dark because
 compressed video makes dark backgrounds with light type legible and the
 reverse muddy.
 
@@ -47,7 +47,7 @@ reverse muddy.
 
 | Role | Face | Where |
 | --- | --- | --- |
-| Display | IBM Plex Sans Condensed 700, tight leading (0.94), `-0.02em` | Questions on the big screen, round names, the winner |
+| Display | IBM Plex Sans Condensed 700, tight leading (0.94), `-0.02em` | Questions on the Desktop, round names, the winner |
 | Body | IBM Plex Sans 400/600 | Answers, copy, the holding line |
 | Label | IBM Plex Mono 400/600, `0.16–0.22em` tracking, uppercase | Eyebrows, kickers, player numbers, timers, counts, everything tabular |
 
@@ -60,7 +60,7 @@ One easing for reveals, `cubic-bezier(.2,.9,.3,1.2)` at 300 ms — the `pop`
 the arcade board already has. Timers do not animate; they tick. Anything
 that moves respects `prefers-reduced-motion` by not moving.
 
-The big screen has a stricter rule: no motion that depends on frame rate.
+The Desktop has a stricter rule: no motion that depends on frame rate.
 Video compression turns a smooth 60 fps slide into a smear at 15 fps. Things
 appear, hold, and change; they do not glide.
 
@@ -142,11 +142,11 @@ showing the last state so the person is never looking at a blank screen.
 | Trivia — locked | The tile you chose, outlined, the other three dimmed. "Locked in." No colour change, no tick, until the reveal |
 | Trivia — reveal | Correct tile fills in `--hit`; yours if wrong outlines in `--miss`; your points for the question count up in mono; the note; then the trivia top five |
 | Standings | Top five, ranks 1–5 in mono, names in condensed display, totals right-aligned. Or the sealed card |
-| Final | The reveal, mirrored from the big screen at phone scale |
+| Final | The reveal, mirrored from the Desktop at phone scale |
 
 The phone shows the question text because the participant may not be able
-to read the big screen; see the spec. It does not show the answer
-distribution, which is a big-screen thing — the phone is for *your* answer.
+to read the Desktop; see the spec. It does not show the answer
+distribution, which is a Desktop thing — the phone is for *your* answer.
 
 ## Host console
 
@@ -217,7 +217,7 @@ highlighted so the host sees it land on 100. Paste-mode shows a match list:
 existing award box), a required reason, grant. Participants on bench for
 that activity are not in the list.
 
-## Big screen
+## Desktop
 
 A 1920 × 1080 tab, shared into a video call, seen as a tile of maybe
 800 px on someone's laptop after two rounds of compression. The whole design
@@ -241,7 +241,7 @@ is about surviving that.
 - **The timer is a number and a shrinking bar**, both. The number for people
   who can read it, the bar for people who cannot.
 
-**Segments on the big screen:**
+**Segments on the Desktop:**
 
 | Segment | What it shows |
 | --- | --- |
@@ -254,7 +254,7 @@ is about surviving that.
 | Final | See below |
 | Arcade | The arena — see the register below |
 
-**The final reveal** is the one place the big screen gets to be theatrical.
+**The final reveal** is the one place the Desktop gets to be theatrical.
 Five slots, bottom to top, each held for four seconds: 5th, 4th, 3rd, 2nd —
 then a hold on an empty first slot for longer than is comfortable — then the
 winner in display type at 200 px with their total and the activity bar.
@@ -290,15 +290,15 @@ lucky part of this whole exercise.
 ### Motifs
 
 - **Shapes.** ○ △ □ in 2 px `--ink` strokes, Plex-weight, used as the staff
-  mask on round cards, as the section marker on the big screen, and as the
+  mask on round cards, as the section marker on the Desktop, and as the
   shape picker in Unseal (with ☆ ☂ added). The card that explains them —
   *○ reads the plan · △ runs the apply · □ approves the PR* — appears once,
   before round 1.
 - **Player numbers.** Three digits, Plex Mono 600, on a green badge with a
   1 px darker border, like a tracksuit patch. On the phone it is in the top
-  left at all times during the arcade; on the big screen it is how the grid
+  left at all times during the arcade; on the Desktop it is how the grid
   is labelled.
-- **The grid.** The dormitory: the big screen's arcade default is a grid of
+- **The grid.** The dormitory: the Desktop's arcade default is a grid of
   every player number, green when on the Floor, gold when in the Lounge,
   grey when away, with a thin pink strike when drained *this round*. Sixty
   people fit at 1080p at 96 px per cell. It is the arcade's scoreboard,
@@ -307,14 +307,14 @@ lucky part of this whole exercise.
   indulgence: a low-alpha (6%) geometric stair pattern in pink, mint and
   gold, tiled behind the round cards only. Never behind gameplay, never on the
   phone — it would eat contrast.
-- **The light.** In Plan / Apply the big screen *is* the light: full-bleed
+- **The light.** In Plan / Apply the Desktop *is* the light: full-bleed
   green with `PLAN` in display type, cutting to full-bleed pink with
   `APPLY IN PROGRESS — STATE LOCKED` in mono. The "doll turning" is a 400 ms
   wipe from green to pink across the screen, left to right, which is the one
   animation in the product that must not be a fade, because the wipe is the
   warning.
 - **The Front-End Man.** All announcer copy is set in Plex Mono, purple,
-  with a `>` prompt, on the big screen and the phone, like a terminal
+  with a `>` prompt, on the Desktop and the phone, like a terminal
   speaking. No face, no figure. The prompt is the character.
 
 ### Copy, and how it is said
@@ -387,7 +387,7 @@ Other lines the system needs, so they are written once and consistently:
 | Arcade end | `> The games have concluded. Please return your tracksuit.` |
 
 Lines refer to player numbers, never nicknames, when the news is bad. The
-big screen shows *Player 017 drained* over the grid; the nickname is on the
+Desktop shows *Player 017 drained* over the grid; the nickname is on the
 phone only, where the person it belongs to is the only reader.
 
 ### What the arcade does not do
@@ -416,7 +416,7 @@ Every round has a single interaction and the phone shows only that:
 | Tug of Raft | A pulsing ring at 100 bpm, the whole lower half is the tap target, a strip showing your side's colour and the rope position |
 | Gganbu | Prompt in body type, `OVER` / `UNDER` as two tall tiles, a 1–5 wager stepper under them, your rival's name and tokens as a mono line at the top |
 | Glass Bridge | Two tall panes with the two names, `LEFT` / `RIGHT`; a six-step track at the top showing where you are and which panes broke for earlier waves |
-| Lounge | Gold. The list of the Floor as tappable chips with player number and nickname, your backed player pinned at the top, and the big screen's grid mirrored small underneath so you can watch without looking up |
+| Lounge | Gold. The list of the Floor as tappable chips with player number and nickname, your backed player pinned at the top, and the Desktop's grid mirrored small underneath so you can watch without looking up |
 
 The Lounge screen is designed with more care than any Floor screen, because
 by the end of the arcade more people will have spent time in it than in any

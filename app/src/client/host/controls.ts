@@ -2,9 +2,12 @@
  * Console buttons, with the two rules DESIGN.md puts on them.
  *
  * - Destructive or irreversible actions are two-step, and the confirm is
- *   *inline*: the button becomes "Really seal? [Yes] [No]". Never a modal — a
- *   modal that steals focus during a live question is how a host presses the
- *   wrong thing.
+ *   *inline*: the button becomes "Hide it from the room? [Yes] [No]". Never a
+ *   modal — a modal that steals focus during a live question is how a host
+ *   presses the wrong thing.
+ * - The confirm asks about the thing that is about to happen, so it is allowed
+ *   to be a function of the current state: one button whose action flips with
+ *   the state must not ask the same question either way.
  * - Refusals are inline, in the button, for three seconds: "can't reveal —
  *   question still open", then back to normal. The host is looking at the
  *   button they pressed, not at a notification area.
@@ -25,8 +28,11 @@ export interface Control {
 interface Opts {
   label: string;
   className?: string;
-  /** Two-step when present. The question replaces the label while armed. */
-  question?: string;
+  /**
+   * Two-step when present. The question replaces the label while armed, and
+   * it says what pressing Yes will do — not "Really?".
+   */
+  question?: string | (() => string);
   title?: string;
   onFire: (control: Control) => void;
 }
@@ -73,6 +79,12 @@ export function control(opts: Opts): Control {
     },
   };
 
+  /** The confirm wording for right now, or null when this is a one-press control. */
+  function question(): string | null {
+    if (opts.question === undefined) return null;
+    return typeof opts.question === "function" ? opts.question() : opts.question;
+  }
+
   function fire(): void {
     if (disabled) return;
     if (opts.question !== undefined && !armed) {
@@ -98,13 +110,14 @@ export function control(opts: Opts): Control {
   }
 
   function render(): void {
-    if (armed && opts.question !== undefined) {
+    const asked = armed ? question() : null;
+    if (asked !== null) {
       const yes = h("button", { class: "ctl-yes", type: "button", text: "Yes" });
       const no = h("button", { class: "ctl-no", type: "button", text: "No" });
       yes.addEventListener("click", fire);
       no.addEventListener("click", () => api.disarm());
       replace(el, [
-        h("span", { class: "ctl-question", text: opts.question }),
+        h("span", { class: "ctl-question", text: asked }),
         yes,
         no,
       ]);

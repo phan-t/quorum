@@ -203,7 +203,7 @@ export function createParticipantView(
       ),
       sealed ? lockGlyph("strip-lock") : null,
       sealed
-        ? h("span", { class: "strip-sealed label", text: "points sealed" })
+        ? h("span", { class: "strip-sealed label", text: "scores hidden" })
         : null,
     ]);
     strip.classList.toggle("frozen", sealed);
@@ -451,7 +451,7 @@ function sceneSealed(): Scene {
   const line = h("p", { class: "v-note" });
   const node = h("section", { class: "v v-sealed" }, [
     lockGlyph("sealed-lock"),
-    h("h1", { class: "display xl", text: "Standings are sealed" }),
+    h("h1", { class: "display xl", text: "Scores are hidden" }),
     line,
   ]);
   return {

@@ -117,7 +117,7 @@ number to add to; "23rd" is a reason to stop playing.
 ## Seal and reveal
 
 Standings can be sealed. Sealed means no surface shows cumulative standings —
-not the big screen, not the host console's public view, not a participant's own
+not the Desktop, not the host console's public view, not a participant's own
 total.
 
 This is a real mechanic, not a display toggle. With a single prize, only a

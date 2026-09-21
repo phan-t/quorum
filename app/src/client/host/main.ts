@@ -19,7 +19,7 @@ import type {
   TriviaView,
 } from "../../protocol.ts";
 import { initTheme, themeToggle } from "../shared/theme.ts";
-import type { ArcadeRoundKind, Segment } from "../../engine/types.ts";
+import type { ArcadePhase, ArcadeRoundKind, Seal, Segment } from "../../engine/types.ts";
 import { h, keyedList, qs, replace, setAttr, setText } from "../shared/dom.ts";
 import { QuorumClient } from "../shared/net.ts";
 import { mockBadge, mockTransport, readMockConfig } from "../shared/mock.ts";
@@ -68,7 +68,7 @@ if (hostToken === "") {
       h("h1", { class: "display", text: "This console needs its token" }),
       h("p", {
         class: "gate-note",
-        text: "Open it as /host#<host token>. The token goes in the fragment so it never reaches a server log. Add ?mock=1 to drive a fake session instead.",
+        text: "Open it as /host#<host token>. Everything after the # stays in this browser, so the token never reaches a server log. Add ?mock=1 to drive a fake session instead.",
       }),
     ]),
   ]);
@@ -82,8 +82,23 @@ if (hostToken === "") {
 const elTitle = h("span", { class: "sb-title" });
 const elCode = h("span", { class: "sb-code mono" });
 const elCounts = h("span", { class: "sb-counts mono" });
-const elSeal = h("span", { class: "sb-seal mono" });
+const elScoreboard = h("span", { class: "sb-seal mono" });
 const elPhase = h("span", { class: "sb-phase mono" });
+
+/**
+ * The scoreboard's three states, said as what the room can see.
+ *
+ * The engine calls these live / sealed / revealed and SCORING.md keeps that
+ * word, because sealing is a real mechanic and not a display toggle. The
+ * status bar is not the place to teach it: the host glances here to answer
+ * "can they see the scores right now", and only one of these three words
+ * answers that on its own.
+ */
+const SCOREBOARD_STATE: Readonly<Record<Seal, string>> = {
+  live: "● SCOREBOARD LIVE",
+  sealed: "■ SCOREBOARD HIDDEN",
+  revealed: "● WINNERS REVEALED",
+};
 
 const elConn = h("span", { class: "sb-conn mono", attrs: { hidden: true } });
 
@@ -96,7 +111,7 @@ const statusBar = h("header", { class: "statusbar" }, [
   elCounts,
   elPhase,
   elConn,
-  elSeal,
+  elScoreboard,
   elTheme,
 ]);
 
@@ -142,14 +157,14 @@ const panel = h("main", { class: "panel" }, [
 
 const preview = createParticipantView({
   compact: true,
-  // No `onAnswer`: the preview is a picture of a phone, not one. It must not
-  // be able to answer the question the host is running.
+  // No `onAnswer`: the preview is a picture of a participant's screen, not
+  // one. It must not be able to answer the question the host is running.
   now: () => client?.now() ?? Date.now(),
 });
 const toastList = h("ul", { class: "toasts" });
 const tray = h("aside", { class: "tray" }, [
   h("div", { class: "tray-preview" }, [
-    h("p", { class: "label", text: "Phone preview" }),
+    h("p", { class: "label", text: "Participant preview" }),
     h("div", { class: "preview-frame" }, [preview.root]),
   ]),
   h("div", { class: "tray-toasts" }, [
@@ -171,10 +186,24 @@ const lockControl = control({
   onFire: (c) => issue({ name: "lobby.lock", locked: !lastState?.joinsLocked }, c),
 });
 
+/**
+ * The seal, said as what it does to the room.
+ *
+ * SCORING.md keeps the word "seal" and so does the Desktop — it is the
+ * mechanic's name. The console does not: the person driving it needs to know
+ * that pressing this takes the scoreboard away from thirty people, and
+ * "Seal standings" does not say that to somebody who has not read SCORING.md.
+ *
+ * One button, two jobs, so the confirm asks about the job in hand: hiding it
+ * and running the 5-to-1 reveal are not the same promise.
+ */
 const sealControl = control({
-  label: "Seal standings",
+  label: "Hide the scoreboard",
   className: "ctl-secondary ctl-seal",
-  question: "Really seal?",
+  question: () =>
+    (lastState?.seal ?? "live") === "live"
+      ? "Hide it from the room?"
+      : "Count down 5 to 1 now?",
   onFire: (c) => {
     const seal = lastState?.seal ?? "live";
     issue({ name: "seal", state: seal === "live" ? "sealed" : "revealed" }, c);
@@ -182,9 +211,9 @@ const sealControl = control({
 });
 
 const unsealControl = control({
-  label: "Back to live",
+  label: "Show the scoreboard again",
   className: "ctl-secondary",
-  question: "Show standings again?",
+  question: "Put it back in front of the room?",
   onFire: (c) => issue({ name: "seal", state: "live" }, c),
 });
 
@@ -248,10 +277,16 @@ const roster = keyedList<RosterEntry>(
       onFire: (c) => issue({ name: "participant.kick", pid: r.pid }, c),
     });
     const release = control({
-      label: "release",
+      // One word, not "free name". Two words plus "kick" cover the nickname on
+      // a 132px row, so the host could not read *who* they were about to act
+      // on while the confirm was armed — a worse failure than the jargon this
+      // replaced ("release"), because freeing the wrong person's name is
+      // silent. The confirm names them instead.
+      label: "free",
       className: "ctl-row",
-      question: "Release name?",
-      title: "Frees the nickname so the same person can rejoin on another device",
+      question: `Free ${r.nickname}'s name?`,
+      title:
+        "Frees their nickname so they can take it back when they reconnect, or on another device",
       onFire: (c) => issue({ name: "participant.release", pid: r.pid }, c),
     });
     const el = h("li", { class: "r-row" }, [
@@ -310,10 +345,10 @@ const holdingLine = h("input", {
   class: "field",
   type: "text",
   placeholder: "Back at 14:20. Prize: the good coffee.",
-  attrs: { maxlength: "140", "aria-label": "Holding card line" },
+  attrs: { maxlength: "140", "aria-label": "Holding card second line" },
 });
 const holdingApply = control({
-  label: "Apply to the room",
+  label: "Show it to the room",
   className: "ctl-secondary",
   onFire: (c) =>
     issue(
@@ -322,7 +357,7 @@ const holdingApply = control({
     ),
 });
 const holdingClear = control({
-  label: "Clear card",
+  label: "Clear the card",
   className: "ctl-secondary",
   onFire: (c) => {
     holdingTitle.value = "";
@@ -347,13 +382,13 @@ const bodyHolding = h("section", { class: "pb" }, [
     holdingTitle,
   ]),
   h("label", { class: "field-row" }, [
-    h("span", { class: "label", text: "Line" }),
+    h("span", { class: "label", text: "Second line" }),
     holdingLine,
   ]),
   h("div", { class: "field-actions" }, [holdingApply.el, holdingClear.el]),
   h("p", {
     class: "pb-note",
-    text: "The room sees this the moment it is applied. The phone preview on the right is what they see.",
+    text: "This is the slide the room sits in front of between activities. It goes up the moment you press Show it to the room, and the participant preview on the right is what they see.",
   }),
 ]);
 
@@ -443,7 +478,7 @@ triviaUpload.addEventListener("change", () => {
 const closeEarly = control({
   label: "Close early",
   className: "ctl-secondary",
-  title: "Stop the question now. The timer would do this at closesAt.",
+  title: "Stops the question now. It closes on its own when the timer runs out.",
   onFire: (c) => issue({ name: "trivia.close" }, c),
 });
 
@@ -451,7 +486,7 @@ const suddenDeath = control({
   label: "Sudden death: off",
   className: "ctl-secondary",
   title:
-    "No timer, first correct answer wins, no points change. Applies to the next question you open.",
+    "First correct answer wins. No timer, and nobody's score changes. Takes effect on the next question you open.",
   onFire: (c) => {
     suddenDeathArmed = !suddenDeathArmed;
     c.setLabel(`Sudden death: ${suddenDeathArmed ? "on" : "off"}`);
@@ -501,6 +536,32 @@ const ARCADE_ROUNDS: readonly ArcadeRoundKind[] = [
   "glass_bridge",
 ];
 
+/**
+ * What each round actually is, in one line, for a host who has never seen the
+ * show and has never run Terraform.
+ *
+ * The names stay: the room sees them, they are on the round cards, and they
+ * are the joke. But a picker of six in-jokes is a picker nobody can choose
+ * from, so every pill carries the game underneath its name. Each line is the
+ * mechanic from SPEC.md's round table, said as the thing the player does.
+ */
+const ARCADE_ROUND_WHAT: Readonly<Record<ArcadeRoundKind, string>> = {
+  recruitment: "Two emoji, one product name — type it. Six items, nobody is knocked out.",
+  plan_apply: "Tap fast while the light is green. Stop the moment it turns. Tapping on red knocks you out.",
+  unseal: "Pick a shape, then tap the scrambled letters in order. One wrong tap and you are out.",
+  tug_of_raft: "Tug of war. Two teams, one rope — tap on the beat. Nobody is knocked out.",
+  gganbu: "Paired off. Six over-or-under questions, and you bet tokens against your partner.",
+  glass_bridge: "Pick the real product feature, twice per step. Pick the fake one and you are out.",
+};
+
+/** The round's state, as the thing that is happening in the room. */
+const ARCADE_PHASE_WORD: Readonly<Record<ArcadePhase, string>> = {
+  idle: "NOT STARTED",
+  card: "CARD ON SCREEN",
+  running: "PLAYING",
+  reveal: "RESULTS ON SCREEN",
+};
+
 const ARCADE_BUILT: Readonly<Record<ArcadeRoundKind, boolean>> = {
   recruitment: true,
   plan_apply: true,
@@ -525,11 +586,12 @@ for (const kind of ARCADE_ROUNDS) {
     attrs: {
       role: "radio",
       "aria-checked": "false",
-      title: built ? "" : "Designed, not built yet",
+      title: built ? "" : "Designed, not built yet — you cannot start this one",
     },
   }, [
     h("span", { class: "a-pick-name", text: ARCADE_ROUND_LABEL[kind] }),
-    built ? null : h("span", { class: "mono a-pick-todo", text: "—" }),
+    h("span", { class: "a-pick-what", text: ARCADE_ROUND_WHAT[kind] }),
+    built ? null : h("span", { class: "mono a-pick-todo", text: "not built yet" }),
   ]) as HTMLButtonElement;
   if (built) {
     button.addEventListener("click", () => {
@@ -551,7 +613,7 @@ const arcadeTarget = h("input", {
   class: "field field-num",
   type: "number",
   value: "120",
-  attrs: { min: "10", max: "999", "aria-label": "Resource target" },
+  attrs: { min: "10", max: "999", "aria-label": "Taps to finish" },
 }) as HTMLInputElement;
 const arcadeFloorSeconds = h("input", {
   class: "field field-num",
@@ -565,11 +627,14 @@ const arcadeRecruitCfg = h("div", { class: "a-cfg" }, [
     h("span", { class: "label", text: "Seconds per item" }),
     arcadeSeconds,
   ]),
-  h("p", { class: "pb-note", text: "Six items. The server walks them; you do not have to press anything." }),
+  h("p", {
+    class: "pb-note",
+    text: "Six items, timed one after another. You do not have to press anything.",
+  }),
 ]);
 const arcadePlanCfg = h("div", { class: "a-cfg" }, [
   h("label", { class: "field-row" }, [
-    h("span", { class: "label", text: "Resource target" }),
+    h("span", { class: "label", text: "Taps to finish" }),
     arcadeTarget,
   ]),
   h("label", { class: "field-row" }, [
@@ -578,7 +643,7 @@ const arcadePlanCfg = h("div", { class: "a-cfg" }, [
   ]),
   h("p", {
     class: "pb-note",
-    text: "120 is tuned so about half the room crosses. The light turns on its own, 2–6 s, and the screen telegraphs the lock 400 ms early.",
+    text: "At 120 taps about half the room finishes. The light changes on its own every 2–6 seconds, and the Desktop shows everyone a warning just before it turns.",
   }),
 ]);
 
@@ -630,7 +695,7 @@ const arcadeGlassCfg = h("div", { class: "a-cfg" }, [
   ]),
   h("p", {
     class: "pb-note",
-    text: "Six steps, two panes each. Waves are thirds of the room by player number. The server walks the eighteen deadlines; the two buttons below are for cutting one short.",
+    text: "Six steps, two panes to choose from at each. The room crosses in three groups, split by player number, and each step ends on its own clock. The two buttons below are for cutting one short.",
   }),
 ]);
 
@@ -647,27 +712,27 @@ const arcadeNote = h("p", { class: "pb-note a-note", attrs: { hidden: true } });
 const arcadeEnd = control({
   label: "End the round",
   className: "ctl-secondary",
-  title: "Stop the Floor now. The server would do this when the clock runs out.",
+  title: "Stops play now. This happens on its own when the clock runs out.",
   onFire: (c) => issue({ name: "arcade.end" }, c),
 });
 const arcadeNext = control({
   label: "Skip to the next item",
   className: "ctl-secondary",
-  title: "Recruitment only. The item timer does this on its own.",
+  title: "Recruitment only. Moves everyone on to the next item; the timer does this on its own.",
   onFire: (c) => issue({ name: "arcade.next" }, c),
 });
 const arcadeNextStep = control({
   label: "Close the step",
   className: "ctl-secondary",
   title:
-    "The Glass Bridge. Closes the open step — which drains whoever has not moved and publishes the pane that broke — and opens the next. The step timer does this on its own.",
+    "The Glass Bridge only. Ends the step everyone is on: anyone who has not picked is out, the broken pane is shown, and the next step opens. The step clock does this on its own.",
   onFire: (c) => issue({ name: "arcade.nextStep" }, c),
 });
 const arcadeNextWave = control({
   label: "Send the next wave",
   className: "ctl-secondary",
   title:
-    "The Glass Bridge. Closes the wave's open step and walks the next wave on. Use it when everyone left in this wave has already fallen.",
+    "The Glass Bridge only. Ends this group's step and sends the next group of players onto the bridge. Use it when everyone still going in this group is out.",
   onFire: (c) => issue({ name: "arcade.nextWave" }, c),
 });
 
@@ -692,7 +757,10 @@ const bodyArcade = h("section", { class: "pb pb-arcade" }, [
     arcadeNextStep.el,
     arcadeNextWave.el,
   ]),
-  h("p", { class: "label", text: "Backing" }),
+  h("p", {
+    class: "label",
+    text: "Backing — players who are out pick someone to root for",
+  }),
   arcadeBacking,
 ]);
 
@@ -748,10 +816,10 @@ function renderArcade(s: RenderState): void {
   arcadeGlassCfg.hidden = inPlay || arcadePick !== "glass_bridge";
 
   if (a === undefined) {
-    setText(arcadeState, "NOT IN THE ARCADE");
+    setText(arcadeState, "NOT IN THE ARCADE YET");
     setText(
       arcadeItem,
-      "Entering hands out the player numbers. Everyone keeps theirs for the whole arcade.",
+      "Entering hands out the player numbers; everyone keeps theirs for the whole arcade. The room calls the players still going in a round the Floor, and the ones who are out the Lounge.",
     );
     arcadeNote.hidden = true;
     replace(arcadeSplit, []);
@@ -767,6 +835,9 @@ function renderArcade(s: RenderState): void {
   }
 
   const roundLabel = a.round ? ARCADE_ROUND_LABEL[a.round] : "no round";
+  // The phase, as the thing that is happening. "CARD" and "IDLE" are the
+  // engine's words for its own states, and the host reads this line out loud.
+  const phaseWord = ARCADE_PHASE_WORD[a.phase];
   const left = remainingMs(a.endsAt, client?.now() ?? Date.now());
   setText(
     arcadeState,
@@ -778,15 +849,16 @@ function renderArcade(s: RenderState): void {
       // 0; the host picks the order, so the position is not the number.
       a.round ? `ROUND ${ARCADE_ROUND_NUMBER[a.round]}` : null,
       roundLabel.toUpperCase(),
-      a.phase.toUpperCase(),
+      phaseWord,
       a.phase === "running" && left !== null ? formatCountdown(left) : null,
     ]
       .filter((x) => x !== null)
       .join(" · "),
   );
 
-  // The Floor / Lounge split, which is the one number the host is asked about
-  // between rounds and the reason nobody is sitting out.
+  // The split, which is the one number the host is asked about between rounds
+  // and the reason nobody is sitting out. The room calls the two sides the
+  // Floor and the Lounge; the console says what those mean.
   const total = a.onFloor + a.inLounge;
   replace(arcadeSplit, [
     h("div", { class: "a-split-bar" }, [
@@ -805,7 +877,7 @@ function renderArcade(s: RenderState): void {
     ]),
     h("p", {
       class: "mono a-split-text",
-      text: `${a.onFloor} on the Floor · ${a.inLounge} in the Lounge`,
+      text: `${a.onFloor} still playing · ${a.inLounge} out`,
     }),
   ]);
 
@@ -830,16 +902,26 @@ function renderArcade(s: RenderState): void {
     arcadeNote.hidden = note === "";
     setText(arcadeNote, note);
   } else if (pa) {
+    // The Desktop's sign says PLAN or APPLY IN PROGRESS. The console says
+    // both: the word the host can see on the Desktop they are sharing, and
+    // what it means for the people playing.
     setText(
       arcadeItem,
-      `${LIGHT_FACE[pa.light].sign} — ${pa.crossed ?? 0} across, target ${pa.target}, checkpoints ${pa.checkpoints.join(" / ")}`,
+      [
+        LIGHT_FACE[pa.light].sign === "PLAN"
+          ? "GREEN (PLAN) — taps count"
+          : "RED (APPLY) — tapping knocks you out",
+        `${pa.crossed ?? 0} finished`,
+        `${pa.target} taps to finish`,
+        `points banked at ${pa.checkpoints.join(" / ")}`,
+      ].join(" · "),
     );
     arcadeNote.hidden = false;
     setText(
       arcadeNote,
       pa.headTurnsAt === undefined
-        ? "The light turns back to PLAN on its own."
-        : `The head starts to turn in ${Math.max(0, Math.round((pa.headTurnsAt - (client?.now() ?? Date.now())) / 100) / 10)}s.`,
+        ? "The light goes back to green on its own."
+        : `The light turns red in ${Math.max(0, Math.round((pa.headTurnsAt - (client?.now() ?? Date.now())) / 100) / 10)}s.`,
     );
   } else if (gl) {
     // The console is the one surface that may hold the answer while the
@@ -867,7 +949,7 @@ function renderArcade(s: RenderState): void {
         .join(" · "),
     );
     arcadeNote.hidden = true;
-    // A running-round tool. At the reveal the big screen carries the whole
+    // A running-round tool. At the reveal the Desktop carries the whole
     // recap, both notes and all, and the host reads it off that.
     arcadeBridge.hidden = a.phase !== "running" && a.phase !== "card";
     // Who has put their weight on something, out of who the step is waiting
@@ -894,8 +976,8 @@ function renderArcade(s: RenderState): void {
         : []),
       h("p", { class: "mono a-bridge-broken" }, [
         [
-          `${waiting.filter((e) => stepped.has(e.pid)).length}/${waiting.length} stepped`,
-          `broken ${broken.length === 0 ? "—" : broken.join(" ")}`,
+          `${waiting.filter((e) => stepped.has(e.pid)).length} of ${waiting.length} have picked`,
+          `panes broken ${broken.length === 0 ? "—" : broken.join(" ")}`,
           `across ${
             (gl.crossed ?? []).length === 0
               ? "—"
@@ -914,8 +996,8 @@ function renderArcade(s: RenderState): void {
   setText(
     arcadeFloorList,
     lounge.length === 0
-      ? "Nobody has drained this round."
-      : `Lounge: ${lounge.map((e) => e.tag).join(" ")}`,
+      ? "Nobody is out this round."
+      : `Out this round: ${lounge.map((e) => e.tag).join(" ")}`,
   );
 
   // Who has backed whom, by number on both sides: the host reads these out.
@@ -1012,7 +1094,7 @@ function primaryPlan(): { label: string; cmd: HostCommand | null } {
     }
     switch (a.phase) {
       case "card":
-        return { label: "Open the Floor", cmd: { name: "arcade.begin" } };
+        return { label: "Start the round", cmd: { name: "arcade.begin" } };
       case "running":
         return { label: "End the round", cmd: { name: "arcade.end" } };
       case "idle":
@@ -1020,17 +1102,17 @@ function primaryPlan(): { label: string; cmd: HostCommand | null } {
         // puts the points on the board, so it is never skipped by accident.
         if (a.round !== null) {
           return {
-            label: `Reveal ${ARCADE_ROUND_LABEL[a.round]}`,
+            label: `Show the results — ${ARCADE_ROUND_LABEL[a.round]}`,
             cmd: { name: "arcade.reveal" },
           };
         }
         return {
-          label: `Start ${ARCADE_ROUND_LABEL[arcadePick]}`,
+          label: `Announce ${ARCADE_ROUND_LABEL[arcadePick]}`,
           cmd: arcadeRoundCommand(),
         };
       case "reveal":
         return {
-          label: `Start ${ARCADE_ROUND_LABEL[arcadePick]}`,
+          label: `Announce ${ARCADE_ROUND_LABEL[arcadePick]}`,
           cmd: arcadeRoundCommand(),
         };
     }
@@ -1067,10 +1149,10 @@ function render(s: RenderState): void {
   const away = s.roster.filter((r) => r.conn === "away").length;
   setText(elCounts, `${on} on · ${away} away`);
   setText(elPhase, s.phase.toUpperCase());
-  setText(elSeal, s.seal === "sealed" ? "■ SEALED" : `● ${s.seal.toUpperCase()}`);
-  setAttr(elSeal, "data-seal", s.seal);
-  // Sealed is loud: the whole bar carries it, so the host never has to wonder
-  // whether the room can see the standings.
+  setText(elScoreboard, SCOREBOARD_STATE[s.seal]);
+  setAttr(elScoreboard, "data-seal", s.seal);
+  // Hidden is loud: the whole bar carries it, so the host never has to wonder
+  // whether the room can see the scoreboard.
   statusBar.classList.toggle("sealed", s.seal === "sealed");
 
   /* rail */
@@ -1087,7 +1169,9 @@ function render(s: RenderState): void {
   /* always-there controls */
   lockControl.setLabel(s.joinsLocked ? "Unlock joining" : "Lock joining");
   lockControl.el.classList.toggle("on", s.joinsLocked);
-  sealControl.setLabel(s.seal === "live" ? "Seal standings" : "Reveal standings");
+  sealControl.setLabel(
+    s.seal === "live" ? "Hide the scoreboard" : "Reveal the winners, 5 to 1",
+  );
   sealControl.setDisabled(s.seal === "revealed");
   unsealControl.el.hidden = s.seal === "live";
   closeControl.setDisabled(s.phase === "closed" || s.phase === "draft");
@@ -1130,7 +1214,7 @@ function render(s: RenderState): void {
       s.standings.length === 0
         ? "No scores yet. Type them into the grid below, or press G."
         : s.seal === "sealed"
-          ? "Sealed: the console still shows this. No other surface does."
+          ? "Hidden from the room. This console is the only place it shows."
           : "The room sees exactly this.",
     );
     standingsNote.classList.toggle("pb-warn", s.seal === "sealed");
@@ -1171,7 +1255,7 @@ function render(s: RenderState): void {
  * distribution while the question is still open, because the host is the one
  * about to read it out and the one deciding whether to wait. Everything here
  * comes from `hostExtras` or from the host's own projection of `trivia`; none
- * of it exists on the wire to a phone.
+ * of it exists on the wire to a participant.
  */
 function renderTrivia(s: RenderState): void {
   const t = s.trivia;
@@ -1179,7 +1263,7 @@ function renderTrivia(s: RenderState): void {
     setText(triviaHead, "NO QUESTIONS LOADED");
     setText(
       triviaQuestion,
-      "Upload the Kahoot CSV for this session before opening trivia.",
+      "Upload this session's questions below — a CSV exported from Kahoot — before you open trivia.",
     );
     triviaRound.hidden = true;
     replace(triviaAnswers, []);
@@ -1204,7 +1288,7 @@ function renderTrivia(s: RenderState): void {
       t.phase.toUpperCase(),
       t.suddenDeath ? "SUDDEN DEATH" : null,
       t.phase === "open" && left !== null ? formatCountdown(left) : null,
-      t.basePoints === 0 ? "WARM-UP · 0 POINTS" : `BASE ${t.basePoints}`,
+      t.basePoints === 0 ? "WARM-UP · 0 POINTS" : `${t.basePoints} POINTS`,
     ]
       .filter((x) => x !== null)
       .join(" · "),
@@ -1285,16 +1369,16 @@ function renderTrivia(s: RenderState): void {
  *
  * The trivia block is the sharp end of that: the host's copy carries the
  * correct answer and the distribution from the moment the question loads, and
- * a preview that rendered those would be showing the host a phone that does
- * not exist — and putting the answer key in the corner of a console people
- * screen-share by accident.
+ * a preview that rendered those would be showing the host a participant view
+ * that does not exist — and putting the answer key in the corner of a console
+ * people screen-share by accident.
  */
 function roomView(s: RenderState): RenderState {
   const { hostExtras: _hostExtras, own: _own, trivia, arcade, ...rest } = s;
   // Fields are *removed*, not set to undefined, so the preview is fed the
-  // same shape a phone is: the participant's copy has no `correct` key at all
-  // before the reveal, and a preview that carried one would be a phone that
-  // does not exist.
+  // same shape a participant is: their copy has no `correct` key at all
+  // before the reveal, and a preview that carried one would be a participant
+  // view that does not exist.
   let roomTrivia: TriviaView | undefined;
   if (trivia !== undefined) {
     const {
@@ -1319,7 +1403,8 @@ function roomView(s: RenderState): RenderState {
   // The arcade's version of the same rule, and the sharp end of it is the
   // light schedule: the console holds `nextChangeAt` and `headTurnsAt` from
   // the moment the round starts, and a preview that carried them would be a
-  // phone that cannot be caught — in the corner of a screen that gets shared.
+  // participant who cannot be caught — in the corner of a window that gets
+  // shared.
   let roomArcade: ArcadeView | undefined;
   if (arcade !== undefined) {
     const { recruitment, planApply, ...shared } = arcade;

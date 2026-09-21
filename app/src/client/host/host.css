@@ -180,6 +180,7 @@ body {
   gap: 0 8px;
 }
 .r-row {
+  position: relative;
   display: flex;
   align-items: center;
   gap: 6px;
@@ -205,9 +206,24 @@ body {
   color: var(--dim);
   font-size: 11px;
 }
+/* The two controls float over the right of the row rather than sitting in
+   it. The roster is a 132px grid and these labels say what they do, which
+   costs characters: in the flow they squeezed the nickname down to its first
+   letter, and the nickname is the whole reason the host is on this row. */
 .r-actions {
   display: none;
   gap: 2px;
+  position: absolute;
+  right: 3px;
+  top: 50%;
+  transform: translateY(-50%);
+  padding-left: 8px;
+  background: linear-gradient(
+    to right,
+    transparent 0,
+    var(--panel-2) 8px,
+    var(--panel-2) 100%
+  );
 }
 .r-row:hover .r-actions,
 .r-row:focus-within .r-actions {
@@ -817,6 +833,8 @@ body {
   font-family: var(--mono);
   letter-spacing: 0.08em;
   background: transparent;
+  /* A two-word label on a 22px row must not become two lines. */
+  white-space: nowrap;
 }
 .ctl-row .ctl-question {
   font-size: 10px;
@@ -1098,17 +1116,39 @@ body {
 .a-picker[hidden] {
   display: none;
 }
+/* A card, not a pill: the name is the joke the room hears and the line under
+   it is what the game actually is, for a host who has never seen the show. */
 .a-pick {
   appearance: none;
-  display: inline-flex;
-  align-items: baseline;
-  gap: 0.4rem;
-  padding: 0.35rem 0.7rem;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.2rem;
+  flex: 1 1 15rem;
+  max-width: 21rem;
+  padding: 0.5rem 0.7rem;
   border: 1px solid var(--line);
-  border-radius: 999px;
+  border-radius: 6px;
   background: var(--panel-2);
   color: var(--ink);
   font-size: 13px;
+  text-align: left;
+}
+.a-pick-name {
+  font-weight: 600;
+}
+/* --muted is the readable muted; --dim never carries text that has to be
+   read, and this line has to be read. */
+.a-pick-what {
+  font-size: 12px;
+  line-height: 1.35;
+  color: var(--muted);
+  font-weight: 400;
+}
+/* On the filled pill the line takes the fill's own ink, not a grey that was
+   measured against the panel. */
+.a-pick.on .a-pick-what {
+  color: inherit;
 }
 /* Selected is filled and ticked — the console is the one surface a host
    glances at for two seconds, and a border colour is not a glance. */
@@ -1118,14 +1158,25 @@ body {
   border-color: #00996c;
   font-weight: 600;
 }
-.a-pick.on::after {
-  content: "✓";
+/* The tick rides the name, so it does not land on a line of its own. */
+.a-pick.on .a-pick-name::after {
+  content: " ✓";
 }
+/* Not built yet, said four ways and none of them colour: a dashed edge, the
+   words, the muted name, and a button that cannot be pressed. Not an opacity
+   — a 0.6 wash over the description is a description nobody can read, and
+   the description is the only reason a new host knows what the round is. */
 .a-pick.is-unbuilt {
-  opacity: 0.5;
   cursor: not-allowed;
+  background: none;
+  border-style: dashed;
+}
+.a-pick.is-unbuilt .a-pick-name {
+  color: var(--muted);
 }
 .a-pick-todo {
+  font-size: 11px;
+  letter-spacing: 0.06em;
   color: var(--muted);
 }
 

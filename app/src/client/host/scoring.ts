@@ -111,7 +111,7 @@ export function createScoringPanel(opts: Opts): ScoringPanel {
 
   const hint = h("span", {
     class: "mono sc-hint",
-    text: "G jumps here · Tab along the row · Enter commits and drops · Alt+B bench · Alt+U clear · Esc undo",
+    text: "G jumps here · Tab along the row · Enter saves and drops a row · Alt+B bench · Alt+U clear · Esc undo",
   });
   const head = h("div", { class: "sc-head" }, [
     h("span", { class: "label", text: "Scoring" }),
@@ -143,7 +143,7 @@ export function createScoringPanel(opts: Opts): ScoringPanel {
   const spotReason = h("input", {
     class: "field sc-reason",
     type: "text",
-    placeholder: "Reason — it gets read out",
+    placeholder: "Reason — it gets read out to the room",
     attrs: { maxlength: "120", "aria-label": "Spot Award reason" },
   });
   const spotNote = h("span", { class: "mono sc-spot-note" });
@@ -162,7 +162,7 @@ export function createScoringPanel(opts: Opts): ScoringPanel {
       const activityId = spotActivity.value;
       const reason = spotReason.value.trim();
       if (reason === "") {
-        c.flash("A Spot Award needs a reason — it gets read out.");
+        c.flash("A spot award needs a reason — it gets read out.");
         spotReason.focus();
         return;
       }
@@ -216,8 +216,8 @@ export function createScoringPanel(opts: Opts): ScoringPanel {
     setText(
       spotNote,
       empty
-        ? "A reason is required — it is announced out loud."
-        : "10 points. Two per activity by default.",
+        ? "A reason is required — it is read out to the room."
+        : "Worth 10 points. Two per activity by default.",
     );
     spotNote.classList.toggle("sc-spot-note-warn", empty);
   }
@@ -313,14 +313,15 @@ export function createScoringPanel(opts: Opts): ScoringPanel {
       class: "sc-mini",
       type: "button",
       text: "B",
-      title: "Bench: credit them their own average for this activity (Alt+B)",
+      title:
+        "Bench — they sat this one out. They are credited their own average instead of a zero, so missing an activity does not sink them. (Alt+B)",
       attrs: { tabindex: "-1" },
     });
     const clearButton = h("button", {
       class: "sc-mini",
       type: "button",
       text: "×",
-      title: "Clear this cell back to unset (Alt+U)",
+      title: "Clear this cell back to empty — no score entered (Alt+U)",
       attrs: { tabindex: "-1" },
     });
     const td = h("td", { class: "sc-cell" }, [

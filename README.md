@@ -18,7 +18,7 @@ huddle — run that one on the existing tools.
 | --- | --- |
 | [`SPEC.md`](SPEC.md) | What it does and why: the three surfaces, the session lifecycle, trivia and its CSV, the arcade's six rounds and the Lounge, manual entry for the TTX, the holding page, failure modes at a live event, open questions |
 | [`ARCHITECTURE.md`](ARCHITECTURE.md) | How it is built: one stateful process on ECS Fargate, the data model, the WebSocket protocol, AWS topology, HCP Terraform with OIDC, GitHub Actions, the deploy decision, restart behaviour, local dev, cost |
-| [`DESIGN.md`](DESIGN.md) | What it looks like: the shared tokens, the phone-first participant view, the host console, the big screen over compressed video, and the arcade's Squid Game register with its copy |
+| [`DESIGN.md`](DESIGN.md) | What it looks like: the shared tokens, the phone-first participant view, the host console, the Desktop over compressed video, and the arcade's Squid Game register with its copy |
 
 ## Three things that carry over unchanged
 
@@ -28,7 +28,7 @@ Spot Awards are 10 points with a required reason; facilitators and late
 joiners get Bench Credit. The service computes it; it does not change it.
 
 **Seal and reveal** is a real state, not a display toggle. Sealed means no
-surface shows cumulative standings — not the big screen, not a phone, not a
+surface shows cumulative standings — not the Desktop, not a phone, not a
 running total — until the host reveals.
 
 **The content** is what is already in this repo:
