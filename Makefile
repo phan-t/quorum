@@ -23,6 +23,11 @@ REPO    ?= quorum
 ACCOUNT  = $(shell aws sts get-caller-identity --query Account --output text 2>/dev/null)
 TAG     ?= sha-$(shell git rev-parse --short=7 HEAD)
 REGISTRY = $(ACCOUNT).dkr.ecr.$(REGION).amazonaws.com
+# Docker or Podman, whichever is here. Docker Desktop needs a paid licence at
+# company size and is not always permitted; Podman is a drop-in for the three
+# commands this file uses (`build --platform`, `login`, `push`). Override with
+# `make ENGINE=... ` if you have something else.
+ENGINE  ?= $(shell command -v docker 2>/dev/null || command -v podman 2>/dev/null)
 HOST    ?= quorum.tphan.sbx.hashidemos.io
 INFRA    = infra
 
@@ -46,14 +51,14 @@ check:
 ## problem but not the cause. Pinning makes the artifact identical wherever it
 ## is built.
 build:
-	docker build --platform linux/amd64 \
+	$(ENGINE) build --platform linux/amd64 \
 	  -t $(REGISTRY)/$(REPO):$(TAG) -t $(REGISTRY)/$(REPO):latest app
 
 push: check
 	aws ecr get-login-password --region $(REGION) \
-	  | docker login --username AWS --password-stdin $(REGISTRY)
-	docker push $(REGISTRY)/$(REPO):$(TAG)
-	docker push $(REGISTRY)/$(REPO):latest
+	  | $(ENGINE) login --username AWS --password-stdin $(REGISTRY)
+	$(ENGINE) push $(REGISTRY)/$(REPO):$(TAG)
+	$(ENGINE) push $(REGISTRY)/$(REPO):latest
 
 ## The apply is the deploy: the image tag is a Terraform variable, so the task
 ## definition has one owner and the plan of a deploy is a reviewable diff.
