@@ -21,7 +21,8 @@ import type {
   TriviaState,
 } from "./types.ts";
 import { newSession, reduce, replay } from "./reducer.ts";
-import { questionPoints, streakBonus } from "./trivia.ts";
+import { currentQuestion, questionPoints, streakBonus } from "./trivia.ts";
+import { DEFAULT_TIEBREAKERS } from "./tiebreak.ts";
 import { computeStandings } from "./scoring.ts";
 
 /* ------------------------------------------------------------------ */
@@ -115,10 +116,20 @@ function q(spec: QSpec = {}): Question {
 
 const PIDS = ["p1", "p2", "p3"];
 
-/** A running session with three participants and `questions` loaded. */
+/**
+ * A running session with three participants and `questions` loaded.
+ *
+ * The tiebreak pool is explicit and is built from the same `q()`, so that a
+ * sudden death in these tests has the same shape of question as a scored one
+ * and `choice: 2` means the same thing in both. The pool's own behaviour —
+ * the built-in fallback, the flag that lifts a question out of the set, and
+ * what happens when it runs out — is in "the tiebreak pool" below, where it
+ * is the subject rather than the scenery.
+ */
 function loaded(
   questions: readonly Question[] = [q(), q(), q()],
   pids: readonly string[] = PIDS,
+  tiebreakers: readonly Question[] = [q(), q()],
 ): SessionState {
   const base = accept(
     newSession({ sid: "s1", title: "Huddle", joinCode: "RAFT", activities: ACTIVITIES }),
@@ -128,7 +139,9 @@ function loaded(
       { type: "start" },
     ],
   );
-  return accept(base, [{ type: "loadTrivia", activityId: "trivia", questions }]);
+  return accept(base, [
+    { type: "loadTrivia", activityId: "trivia", questions, tiebreakers },
+  ]);
 }
 
 function trivia(state: SessionState): TriviaState {
@@ -959,5 +972,364 @@ describe("recovery", () => {
     assert.equal(trivia(once).streaks["p1"], 2);
     assert.deepEqual(once.scores["trivia"]?.["p1"], { raw: 875, status: "played" });
     assert.deepEqual(once.scores["trivia"]?.["p2"], { raw: 0, status: "played" });
+  });
+});
+
+/* ------------------------------------------------------------------ */
+/* The tiebreak pool                                                   */
+/* ------------------------------------------------------------------ */
+
+/**
+ * SCORING.md settles a tie with "sudden death — one question, first correct
+ * answer wins, no points", and never a coin flip.
+ *
+ * Sudden death used to be a *mode* on `questions[at]`, and that had three
+ * consequences, all of them wrong: it spent one of the twenty scored
+ * questions, a tie settled mid-set silently dropped a question from the game,
+ * and once the set was exhausted there was nothing left to put the mode on —
+ * which is exactly the moment a final tie needs settling. The fix is that a
+ * tiebreaker is **not part of the scored set**.
+ */
+describe("the tiebreak pool", () => {
+  /**
+   * A tiebreaker whose correct answer is 1, where an ordinary `q()`'s is 2.
+   * That difference is what proves which question an answer was judged
+   * against.
+   */
+  const tb = (n: number): Question => ({
+    ...q({ correct: [1] }),
+    text: `Tiebreaker ${n}`,
+    tiebreak: true,
+  });
+
+  test("questions flagged in the file are lifted out of the twenty", () => {
+    const s = accept(
+      newSession({ sid: "s", title: "t", joinCode: "RAFT", activities: ACTIVITIES }),
+      [
+        { type: "open" },
+        { type: "join", pid: "p1", nickname: "p1" },
+        { type: "start" },
+        {
+          type: "loadTrivia",
+          activityId: "trivia",
+          questions: [
+            q(),
+            { ...q(), text: "Held back", tiebreak: true },
+            q(),
+          ],
+        },
+      ],
+    );
+    const t = trivia(s);
+    assert.equal(t.questions.length, 2, "two scored questions, not three");
+    assert.ok(!t.questions.some((x) => x.text === "Held back"));
+    assert.equal(t.tiebreakers.length, 1);
+    assert.equal(must(t.tiebreakers[0]).text, "Held back");
+  });
+
+  test("a file of nothing but tiebreakers has no game in it", () => {
+    const base = accept(
+      newSession({ sid: "s", title: "t", joinCode: "RAFT", activities: ACTIVITIES }),
+      [{ type: "open" }, { type: "start" }],
+    );
+    assertRefused(
+      base,
+      run(base, {
+        type: "loadTrivia",
+        activityId: "trivia",
+        questions: [{ ...q(), tiebreak: true }],
+      }),
+      "no_questions_loaded",
+    );
+  });
+
+  test("a file with no tiebreakers falls back to the built-in pool", () => {
+    // Every CSV the importer produces today is this case, and "never a coin
+    // flip" has to be true for them too.
+    const s = accept(
+      newSession({ sid: "s", title: "t", joinCode: "RAFT", activities: ACTIVITIES }),
+      [
+        { type: "open" },
+        { type: "join", pid: "p1", nickname: "p1" },
+        { type: "start" },
+        { type: "loadTrivia", activityId: "trivia", questions: [q()] },
+      ],
+    );
+    assert.deepEqual(trivia(s).tiebreakers, DEFAULT_TIEBREAKERS);
+  });
+
+  test("the built-in pool is askable, and scores nothing even if asked", () => {
+    assert.ok(DEFAULT_TIEBREAKERS.length >= 2, "one tie is not the only tie");
+    for (const question of DEFAULT_TIEBREAKERS) {
+      assert.ok(question.answers.length >= 2, `${question.text} has one answer`);
+      assert.ok(question.correct.length >= 1, `${question.text} has no answer`);
+      for (const c of question.correct) {
+        assert.ok(c >= 0 && c < question.answers.length, "a correct index off the end");
+      }
+      assert.equal(question.basePoints, 0, "a tiebreaker cannot pay points");
+      assert.equal(question.tiebreak, true);
+      assert.ok(question.note !== null, "the reveal still teaches something");
+    }
+  });
+
+  test("a sudden death asks the tiebreaker, and leaves the set where it was", () => {
+    let s = loaded([q(), q(), q()], PIDS, [tb(1), tb(2)]);
+    s = accept(s, [{ type: "openQuestion", suddenDeath: true }], 1_000);
+    const t = trivia(s);
+    assert.equal(t.suddenDeath, true);
+    assert.equal(must(currentQuestion(t)).text, "Tiebreaker 1");
+    assert.equal(t.tiebreakAt, 0);
+    assert.equal(t.tiebreakUsed, 1, "asking it spends it");
+    // The scored set has no question in play while the tiebreak runs, and
+    // `at` says so by pointing past the end of it — so a projection that has
+    // not learned about tiebreakers finds nothing rather than the wrong
+    // question. Where the host comes back to is parked in `tiebreakHeld`.
+    assert.equal(t.at, t.questions.length);
+    assert.equal(t.questions[t.at], undefined);
+    assert.equal(must(t.tiebreakHeld).at, 0, "and question one is kept");
+    // Cleared, it hands the set back exactly where it was.
+    const cleared = accept(
+      accept(s, [{ type: "closeQuestion" }, { type: "revealQuestion" }], 2_000),
+      [{ type: "nextQuestion" }],
+      3_000,
+    );
+    assert.equal(trivia(cleared).at, 0);
+    assert.equal(trivia(cleared).phase, "idle");
+    // And it is judged against the tiebreaker, not against questions[0]:
+    // `q()` is correct on 2 and the tiebreaker on 1.
+    const answered = accept(s, [{ type: "answerQuestion", pid: "p1", choice: 1, ms: 40 }]);
+    assert.equal(must(trivia(answered).answers["p1"]).correct, true);
+    assert.equal(trivia(answered).suddenDeathWinner, "p1");
+    const wrong = accept(s, [{ type: "answerQuestion", pid: "p2", choice: 2, ms: 40 }]);
+    assert.equal(must(trivia(wrong).answers["p2"]).correct, false);
+  });
+
+  test("it can be run after the final question, which is where a tie lands", () => {
+    // Walk to the end of a two-question set and reveal the last one. This is
+    // the state the old sudden death could not be opened from at all:
+    // `nextQuestion` refuses past the last question, so there was nothing
+    // left to put the mode on.
+    let s = loaded([q(), q()], PIDS, [tb(1)]);
+    s = playQuestion(s, { p1: { choice: 2, ms: 100 } }, { reveal: true });
+    s = accept(s, [{ type: "nextQuestion" }]);
+    s = playQuestion(s, { p1: { choice: 2, ms: 100 } }, { reveal: true });
+    const t = trivia(s);
+    assert.equal(t.at, 1);
+    assert.equal(t.phase, "revealed");
+    assertRefused(s, run(s, { type: "nextQuestion" }), "no_more_questions");
+
+    const sd = accept(s, [{ type: "openQuestion", suddenDeath: true }], 90_000);
+    assert.equal(trivia(sd).phase, "open");
+    assert.equal(must(currentQuestion(trivia(sd))).text, "Tiebreaker 1");
+    assert.equal(
+      must(trivia(sd).tiebreakHeld).at,
+      1,
+      "the set is still sitting on its last question, and comes back to it",
+    );
+    const back = accept(
+      accept(sd, [{ type: "closeQuestion" }, { type: "revealQuestion" }], 91_000),
+      [{ type: "nextQuestion" }],
+      92_000,
+    );
+    assert.equal(trivia(back).at, 1);
+    assert.equal(trivia(back).phase, "revealed");
+  });
+
+  test("it settles nothing: no points, no streaks, no scoreboard", () => {
+    let s = loaded([q(), q()], PIDS, [tb(1)]);
+    s = playQuestion(s, { p1: { choice: 2, ms: 100 } }, { reveal: true });
+    const before = { ...trivia(s).totals };
+    s = accept(s, [{ type: "openQuestion", suddenDeath: true }], 50_000);
+    s = accept(s, [{ type: "answerQuestion", pid: "p2", choice: 1, ms: 30 }], 50_030);
+    s = accept(s, [{ type: "closeQuestion" }], 50_100);
+    assert.equal(trivia(s).suddenDeathWinner, "p2");
+    assert.deepEqual(trivia(s).totals, before, "a tiebreak moves no totals");
+    s = accept(s, [{ type: "revealQuestion" }], 50_200);
+    assert.deepEqual(s.scores["trivia"]?.["p2"], undefined);
+    assert.equal(must(s.scores["trivia"]?.["p1"]).raw, before["p1"]);
+  });
+
+  test("clearing a tiebreak does not advance the scored set", () => {
+    // A tie settled between questions three and four must not cost the room
+    // question four. `at` did not move when the tiebreak opened, so it must
+    // not move when it is put away.
+    let s = loaded([q(), q(), q()], PIDS, [tb(1)]);
+    s = playQuestion(s, { p1: { choice: 2, ms: 100 } }, { reveal: true });
+    s = accept(s, [{ type: "nextQuestion" }]);
+    assert.equal(trivia(s).at, 1);
+    s = playQuestion(s, { p1: { choice: 2, ms: 10 } }, { suddenDeath: true, openAt: 40_000 });
+    s = accept(s, [{ type: "revealQuestion" }], 61_000);
+    s = accept(s, [{ type: "nextQuestion" }], 62_000);
+    const t = trivia(s);
+    assert.equal(t.at, 1, "question two is still to be asked");
+    assert.equal(t.suddenDeath, false);
+    assert.equal(t.suddenDeathWinner, null);
+    assert.deepEqual(t.answers, {});
+  });
+
+  test("a tiebreak puts no un-asked scored question within reach", () => {
+    // The safety property that `at` pointing past the end of the set buys.
+    // Every projection written before tiebreakers existed reads
+    // `questions[at]` for "the question in play"; during a tiebreak that must
+    // find nothing rather than the next question the room has not been asked
+    // yet, whose text would go on every phone and whose answer and note would
+    // be read out at the tiebreak's reveal.
+    let s = loaded(
+      [q(), { ...q(), text: "NOT ASKED YET", note: "and its answer" }],
+      ["p1"],
+      [tb(1)],
+    );
+    s = playQuestion(s, { p1: { choice: 2, ms: 100 } }, { reveal: true });
+    s = accept(s, [{ type: "nextQuestion" }], 30_000);
+    assert.equal(must(trivia(s).questions[trivia(s).at]).text, "NOT ASKED YET");
+    s = accept(s, [{ type: "openQuestion", suddenDeath: true }], 40_000);
+    const t = trivia(s);
+    assert.equal(t.questions[t.at], undefined, "nothing for a stale reader to find");
+    assert.equal(must(currentQuestion(t)).text, "Tiebreaker 1");
+    // And the un-asked question is still there, still un-asked, when the
+    // tiebreak is cleared.
+    s = accept(s, [{ type: "closeQuestion" }, { type: "revealQuestion" }], 41_000);
+    s = accept(s, [{ type: "nextQuestion" }], 42_000);
+    assert.equal(must(currentQuestion(trivia(s))).text, "NOT ASKED YET");
+    assert.equal(trivia(s).phase, "idle");
+  });
+
+  test("a question already scored cannot be re-opened after a tiebreak", () => {
+    // The hazard the hold exists for. A tiebreak does not move `at`, so
+    // clearing one used to leave the set `idle` on a question that had already
+    // been asked, settled and written to `scores` — and `idle` is exactly the
+    // phase `openQuestion` accepts. Asking it again paid for it again.
+    let s = loaded([q(), q()], ["p1"], [tb(1)]);
+    s = playQuestion(s, { p1: { choice: 2, ms: 100 } }, { reveal: true });
+    const once = totalOf(s, "p1");
+    assert.ok(once > 0);
+    // Straight into a tiebreak off the reveal, then clear it.
+    s = accept(s, [{ type: "openQuestion", suddenDeath: true }], 40_000);
+    s = accept(s, [{ type: "closeQuestion" }, { type: "revealQuestion" }], 41_000);
+    s = accept(s, [{ type: "nextQuestion" }], 42_000);
+    const t = trivia(s);
+    assert.equal(t.at, 0, "the set is still on question one");
+    assert.equal(t.phase, "revealed", "and it is still revealed, not idle");
+    assert.equal(t.tiebreakHeld, null);
+    assertRefused(
+      s,
+      run(s, { type: "openQuestion", suddenDeath: false }, 43_000),
+      "wrong_question_phase",
+    );
+    assert.equal(totalOf(s, "p1"), once, "and it was paid for exactly once");
+    // The ordinary way on still works, and pays question two once.
+    s = accept(s, [{ type: "nextQuestion" }], 44_000);
+    assert.equal(trivia(s).at, 1);
+    assert.equal(trivia(s).phase, "idle");
+  });
+
+  test("the interrupted question keeps its answers for the big screen", () => {
+    let s = loaded([q(), q()], PIDS, [tb(1)]);
+    s = playQuestion(
+      s,
+      { p1: { choice: 2, ms: 100 }, p2: { choice: 0, ms: 200 } },
+      { reveal: true },
+    );
+    const before = trivia(s).answers;
+    assert.equal(Object.keys(before).length, 2);
+    s = accept(s, [{ type: "openQuestion", suddenDeath: true }], 40_000);
+    assert.deepEqual(trivia(s).answers, {}, "the tiebreak starts empty");
+    s = accept(s, [{ type: "answerQuestion", pid: "p3", choice: 1, ms: 20 }], 40_020);
+    s = accept(s, [{ type: "closeQuestion" }, { type: "revealQuestion" }], 41_000);
+    s = accept(s, [{ type: "nextQuestion" }], 42_000);
+    assert.deepEqual(trivia(s).answers, before, "and hands the question back whole");
+  });
+
+  test("two tiebreaks in a row still hand the scored question back", () => {
+    let s = loaded([q(), q()], ["p1"], [tb(1), tb(2)]);
+    s = playQuestion(s, { p1: { choice: 2, ms: 100 } }, { reveal: true });
+    s = accept(s, [{ type: "openQuestion", suddenDeath: true }], 40_000);
+    s = accept(s, [{ type: "closeQuestion" }, { type: "revealQuestion" }], 41_000);
+    // Nobody got it, so the host runs another one without clearing the first.
+    s = accept(s, [{ type: "openQuestion", suddenDeath: true }], 42_000);
+    assert.equal(must(currentQuestion(trivia(s))).text, "Tiebreaker 2");
+    assert.equal(must(trivia(s).tiebreakHeld).phase, "revealed");
+    s = accept(s, [{ type: "closeQuestion" }, { type: "revealQuestion" }], 43_000);
+    s = accept(s, [{ type: "nextQuestion" }], 44_000);
+    assert.equal(trivia(s).phase, "revealed", "still the scored question's phase");
+    assert.equal(trivia(s).at, 0);
+  });
+
+  test("each tiebreak spends a question, and the pool runs out", () => {
+    let s = loaded([q()], PIDS, [tb(1), tb(2)]);
+    s = accept(s, [{ type: "openQuestion", suddenDeath: true }], 1_000);
+    assert.equal(must(currentQuestion(trivia(s))).text, "Tiebreaker 1");
+    s = accept(s, [{ type: "closeQuestion" }, { type: "revealQuestion" }], 2_000);
+    s = accept(s, [{ type: "nextQuestion" }], 3_000);
+    s = accept(s, [{ type: "openQuestion", suddenDeath: true }], 4_000);
+    assert.equal(
+      must(currentQuestion(trivia(s))).text,
+      "Tiebreaker 2",
+      "a question the room has already heard cannot settle a second tie",
+    );
+    s = accept(s, [{ type: "closeQuestion" }, { type: "revealQuestion" }], 5_000);
+    s = accept(s, [{ type: "nextQuestion" }], 6_000);
+    assertRefused(
+      s,
+      run(s, { type: "openQuestion", suddenDeath: true }, 7_000),
+      "no_tiebreak_question",
+    );
+  });
+
+  test("a tiebreak is refused over an open or an unrevealed question", () => {
+    const open = accept(loaded(), [{ type: "openQuestion", suddenDeath: false }]);
+    assertRefused(
+      open,
+      run(open, { type: "openQuestion", suddenDeath: true }),
+      "wrong_question_phase",
+    );
+    const closed = accept(open, [{ type: "closeQuestion" }], 2_000);
+    assertRefused(
+      closed,
+      run(closed, { type: "openQuestion", suddenDeath: true }, 3_000),
+      "wrong_question_phase",
+    );
+  });
+
+  test("an ordinary question is still refused once one has been revealed", () => {
+    // Only sudden death may open over a revealed question. Opening the next
+    // scored one still goes through `nextQuestion`.
+    let s = accept(loaded(), [{ type: "openQuestion", suddenDeath: false }]);
+    s = accept(s, [{ type: "closeQuestion" }, { type: "revealQuestion" }], 2_000);
+    assertRefused(
+      s,
+      run(s, { type: "openQuestion", suddenDeath: false }, 3_000),
+      "wrong_question_phase",
+    );
+  });
+
+  test("the pool survives a replay of the log", () => {
+    const log: readonly { event: Event; at: number }[] = [
+      { event: { type: "open" }, at: 10 },
+      { event: { type: "join", pid: "p1", nickname: "p1" }, at: 20 },
+      { event: { type: "join", pid: "p2", nickname: "p2" }, at: 30 },
+      { event: { type: "start" }, at: 40 },
+      {
+        event: {
+          type: "loadTrivia",
+          activityId: "trivia",
+          questions: [q(), { ...q(), text: "Held back", tiebreak: true }],
+        },
+        at: 50,
+      },
+      { event: { type: "openQuestion", suddenDeath: true }, at: 60 },
+      { event: { type: "answerQuestion", pid: "p2", choice: 2, ms: 20 }, at: 80 },
+      { event: { type: "closeQuestion" }, at: 90 },
+    ];
+    const s = replay(
+      newSession({ sid: "s", title: "t", joinCode: "RAFT", activities: ACTIVITIES }),
+      log,
+    );
+    const t = must(s.trivia);
+    assert.equal(t.questions.length, 1);
+    assert.equal(must(currentQuestion(t)).text, "Held back");
+    assert.equal(t.suddenDeathWinner, "p2");
+    assert.equal(t.tiebreakUsed, 1);
+    assert.deepEqual(t.totals, {});
   });
 });

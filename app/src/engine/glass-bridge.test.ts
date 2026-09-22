@@ -912,13 +912,16 @@ describe("refusals", () => {
     );
   });
 
-  test("the three rounds that are still not built", () => {
+  test("a bridge config under another round's name is refused", () => {
+    // All six rounds are built now, so `round_not_built` is unreachable and
+    // the only mistake left at this door is naming one round and passing
+    // another's configuration.
     const s = entered(3);
     for (const round of ["unseal", "tug_of_raft", "gganbu"] as const) {
       assertRefused(
         s,
         run(s, { type: "startRound", round, config: glassBridgeRound() }, T0),
-        "round_not_built",
+        "invalid_round_config",
       );
     }
   });

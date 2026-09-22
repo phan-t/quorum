@@ -15,6 +15,7 @@ import {
   type Standing,
 } from "../engine/scoring.ts";
 import { checkpointsFor, glassFloorView, glassMeView } from "../engine/arcade.ts";
+import { currentQuestion } from "../engine/trivia.ts";
 import type {
   ArcadeState,
   ParticipantId,
@@ -244,7 +245,12 @@ export function triviaViewFor(
   trivia: TriviaState,
   role: Role,
 ): TriviaView | undefined {
-  const question = trivia.questions[trivia.at];
+  // `currentQuestion`, not `questions[at]`: a sudden-death tiebreaker is not in
+  // the scored set, and `at` is deliberately parked out of range while one
+  // runs. Reading the array directly used to put the *next unasked* question's
+  // text on every phone during a tiebreak, judge the taps against a different
+  // question, and read that question's answer out at the reveal.
+  const question = currentQuestion(trivia);
   if (!question) return undefined;
 
   const isHost = role === "host";
@@ -255,7 +261,9 @@ export function triviaViewFor(
 
   const base: TriviaView = {
     activityId: trivia.activityId,
-    index: trivia.at,
+    // A tiebreaker is not "question 4 of 20". It is outside the set, and the
+    // surfaces say so by being given no position in it.
+    index: trivia.suddenDeath ? -1 : trivia.at,
     of: trivia.questions.length,
     phase: trivia.phase,
     text: visible ? question.text : "",
@@ -267,7 +275,7 @@ export function triviaViewFor(
     suddenDeath: trivia.suddenDeath,
     suddenDeathWinner:
       winner === null ? null : (state.participants[winner]?.nickname ?? null),
-    round: roundAt(trivia.questions, trivia.at),
+    round: trivia.suddenDeath ? null : roundAt(trivia.questions, trivia.at),
   };
 
   const extra: {

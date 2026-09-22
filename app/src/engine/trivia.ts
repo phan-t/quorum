@@ -21,6 +21,56 @@ import type {
 /** SPEC.md's default when the CSV leaves `Points` blank. */
 export const DEFAULT_BASE_POINTS = 1000;
 
+/**
+ * The question in play: the tiebreaker during a sudden death, the scored
+ * question otherwise.
+ *
+ * Every read of "the current question" goes through here. Sudden death used to
+ * be a *mode* applied to `questions[at]`, and that had three consequences, all
+ * of them wrong: it spent a scored question to settle a tie, a tie settled
+ * mid-set silently removed a question from the game, and once the set was
+ * exhausted a tiebreak could not be run at all — `nextQuestion` refuses past
+ * the last question, so there was nothing left to put the mode on, which is
+ * precisely when a tie needs settling.
+ *
+ * Returning `undefined` rather than throwing keeps the callers' shape: an
+ * empty pool is refused at `openQuestion`, which is the only place that can
+ * say anything useful about it.
+ */
+export function currentQuestion(t: TriviaState): Question | undefined {
+  return t.suddenDeath ? t.tiebreakers[t.tiebreakAt] : t.questions[t.at];
+}
+
+/**
+ * Split a loaded file into the scored set and the sudden-death pool.
+ *
+ * Three sources, in order:
+ *
+ * 1. Questions flagged {@link Question.tiebreak} in the file. This is the
+ *    design SCORING.md wants — the tiebreaker travels with the set it is meant
+ *    to settle, written by the same person and verified in the same pass — and
+ *    it needs one column in the CSV importer, which is the follow-up this
+ *    change does not reach.
+ * 2. An explicit pool on the event, for a host who keeps tiebreakers in a
+ *    second file.
+ * 3. The built-in pool, so that "never a coin flip" is true for the files that
+ *    exist today, none of which carry a flag.
+ *
+ * The flagged questions come out of `questions` entirely. That is the whole
+ * point: a question that scores nothing must not be left sitting in the twenty
+ * that do, where a host working down the list would open it for points.
+ */
+export function partitionTiebreakers(
+  questions: readonly Question[],
+  explicit: readonly Question[] | undefined,
+  fallback: readonly Question[],
+): { scored: readonly Question[]; tiebreakers: readonly Question[] } {
+  const scored = questions.filter((q) => q.tiebreak !== true);
+  const flagged = questions.filter((q) => q.tiebreak === true);
+  const pool = [...flagged, ...(explicit ?? [])];
+  return { scored, tiebreakers: pool.length > 0 ? pool : fallback };
+}
+
 /** The streak bonus stops growing at the sixth consecutive correct answer. */
 export const MAX_STREAK_BONUS_STEPS = 5;
 

@@ -43,6 +43,10 @@ import {
   RECRUITMENT_SECONDS_PER_ITEM,
   recruitmentRound,
 } from "../arcade/recruitment.ts";
+import { unsealRound } from "../arcade/unseal.ts";
+import { tugOfRaftRound } from "../arcade/tug-of-raft.ts";
+import { gganbuRound } from "../arcade/gganbu.ts";
+import { glassBridgeRound } from "../arcade/glass-bridge.ts";
 
 /* ------------------------------------------------------------------ */
 /* Harness                                                              */
@@ -263,14 +267,15 @@ describe("the round frame", () => {
     assert.equal(arcadeOf(s).roundIndex, 1);
   });
 
-  test("a round that is not built, and a config for the wrong round, are refused", () => {
+  test("a config for the wrong round, and a round nobody can play, are refused", () => {
     const s = entered(["p1"]);
     assertRefused(
       s,
       run(s, { type: "startRound", round: "unseal", config: recruitmentRound() }),
-      // Its own code: "that round does not exist yet" and "you passed the
-      // wrong config" are different mistakes and the console says so.
-      "round_not_built",
+      // All six rounds are built, so this is no longer "that round does not
+      // exist yet" — it is the one mistake left at this door, which is naming
+      // one round and passing another's configuration.
+      "invalid_round_config",
     );
     assertRefused(
       s,
@@ -795,7 +800,16 @@ describe("the Lounge", () => {
 
 describe("the Lounge cap", () => {
   test("a perfect Lounge is worth less than a perfect Floor, round by round", () => {
-    // SPEC's "Arcade scoring summary", for the two rounds that are built.
+    // SPEC's "Arcade scoring summary", all six rounds.
+    //
+    // Two of the Lounge figures in that table are **stale and need
+    // correcting**: it lists 25 for Unseal and 25 for Gganbu, which predate
+    // the decision that the two backing awards are the better of the two and
+    // never their sum. Both are 8 here, and the test below says why 8 rather
+    // than 15: the cheapest way of completing those two Floors pays 10, where
+    // the cheapest way of crossing Plan / Apply's pays 25.
+    //
+    // Every Floor figure is SPEC's, unchanged.
     const rounds = [
       { round: "recruitment" as const, config: recruitmentRound(), floor: 90, lounge: 0 },
       {
@@ -804,6 +818,10 @@ describe("the Lounge cap", () => {
         floor: 40,
         lounge: 15,
       },
+      { round: "unseal" as const, config: unsealRound(), floor: 60, lounge: 8 },
+      { round: "tug_of_raft" as const, config: tugOfRaftRound(1), floor: 45, lounge: 0 },
+      { round: "gganbu" as const, config: gganbuRound(1), floor: 50, lounge: 8 },
+      { round: "glass_bridge" as const, config: glassBridgeRound(), floor: 63, lounge: 15 },
     ];
     for (const r of rounds) {
       assert.equal(floorMax(r.config), r.floor, `${r.round} Floor max`);
@@ -816,6 +834,36 @@ describe("the Lounge cap", () => {
       checkpointsFor(120).length * PLAN_APPLY_CHECKPOINT_BANK + PLAN_APPLY_CROSS;
     assert.equal(worstCrossing, 25);
     assert.ok(worstCrossing > loungeMax("plan_apply"));
+  });
+
+  test("the cheapest way off each Floor beats that round's perfect Lounge", () => {
+    // The same property, round by round, in the terms each round states it.
+    // "Crossing the line" means something different on each Floor, so the
+    // cheapest completion is written out here rather than derived.
+    const cheapest = [
+      // Crossing in last place: three checkpoints and the 10.
+      { round: "plan_apply" as const, completion: 25 },
+      // A circle tin, which is the cheapest tin there is.
+      { round: "unseal" as const, completion: 10 },
+      // Wagering nothing all round: ten tokens, converted 1:1. The cheapest
+      // *win* is 11 — one token against a revoked rival — and 10 is the
+      // harder number to beat, so it is the one used.
+      { round: "gganbu" as const, completion: 10 },
+      // Reaching the far side in wave 2 or 3: six steps at 5, and the 15.
+      { round: "glass_bridge" as const, completion: 45 },
+    ];
+    for (const r of cheapest) {
+      assert.ok(
+        loungeMax(r.round) < r.completion,
+        `${r.round}: a perfect Lounge (${loungeMax(r.round)}) must not beat ${r.completion}`,
+      );
+      // And the other half of SPEC's tuning target: a perfect Lounge is
+      // always worth having.
+      assert.ok(loungeMax(r.round) > 0, `${r.round}: the Lounge must pay something`);
+    }
+    // The two rounds with no Lounge at all are the two that never drain.
+    assert.equal(loungeMax("recruitment"), 0);
+    assert.equal(loungeMax("tug_of_raft"), 0);
   });
 
   test("a survivor who banks nothing is still beaten by a perfect Lounge", () => {

@@ -20,6 +20,7 @@ import type {
   Effect,
   Event,
   GlassWave,
+  LoungeSeat,
   Participant,
   ParticipantId,
   RawScore,
@@ -32,29 +33,51 @@ import type {
 import { spotsRemaining } from "./scoring.ts";
 import {
   assignPlayerNumbers,
+  beatMsFor,
   checkpointBank,
   checkpointsFor,
   closeGlassStep,
+  closePull,
+  closeRound,
   finishBonus,
+  GGANBU_MAX_WAGER,
+  GGANBU_MIN_WAGER,
   GLASS_FAR_SIDE,
   glassRemainingMs,
   glassStepBank,
+  isScrambleOf,
+  lateSide,
   lockInForceAt,
   matchesItem,
   PLAN_APPLY_CROSS,
   RECRUITMENT_CORRECT,
   RECRUITMENT_FIRST_BONUS,
   RECRUITMENT_FIRST_PLACES,
+  gganbuPairs,
+  resolveBeat,
   rosterOrder,
+  settleGganbuPrompt,
+  tinFor,
   settleRound,
   splitBoard,
+  splitPrompts,
+  splitTins,
+  tinIndexFor,
+  tokensOf,
+  tugRemainingMs,
+  tugSides,
+  unsealAnswerFor,
+  unsealFloorPoints,
+  unsealLetters,
   waveCutsFor,
   waveOf,
 } from "./arcade.ts";
-import type { GlassPlay } from "./arcade.ts";
-import { clampMs, idleQuestion, isCorrect, settleQuestion,
+import type { GganbuPlay, GlassPlay, TugPlay, UnsealPlay } from "./arcade.ts";
+import { clampMs, currentQuestion, idleQuestion, isCorrect,
+  partitionTiebreakers, settleQuestion,
   triviaHasBegun,
 } from "./trivia.ts";
+import { DEFAULT_TIEBREAKERS } from "./tiebreak.ts";
 
 /**
  * Fold a nickname for collision detection.
@@ -182,6 +205,53 @@ function withActivityTotals(
     bucket[pid] = { raw, status: "played" };
   }
   return { ...state.scores, [activityId]: bucket };
+}
+
+/**
+ * Somebody left the room. If a Gganbu round is running, the pair they were
+ * half of dissolves and **both** halves play the house.
+ *
+ * SPEC.md: "a rival who disconnects is replaced by the house". Written when
+ * the disconnection happens rather than worked out at the buzzer, for two
+ * reasons. The engine has no clock, so at settlement it could only ask "are
+ * they connected *now*", which turns a phone that blinked at the wrong second
+ * into a different scoreline. And the substitution is something the survivor's
+ * screen has to show *during* the round — their rival's name goes and the
+ * Front-End Man's takes its place — so it has to be state, not a derivation at
+ * the end.
+ *
+ * **Both halves**, rather than only the one left behind, because the +10 is
+ * awarded per player against whoever is in front of them and a one-sided
+ * substitution makes the pair's two comparisons disagree. With A on twelve and
+ * B on eleven, housing only B pays B (eleven beats the house's ten) *and* A
+ * (twelve beats eleven); with A on eight and B on nine it pays neither. Housing
+ * both leaves one rule to explain — if your gganbu leaves, you both play the
+ * house — and the house is the same ten that the odd one out has been playing
+ * all round, so nothing about it is a reward for leaving.
+ *
+ * Worth stating plainly, because it can cut either way: a player whose rival
+ * drops while holding three tokens is now chasing the house's ten, which is
+ * harder than what they had. Ten is the only count that does not depend on how
+ * the round had been going for somebody who is no longer in it.
+ */
+function houseThePairOf(
+  state: SessionState,
+  pid: ParticipantId,
+): ArcadeState | null {
+  const arcade = state.arcade;
+  const play = arcade?.play;
+  if (!arcade || play?.kind !== "gganbu") return arcade ?? null;
+  if (arcade.phase !== "card" && arcade.phase !== "running") return arcade;
+  const rival = play.rivals[pid];
+  if (rival === undefined) return arcade;
+  if (play.housed[rival] && play.housed[pid]) return arcade;
+  return {
+    ...arcade,
+    play: {
+      ...play,
+      housed: { ...play.housed, [rival]: true, [pid]: true },
+    },
+  };
 }
 
 export function reduce(
@@ -339,16 +409,41 @@ export function reduce(
       if (p.kicked) return unchanged();
       const connected = event.type === "reconnect";
       if (p.connected === connected) return unchanged();
+      // "A rival who disconnects is replaced by the house." Recorded at the
+      // instant it happens, because the engine has no clock and could not
+      // otherwise say *when* a rival stopped being one; and kept if they come
+      // back, because their gganbu has spent two prompts playing a house.
+      const arcade = connected ? state.arcade : houseThePairOf(state, event.pid);
+      const housed = arcade !== state.arcade;
+      const rival =
+        housed && state.arcade?.play?.kind === "gganbu"
+          ? state.arcade.play.rivals[event.pid]
+          : undefined;
       return applied(
-        {
-          ...state,
-          participants: {
-            ...state.participants,
-            [event.pid]: { ...p, connected },
-          },
-        },
-        // A connection blip is not news to anyone but the host.
-        [{ kind: "broadcast", to: "host", what: "state" }],
+        { ...state, participants: { ...state.participants, [event.pid]: { ...p, connected } }, arcade },
+        // A connection blip is not news to anyone but the host — but a pair
+        // dissolving is not a blip. It changes who two people are playing and
+        // what their +10 is measured against, so when it happens the two of
+        // them are told and it is **written down**: the runtime persists only
+        // when the engine asks, and it deliberately never persists a bare
+        // connection change ("who is connected is not durable"). Without this
+        // a restart would quietly un-house the pair.
+        housed
+          ? [
+              { kind: "broadcast", to: "host", what: "state" },
+              { kind: "broadcast", to: { pid: event.pid }, what: "state" },
+              ...(rival === undefined
+                ? []
+                : [
+                    {
+                      kind: "broadcast",
+                      to: { pid: rival },
+                      what: "state",
+                    } as const,
+                  ]),
+              PERSIST,
+            ]
+          : [{ kind: "broadcast", to: "host", what: "state" }],
       );
     }
 
@@ -362,6 +457,10 @@ export function reduce(
             ...state.participants,
             [event.pid]: { ...p, kicked: true, connected: false },
           },
+          // Kicked is gone for good, which is a disconnection that does not
+          // come back. Their gganbu plays the house from here, and so would
+          // they if they were still here.
+          arcade: houseThePairOf(state, event.pid),
         },
         [BROADCAST_STATE, ...BROADCAST_STANDINGS, PERSIST],
       );
@@ -377,6 +476,10 @@ export function reduce(
             ...state.participants,
             [event.pid]: { ...p, nicknameKey: "", connected: false },
           },
+          // Releasing a nickname takes somebody out of the roster, which is
+          // leaving the room by another door. Their gganbu plays the house for
+          // the same reason a kick's does.
+          arcade: houseThePairOf(state, event.pid),
         },
         [{ kind: "broadcast", to: "host", what: "state" }, PERSIST],
       );
@@ -680,12 +783,35 @@ export function reduce(
           ),
         );
       }
+      // The tiebreakers come out of the set here, once, so that from this
+      // point "the questions" means the scored questions everywhere.
+      const split = partitionTiebreakers(
+        event.questions,
+        event.tiebreakers,
+        DEFAULT_TIEBREAKERS,
+      );
+      // A file of nothing but tiebreakers is a file with no game in it. The
+      // same reasoning as an empty set, and a likelier mistake: it is one
+      // stray column of Ys.
+      if (split.scored.length === 0) {
+        return unchanged(
+          reject(
+            "host",
+            "no_questions_loaded",
+            "Every question in that file is flagged as a tiebreaker.",
+          ),
+        );
+      }
       return applied(
         {
           ...state,
           trivia: {
             activityId: event.activityId,
-            questions: event.questions,
+            questions: split.scored,
+            tiebreakers: split.tiebreakers,
+            tiebreakAt: 0,
+            tiebreakUsed: 0,
+            tiebreakHeld: null,
             at: 0,
             phase: "idle",
             opensAt: null,
@@ -713,19 +839,42 @@ export function reduce(
           reject("host", "wrong_phase", "Start the session first."),
         );
       }
-      if (trivia.phase !== "idle") {
+      // A sudden death may be opened over a question that has been revealed as
+      // well as over an idle one, and that is the point of the fix: a tie is
+      // settled *after* the last question, when the phase is `revealed` and
+      // `nextQuestion` has nothing left to advance to. It is still refused
+      // over an open question — two live questions is two live questions —
+      // and over a closed one, which would skip a reveal the room is waiting
+      // for.
+      const openable =
+        trivia.phase === "idle" ||
+        (event.suddenDeath && trivia.phase === "revealed");
+      if (!openable) {
         return unchanged(
           reject(
             "host",
             "wrong_question_phase",
-            "This question is already in play.",
+            trivia.phase === "closed"
+              ? "Reveal this question before settling a tie."
+              : "This question is already in play.",
           ),
         );
       }
-      const question = trivia.questions[trivia.at];
+      // Sudden death draws on the pool, and spends what it draws: a question
+      // the room has heard cannot be asked again to settle a second tie.
+      const tiebreakAt = event.suddenDeath ? trivia.tiebreakUsed : trivia.tiebreakAt;
+      const question = event.suddenDeath
+        ? trivia.tiebreakers[tiebreakAt]
+        : trivia.questions[trivia.at];
       if (!question) {
         return unchanged(
-          reject("host", "no_more_questions", "That was the last question."),
+          event.suddenDeath
+            ? reject(
+                "host",
+                "no_tiebreak_question",
+                "There are no tiebreak questions left.",
+              )
+            : reject("host", "no_more_questions", "That was the last question."),
         );
       }
       return applied(
@@ -742,6 +891,33 @@ export function reduce(
               : now + question.timeLimitSec * 1000,
             suddenDeath: event.suddenDeath,
             suddenDeathWinner: null,
+            tiebreakAt,
+            tiebreakUsed: event.suddenDeath
+              ? tiebreakAt + 1
+              : trivia.tiebreakUsed,
+            // `at` is deliberately untouched by a sudden death. The scored set
+            // stays exactly where the host left it, which is what makes a
+            // tiebreak runnable at any point — including between two scored
+            // questions, and including after the last of them.
+            //
+            // Where it was *in* that question is put aside here and handed
+            // back by `nextQuestion`. Without it a tiebreak run straight off a
+            // reveal would leave the set `idle` on a question already written
+            // to `scores`, which the host could then open and score a second
+            // time. A second tiebreak in a row keeps the first one's hold: the
+            // thing to come back to is the scored question, not the tiebreak
+            // that has just been asked.
+            tiebreakHeld: event.suddenDeath
+              ? (trivia.suddenDeath
+                  ? trivia.tiebreakHeld
+                  : { at: trivia.at, phase: trivia.phase, answers: trivia.answers })
+              : null,
+            // While the tiebreak runs, the scored set has no question in play,
+            // and `at` says so by pointing past the end of it. See the note on
+            // TriviaState.at: this is what keeps a projection that has not
+            // learned about tiebreakers yet from putting an un-asked scored
+            // question on thirty phones and reading its answer out.
+            ...(event.suddenDeath ? { at: trivia.questions.length } : {}),
             answers: {},
           },
         },
@@ -751,7 +927,10 @@ export function reduce(
 
     case "answerQuestion": {
       const trivia = state.trivia;
-      const question = trivia?.questions[trivia.at];
+      // The question in play, which during a sudden death is the tiebreaker
+      // and not `questions[at]`. Judging an answer against the wrong question
+      // is the bug this indirection exists to make impossible.
+      const question = trivia ? currentQuestion(trivia) : undefined;
       if (!trivia || !question || trivia.phase !== "open") {
         return unchanged(
           reject(
@@ -942,6 +1121,31 @@ export function reduce(
           ),
         );
       }
+      // Clearing a sudden death is not advancing the set. The tiebreak was
+      // never one of the twenty — `at` did not move when it opened — so it
+      // must not move when it is put away, or a tie settled between questions
+      // three and four would quietly cost the room question four. It also
+      // means this is the way out of a tiebreak run after the last question,
+      // where advancing would have nothing to advance to.
+      if (trivia.suddenDeath) {
+        const held = trivia.tiebreakHeld;
+        return applied(
+          {
+            ...state,
+            trivia: {
+              ...idleQuestion(trivia, held?.at ?? trivia.at),
+              // Back exactly where the tiebreak found it: the same phase, and
+              // the same answers for the big screen's distribution. A question
+              // that had been revealed comes back `revealed`, which is what
+              // stops it being opened — and scored — a second time.
+              phase: held?.phase ?? "idle",
+              answers: held?.answers ?? {},
+              tiebreakHeld: null,
+            },
+          },
+          [BROADCAST_STATE, PERSIST],
+        );
+      }
       const at = trivia.at + 1;
       if (at >= trivia.questions.length) {
         return unchanged(
@@ -1038,21 +1242,16 @@ export function reduce(
           reject("host", "wrong_round_phase", "A round is already in play."),
         );
       }
-      // Three of the six rounds are built. The config union carries only those
-      // three, so a mismatch is both "that is the wrong config" and "that round
-      // does not exist yet" — the message says which.
+      // All six rounds are built, and the config union carries all six, so a
+      // mismatch can only mean the host sent the wrong configuration for the
+      // round they named. `round_not_built` survives in the wire's vocabulary
+      // and is no longer reachable from here.
       if (event.config.kind !== event.round) {
-        const built =
-          event.round === "recruitment" ||
-          event.round === "plan_apply" ||
-          event.round === "glass_bridge";
         return unchanged(
           reject(
             "host",
-            built ? "invalid_round_config" : "round_not_built",
-            built
-              ? `That configuration is for ${event.config.kind}, not ${event.round}.`
-              : `${event.round} is not built yet.`,
+            "invalid_round_config",
+            `That configuration is for ${event.config.kind}, not ${event.round}.`,
           ),
         );
       }
@@ -1081,6 +1280,111 @@ export function reduce(
         if (!Number.isFinite(config.seconds) || config.seconds <= 0) {
           return unchanged(
             reject("host", "wrong_phase", "The round needs a length above zero."),
+          );
+        }
+      } else if (config.kind === "unseal") {
+        if (config.items.length === 0) {
+          return unchanged(
+            reject("host", "invalid_round_config", "That round has no tins."),
+          );
+        }
+        // A cue that is not a scramble of its own answer is a tin that cannot
+        // be opened: the letters to tap are not on the tiles. The content is
+        // hand-written, so it is checked once here rather than discovered by
+        // the one person who picked the umbrella.
+        const badTin = config.items.findIndex(
+          (i) =>
+            unsealLetters(i.answer).length === 0 ||
+            !isScrambleOf(i.cue, i.answer),
+        );
+        if (badTin !== -1) {
+          return unchanged(
+            reject(
+              "host",
+              "invalid_round_config",
+              `Tin ${badTin + 1}'s scramble is not the letters of its word.`,
+            ),
+          );
+        }
+        if (!Number.isFinite(config.seconds) || config.seconds <= 0) {
+          return unchanged(
+            reject(
+              "host",
+              "invalid_round_config",
+              "The round needs a length above zero.",
+            ),
+          );
+        }
+      } else if (config.kind === "tug_of_raft") {
+        if (!Number.isInteger(config.pulls) || config.pulls <= 0) {
+          return unchanged(
+            reject(
+              "host",
+              "invalid_round_config",
+              "There has to be at least one pull.",
+            ),
+          );
+        }
+        if (!Number.isFinite(config.pullSeconds) || config.pullSeconds <= 0) {
+          return unchanged(
+            reject(
+              "host",
+              "invalid_round_config",
+              "A pull needs a length above zero.",
+            ),
+          );
+        }
+        // A heartbeat of zero has no beats to be on, and a negative one runs
+        // backwards. Either divides the whole round by nonsense.
+        if (!Number.isFinite(config.bpm) || config.bpm <= 0) {
+          return unchanged(
+            reject(
+              "host",
+              "invalid_round_config",
+              "The heartbeat needs a tempo above zero.",
+            ),
+          );
+        }
+        if (!Number.isFinite(config.seed)) {
+          return unchanged(
+            reject("host", "invalid_round_config", "That seed is not a number."),
+          );
+        }
+      } else if (config.kind === "gganbu") {
+        if (config.prompts.length === 0) {
+          return unchanged(
+            reject("host", "invalid_round_config", "That round has no prompts."),
+          );
+        }
+        if (
+          !Number.isFinite(config.secondsPerPrompt) ||
+          config.secondsPerPrompt <= 0
+        ) {
+          return unchanged(
+            reject(
+              "host",
+              "invalid_round_config",
+              "Each prompt needs a timer above zero.",
+            ),
+          );
+        }
+        // Nobody can wager out of an empty hand, and a round that starts every
+        // player on zero would revoke the room before the first prompt.
+        if (
+          !Number.isInteger(config.startTokens) ||
+          config.startTokens < GGANBU_MIN_WAGER
+        ) {
+          return unchanged(
+            reject(
+              "host",
+              "invalid_round_config",
+              "Everyone has to start with at least one token.",
+            ),
+          );
+        }
+        if (!Number.isFinite(config.seed)) {
+          return unchanged(
+            reject("host", "invalid_round_config", "That seed is not a number."),
           );
         }
       } else {
@@ -1155,6 +1459,88 @@ export function reduce(
           target: config.target,
           seconds: config.seconds,
           finishOrder: [],
+        };
+      } else if (config.kind === "unseal") {
+        // The word is separated from the letters once, here, and never put
+        // back together outside `revealRound`. See splitTins().
+        const { tins, key } = splitTins(config.items);
+        play = {
+          kind: "unseal",
+          tins,
+          key,
+          seconds: config.seconds,
+          // Nobody holds a tin yet. The shape picker runs against the round
+          // card — "choose a shape, you will be given a sealed tin" — and the
+          // tin does not open until `beginPlay`.
+          pick: {},
+          progress: {},
+          docs: {},
+          unsealedMs: {},
+          unsealOrder: [],
+        };
+      } else if (config.kind === "tug_of_raft") {
+        play = {
+          kind: "tug_of_raft",
+          pulls: config.pulls,
+          pullSeconds: config.pullSeconds,
+          beatMs: beatMsFor(config.bpm),
+          pull: 0,
+          seed: config.seed,
+          // Dealt from the roster that is in the room now, so the big screen
+          // can put the two sides on the round card. Anyone who arrives after
+          // this gets a side on their first tap — see `tapBeat`.
+          sides: tugSides(
+            rosterOrder(state).map((p) => p.pid),
+            config.seed,
+          ),
+          // The heartbeat starts at `beginPlay`, not here.
+          pullStartedAt: 0,
+          pullEndsAt: 0,
+          onBeats: {},
+          lastBeat: {},
+          creditedAt: {},
+          wins: [0, 0],
+        };
+      } else if (config.kind === "gganbu") {
+        const { board, key } = splitPrompts(config.prompts);
+        const roster = rosterOrder(state);
+        const tokens: Record<ParticipantId, number> = {};
+        for (const p of roster) tokens[p.pid] = config.startTokens;
+        // "A rival who disconnects is replaced by the house" — including one
+        // who was already gone when the pairs were drawn. Somebody whose phone
+        // died in the break is not a rival, they are a frozen token count, and
+        // the house is the kinder and the more honest of the two.
+        //
+        // A pair with an absent half dissolves for **both** of them, exactly
+        // as it does when somebody drops mid-round. See houseThePairOf().
+        const rivals = gganbuPairs(
+          roster.map((p) => p.pid),
+          config.seed,
+        );
+        const housed: Record<ParticipantId, true> = {};
+        for (const p of roster) {
+          const rival = rivals[p.pid];
+          if (rival === undefined) continue;
+          if (
+            state.participants[rival]?.connected !== true ||
+            p.connected !== true
+          ) {
+            housed[p.pid] = true;
+            housed[rival] = true;
+          }
+        }
+        play = {
+          kind: "gganbu",
+          board,
+          key,
+          at: 0,
+          secondsPerPrompt: config.secondsPerPrompt,
+          promptEndsAt: 0,
+          startTokens: config.startTokens,
+          tokens,
+          rivals,
+          housed,
+          wagers: {},
         };
       } else {
         // The answer is separated from the labels once, here, and never put
@@ -1232,6 +1618,22 @@ export function reduce(
         // durations are random 2–6 s and the engine has no randomness.
         started = { ...play, light: "plan", lightChangedAt: now, nextChangeAt: now };
         endsAt = now + play.seconds * 1000;
+      } else if (play.kind === "unseal") {
+        // The tins open. Whoever picked a shape against the round card is
+        // holding one; whoever did not may still pick, and has lost the
+        // seconds it takes them.
+        started = play;
+        endsAt = now + play.seconds * 1000;
+      } else if (play.kind === "tug_of_raft") {
+        // The heartbeat starts here, and beat 0 is this instant: every beat
+        // index in the round is counted from it.
+        const pullEndsAt = now + play.pullSeconds * 1000;
+        started = { ...play, pull: 0, pullStartedAt: now, pullEndsAt };
+        endsAt = pullEndsAt + tugRemainingMs(play, 0);
+      } else if (play.kind === "gganbu") {
+        const promptEndsAt = now + play.secondsPerPrompt * 1000;
+        started = { ...play, at: 0, promptEndsAt };
+        endsAt = now + play.board.length * play.secondsPerPrompt * 1000;
       } else {
         // Wave 1 walks onto the bridge blind, with the longest step it will
         // ever get.
@@ -1602,6 +2004,608 @@ export function reduce(
               PERSIST,
             ]
           : [],
+      );
+    }
+
+    /* ---------------- Round 2 — Unseal ---------------- */
+
+    case "pickShape": {
+      const arcade = state.arcade;
+      if (!arcade) {
+        return unchanged(
+          reject({ pid: event.pid }, "not_in_arcade", "The arcade is not open."),
+        );
+      }
+      const play = arcade.play;
+      // Picking is allowed against the round card *and* after the Floor
+      // opens. The card is what the picker is for — "choose a shape, you will
+      // be given a sealed tin" — but a player who joined late, or whose phone
+      // woke up slowly, still has to be able to play, and the seconds they
+      // spend picking are already the whole cost.
+      if (
+        play?.kind !== "unseal" ||
+        (arcade.phase !== "card" && arcade.phase !== "running")
+      ) {
+        return unchanged(
+          reject(
+            { pid: event.pid },
+            "wrong_round_phase",
+            "There is no tin to choose.",
+          ),
+        );
+      }
+      const p = state.participants[event.pid];
+      if (!p || p.kicked) {
+        return unchanged(
+          reject(
+            { pid: event.pid },
+            "unknown_participant",
+            `No participant ${event.pid}.`,
+          ),
+        );
+      }
+      if (arcade.standing[event.pid] === "drained") {
+        return unchanged(
+          reject(
+            { pid: event.pid },
+            "not_on_the_floor",
+            "You are in the Lounge. Back a player.",
+          ),
+        );
+      }
+      // Change your mind freely while the tin is still closed, and not once it
+      // is open. The shape is a bet made before the word is known, which is
+      // the round; a re-pick at second nine would be a second tin.
+      if (arcade.phase === "running" && event.pid in play.pick) {
+        return unchanged(
+          reject(
+            { pid: event.pid },
+            "already_picked",
+            "You are holding that tin.",
+          ),
+        );
+      }
+      const at = tinIndexFor(
+        play.tins,
+        event.shape,
+        arcade.playerNumbers[event.pid],
+      );
+      if (at === -1) {
+        return unchanged(
+          reject(
+            { pid: event.pid },
+            "invalid_choice",
+            "There is no tin of that shape.",
+          ),
+        );
+      }
+      if (play.pick[event.pid] === at) return unchanged();
+      return applied(
+        {
+          ...state,
+          arcade: {
+            ...arcade,
+            play: { ...play, pick: { ...play.pick, [event.pid]: at } },
+          },
+        },
+        // The big screen counts the shapes — four tiles filling up is the
+        // round card's whole animation — and the console shows the room. What
+        // goes nowhere is *which tin*, which is why the view is a count.
+        [
+          { kind: "broadcast", to: { pid: event.pid }, what: "state" },
+          { kind: "broadcast", to: "host", what: "state" },
+          { kind: "broadcast", to: "screen", what: "state" },
+          PERSIST,
+        ],
+      );
+    }
+
+    case "tapLetter":
+    case "readDocs": {
+      const arcade = state.arcade;
+      if (!arcade) {
+        return unchanged(
+          reject({ pid: event.pid }, "not_in_arcade", "The arcade is not open."),
+        );
+      }
+      const play = arcade.play;
+      if (arcade.phase !== "running" || play?.kind !== "unseal") {
+        return unchanged(
+          reject(
+            { pid: event.pid },
+            "wrong_round_phase",
+            "There is nothing to unseal.",
+          ),
+        );
+      }
+      const p = state.participants[event.pid];
+      if (!p || p.kicked) {
+        return unchanged(
+          reject(
+            { pid: event.pid },
+            "unknown_participant",
+            `No participant ${event.pid}.`,
+          ),
+        );
+      }
+      if (arcade.standing[event.pid] === "drained") {
+        return unchanged(
+          reject(
+            { pid: event.pid },
+            "not_on_the_floor",
+            "The tin has cracked. Back a player.",
+          ),
+        );
+      }
+      if (arcade.endsAt !== null && now >= arcade.endsAt) {
+        return unchanged(
+          reject({ pid: event.pid }, "floor_locked", "The Floor is closed."),
+        );
+      }
+      const tin = tinFor(play, event.pid);
+      const answer = unsealAnswerFor(play, event.pid);
+      if (!tin || !answer) {
+        return unchanged(
+          reject(
+            { pid: event.pid },
+            "no_shape_picked",
+            "Choose a shape first.",
+          ),
+        );
+      }
+      const word = unsealLetters(answer.answer);
+      const progress = play.progress[event.pid] ?? 0;
+      // Already open. Their tin is done; a stray frame is not a crack, exactly
+      // as a stray tap is not one in Plan / Apply.
+      if (progress >= word.length) return unchanged();
+
+      let correct: boolean;
+      if (event.type === "readDocs") {
+        // "It reveals the next letter and halves your score for the round."
+        // The letter is *committed*, not merely shown: there is then nothing
+        // per-player left to project, and the phone's solved row fills in on
+        // its own. Press it again and it buys the next one too — in the show
+        // the cheat works completely, and what it costs is half the round.
+        correct = true;
+      } else {
+        const tapped = unsealLetters(event.letter)[0];
+        if (tapped === undefined) {
+          return unchanged(
+            reject({ pid: event.pid }, "invalid_letter", "That is not a letter."),
+          );
+        }
+        // A letter that is not on their own tiles is a malformed frame, not a
+        // wrong guess, and draining somebody for a bad frame would be the game
+        // punishing a phone. It leaks nothing to say so: the tiles are theirs
+        // and they are looking at them.
+        if (!unsealLetters(tin.cue).includes(tapped)) {
+          return unchanged(
+            reject(
+              { pid: event.pid },
+              "invalid_letter",
+              "That letter is not on your tin.",
+            ),
+          );
+        }
+        correct = tapped === word[progress];
+      }
+
+      if (!correct) {
+        // "The tin has cracked. Player 017 drained." Everything banked stays
+        // banked: 2 a letter, up to the crack.
+        const cracked: UnsealPlay = play;
+        return applied(
+          {
+            ...state,
+            arcade: {
+              ...arcade,
+              standing: { ...arcade.standing, [event.pid]: "drained" },
+              lounge: {
+                ...arcade.lounge,
+                [event.pid]: arcade.lounge[event.pid] ?? {
+                  backing: null,
+                  at: now,
+                },
+              },
+              banked: {
+                ...arcade.banked,
+                [event.pid]: unsealFloorPoints(cracked, event.pid),
+              },
+            },
+          },
+          [BROADCAST_STATE, PERSIST],
+        );
+      }
+
+      const next = progress + 1;
+      const open = next >= word.length;
+      const nextPlay: UnsealPlay = {
+        ...play,
+        progress: { ...play.progress, [event.pid]: next },
+        docs:
+          event.type === "readDocs"
+            ? { ...play.docs, [event.pid]: true }
+            : play.docs,
+        // Measured from the Floor opening, which is the same instant for
+        // everybody. Dithering over the shape picker comes out of your own
+        // time, and a player who picked late has not bought a shorter clock.
+        unsealedMs: open
+          ? {
+              ...play.unsealedMs,
+              [event.pid]: Math.max(0, now - (arcade.startedAt ?? now)),
+            }
+          : play.unsealedMs,
+        unsealOrder: open
+          ? [...play.unsealOrder, event.pid]
+          : play.unsealOrder,
+      };
+      return applied(
+        {
+          ...state,
+          arcade: {
+            ...arcade,
+            // Assigned rather than added: the Floor score for this round is a
+            // function of the tin, the progress and the docs button, and
+            // reading the docs at letter nine has to be able to halve what
+            // letters one to eight were worth.
+            banked: {
+              ...arcade.banked,
+              [event.pid]: unsealFloorPoints(nextPlay, event.pid),
+            },
+            play: nextPlay,
+          },
+        },
+        // The tapper's own phone, the console, and the big screen — which
+        // draws letter counts and the fastest board, and never a letter.
+        // Reading the docs looks identical from outside, because it is one
+        // more letter: "Nobody will know."
+        [
+          { kind: "broadcast", to: { pid: event.pid }, what: "state" },
+          { kind: "broadcast", to: "host", what: "state" },
+          { kind: "broadcast", to: "screen", what: "state" },
+          PERSIST,
+        ],
+      );
+    }
+
+    /* ---------------- Round 3 — Tug of Raft ---------------- */
+
+    case "tapBeat": {
+      const arcade = state.arcade;
+      if (!arcade) {
+        return unchanged(
+          reject({ pid: event.pid }, "not_in_arcade", "The arcade is not open."),
+        );
+      }
+      const play = arcade.play;
+      if (arcade.phase !== "running" || play?.kind !== "tug_of_raft") {
+        return unchanged(
+          reject({ pid: event.pid }, "wrong_round_phase", "There is no rope."),
+        );
+      }
+      const p = state.participants[event.pid];
+      if (!p || p.kicked) {
+        return unchanged(
+          reject(
+            { pid: event.pid },
+            "unknown_participant",
+            `No participant ${event.pid}.`,
+          ),
+        );
+      }
+      // No drained check, and that is not an omission: nobody drains in this
+      // round. SPEC.md is explicit about why — two elimination rounds
+      // back-to-back is a downer, and the arcade needs one round that is pure
+      // noise — so there is no Lounge here to be refused into.
+      if (event.at >= play.pullEndsAt) {
+        return unchanged(
+          reject({ pid: event.pid }, "floor_locked", "The pull is over."),
+        );
+      }
+      // A frame from before the heartbeat started has no beat to be on.
+      if (event.at < play.pullStartedAt) return unchanged();
+
+      // Somebody who was not in the room when the sides were dealt gets one
+      // now, rather than being told to watch.
+      const dealt = play.sides[event.pid];
+      const sides =
+        dealt === undefined
+          ? { ...play.sides, [event.pid]: lateSide(play.seed, event.pid) }
+          : play.sides;
+
+      const was = play.lastBeat[event.pid] ?? -1;
+      const judged = resolveBeat(play, was, event.at);
+      // One credit per beat: a drum roll on one beat is one pull, or the round
+      // would be the tap race the heartbeat exists to prevent.
+      const credited =
+        !judged.inElection && judged.onBeat && judged.beat > was;
+      const last = credited ? judged.beat : judged.lastBeat;
+
+      if (!credited && sides === play.sides && last === was) {
+        // An off-beat tap, or a tap swallowed by an election. "Tap off the
+        // beat and nothing happens" is the rule, and nothing happening is
+        // cheaper than saying so.
+        return unchanged();
+      }
+      return applied(
+        {
+          ...state,
+          arcade: {
+            ...arcade,
+            play: {
+              ...play,
+              sides,
+              onBeats: credited
+                ? {
+                    ...play.onBeats,
+                    [event.pid]: (play.onBeats[event.pid] ?? 0) + 1,
+                  }
+                : play.onBeats,
+              lastBeat: { ...play.lastBeat, [event.pid]: last },
+              creditedAt: credited
+                ? { ...play.creditedAt, [event.pid]: event.at }
+                : play.creditedAt,
+            },
+          },
+        },
+        // **Not** `to: "all"`, and this is the one round where that needs
+        // saying, because the rope is on every phone. Thirty players at 100
+        // bpm is fifty credits a second, and a fan-out each would be fifteen
+        // hundred frames a second to move a rope by a pixel. The big screen is
+        // the rope of record and the console is the room; a phone animates its
+        // own side and picks the rope up on the next frame it is sent. A
+        // throttled tick for the phones belongs at the boundary, not here.
+        credited
+          ? [
+              { kind: "broadcast", to: { pid: event.pid }, what: "state" },
+              { kind: "broadcast", to: "host", what: "state" },
+              { kind: "broadcast", to: "screen", what: "state" },
+              PERSIST,
+            ]
+          : [],
+      );
+    }
+
+    case "nextPull": {
+      const arcade = state.arcade;
+      if (!arcade) {
+        return unchanged(
+          reject("host", "not_in_arcade", "Enter the arcade first."),
+        );
+      }
+      const play = arcade.play;
+      if (arcade.phase !== "running" || play?.kind !== "tug_of_raft") {
+        return unchanged(
+          reject("host", "wrong_round_phase", "No rope round is running."),
+        );
+      }
+      const pull = play.pull + 1;
+      if (pull >= play.pulls) {
+        return unchanged(
+          reject(
+            "host",
+            "wrong_round_phase",
+            "That was the last pull. End the round.",
+          ),
+        );
+      }
+      if (!Number.isFinite(event.seed)) {
+        return unchanged(
+          reject("host", "invalid_round_config", "That seed is not a number."),
+        );
+      }
+      const close = closePull(play);
+      const banked: Record<ParticipantId, number> = { ...arcade.banked };
+      for (const [pid, gain] of Object.entries(close.gained)) {
+        banked[pid] = (banked[pid] ?? 0) + gain;
+      }
+      const pullEndsAt = now + play.pullSeconds * 1000;
+      return applied(
+        {
+          ...state,
+          arcade: {
+            ...arcade,
+            banked,
+            // Re-derived from the pull that is actually open, for the reason
+            // `nextItem` re-derives Recruitment's: each pull starts a little
+            // after its predecessor's deadline, and a round end guessed at
+            // `beginPlay` drifts earlier than the truth by the accumulated
+            // lag.
+            endsAt: pullEndsAt + tugRemainingMs(play, pull),
+            play: {
+              ...play,
+              pull,
+              seed: event.seed,
+              // Reshuffled, so nobody is stuck on a losing side.
+              sides: tugSides(
+                rosterOrder(state).map((rp) => rp.pid),
+                event.seed,
+              ),
+              pullStartedAt: now,
+              pullEndsAt,
+              // Every one of these is per pull: a new heartbeat, a new rope,
+              // and a leader who has to earn it again.
+              onBeats: {},
+              lastBeat: {},
+              creditedAt: {},
+              wins: close.wins,
+            },
+          },
+        },
+        [BROADCAST_STATE, PERSIST],
+      );
+    }
+
+    /* ---------------- Round 4 — Gganbu ---------------- */
+
+    case "wager": {
+      const arcade = state.arcade;
+      if (!arcade) {
+        return unchanged(
+          reject({ pid: event.pid }, "not_in_arcade", "The arcade is not open."),
+        );
+      }
+      const play = arcade.play;
+      if (arcade.phase !== "running" || play?.kind !== "gganbu") {
+        return unchanged(
+          reject(
+            { pid: event.pid },
+            "wrong_round_phase",
+            "There is nothing to wager on.",
+          ),
+        );
+      }
+      const p = state.participants[event.pid];
+      if (!p || p.kicked) {
+        return unchanged(
+          reject(
+            { pid: event.pid },
+            "unknown_participant",
+            `No participant ${event.pid}.`,
+          ),
+        );
+      }
+      if (arcade.standing[event.pid] === "drained") {
+        return unchanged(
+          reject(
+            { pid: event.pid },
+            "not_on_the_floor",
+            "Your token was revoked. Back a player.",
+          ),
+        );
+      }
+      if (
+        now >= play.promptEndsAt ||
+        (arcade.endsAt !== null && now >= arcade.endsAt)
+      ) {
+        return unchanged(
+          reject({ pid: event.pid }, "floor_locked", "That prompt has closed."),
+        );
+      }
+      // One wager per prompt. A second frame is not a change of mind: fifteen
+      // seconds is short enough that a re-stake would be a second look at your
+      // rival's face.
+      if (event.pid in play.wagers) {
+        return unchanged(
+          reject({ pid: event.pid }, "already_answered_item", "You are locked in."),
+        );
+      }
+      if (!play.board[play.at]) {
+        return unchanged(
+          reject({ pid: event.pid }, "wrong_round_phase", "No prompt is open."),
+        );
+      }
+      if (event.pick !== "over" && event.pick !== "under") {
+        return unchanged(
+          reject({ pid: event.pid }, "invalid_choice", "Over, or under."),
+        );
+      }
+      const held = tokensOf(play, event.pid);
+      if (
+        !Number.isInteger(event.amount) ||
+        event.amount < GGANBU_MIN_WAGER ||
+        event.amount > GGANBU_MAX_WAGER ||
+        event.amount > held
+      ) {
+        return unchanged(
+          reject(
+            { pid: event.pid },
+            "invalid_wager",
+            `One to ${Math.min(GGANBU_MAX_WAGER, held)} tokens.`,
+          ),
+        );
+      }
+      return applied(
+        {
+          ...state,
+          arcade: {
+            ...arcade,
+            play: {
+              ...play,
+              // A latecomer is dealt in by playing, at the opening stake.
+              tokens:
+                play.tokens[event.pid] === undefined
+                  ? { ...play.tokens, [event.pid]: held }
+                  : play.tokens,
+              wagers: {
+                ...play.wagers,
+                [event.pid]: { pick: event.pick, amount: event.amount },
+              },
+            },
+          },
+        },
+        // The count of who has wagered goes to the console and the big screen;
+        // the contents go nowhere at all until the prompt settles, least of
+        // all to the one person in the room who is betting against this
+        // player. **Not** `to: "all"`: a rival learning that a wager landed is
+        // the whole of what they are allowed to learn, and they learn it from
+        // their own frame, not from this one.
+        [
+          { kind: "broadcast", to: { pid: event.pid }, what: "state" },
+          { kind: "broadcast", to: "host", what: "state" },
+          { kind: "broadcast", to: "screen", what: "state" },
+          PERSIST,
+        ],
+      );
+    }
+
+    case "nextPrompt": {
+      const arcade = state.arcade;
+      if (!arcade) {
+        return unchanged(
+          reject("host", "not_in_arcade", "Enter the arcade first."),
+        );
+      }
+      const play = arcade.play;
+      if (arcade.phase !== "running" || play?.kind !== "gganbu") {
+        return unchanged(
+          reject("host", "wrong_round_phase", "No wager round is running."),
+        );
+      }
+      const at = play.at + 1;
+      if (at >= play.board.length) {
+        return unchanged(
+          reject(
+            "host",
+            "wrong_round_phase",
+            "That was the last prompt. End the round.",
+          ),
+        );
+      }
+      // The tokens move here and nowhere else. See settleGganbuPrompt().
+      const settled = settleGganbuPrompt(play);
+      const standing: Record<ParticipantId, ArcadeStanding> = {
+        ...arcade.standing,
+      };
+      const lounge: Record<ParticipantId, LoungeSeat> = { ...arcade.lounge };
+      for (const pid of settled.revoked) {
+        standing[pid] = "drained";
+        lounge[pid] = arcade.lounge[pid] ?? { backing: null, at: now };
+      }
+      const promptEndsAt = now + play.secondsPerPrompt * 1000;
+      const nextPlay: GganbuPlay = {
+        ...play,
+        at,
+        promptEndsAt,
+        tokens: settled.tokens,
+        wagers: {},
+      };
+      return applied(
+        {
+          ...state,
+          arcade: {
+            ...arcade,
+            standing,
+            lounge,
+            endsAt:
+              promptEndsAt +
+              (play.board.length - 1 - at) * play.secondsPerPrompt * 1000,
+            play: nextPlay,
+          },
+        },
+        // Everybody's frame moves: the token counts are public once they are
+        // settled, and a revocation puts a gold seat on the dormitory grid.
+        [BROADCAST_STATE, PERSIST],
       );
     }
 
@@ -1993,23 +2997,10 @@ export function reduce(
           reject("host", "wrong_round_phase", "No round is running."),
         );
       }
-      // The Glass Bridge's last step has no `nextStep` or `nextWave` after it
-      // to close it, so the round's end closes it — which is also what
-      // happens when the host ends a round early with a wave still on the
-      // bridge. Anyone who had not stepped is drained, and the pane that broke
-      // is published, before the Lounge is settled against the result.
-      const closing =
-        arcade.play?.kind === "glass_bridge"
-          ? closeGlassStep(state, arcade, arcade.play, now)
-          : null;
-      const closed: ArcadeState = closing
-        ? {
-            ...arcade,
-            standing: closing.standing,
-            lounge: closing.lounge,
-            play: { ...(arcade.play as GlassPlay), broken: closing.broken },
-          }
-        : arcade;
+      // Whatever the Floor still owes, before the Lounge is settled against
+      // the result: the Bridge's last step, Unseal's fastest bonuses, the last
+      // pull, the last prompt and Gganbu's conversion. See closeRound().
+      const closed: ArcadeState = closeRound(state, arcade, now);
 
       // The Floor locks, the Lounge is paid, and the round folds into the
       // arcade total. Who is drained is *not* reset here: the big screen keeps

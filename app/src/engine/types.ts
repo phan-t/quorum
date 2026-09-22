@@ -95,6 +95,21 @@ export interface Question {
   readonly round: string | null;
   /** Base points. 0 makes a question a warm-up that scores nothing. */
   readonly basePoints: number;
+  /**
+   * A tiebreak question: **not part of the scored set**.
+   *
+   * SCORING.md settles a tie with sudden death — "one question, first correct
+   * answer wins, no points" — and a question that scores nothing must not also
+   * be one of the twenty that do. `loadTrivia` lifts every flagged question out
+   * of `questions` and into {@link TriviaState.tiebreakers}, so a file of 23
+   * rows with three flagged is a twenty-question game with three tiebreakers
+   * behind it.
+   *
+   * Optional, and absent on every question the CSV importer builds today: a
+   * `Tiebreak` column is the follow-up that fills it. Until then sudden death
+   * draws on the built-in pool — see engine/tiebreak.ts.
+   */
+  readonly tiebreak?: boolean;
 }
 
 /**
@@ -123,12 +138,78 @@ export interface TriviaAnswer {
 export interface TriviaState {
   readonly activityId: ActivityId;
   readonly questions: readonly Question[];
-  /** Index into `questions`. */
+  /**
+   * Index into `questions` of the **scored question in play**.
+   *
+   * While a sudden death is running there is no scored question in play, and
+   * this says so by pointing past the end of the set: a tiebreaker is not one
+   * of the twenty and does not have a place among them. The index the host
+   * will come back to is parked in {@link tiebreakHeld}.
+   *
+   * That is not only bookkeeping. Every projection built before the tiebreak
+   * pool existed reads `questions[at]` for "the question in play"; left
+   * pointing at the next scored question, such a projection would put that
+   * question's text on every phone during a tiebreak, judge the taps against
+   * a different question, and read its answer and its note out at the reveal —
+   * destroying a question that had not been asked yet. Out of range, the same
+   * projection finds nothing and shows nothing, which is the safe way to be
+   * wrong. Anything that wants the question in play calls `currentQuestion`.
+   */
   readonly at: number;
   readonly phase: QuestionPhase;
   /** Absolute server epochs, never durations. Null unless `phase` is open. */
   readonly opensAt: number | null;
   readonly closesAt: number | null;
+  /**
+   * Questions held back for sudden death, in the order they will be asked.
+   *
+   * Separate from `questions` because SCORING.md's sudden death "scores
+   * nothing" and a question that scores nothing cannot also be one of the
+   * twenty that do. Before this existed, sudden death was a *mode* on the
+   * question the set happened to be sitting on: it consumed a scored question,
+   * it could not be run once the set was exhausted, and running one mid-set
+   * meant that question was never asked for points.
+   *
+   * Filled from the questions flagged {@link Question.tiebreak} in the loaded
+   * file, from an explicit pool on `loadTrivia`, or — when the file carries
+   * neither, which is every file the importer produces today — from the
+   * built-in pool, so that a host can always settle a tie without a coin flip.
+   */
+  readonly tiebreakers: readonly Question[];
+  /**
+   * Index into `tiebreakers` of the sudden death **in play**. Meaningful only
+   * while `suddenDeath` is true.
+   */
+  readonly tiebreakAt: number;
+  /**
+   * How many tiebreakers have been spent. Bumped when a sudden death opens,
+   * not when it closes: a question the room has heard is spent whether or not
+   * anybody got it, and asking it twice would be asking a question the answer
+   * to which has already been shouted.
+   *
+   * Two fields rather than one index plus an off-by-one, because an off-by-one
+   * here is a question revealed to thirty people.
+   */
+  readonly tiebreakUsed: number;
+  /**
+   * Where the scored set was when the sudden death interrupted it, put aside
+   * to be handed back when the tiebreak is cleared.
+   *
+   * A tiebreak does not move `at`, so without this the set comes back from one
+   * in phase `idle` — and `idle` on a question that has already been asked,
+   * settled and written to `scores` is a question the host can open a second
+   * time, scoring it twice. It also keeps that question's answers, which the
+   * big screen draws its distribution from and which the tiebreak would
+   * otherwise overwrite with its own.
+   *
+   * Null except while a sudden death is in play.
+   */
+  readonly tiebreakHeld: {
+    /** The scored question the host will come back to. */
+    readonly at: number;
+    readonly phase: QuestionPhase;
+    readonly answers: Readonly<Record<ParticipantId, TriviaAnswer>>;
+  } | null;
   /** Sudden death: no timer, first correct answer wins, no points change. */
   readonly suddenDeath: boolean;
   readonly suddenDeathWinner: ParticipantId | null;
@@ -194,6 +275,42 @@ export type ArcadeRoundConfig =
   | { readonly kind: "recruitment"; readonly items: readonly EmojiItem[]; readonly secondsPerItem: number }
   | { readonly kind: "plan_apply"; readonly target: number; readonly seconds: number }
   | {
+      readonly kind: "unseal";
+      /** The tins. Carries the answers — see {@link UnsealItem}. */
+      readonly items: readonly UnsealItem[];
+      /** How long the Floor runs. SPEC.md: sixty seconds. */
+      readonly seconds: number;
+    }
+  | {
+      readonly kind: "tug_of_raft";
+      /** SPEC.md: three pulls, sides reshuffled between them. */
+      readonly pulls: number;
+      /** Seconds per pull. SPEC.md: 25. */
+      readonly pullSeconds: number;
+      /** The heartbeat. SPEC.md: 100 bpm, which is a beat every 600 ms. */
+      readonly bpm: number;
+      /**
+       * The seed the **first** pull's sides are dealt from.
+       *
+       * Drawn at the socket boundary, exactly as Plan / Apply's light
+       * durations are: the engine has no randomness, and "reshuffled by seed
+       * before each of three pulls" is SPEC.md's own phrasing. Pulls two and
+       * three get their seeds on `nextPull`.
+       */
+      readonly seed: number;
+    }
+  | {
+      readonly kind: "gganbu";
+      /** Six Over/Under prompts. Carries the answers — see {@link OverUnderItem}. */
+      readonly prompts: readonly OverUnderItem[];
+      /** SPEC.md: fifteen seconds a prompt. */
+      readonly secondsPerPrompt: number;
+      /** SPEC.md: "You each hold ten Vault tokens." */
+      readonly startTokens: number;
+      /** The seed the pairs are drawn from. Boundary-drawn, as above. */
+      readonly seed: number;
+    }
+  | {
       readonly kind: "glass_bridge";
       /** Six steps, two panes each. Carries the answers — see {@link GlassStep}. */
       readonly steps: readonly GlassStep[];
@@ -222,6 +339,112 @@ export interface EmojiItem {
   readonly accept: readonly string[];
   /** Shown at the reveal. The bit people actually learn from. */
   readonly note: string;
+}
+
+/* ------------------------------------------------------------------ */
+/* Round 2 — Unseal                                                    */
+/* ------------------------------------------------------------------ */
+
+/**
+ * The four tins. SPEC.md: "○ △ ☆ ☂ … the shapes are word lengths."
+ *
+ * Circle is a four- or five-letter term, triangle six, star eight, umbrella
+ * eleven or more. The shape is picked **before** the word is known, which is
+ * the whole conceit, and which is why {@link UnsealTin} does not reach a phone
+ * until the Floor opens.
+ */
+export type UnsealShape = "circle" | "triangle" | "star" | "umbrella";
+
+/**
+ * One tin, as content: the scrambled letters, the word inside, and the line
+ * the reveal reads out.
+ *
+ * `cue` is a permutation of `answer` with the letters spaced — "N E A L U S"
+ * for UNSEAL — and is the only half a player ever sees. `answer` is the
+ * answer, and is split away from `cue` at `startRound` for the same reason a
+ * glass pane's `real` is: see {@link UnsealTin} and {@link UnsealAnswer}.
+ */
+export interface UnsealItem {
+  readonly shape: UnsealShape;
+  readonly cue: string;
+  readonly answer: string;
+  readonly note: string;
+}
+
+/**
+ * The half of a tin a player may see once they are holding it: the shape they
+ * picked, the scrambled letters, and how many there are.
+ *
+ * Not the word. A projection handed one of these cannot leak the round,
+ * however carelessly it spreads the object.
+ */
+export interface UnsealTin {
+  readonly shape: UnsealShape;
+  readonly cue: string;
+  readonly length: number;
+}
+
+/** The other half: the word, and the reveal note. Both are the answer. */
+export interface UnsealAnswer {
+  readonly answer: string;
+  readonly note: string;
+}
+
+/* ------------------------------------------------------------------ */
+/* Round 4 — Gganbu                                                    */
+/* ------------------------------------------------------------------ */
+
+/** A wager's side. "Vagrant's first release — over or under 2011?" */
+export type OverUnder = "over" | "under";
+
+/**
+ * One Over/Under prompt, as content.
+ *
+ * `verify` is the trivia bank's ⚠️ VERIFY discipline, carried in the data
+ * rather than in a comment so that a test can hold the count and the host
+ * console can show the flag. SPEC.md: "three are flagged VERIFY exactly as the
+ * trivia bank flags dates". It travels with the *answer*, never with the
+ * prompt: which prompts the author was least sure of is not something a
+ * player needs, and a flag beside a question is a nudge.
+ */
+export interface OverUnderItem {
+  /** "Vagrant's first public release". Shown with the threshold. */
+  readonly cue: string;
+  /** "2011". Shown. */
+  readonly threshold: string;
+  /** **The answer.** */
+  readonly answer: OverUnder;
+  /** Read out at the reveal, with the real figure in it. */
+  readonly note: string;
+  /** Checked before the session, or not. */
+  readonly verify: boolean;
+}
+
+/** The half of a prompt that may be shown: the question, and nothing else. */
+export interface GganbuPrompt {
+  readonly cue: string;
+  readonly threshold: string;
+}
+
+/** The other half. Everything here is the answer. */
+export interface GganbuAnswer {
+  readonly answer: OverUnder;
+  readonly note: string;
+  readonly verify: boolean;
+}
+
+/**
+ * One player's secret call on the open prompt.
+ *
+ * Secret until the prompt settles, and that is the round's whole leak: both
+ * halves of a pair answer the same prompt, so a rival's wager — never mind
+ * their token count moving — is the answer arriving early. See
+ * {@link ArcadePlay} and `gganbuMeView`.
+ */
+export interface Wager {
+  readonly pick: OverUnder;
+  /** One to five tokens, and never more than they hold. */
+  readonly amount: number;
 }
 
 /**
@@ -383,6 +606,119 @@ export type ArcadePlay =
       readonly finishOrder: readonly ParticipantId[];
     }
   | {
+      readonly kind: "unseal";
+      /**
+       * What may be shown: shape, scrambled letters, length. Deliberately
+       * separate from {@link key} — see {@link UnsealTin}.
+       *
+       * Note that this is not public *state*: a tin reaches one phone, the
+       * phone of the player holding it, and not before the Floor opens.
+       * Publishing the list during the round card would tell the room which
+       * word sits behind each shape, and SPEC.md's whole conceit is "pick your
+       * shape before you know the word". `unsealMeView` is the only way out.
+       */
+      readonly tins: readonly UnsealTin[];
+      /**
+       * **The answer key**, index-aligned with {@link tins}. The words, and
+       * the reveal notes. Nothing here reaches any phone before `revealRound`.
+       */
+      readonly key: readonly UnsealAnswer[];
+      readonly seconds: number;
+      /**
+       * Which tin each player holds, as an index into {@link tins}. Written
+       * when they pick a shape; a tier with more than one word hands them out
+       * by arcade player number, so that two people sitting together are not
+       * unscrambling the same word.
+       */
+      readonly pick: Readonly<Record<ParticipantId, number>>;
+      /**
+       * Letters tapped in order, per player. The *count*, never the letters:
+       * the letters would be the prefix of the answer, on a screen the room
+       * can see.
+       */
+      readonly progress: Readonly<Record<ParticipantId, number>>;
+      /** Who pressed **Read the docs**. Their Floor score for the round halves. */
+      readonly docs: Readonly<Record<ParticipantId, true>>;
+      /** Time from the Floor opening to the tin coming open, in ms. */
+      readonly unsealedMs: Readonly<Record<ParticipantId, number>>;
+      /** Who unsealed, in the order they did it. Ties in `unsealedMs` break here. */
+      readonly unsealOrder: readonly ParticipantId[];
+    }
+  | {
+      readonly kind: "tug_of_raft";
+      readonly pulls: number;
+      readonly pullSeconds: number;
+      /** 60 000 / bpm. Stored derived so every judgement uses one number. */
+      readonly beatMs: number;
+      /** Which pull is being pulled, from 0. */
+      readonly pull: number;
+      /** The seed this pull's sides were dealt from. */
+      readonly seed: number;
+      /**
+       * Which side each player is on this pull. Re-dealt every pull, so
+       * "nobody is stuck on a losing side" is arithmetic rather than a hope.
+       */
+      readonly sides: Readonly<Record<ParticipantId, 0 | 1>>;
+      readonly pullStartedAt: number;
+      readonly pullEndsAt: number;
+      /** On-beat taps this pull, per player. The rope is the difference. */
+      readonly onBeats: Readonly<Record<ParticipantId, number>>;
+      /**
+       * The last beat each player hit, as a beat index from the pull's start.
+       * −1 until they hit one.
+       *
+       * This is what an election is derived from rather than stored: three
+       * missed beats in a row time a node out, and a stored `electionUntil`
+       * would be a second thing for a snapshot to disagree with. See
+       * `resolveBeat`.
+       */
+      readonly lastBeat: Readonly<Record<ParticipantId, number>>;
+      /** When each player's last on-beat tap landed. Breaks a leader tie. */
+      readonly creditedAt: Readonly<Record<ParticipantId, number>>;
+      /** Pulls won, per side. For the big screen, and for nothing else. */
+      readonly wins: readonly [number, number];
+    }
+  | {
+      readonly kind: "gganbu";
+      /** What may be shown: the cue and the threshold. */
+      readonly board: readonly GganbuPrompt[];
+      /** **The answer key**, index-aligned with {@link board}. */
+      readonly key: readonly GganbuAnswer[];
+      readonly at: number;
+      readonly secondsPerPrompt: number;
+      /** When the current prompt closes. The round's `endsAt` is the last one's. */
+      readonly promptEndsAt: number;
+      readonly startTokens: number;
+      /** Tokens held. Moves **only when a prompt settles** — see `wagers`. */
+      readonly tokens: Readonly<Record<ParticipantId, number>>;
+      /**
+       * Who is paired with whom. Symmetric. A player with no entry is paired
+       * with the house, which is what an odd roster and a latecomer both get.
+       */
+      readonly rivals: Readonly<Record<ParticipantId, ParticipantId>>;
+      /**
+       * Players who are playing the house because their pair dissolved.
+       *
+       * SPEC.md: "a rival who disconnects is replaced by the house". Recorded
+       * at the instant it happens rather than derived at settlement, because
+       * the engine has no clock and a rival who dropped and came back is still
+       * a rival who dropped. **Both** halves of the pair are marked, or the
+       * two comparisons the +10 is made from can disagree with each other —
+       * see `houseThePairOf` in reducer.ts.
+       */
+      readonly housed: Readonly<Record<ParticipantId, true>>;
+      /**
+       * Wagers on the **current prompt only**, cleared when it settles.
+       *
+       * This is the field the round is built around. Both halves of a pair
+       * answer the same prompt, so a rival's pick, a rival's stake, or a
+       * rival's token count moving mid-prompt are all the answer arriving
+       * early. Nothing in here is projected to anybody but its owner, and
+       * `tokens` does not move until the prompt closes.
+       */
+      readonly wagers: Readonly<Record<ParticipantId, Wager>>;
+    }
+  | {
       readonly kind: "glass_bridge";
       /**
        * What may be shown: product and two labels per step. Deliberately
@@ -485,7 +821,18 @@ export type Event =
   /** Frees a nickname so a reconnecting participant can retake it. */
   | { type: "releaseNickname"; pid: ParticipantId }
   // trivia
-  | { type: "loadTrivia"; activityId: ActivityId; questions: readonly Question[] }
+  /**
+   * `tiebreakers` is the sudden-death pool. Optional, and three sources feed
+   * it: this field, the questions in `questions` flagged
+   * {@link Question.tiebreak}, and — when neither is present — the built-in
+   * pool. See `partitionTiebreakers`.
+   */
+  | {
+      type: "loadTrivia";
+      activityId: ActivityId;
+      questions: readonly Question[];
+      tiebreakers?: readonly Question[];
+    }
   | { type: "openQuestion"; suddenDeath: boolean }
   /**
    * `ms` is the corrected response time, computed at the socket boundary
@@ -520,6 +867,36 @@ export type Event =
    * never saw.
    */
   | { type: "stepPane"; pid: ParticipantId; step: number; choice: number }
+  /**
+   * Unseal: choose a shape, before knowing the word. Allowed while the round
+   * card is up — which is what the card is *for* — and after the Floor opens,
+   * because a player who has not picked by then has nothing else to do and
+   * the seconds they spent are punishment enough.
+   */
+  | { type: "pickShape"; pid: ParticipantId; shape: UnsealShape }
+  /**
+   * Unseal: tap a letter. The character, not a tile index — with a repeated
+   * letter either tile is the same tap, and a phone that renumbers its tiles
+   * on a repaint must not be able to crack somebody's tin.
+   */
+  | { type: "tapLetter"; pid: ParticipantId; letter: string }
+  /** Unseal: **Read the docs.** Reveals the next letter, halves the round. */
+  | { type: "readDocs"; pid: ParticipantId }
+  /**
+   * Tug of Raft: one tap. `at` is the corrected instant, as with `tap` — the
+   * beat is judged against the heartbeat the phone was showing, not against
+   * whatever the frame's arrival time makes of it.
+   */
+  | { type: "tapBeat"; pid: ParticipantId; at: number }
+  /**
+   * Tug of Raft: settle the pull and start the next one, with new sides. The
+   * seed is drawn at the boundary; the engine has no randomness.
+   */
+  | { type: "nextPull"; seed: number }
+  /** Gganbu: a secret call and stake on the open prompt. */
+  | { type: "wager"; pid: ParticipantId; pick: OverUnder; amount: number }
+  /** Gganbu: settle the open prompt — tokens move here — and open the next. */
+  | { type: "nextPrompt" }
   /** Glass Bridge: close the open step and open the next one. */
   | { type: "nextStep" }
   /** Glass Bridge: close the wave and send the next one onto the bridge. */
@@ -572,6 +949,8 @@ export type RejectCode =
   | "invalid_choice"
   | "question_not_open"
   | "no_more_questions"
+  /** A sudden death with no tiebreak question left to ask. */
+  | "no_tiebreak_question"
   // arcade
   | "not_in_arcade"
   | "wrong_round_phase"
@@ -581,6 +960,16 @@ export type RejectCode =
   | "cannot_back_yourself"
   | "cannot_back_a_drained_player"
   | "floor_locked"
+  // arcade — Unseal
+  /** The tin is open. The shape was a choice made before it was. */
+  | "already_picked"
+  /** Tapping letters, or reading the docs, before choosing a shape. */
+  | "no_shape_picked"
+  /** A letter that is not on any of that player's tiles. Not a crack: a bug. */
+  | "invalid_letter"
+  // arcade — Gganbu
+  /** Not one to five, or more tokens than they hold. */
+  | "invalid_wager"
   // arcade — the Glass Bridge
   /** Stepping while somebody else's wave is on the bridge. */
   | "not_your_wave"
@@ -592,7 +981,13 @@ export type RejectCode =
   | "must_back_a_later_wave"
   /** Your runner's wave has started. The bet was placed before they stepped. */
   | "backing_locked"
-  /** `startRound` for one of the four rounds that are designed but not built. */
+  /**
+   * `startRound` for a round that is designed but not built.
+   *
+   * All six are built now, so nothing in the engine can produce this any
+   * more. It stays because it is part of the wire's vocabulary and because a
+   * seventh round is a thing a future session could ask for and not get.
+   */
   | "round_not_built"
   /** A round config the round itself rejects — a target of zero, say. */
   | "invalid_round_config";

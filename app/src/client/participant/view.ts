@@ -1370,6 +1370,10 @@ function sceneArcade(ctx: SceneCtx): Scene {
     loungeBacked,
     h("p", { class: "label a-lounge-prompt", text: "Back a player" }),
     loungeList,
+    // The grid has a name — DESIGN.md calls it the dormitory — and on a
+    // laptop it sits in a column beside the chips rather than underneath
+    // them, where an unlabelled block of player numbers is a puzzle.
+    h("p", { class: "label a-mirror-label", text: "Dormitory" }),
     loungeMirror,
   ]);
 

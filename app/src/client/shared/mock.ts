@@ -797,6 +797,17 @@ class MockSession {
     this.arcadePlay = null;
   }
 
+  /**
+   * TODO(tiebreak): this mock has no sudden-death pool.
+   *
+   * The engine now runs sudden death off tiebreakers held outside the scored
+   * set, and `server/views.ts` reads them through `currentQuestion`. This
+   * harness still indexes the scored set directly, so a sudden death driven
+   * against the mock would show the next un-asked question. The mock is
+   * written independently from `views.ts` on purpose — that is how it catches
+   * the real projection leaking — so it needs its own pool rather than an
+   * import, and that belongs with the surfaces work for the new rounds.
+   */
   question(): MockQuestion | undefined {
     return this.questions[this.at];
   }

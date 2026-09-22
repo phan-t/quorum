@@ -483,8 +483,14 @@ tin. Sixty seconds.
 
 Unsealing scores by shape: **10 / 20 / 35 / 50**, with **+10** for the fastest
 in each shape. A crack drains you: banked **2 per correct letter** up to the
-crack, then the Lounge. Backing a player who unseals is **+10**; backing the
-fastest in any shape **+15**.
+crack, then the Lounge. The per-letter 2 banks **towards** the shape score, not
+on top of it — that is what makes the Floor maximum 60 rather than more.
+Backing a player who unseals is **+5**; backing the fastest in any shape
+**+8** — the better of the two, never their sum, as everywhere else.
+
+The Lounge is 5 / 8 here rather than Plan / Apply's 10 / 15 because this
+round's cheapest completion is a circle tin at **10**, and a perfect Lounge of
+15 would beat somebody who actually unsealed one.
 
 There is a button labelled **Read the docs**. It reveals the next letter and
 halves your score for the round. In the show, licking the back of the
@@ -534,8 +540,13 @@ token count sit on your screen the whole round.
 At the buzzer, tokens convert to points **1:1** (max 40 for a perfect run).
 Whoever of the pair holds more takes **+10**. Reach **zero** and your token is
 **revoked**: you are drained to the Lounge, where you back a surviving player
-(**+10** if they finish above their rival, **+15** if they finish with the most
-tokens in the room).
+(**+5** if they finish above their rival, **+8** if they finish with the most
+tokens in the room — the better of the two, never their sum).
+
+If your gganbu leaves mid-round you **both** play the house, which holds its
+opening stake and wagers nothing. One rule for both halves: a one-sided
+substitution let both of them collect on an odd roster and neither on an even
+one.
 
 The pairing is mostly presentation — everyone answers the same prompts — but a
 named rival is what makes a wager feel like a wager, and the *gganbu* card on
@@ -605,9 +616,9 @@ one. Ties go to whoever crossed first.
 | --- | --- | --- |
 | Recruitment | 90 | — |
 | Plan / Apply | 40 | 15 |
-| Unseal | 60 | 25 |
+| Unseal | 60 | 8 |
 | Tug of Raft | 45 | — |
-| Gganbu | 50 | 25 |
+| Gganbu | 50 | 8 |
 | Glass Bridge | 63 | 15 |
 
 The raw arcade score is the sum. It is normalised like any other activity, so

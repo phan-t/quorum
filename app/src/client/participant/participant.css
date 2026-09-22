@@ -1,9 +1,19 @@
 /*
- * Participant — phone first. Designed at 360 × 740, grows from there.
+ * Participant — laptop first. A second window beside a video call.
  *
- * The hard rule is no scrolling during play: the root is exactly the viewport,
- * the stage is the only flexible box in it, and everything inside a segment is
- * sized to fit rather than to look nice at desktop width.
+ * SPEC.md "The three surfaces" and DESIGN.md "Participant — laptop first":
+ * these events are virtual, so everybody is already at a laptop and joins in
+ * a second window. The page still has to work at 360 × 740 — it is a
+ * responsive page and somebody will use a phone — so the rules below are
+ * written phone-up and the laptop layout is layered on top of them in the
+ * "Laptop" section at the foot of this file.
+ *
+ * The hard rule is unchanged and is harder to keep in landscape: no scrolling
+ * during play. The root is exactly the viewport, the stage is the only
+ * flexible box in it, and everything inside a segment is sized to fit. On a
+ * laptop the scarce axis is height, not width — a browser window beside a
+ * call is wide and shallow — so the laptop rules size the vertical rhythm off
+ * `cqh` (the stage's own height) rather than off the width.
  */
 
 /* Scoped to the phone page: the host console loads this stylesheet too, for
@@ -143,6 +153,12 @@ body.phone #app {
   min-height: 0;
   display: flex;
   flex-direction: column;
+  /* The laptop layout is keyed to *this box*, not to the viewport, because
+     the host console renders the same module as a 360 × 740 preview inside a
+     1440px window. A viewport media query would give that preview the laptop
+     layout in a phone-sized box; a container query gives it the phone's. */
+  container-type: size;
+  container-name: pv;
 }
 
 /* Reconnect is a banner, not a modal: a thin amber strip under the top edge.
@@ -671,14 +687,9 @@ body.phone #app {
   pointer-events: none;
 }
 
-@media (min-width: 720px) {
-  body.phone #app {
-    max-width: 480px;
-    margin: 0 auto;
-    border-left: 1px solid var(--line);
-    border-right: 1px solid var(--line);
-  }
-}
+/* A 480px column with a hairline down each side was this page pretending to
+   be a phone on a 1440px screen. It is gone: see "Laptop" at the foot of the
+   file, where the width is actually used. */
 
 
 
@@ -1544,8 +1555,20 @@ body.phone:has(.v-splash) {
   font-size: 13px;
   line-height: 1.5;
 }
+/*
+ * Once the gold card is up the error is history rather than news — but it
+ * recedes by losing the panel, not by losing contrast.
+ *
+ * This was `opacity: 0.55`, which measured **2.77:1** on the dark theme and
+ * **2.57:1** on the light one, against DESIGN.md's 4.5:1 floor — and it is
+ * the only thing on the screen that says *why* you are in the Lounge. On a
+ * phone the vibration carried that too; on a laptop `navigator.vibrate` does
+ * not exist, so the words are the whole message. Full ink on the ground
+ * measures 7.06:1 dark and 5.85:1 light.
+ */
 .v-arcade.is-lounged .a-drain {
-  opacity: 0.55;
+  background: transparent;
+  border-left-color: var(--line);
 }
 
 .a-lounge {
@@ -1640,7 +1663,14 @@ body.phone:has(.v-splash) {
   opacity: 0.75;
 }
 
-/* The big screen's grid, mirrored small. */
+/* The big screen's grid, mirrored small — and its name, because a block of
+   player numbers with no label is a puzzle. */
+.a-mirror-label {
+  margin: 0;
+  font-size: 10px;
+  color: inherit;
+  opacity: 0.75;
+}
 .a-mirror {
   display: flex;
   flex-wrap: wrap;
@@ -1722,4 +1752,645 @@ body.phone:has(.v-splash) {
   grid-column: 2;
   color: var(--muted);
   font-size: 13px;
+}
+
+/* ==================================================================== */
+/* Laptop                                                               */
+/* ==================================================================== */
+
+/*
+ * Everything above is the phone, and stays the phone. Everything below is
+ * what this page is actually for: a browser window beside a video call.
+ *
+ * Keyed to `@container pv`, never to the viewport, for the reason given on
+ * `.p-root`: the host console renders this same module as a 360px-wide
+ * preview inside a 1440px window, and the preview must keep the phone's
+ * layout. The breakpoint is 700px, so a half-screen window on a 1280px laptop
+ * (640px) stays in the single column — it is genuinely narrow — and anything
+ * wider gets the landscape composition.
+ *
+ * Vertical sizes are `cqh`, horizontal ones `cqw`. A laptop window beside a
+ * call is wide and *shallow*: height is the scarce axis, and DESIGN.md's "no
+ * scrolling during play" is the rule that costs the most to keep. Sizing the
+ * type off the stage's own height is what keeps a question, four answers and
+ * a timer in a 1440 × 900 window that is only 660px of viewport.
+ *
+ * Nothing below is distinguished by colour and nothing depends on hover.
+ * Contrast is inherited from the phone rules — no hue, fill or ink changes
+ * here, only size, spacing and placement — with the single exception of the
+ * keycaps, which stop being hover-gated and are noted where they are.
+ */
+
+@container pv (min-width: 700px) {
+  /* ---- the frame ---- */
+
+  /* The stage gets the width, up to a line length worth reading. Past
+     ~1460px the padding takes the surplus and the content stays centred:
+     "use the width" is not "set a question in a 1900px measure". */
+  .p-stage {
+    padding-block: clamp(16px, 3.2cqh, 34px);
+    padding-inline: max(32px, (100% - 1460px) / 2);
+  }
+  .v {
+    gap: clamp(10px, 2.2cqh, 20px);
+  }
+  .v-note {
+    font-size: clamp(16px, 2.6cqh, 20px);
+    max-width: 62ch;
+  }
+  .display.xl {
+    font-size: clamp(40px, min(7cqw, 12cqh), 88px);
+  }
+
+  /* The strip keeps its full-width rule above the fold line and lines its
+     contents up with the stage. */
+  .p-strip {
+    padding-block: 11px;
+    padding-inline: max(32px, (100% - 1460px) / 2);
+    gap: 6px 22px;
+    font-size: 13px;
+  }
+  .strip-you-label {
+    font-size: 12px;
+  }
+  .strip-you-total {
+    font-size: 18px;
+  }
+  .strip-cell {
+    font-size: 13px;
+  }
+  .strip-swatch {
+    width: 10px;
+    height: 10px;
+  }
+  .strip-sealed {
+    font-size: 12px;
+  }
+  .p-banner {
+    font-size: 13px;
+    padding: 8px 12px;
+  }
+
+  /* ---- the keyboard, which is the point of a laptop ---- */
+
+  /*
+   * The key hints were shown only under `(hover: hover) and (pointer: fine)`,
+   * which is a guess at "there is a keyboard attached" that gets a touch
+   * laptop wrong — and a hover-gated affordance is one a keyboard user cannot
+   * see. At this width the hint is simply on: the window is a laptop window,
+   * whatever it is being pointed at with.
+   */
+  .a-keys {
+    display: block;
+    font-size: 12px;
+  }
+  .t-key {
+    display: block;
+    min-width: 1.8em;
+    font-size: 13px;
+  }
+
+  /* ---- lobby ---- */
+
+  /*
+   * Landscape: who you are and what this is on the left, who else is here on
+   * the right. The roster is the part that grows, so it takes the column that
+   * can grow and the rest stops being a stack of headings above a wall of
+   * chips.
+   */
+  .v-lobby {
+    display: grid;
+    grid-template-columns: minmax(260px, 0.95fr) minmax(0, 1.05fr);
+    grid-template-rows: auto auto auto minmax(0, 1fr);
+    grid-template-areas:
+      "you   here"
+      "title chips"
+      "prize chips"
+      "wait  chips";
+    column-gap: clamp(24px, 4cqw, 56px);
+    row-gap: clamp(6px, 1.4cqh, 16px);
+    align-content: start;
+  }
+  .v-lobby .lobby-you {
+    grid-area: you;
+  }
+  .v-lobby .lobby-title {
+    grid-area: title;
+    font-size: clamp(36px, min(5.6cqw, 11cqh), 72px);
+  }
+  .v-lobby .lobby-prize {
+    grid-area: prize;
+    font-size: clamp(16px, 2.8cqh, 21px);
+    max-width: 40ch;
+  }
+  .v-lobby .lobby-here {
+    grid-area: here;
+    align-self: baseline;
+  }
+  .v-lobby .lobby-chips {
+    grid-area: chips;
+    align-content: flex-start;
+    gap: 8px;
+  }
+  .v-lobby .lobby-wait {
+    grid-area: wait;
+    align-self: end;
+  }
+  .v-lobby .lobby-nick {
+    font-size: clamp(28px, 5cqh, 40px);
+  }
+  .v-lobby .lobby-count {
+    font-size: clamp(30px, 5.5cqh, 44px);
+  }
+  .v-lobby .chip {
+    font-size: 15px;
+    padding: 8px 12px;
+  }
+
+  /* ---- holding, waiting, sealed, coming up ---- */
+
+  /* Nothing to press, so these centre in the window rather than sitting in
+     the top-left corner of a very wide one. */
+  .v-holding,
+  .v-waiting,
+  .v-pending,
+  .v-sealed {
+    width: 100%;
+    max-width: 920px;
+    margin-inline: auto;
+    justify-content: center;
+  }
+  .holding-line {
+    font-size: clamp(17px, 3cqh, 24px);
+    max-width: 52ch;
+  }
+  .sealed-lock {
+    width: clamp(44px, 9cqh, 72px);
+    height: clamp(44px, 9cqh, 72px);
+  }
+
+  /* ---- standings ---- */
+
+  /*
+   * Five rows. The width past a point does not help a five-row list — it
+   * makes a name and its total the two ends of a very long line — so the list
+   * takes a generous measure and the rest of the window is margin, and the
+   * height that landscape does not have goes into the type instead.
+   */
+  .v-standings {
+    width: 100%;
+    max-width: 1000px;
+    margin-inline: auto;
+    justify-content: center;
+  }
+  .v-standings .rows {
+    gap: clamp(6px, 1.4cqh, 14px);
+  }
+  .v-standings > .rows > .row {
+    grid-template-columns: 44px 1fr auto;
+    padding: clamp(8px, 1.8cqh, 18px) clamp(14px, 2cqw, 24px);
+    border-left-width: 4px;
+  }
+  .v-standings > .rows > .row .rank {
+    font-size: clamp(15px, 2.4cqh, 20px);
+  }
+  .v-standings > .rows > .row .name {
+    font-size: clamp(24px, min(3.4cqw, 5.6cqh), 44px);
+  }
+  .v-standings > .rows > .row .total {
+    font-size: clamp(20px, 3.8cqh, 32px);
+  }
+
+  /* ---- trivia ---- */
+
+  /*
+   * The landscape composition, and the one that mattered most: the question
+   * and its clock on the left, the four answers as a 2 × 2 block on the
+   * right, filling the full height of the stage.
+   *
+   * DESIGN.md's "bottom 55% of the screen" was thumb reach on a phone and
+   * does not survive the move — a 55%-height band across a 1440px window is
+   * four letterboxes. The rest of that rule is intact and is what makes the
+   * tiles work: 2 × 2, a shape glyph per tile, one of the four product hues
+   * as a fill, and the measured ink on top of it. The tiles still never
+   * shrink to make room; the question is still what gives way.
+   *
+   * The reveal lands in the same left column under the question, which is why
+   * the rows below are explicit: `status`, `keys` and `reveal` are separate
+   * rows rather than one shared area, or the two that can be on screen at the
+   * same time would be drawn on top of each other.
+   */
+  .v-trivia {
+    display: grid;
+    grid-template-columns: minmax(260px, 0.92fr) minmax(0, 1.08fr);
+    grid-template-rows: auto auto auto minmax(0, 1fr);
+    grid-template-areas:
+      "head   grid"
+      "status grid"
+      "keys   grid"
+      "reveal grid";
+    column-gap: clamp(20px, 3cqw, 44px);
+    row-gap: clamp(8px, 1.6cqh, 16px);
+  }
+  .v-trivia .t-head {
+    grid-area: head;
+    gap: clamp(6px, 1.4cqh, 12px);
+  }
+  .v-trivia .t-grid {
+    grid-area: grid;
+    gap: clamp(10px, 1.6cqw, 18px);
+  }
+  .v-trivia .t-status {
+    grid-area: status;
+    text-align: left;
+    font-size: 14px;
+  }
+  .v-trivia .a-keys {
+    grid-area: keys;
+  }
+  .v-trivia .t-reveal {
+    grid-area: reveal;
+  }
+  .t-question {
+    font-size: clamp(21px, min(3.1cqw, 5.6cqh), 38px);
+    max-height: 5em;
+  }
+  .t-timer-num {
+    font-size: clamp(17px, 3cqh, 24px);
+  }
+  .t-timer-track {
+    height: 10px;
+  }
+  .t-tile {
+    gap: clamp(10px, 1.4cqw, 18px);
+    padding: clamp(10px, 2cqh, 20px) clamp(12px, 1.8cqw, 22px);
+    border-radius: 14px;
+    font-size: clamp(16px, min(2cqw, 3.6cqh), 26px);
+  }
+  .t-shape {
+    font-size: clamp(18px, 3.4cqh, 28px);
+  }
+  .t-verdict {
+    font-size: clamp(26px, 5cqh, 42px);
+  }
+  .t-points {
+    font-size: clamp(34px, 7cqh, 60px);
+  }
+  .t-note {
+    font-size: clamp(14px, 2.4cqh, 18px);
+  }
+  .t-podium .row .name {
+    font-size: clamp(16px, 2.8cqh, 21px);
+  }
+  .t-podium .row .total {
+    font-size: clamp(14px, 2.2cqh, 17px);
+  }
+
+  /* ---- the arcade ---- */
+
+  .v-arcade {
+    gap: clamp(8px, 1.8cqh, 18px);
+  }
+  .a-badge-num {
+    font-size: clamp(20px, 3.6cqh, 28px);
+  }
+  .a-badge-label {
+    font-size: 11px;
+  }
+  .a-house {
+    font-size: clamp(14px, 2.4cqh, 19px);
+  }
+  .a-body {
+    gap: clamp(8px, 1.8cqh, 18px);
+  }
+
+  /* The round card is the one full-bleed panel — the stairwell wants the
+     whole width — but its copy keeps a measure. */
+  .a-card {
+    align-items: center;
+    padding: clamp(18px, 4cqh, 44px) clamp(20px, 3cqw, 40px);
+    gap: clamp(8px, 1.6cqh, 16px);
+  }
+  .a-card > *:not(.a-stair) {
+    width: 100%;
+    max-width: 860px;
+  }
+  .a-card-shapes {
+    font-size: clamp(24px, 5cqh, 48px);
+    gap: clamp(12px, 2cqw, 22px);
+  }
+  /* The round card is the announcer's moment and the only screen with
+     nothing to press, so it gets the height that the playing screens cannot
+     spare. */
+  .a-card > *:not(.a-stair) {
+    max-width: 1000px;
+  }
+  .a-card .a-house {
+    font-size: clamp(16px, 3.4cqh, 30px);
+  }
+  .a-card .a-staff {
+    font-size: clamp(12px, 2.2cqh, 18px);
+    gap: 0.35rem;
+  }
+  .a-staff {
+    font-size: clamp(12px, 2cqh, 15px);
+  }
+
+  /*
+   * Recruitment: the two emoji are the question, so they take the left half
+   * at a size you can read across a room, and everything you do about them —
+   * the item clock, the field, the button, the verdict — is a column beside
+   * them rather than a stack underneath. In a shallow window that is the
+   * difference between a 96px cue and a 200px one.
+   */
+  .a-recruit {
+    display: grid;
+    width: 100%;
+    max-width: 1180px;
+    margin-inline: auto;
+    grid-template-columns: minmax(0, 1fr) minmax(300px, 0.85fr);
+    grid-template-rows: auto auto auto auto;
+    grid-template-areas:
+      "cue timer"
+      "cue row"
+      "cue keys"
+      "cue status";
+    column-gap: clamp(24px, 4cqw, 56px);
+    row-gap: clamp(8px, 1.6cqh, 14px);
+    align-content: center;
+  }
+  .a-recruit .a-item-timer {
+    grid-area: timer;
+    font-size: clamp(16px, 3cqh, 22px);
+    align-self: end;
+  }
+  .a-recruit .a-cue {
+    grid-area: cue;
+    align-self: center;
+    font-size: clamp(96px, min(11cqw, 26cqh), 190px);
+  }
+  .a-recruit .a-recruit-row {
+    grid-area: row;
+  }
+  .a-recruit .a-keys {
+    grid-area: keys;
+  }
+  .a-recruit .a-recruit-status {
+    grid-area: status;
+    align-self: start;
+  }
+  .a-recruit .a-field {
+    height: 52px;
+    font-size: 20px;
+  }
+  .a-recruit .a-submit {
+    min-height: 52px;
+    font-size: 17px;
+    padding: 0 1.4rem;
+  }
+
+  /*
+   * Plan / Apply. The button is the round, so it keeps the stage — and in
+   * landscape it grows sideways, which is exactly what a shallow window has
+   * to give. Capped at 1040px: past that it stops reading as a button.
+   */
+  .a-plan {
+    width: 100%;
+    max-width: 1040px;
+    margin-inline: auto;
+    gap: clamp(8px, 1.8cqh, 16px);
+  }
+  .a-bar-track {
+    height: clamp(10px, 1.8cqh, 16px);
+  }
+  .a-big {
+    border-radius: 18px;
+    gap: clamp(2px, 0.8cqh, 8px);
+  }
+  .a-big-glyph {
+    font-size: clamp(34px, 7cqh, 60px);
+  }
+  .a-big-word {
+    font-size: clamp(46px, min(8cqw, 15cqh), 108px);
+  }
+  .a-big-count {
+    font-size: clamp(24px, 5cqh, 42px);
+  }
+
+  /*
+   * The Glass Bridge. The bridge itself is a horizontal thing and finally
+   * gets to be one: six steps and the far side across the full width, with
+   * the player numbers on them big enough to find your own. The two panes sit
+   * under it and take every pixel of height that is left, because they are
+   * the decision. Paired rows — wave beside clock, product beside status,
+   * keys beside banked — are how the whole round fits a shallow window.
+   */
+  .a-glass {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-rows: auto auto auto auto minmax(0, 1fr) auto;
+    grid-template-areas:
+      "wave    timer"
+      "bar     bar"
+      "bridge  bridge"
+      "product status"
+      "panes   panes"
+      "keys    banked";
+    column-gap: clamp(16px, 2.4cqw, 32px);
+    row-gap: clamp(6px, 1.4cqh, 14px);
+  }
+  .a-glass .a-glass-wave {
+    grid-area: wave;
+    align-self: center;
+    font-size: 13px;
+  }
+  .a-glass .a-step-timer {
+    grid-area: timer;
+    text-align: right;
+    font-size: clamp(26px, 5.5cqh, 46px);
+  }
+  .a-glass .a-step-bar {
+    grid-area: bar;
+    height: clamp(6px, 1.2cqh, 10px);
+  }
+  .a-glass .a-bridge {
+    grid-area: bridge;
+    gap: clamp(4px, 0.6cqw, 8px);
+  }
+  .a-glass .a-glass-product {
+    grid-area: product;
+    align-self: center;
+    font-size: clamp(13px, 2.4cqh, 17px);
+  }
+  .a-glass .a-panes {
+    grid-area: panes;
+    width: 100%;
+    max-width: 1040px;
+    margin-inline: auto;
+    gap: clamp(14px, 2cqw, 28px);
+  }
+  .a-glass .a-keys {
+    grid-area: keys;
+  }
+  .a-glass .a-glass-status {
+    grid-area: status;
+    text-align: right;
+    align-self: center;
+    font-size: clamp(13px, 2.4cqh, 17px);
+  }
+  .a-glass .a-glass-banked {
+    grid-area: banked;
+    text-align: right;
+    font-size: 13px;
+  }
+  .a-bridge-step,
+  .a-bridge-far {
+    padding: clamp(5px, 1.2cqh, 10px) 4px;
+    gap: 5px;
+    border-radius: 8px;
+  }
+  /* The far side is `flex: 0 0 auto` and its only content is one glyph, so at
+     this width it collapsed to a sliver that read as a scrollbar rather than
+     as the end of the bridge. */
+  .a-bridge-far {
+    min-width: clamp(44px, 4cqw, 72px);
+    padding-inline: 10px;
+  }
+  .a-bridge-num {
+    font-size: clamp(11px, 1.8cqh, 14px);
+  }
+  .a-bridge-panes {
+    gap: 5px;
+  }
+  .a-bridge-pane {
+    width: clamp(14px, 1.6cqw, 26px);
+    height: clamp(8px, 1.6cqh, 13px);
+  }
+  .a-bridge-who {
+    font-size: clamp(9px, 1.7cqh, 13px);
+    gap: 3px;
+  }
+  .a-bridge-step[data-open="yes"]::after {
+    font-size: 10px;
+  }
+  .a-pane {
+    min-height: clamp(96px, 20cqh, 220px);
+    border-radius: 16px;
+    padding: clamp(12px, 2.4cqh, 24px);
+    font-size: clamp(17px, min(2.1cqw, 3.6cqh), 27px);
+  }
+  .a-pane-key {
+    font-size: clamp(18px, 3.4cqh, 28px);
+  }
+
+  /*
+   * The Lounge, which DESIGN.md asks to be the screen designed with the most
+   * care. Landscape splits what it is for: the Floor as chips you press on
+   * the left, the Desktop's grid mirrored on the right — "underneath so you
+   * can watch without looking up" becomes "beside", which is the same
+   * promise in a window that is wider than it is tall.
+   */
+  .a-lounge {
+    display: grid;
+    grid-template-columns: minmax(0, 1.25fr) minmax(250px, 0.75fr);
+    grid-template-rows: auto auto auto auto minmax(0, 1fr);
+    grid-template-areas:
+      "kicker kicker"
+      "line   mirrorhead"
+      "backed mirror"
+      "prompt mirror"
+      "list   mirror";
+    column-gap: clamp(18px, 3cqw, 40px);
+    row-gap: clamp(6px, 1.4cqh, 14px);
+    padding: clamp(14px, 3cqh, 28px);
+  }
+  .a-lounge .a-lounge-kicker {
+    grid-area: kicker;
+  }
+  .a-lounge .a-lounge-line {
+    grid-area: line;
+    font-size: clamp(14px, 2.6cqh, 20px);
+  }
+  .a-lounge .a-lounge-backed {
+    grid-area: backed;
+    justify-self: start;
+  }
+  .a-lounge .a-lounge-prompt {
+    grid-area: prompt;
+  }
+  .a-lounge .a-lounge-list {
+    grid-area: list;
+    align-content: flex-start;
+    gap: 8px;
+  }
+  .a-lounge .a-mirror-label {
+    grid-area: mirrorhead;
+    align-self: center;
+    font-size: 11px;
+  }
+  .a-lounge .a-mirror {
+    grid-area: mirror;
+    align-content: flex-start;
+    gap: 4px;
+  }
+  .a-mirror-cell {
+    font-size: clamp(9px, 2.1cqh, 15px);
+    padding: 4px 6px;
+    border-radius: 3px;
+  }
+  .a-chip {
+    font-size: 15px;
+    min-height: 40px;
+    padding: 0.35rem 0.8rem;
+  }
+  .a-drain {
+    padding: 0.6rem 0.9rem;
+  }
+  .a-drain-error,
+  .a-drain-who {
+    font-size: clamp(13px, 2.2cqh, 16px);
+  }
+
+  /*
+   * The arcade reveal. Six bridge steps with two notes each is a column that
+   * scrolls on a phone; in landscape they flow into as many columns as the
+   * width gives, and the whole lesson is on screen at once.
+   */
+  .a-reveal {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+    column-gap: clamp(18px, 3cqw, 36px);
+    row-gap: clamp(6px, 1.4cqh, 14px);
+    align-content: start;
+  }
+  .a-reveal > .label,
+  .a-reveal > .a-banked,
+  .a-reveal > .a-total,
+  .a-reveal > .a-house {
+    grid-column: 1 / -1;
+  }
+  .a-banked {
+    font-size: clamp(40px, 8cqh, 68px);
+  }
+  .a-glass-recap-label,
+  .a-recap-answer {
+    font-size: clamp(14px, 2.4cqh, 17px);
+  }
+  .a-glass-recap-note,
+  .a-recap-note {
+    font-size: clamp(12px, 2.1cqh, 15px);
+  }
+}
+
+/*
+ * Very wide, where the two-column splits have room to breathe rather than
+ * just stretch. Nothing moves; the measure and the gutters grow.
+ */
+@container pv (min-width: 1200px) {
+  .v-trivia {
+    grid-template-columns: minmax(320px, 0.85fr) minmax(0, 1.15fr);
+  }
+  .v-lobby .lobby-chips {
+    gap: 10px;
+  }
 }
