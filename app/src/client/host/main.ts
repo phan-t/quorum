@@ -36,7 +36,6 @@ import {
   formatCountdown,
   gridEntries,
   itemEndsAt,
-  nextSegment,
   playerTag,
   questionLabel,
   remainingMs,
@@ -63,6 +62,22 @@ import {
   type ArcadePick,
   type ArcadePlan,
 } from "./plan.ts";
+import {
+  TRAY_MAX,
+  TRAY_MIN,
+  clampTray,
+  defaultRunbook,
+  dropRunbook,
+  isLastIncludedSegment,
+  moveRunbook,
+  nextInRunbook,
+  parseRunbook,
+  parseTrayWidth,
+  runbookIncluded,
+  runbookRail,
+  toggleRunbook,
+  type Runbook,
+} from "./runbook.ts";
 import { createScoringPanel } from "./scoring.ts";
 import { createParticipantView } from "../participant/view.ts";
 
@@ -101,7 +116,6 @@ if (hostToken === "") {
 /* ------------------------------------------------------------------ */
 
 const elTitle = h("span", { class: "sb-title" });
-const elCode = h("span", { class: "sb-code mono" });
 const elCounts = h("span", { class: "sb-counts mono" });
 const elScoreboard = h("span", { class: "sb-seal mono" });
 const elPhase = h("span", { class: "sb-phase mono" });
@@ -125,10 +139,20 @@ const elConn = h("span", { class: "sb-conn mono", attrs: { hidden: true } });
 
 const elTheme = themeToggle();
 
+/**
+ * Four things and a switch.
+ *
+ * The bar used to open with a red DO NOT SHARE chip and then the join code.
+ * Both are gone from here and neither is lost. The warning is in the tab
+ * title, which is the one place it does any work — the screen-share picker
+ * lists tab titles, and a title is legible while the console is behind
+ * another window, which a bar inside it is not. The join code is set in 34px
+ * type in the lobby panel beside the join link, which is where a host reads
+ * it off. What is left is what the bar is for: whose session, who is in it,
+ * what phase it is in, and whether the room can see the scores.
+ */
 const statusBar = h("header", { class: "statusbar" }, [
-  h("span", { class: "sb-warn mono", text: "⚠ DO NOT SHARE" }),
   elTitle,
-  elCode,
   elCounts,
   elPhase,
   elConn,
@@ -152,7 +176,7 @@ const KEYS_HINT =
 
 const rail = h("aside", { class: "rail" }, [
   h("section", { class: "rail-block" }, [
-    h("p", { class: "label", text: "Run of show" }),
+    h("p", { class: "label", text: "Runbook" }),
     railSegments,
   ]),
   h("section", { class: "rail-block rail-grow" }, [
@@ -197,16 +221,125 @@ const preview = createParticipantView({
   now: () => client?.now() ?? Date.now(),
 });
 const toastList = h("ul", { class: "toasts" });
+const previewFrame = h("div", { class: "preview-frame" }, [preview.root]);
+const previewBox = h("div", { class: "tray-preview" }, [
+  h("p", { class: "label", text: "Participant preview" }),
+  previewFrame,
+]);
 const tray = h("aside", { class: "tray" }, [
-  h("div", { class: "tray-preview" }, [
-    h("p", { class: "label", text: "Participant preview" }),
-    h("div", { class: "preview-frame" }, [preview.root]),
-  ]),
+  previewBox,
   h("div", { class: "tray-toasts" }, [
     h("p", { class: "label", text: "Recent" }),
     toastList,
   ]),
 ]);
+
+/* ------------------------------------------------------------------ */
+/* The preview column's width                                          */
+/* ------------------------------------------------------------------ */
+
+/**
+ * A splitter between the activity panel and the preview.
+ *
+ * Wider is a better preview and a narrower scoring grid, and which of those
+ * a host wants is not something this file can know — it depends on the room,
+ * the laptop and whether they are scoring by hand. So it is theirs to set,
+ * and it is remembered.
+ *
+ * `role="separator"` with a tabindex is the window-splitter pattern, and it
+ * is in the tab order on purpose: this console is driven by keyboard, and a
+ * resize that can only be dragged is a resize this host cannot do while they
+ * are talking. Arrow keys move it, Shift+Arrow moves it faster, Home and End
+ * go to the stops, and the widths are the ones runbook.ts clamps to.
+ */
+const TRAY_KEY = "quorum.host.tray.v1";
+
+const trayGrip = h("div", {
+  class: "tray-grip",
+  attrs: {
+    role: "separator",
+    tabindex: "0",
+    "aria-orientation": "vertical",
+    "aria-label": "Preview column width",
+    "aria-valuemin": String(TRAY_MIN),
+    "aria-valuemax": String(TRAY_MAX),
+    title: "Drag to resize the preview \u2014 or focus it and use \u2190 \u2192",
+  },
+});
+
+/** `null` means "whatever the stylesheet says for this window width". */
+let trayWidth: number | null = null;
+
+try {
+  trayWidth = parseTrayWidth(localStorage.getItem(TRAY_KEY));
+} catch {
+  // Storage off. The stylesheet's default is a working console.
+}
+
+function saveTray(): void {
+  try {
+    if (trayWidth === null) localStorage.removeItem(TRAY_KEY);
+    else localStorage.setItem(TRAY_KEY, String(trayWidth));
+  } catch {
+    // See the runbook: it still works, it just will not survive a reload.
+  }
+}
+
+/**
+ * The preview renders the participant surface at 1280 x 800 and scales it
+ * down to whatever the column is. It is a transform, so the participant's
+ * own container queries still measure 1280px and still resolve to the laptop
+ * layout — which is the whole point of previewing at that size.
+ */
+function sizePreview(): void {
+  // Inside the 1px border on each side.
+  const inner = Math.max(80, previewFrame.clientWidth);
+  previewFrame.style.setProperty("--pv-scale", String(inner / 1280));
+}
+
+function applyTray(): void {
+  if (trayWidth === null) cols.style.removeProperty("--tray-w");
+  else cols.style.setProperty("--tray-w", `${trayWidth}px`);
+  setAttr(
+    trayGrip,
+    "aria-valuenow",
+    String(trayWidth ?? Math.round(tray.getBoundingClientRect().width)),
+  );
+  sizePreview();
+}
+
+/**
+ * The widest this window can afford.
+ *
+ * runbook.ts clamps to 216-560px, which is about the preview; this is about
+ * everything else. The rail is 300px and the splitter is 6, and the activity
+ * panel needs 620 to keep the scoring grid's ~700px table close to fitting
+ * and the foot's four controls on one row. On a 1512px window that leaves the
+ * full 560; on a 1280px laptop it leaves 354, and 354 is the honest answer
+ * there — the pixels are not available, and a splitter that let the host drag
+ * past them would be a splitter that broke the grid.
+ */
+const PANEL_FLOOR = 620;
+
+function maxTray(): number {
+  const room = window.innerWidth - 300 - 6 - PANEL_FLOOR;
+  return Math.max(TRAY_MIN, Math.min(TRAY_MAX, Math.round(room)));
+}
+
+function setTray(width: number): void {
+  const next = Math.min(clampTray(width), maxTray());
+  if (next === trayWidth) return;
+  trayWidth = next;
+  applyTray();
+}
+
+// A window that got narrower must not leave a preview column the panel cannot
+// live with. The stylesheet's own default follows the window already; a width
+// the host set does not, so it is re-clamped here.
+window.addEventListener("resize", () => {
+  if (trayWidth !== null) setTray(trayWidth);
+  sizePreview();
+});
 
 /* ------------------------------------------------------------------ */
 /* Driving mode                                                        */
@@ -240,11 +373,78 @@ const drivingView = h("section", { class: "driving-view", attrs: { hidden: true 
   h("p", { class: "mono dv-keys", text: KEYS_HINT }),
 ]);
 
-replace(app, [
-  statusBar,
-  h("div", { class: "cols" }, [rail, panel, tray]),
-  drivingView,
-]);
+const cols = h("div", { class: "cols" }, [rail, panel, trayGrip, tray]);
+
+replace(app, [statusBar, cols, drivingView]);
+
+/* ---- the splitter, by pointer and by key ---- */
+
+let trayDragging = false;
+
+trayGrip.addEventListener("pointerdown", (ev) => {
+  const e = ev as PointerEvent;
+  if (e.button !== 0) return;
+  trayDragging = true;
+  trayGrip.setPointerCapture(e.pointerId);
+  trayGrip.classList.add("is-dragging");
+  e.preventDefault();
+});
+trayGrip.addEventListener("pointermove", (ev) => {
+  if (!trayDragging) return;
+  const e = ev as PointerEvent;
+  // The splitter is 6px wide and sits to the left of the column it sizes.
+  setTray(window.innerWidth - e.clientX - 3);
+});
+const endTrayDrag = (ev: Event): void => {
+  if (!trayDragging) return;
+  trayDragging = false;
+  trayGrip.classList.remove("is-dragging");
+  const e = ev as PointerEvent;
+  if (trayGrip.hasPointerCapture(e.pointerId)) {
+    trayGrip.releasePointerCapture(e.pointerId);
+  }
+  saveTray();
+};
+trayGrip.addEventListener("pointerup", endTrayDrag);
+trayGrip.addEventListener("pointercancel", endTrayDrag);
+// Nudging it back to the stylesheet's default, which is the one width that
+// follows the window rather than a number the host once dragged to.
+trayGrip.addEventListener("dblclick", () => {
+  trayWidth = null;
+  applyTray();
+  saveTray();
+});
+
+trayGrip.addEventListener("keydown", (ev) => {
+  const e = ev as KeyboardEvent;
+  if (e.metaKey || e.ctrlKey || e.altKey) return;
+  const now = trayWidth ?? Math.round(tray.getBoundingClientRect().width);
+  const step = e.shiftKey ? 48 : 16;
+  switch (e.key) {
+    case "ArrowLeft":
+      setTray(now + step);
+      break;
+    case "ArrowRight":
+      setTray(now - step);
+      break;
+    case "Home":
+      setTray(TRAY_MAX);
+      break;
+    case "End":
+      setTray(TRAY_MIN);
+      break;
+    default:
+      return;
+  }
+  e.preventDefault();
+  saveTray();
+});
+
+if (trayWidth !== null) trayWidth = Math.min(trayWidth, maxTray());
+applyTray();
+// The column also changes width when the window does, and the preview's
+// scale is a function of the column. One observer covers both.
+new ResizeObserver(() => sizePreview()).observe(previewFrame);
 if (mock) document.body.appendChild(mockBadge());
 
 /* ------------------------------------------------------------------ */
@@ -303,23 +503,77 @@ replace(footLeft, [
 ]);
 
 /* ------------------------------------------------------------------ */
-/* Run of show rail                                                    */
+/* The runbook                                                         */
 /* ------------------------------------------------------------------ */
 
-const segmentRows = new Map<Segment, { li: HTMLLIElement; button: HTMLButtonElement }>();
+/**
+ * Which segments this event runs, and in what order. See runbook.ts for the
+ * rules and for why the lobby and the final are not in it.
+ *
+ * Kept in this browser, like the arcade's running order and for the same
+ * reason: a host who sets it up on Thursday finds it on Friday, and a console
+ * reloaded at 2:45pm comes back with it still set. Best-effort — storage off
+ * means the default runbook and a working console, never a broken one.
+ */
+const RUNBOOK_KEY = "quorum.host.runbook.v1";
+
+let runbook: Runbook = defaultRunbook();
+
+try {
+  runbook = parseRunbook(localStorage.getItem(RUNBOOK_KEY)) ?? defaultRunbook();
+} catch {
+  // Storage off, or blocked. The default runbook is the shipped run of show.
+}
+
+function saveRunbook(): void {
+  try {
+    localStorage.setItem(RUNBOOK_KEY, JSON.stringify(runbook));
+  } catch {
+    // See above: it still works, it just will not survive a reload, and
+    // nothing about that is worth an error in front of a room.
+  }
+}
+
+const segmentRows = new Map<
+  Segment,
+  { li: HTMLLIElement; button: HTMLButtonElement; tag: HTMLElement }
+>();
 for (const seg of SEGMENTS) {
+  const tag = h("span", { class: "seg-phase mono", attrs: { hidden: true } });
   const button = h("button", { class: "seg", type: "button" }, [
     h("span", { class: "seg-mark", text: "○" }),
     h("span", { class: "seg-name", text: SEGMENT_LABEL[seg] }),
     SEGMENT_BUILT[seg]
-      ? null
+      ? tag
       : h("span", { class: "seg-phase mono", text: `P${SEGMENT_PHASE[seg]}` }),
   ]);
   handsBackSpace(button);
   button.addEventListener("click", () => issue({ name: "segment", kind: seg }, null));
   const li = h("li", {}, [button]);
   railSegments.appendChild(li);
-  segmentRows.set(seg, { li, button });
+  segmentRows.set(seg, { li, button, tag });
+}
+
+/**
+ * The rail, in the host's order.
+ *
+ * Every segment is listed, including the ones taken out of the runbook —
+ * marked, and still one click away. Out of the runbook means "not on the
+ * space bar", never "not at all": the rail is also the way off the plan when
+ * the room runs long, and a console that could not jump to trivia because
+ * trivia was not in the plan would be a console that had lost a feature at
+ * 2:45pm. The rows are moved rather than rebuilt, so nothing the host is
+ * pointing at changes identity underneath them.
+ */
+function renderRail(): void {
+  for (const entry of runbookRail(runbook)) {
+    const row = segmentRows.get(entry.kind);
+    if (row === undefined) continue;
+    railSegments.appendChild(row.li);
+    row.button.classList.toggle("is-out", !entry.included);
+    row.tag.hidden = entry.included;
+    setText(row.tag, entry.included ? "" : "out");
+  }
 }
 
 /* ------------------------------------------------------------------ */
@@ -466,6 +720,221 @@ const preflight = h("section", { class: "pf" }, [
   }),
 ]);
 
+/* ---- the runbook, set before the room arrives ---------------------- */
+
+/**
+ * The runbook editor.
+ *
+ * The same shape as the arcade's running order below it, on purpose: a host
+ * who has learned one has learned the other. Rows move with the two arrow
+ * buttons, with Alt+Up and Alt+Down from anywhere inside a row, or by
+ * dragging. The buttons are the path that matters — this console is driven by
+ * keyboard while its host is talking to thirty people, and a reorder that can
+ * only be done with a mouse is a reorder that cannot be done at all. Drag is
+ * the extra, not the mechanism.
+ *
+ * Focus is put back on the control that was pressed after every change, since
+ * the rows are rebuilt: a keyboard user pressing Alt+Down twice must move the
+ * same row twice.
+ */
+const runbookRows = h("div", { class: "a-setup-rows" });
+const runbookNote = h("p", { class: "pb-note a-setup-note", attrs: { hidden: true } });
+
+const runbookSetup = h("section", { class: "a-setup" }, [
+  h("p", { class: "label", text: "Runbook" }),
+  h("p", {
+    class: "pb-note",
+    text: "Set this before you start. The main button walks these in this order, and it always says which one is next. Anything you take out stays in the rail on the left and is still one click away, so you can go there by hand if the afternoon changes shape.",
+  }),
+  runbookRows,
+  runbookNote,
+  h("p", {
+    class: "pb-note",
+    text: "Move a row with its arrow buttons, or with Alt+\u2191 and Alt+\u2193 from anywhere in the row \u2014 or drag it. The lobby and the final are fixed: the session opens in one and ends in the other.",
+  }),
+]);
+
+function noteRunbook(message: string): void {
+  setText(runbookNote, message);
+  runbookNote.hidden = message === "";
+  // A refusal the host cannot see is a button that silently did nothing. The
+  // panel scrolls, so the words are brought to where they are looking.
+  if (message !== "") runbookNote.scrollIntoView({ block: "nearest" });
+}
+
+/** Which control to put the cursor back on once the rows are rebuilt. */
+interface RunbookFocus {
+  readonly kind: Segment;
+  readonly role: string;
+}
+
+function focusRunbookRow(want: RunbookFocus): void {
+  const row = runbookRows.querySelector(`[data-kind="${want.kind}"]`);
+  if (!(row instanceof HTMLElement)) return;
+  const exact = row.querySelector(`button[data-role="${want.role}"]`);
+  if (exact instanceof HTMLButtonElement && !exact.disabled) {
+    exact.focus();
+    return;
+  }
+  // The control it was on is disabled now — it moved to an end. Anything in
+  // the same row beats losing the cursor to the top of the document.
+  const any = Array.from(row.querySelectorAll("button")).find((b) => !b.disabled);
+  any?.focus();
+}
+
+function changeRunbook(
+  next: Runbook,
+  refused: string,
+  focus?: RunbookFocus,
+): void {
+  if (next === runbook) {
+    noteRunbook(refused);
+    if (focus !== undefined) focusRunbookRow(focus);
+    return;
+  }
+  runbook = next;
+  noteRunbook("");
+  saveRunbook();
+  renderRunbookSetup();
+  renderRail();
+  if (focus !== undefined) focusRunbookRow(focus);
+  if (lastState) render(lastState);
+}
+
+/** The row being dragged, for the pointer path. */
+let runbookDrag: Segment | null = null;
+
+const RUNBOOK_FULL =
+  "Keep at least one segment \u2014 the runbook has to have something between the lobby and the final.";
+
+function renderRunbookSetup(): void {
+  const included = runbookIncluded(runbook);
+  replace(
+    runbookRows,
+    runbook.map((entry, i) => {
+      const kind = entry.kind;
+      const name = SEGMENT_LABEL[kind];
+      const move = (role: "up" | "down", delta: -1 | 1): HTMLButtonElement => {
+        const button = handsBackSpace(
+          h("button", {
+            class: "a-setup-move",
+            type: "button",
+            text: delta === -1 ? "\u2191" : "\u2193",
+            disabled: delta === -1 ? i === 0 : i === runbook.length - 1,
+            attrs: {
+              "data-role": role,
+              "aria-label": `Move ${name} ${delta === -1 ? "earlier" : "later"}`,
+            },
+          }),
+        );
+        button.addEventListener("click", () =>
+          changeRunbook(moveRunbook(runbook, kind, delta), "", { kind, role }),
+        );
+        return button;
+      };
+      const inOut = handsBackSpace(
+        h("button", {
+          class: entry.included ? "a-setup-in on" : "a-setup-in",
+          type: "button",
+          text: entry.included ? "In" : "Out",
+          attrs: {
+            "data-role": "inout",
+            "aria-pressed": entry.included ? "true" : "false",
+            "aria-label": entry.included
+              ? `${name} is in the runbook`
+              : `${name} is out of the runbook`,
+          },
+        }),
+      );
+      inOut.addEventListener("click", () =>
+        changeRunbook(
+          toggleRunbook(runbook, kind),
+          isLastIncludedSegment(runbook, kind) ? RUNBOOK_FULL : "",
+          { kind, role: "inout" },
+        ),
+      );
+
+      const row = h(
+        "div",
+        {
+          class: entry.included ? "a-setup-row rb-row" : "a-setup-row rb-row is-out",
+          attrs: { draggable: "true", "data-kind": kind },
+        },
+        [
+          h("span", {
+            class: "mono rb-grip",
+            text: "\u2807",
+            attrs: { "aria-hidden": "true" },
+          }),
+          h("span", {
+            class: "mono a-setup-pos",
+            text: entry.included ? String(included.indexOf(kind) + 1) : "\u2013",
+          }),
+          h("div", { class: "a-setup-main" }, [
+            h("span", { class: "a-setup-name", text: name }),
+          ]),
+          h("div", { class: "a-setup-acts" }, [
+            move("up", -1),
+            move("down", 1),
+            inOut,
+          ]),
+        ],
+      );
+
+      /* ---- the keyboard path ---- */
+      row.addEventListener("keydown", (ev) => {
+        const e = ev as KeyboardEvent;
+        if (!e.altKey || e.metaKey || e.ctrlKey) return;
+        if (e.key !== "ArrowUp" && e.key !== "ArrowDown") return;
+        e.preventDefault();
+        e.stopPropagation();
+        const role =
+          document.activeElement instanceof HTMLElement
+            ? (document.activeElement.dataset["role"] ?? "up")
+            : "up";
+        changeRunbook(
+          moveRunbook(runbook, kind, e.key === "ArrowUp" ? -1 : 1),
+          "",
+          { kind, role },
+        );
+      });
+
+      /* ---- the pointer path ---- */
+      row.addEventListener("dragstart", (ev) => {
+        runbookDrag = kind;
+        row.classList.add("is-dragging");
+        const dt = (ev as DragEvent).dataTransfer;
+        if (dt) {
+          dt.effectAllowed = "move";
+          dt.setData("text/plain", kind);
+        }
+      });
+      row.addEventListener("dragend", () => {
+        runbookDrag = null;
+        row.classList.remove("is-dragging");
+      });
+      row.addEventListener("dragover", (ev) => {
+        if (runbookDrag === null || runbookDrag === kind) return;
+        ev.preventDefault();
+        const dt = (ev as DragEvent).dataTransfer;
+        if (dt) dt.dropEffect = "move";
+        row.classList.add("is-over");
+      });
+      row.addEventListener("dragleave", () => row.classList.remove("is-over"));
+      row.addEventListener("drop", (ev) => {
+        ev.preventDefault();
+        row.classList.remove("is-over");
+        const moved = runbookDrag;
+        runbookDrag = null;
+        if (moved === null || moved === kind) return;
+        changeRunbook(dropRunbook(runbook, moved, i), "");
+      });
+
+      return row;
+    }),
+  );
+}
+
 /** Where the arcade running order sits while the session has not started. */
 const lobbySetupSlot = h("div", { class: "lobby-setup" });
 
@@ -487,6 +956,7 @@ const bodyLobby = h("section", { class: "pb" }, [
     bodyLobbyLock,
   ]),
   preflight,
+  runbookSetup,
   lobbySetupSlot,
 ]);
 
@@ -1517,16 +1987,42 @@ function issue(cmd: HostCommand, from: Control | null): void {
   if (from) pending.set(cid, from);
 }
 
+/** What the button says about arriving at each segment. Unchanged wording. */
+const SEGMENT_ADVANCE_LABEL: Readonly<Record<Segment, string>> = {
+  lobby: "Show the lobby",
+  holding: "Show the holding card",
+  trivia: "Open trivia",
+  arcade: "Open the arcade",
+  standings: "Show standings",
+  final: "Show the final",
+};
+
+/**
+ * The next segment in the host's runbook, as a button label and a command.
+ *
+ * This is the one place the run of show is read, and it is read out of the
+ * runbook rather than out of a constant — so a host who took trivia out, or
+ * put the standings before the arcade, gets a space bar that agrees with the
+ * plan they wrote. `null` is the end of the runbook, which the button says in
+ * words rather than by doing nothing.
+ */
+function advanceFrom(seg: Segment): { label: string; cmd: HostCommand | null } {
+  const next = nextInRunbook(runbook, seg);
+  if (next === null) return { label: "Nothing queued", cmd: null };
+  return {
+    label: SEGMENT_ADVANCE_LABEL[next],
+    cmd: { name: "segment", kind: next },
+  };
+}
+
 /**
  * The next round in the order the host set during setup — or, when they have
- * all been played, the next thing in the run of show. The button never says
+ * all been played, the next thing in the runbook. The button never says
  * "choose something": the choosing was done before the room arrived.
  */
 function announceNext(): { label: string; cmd: HostCommand | null } {
   const pick = currentPick();
-  if (pick === null) {
-    return { label: "Show standings", cmd: { name: "segment", kind: "standings" } };
-  }
+  if (pick === null) return advanceFrom("arcade");
   return {
     label: `Announce ${ARCADE_ROUND_LABEL[pick]}`,
     cmd: arcadeRoundCommand(pick),
@@ -1562,7 +2058,7 @@ function primaryPlan(): { label: string; cmd: HostCommand | null } {
       case "revealed":
         return t.index + 1 < t.of
           ? { label: "Next question", cmd: { name: "trivia.next" } }
-          : { label: "Show standings", cmd: { name: "segment", kind: "standings" } };
+          : advanceFrom("trivia");
     }
   }
   // Inside the arcade the primary button walks the round the same way it
@@ -1592,17 +2088,7 @@ function primaryPlan(): { label: string; cmd: HostCommand | null } {
     }
   }
 
-  const next = nextSegment(s.segment);
-  if (next === null) return { label: "Nothing queued", cmd: null };
-  const labels: Record<Segment, string> = {
-    lobby: "Show the lobby",
-    holding: "Show the holding card",
-    trivia: "Open trivia",
-    arcade: "Open the arcade",
-    standings: "Show standings",
-    final: "Show the final",
-  };
-  return { label: labels[next], cmd: { name: "segment", kind: next } };
+  return advanceFrom(s.segment);
 }
 
 /* ------------------------------------------------------------------ */
@@ -1616,7 +2102,6 @@ function render(s: RenderState): void {
   /* status bar */
   setText(elTitle, s.title);
   const code = s.hostExtras?.joinCode ?? "————";
-  setText(elCode, code);
   // Counts come from the roster, not from `hostExtras`: a `roster` delta
   // updates the roster and leaves `hostExtras` behind, so the roster is the
   // only field guaranteed to be current. See the report.
@@ -1737,6 +2222,13 @@ function render(s: RenderState): void {
 function renderPreflight(s: RenderState): void {
   const setup = s.phase === "draft" || s.phase === "lobby";
   preflight.hidden = !setup;
+  // The runbook is set before the room arrives, for the same reason the
+  // arcade's running order is: it is knowable at 9am, and a run of show that
+  // can be rewritten mid-session is a run of show that gets rewritten by
+  // accident. The rail is still the way to deviate once the session is live.
+  runbookSetup.hidden = !setup;
+  // Setup gets the whole panel; see `.panel.is-setup` in host.css.
+  panel.classList.toggle("is-setup", setup);
   if (!setup) return;
 
   const loaded = s.hostExtras?.trivia?.loaded ?? 0;
@@ -2239,6 +2731,8 @@ document.addEventListener("keydown", (ev) => {
 
 loadSetup();
 renderArcadeSetup();
+renderRunbookSetup();
+renderRail();
 
 bindSpace(primary);
 bindEscape(() => [

@@ -4,11 +4,55 @@
  * This is the one surface allowed to look like a terminal: dense, mono,
  * 13–14px, tabular. Everything is sized so that a host glancing at it for two
  * seconds knows the phase, the seal, the headcount and what space will do.
+ *
+ * ---- The type scale --------------------------------------------------
+ *
+ * Dense is not the same as flat. Everything used to sit between 10px and
+ * 15px, which meant a section heading shouted as loudly as the question the
+ * host was about to read out, and the eye had nowhere to land. Six steps,
+ * and each one has a job:
+ *
+ *   10px  mono, tracked   column heads, keycaps, per-cell buttons — chrome
+ *                         the eye skips until it is looking for it
+ *   11px  mono, tracked   SECTION LABELS and hints. Quiet on purpose: a
+ *                         label names a region, it is not the content
+ *   12–13px               notes, meta, the scoring grid's own rows
+ *   14px                  the body. Buttons, roster, run of show, answers
+ *   15px  mono, tracked   the panel head — which segment is up
+ *   17px                  the line the host acts on: what the round is,
+ *                         which round is next, the primary button
+ *   22px                  the one thing in front of the room: the question
+ *   34px                  the join code, which a room of thirty reads off a
+ *                         shared screen
+ *
+ * Nothing here changes a colour. Every pair below was re-measured against
+ * the tokens as they stand, and the figures are recorded beside the rule.
  */
 
 body {
   font-size: 14px;
   overflow: hidden;
+}
+
+/*
+ * Section labels are chrome, so they are quiet.
+ *
+ * `.label` in tokens.css sets the face and the tracking but no size, so every
+ * one of these rendered at the 14px body size — the same size as the content
+ * underneath them. Scoped to the console's own regions rather than set on
+ * `.label` outright, because participant.css is loaded on this page for the
+ * preview and uses the same class: a bare rule here would resize the labels
+ * *inside* the preview, and a preview that does not match the room is worse
+ * than no preview.
+ *
+ * --muted, unchanged: #8b8a9c on --ground #0a0a0f is 5.84:1 dark, #656a76 on
+ * #ffffff 5.38:1 light; on --panel 5.41:1 / 5.19:1. AA at any size.
+ */
+.rail .label,
+.panel .label,
+.tray-preview > .label,
+.tray-toasts > .label {
+  font-size: 11px;
 }
 
 #app {
@@ -32,20 +76,13 @@ body {
   white-space: nowrap;
 }
 
-/* The tab title says DO NOT SHARE and so does the bar. The screen-share
-   picker shows tab titles; this is the cheapest protection there is. */
-.sb-warn {
-  color: var(--danger);
-  font-weight: 600;
-  letter-spacing: 0.16em;
-}
-
+/* The DO NOT SHARE chip and the join code have both left this bar — see the
+   note on `statusBar` in main.ts. The tab title still carries the warning,
+   which is where the screen-share picker reads it from, and the join code is
+   34px in the lobby panel. What is left leads with whose session it is. */
 .sb-title {
+  font-size: 15px;
   font-weight: 600;
-}
-.sb-code {
-  letter-spacing: 0.22em;
-  color: var(--muted);
 }
 .sb-counts,
 .sb-phase {
@@ -89,11 +126,76 @@ body {
 
 /* ------------------------------------------------------------ layout -- */
 
+/*
+ * Three columns: run of show and the roster | the activity | the preview.
+ *
+ * The rail stays at 300px. It looks empty with six people in the room and it
+ * is not: thirty people is fifteen rows of a two-column roster, and every
+ * pixel taken off this column takes characters off a nickname the host is
+ * about to read out.
+ *
+ * The tray is the column that grows, and only where there is room to grow.
+ * Below 1400px the panel needs every pixel it has — the scoring grid is
+ * ~700px wide and horizontal scrolling in a grid is the worst thing that can
+ * happen to it — so the tray takes 248px and the preview is small. At 1400px
+ * and up there is genuine surplus, and it goes to the preview, which is the
+ * one thing on this console that is worth more the bigger it is.
+ */
+/*
+ * Four tracks: the rail, the activity, the splitter, the preview.
+ *
+ * `--tray-w` is the default for this window width; the host's own width, once
+ * they have set one, arrives as an inline custom property on this element and
+ * beats both rules. runbook.ts clamps it to 216–560px: narrower and the
+ * preview stops being worth looking at, wider and the scoring grid loses its
+ * ~700px on a 1280px laptop.
+ */
 .cols {
+  --tray-w: 248px;
   flex: 1;
   min-height: 0;
   display: grid;
-  grid-template-columns: 300px minmax(0, 1fr) 240px;
+  grid-template-columns: 300px minmax(0, 1fr) 6px var(--tray-w);
+}
+
+@media (min-width: 1400px) {
+  .cols {
+    --tray-w: 376px;
+  }
+}
+
+/*
+ * The splitter. Six pixels of hit area, one pixel of line, and a focus ring
+ * that is loud because this is a control a keyboard reaches: it is in the tab
+ * order between the panel and the preview, and the arrow keys move it.
+ */
+.tray-grip {
+  position: relative;
+  cursor: col-resize;
+  background: var(--line);
+  border: 0;
+  padding: 0;
+}
+.tray-grip::after {
+  /* A short handle mark, so the column edge reads as something to take hold
+     of rather than as a border that happens to be there. */
+  content: "";
+  position: absolute;
+  top: 50%;
+  left: 1px;
+  width: 4px;
+  height: 36px;
+  margin-top: -18px;
+  border-radius: 2px;
+  background: var(--dim);
+}
+.tray-grip:hover,
+.tray-grip.is-dragging {
+  background: var(--muted);
+}
+.tray-grip:focus-visible {
+  outline: 2px solid var(--ibm-blue);
+  outline-offset: 0;
 }
 
 .rail {
@@ -161,10 +263,22 @@ body {
   margin-left: auto;
   font-size: 10px;
   letter-spacing: 0.1em;
-  color: var(--dim);
+  color: var(--muted);
   border: 1px solid var(--line);
   border-radius: 3px;
   padding: 0 4px;
+  text-transform: uppercase;
+}
+/* Out of the runbook: not on the space bar, still one click away. Said twice
+   and neither time in colour — a dashed edge and the word "out" — because
+   nothing on this console is carried by colour alone. --muted on --ground is
+   5.84:1 dark and 5.38:1 light. */
+.seg.is-out {
+  border: 1px dashed var(--line);
+  color: var(--muted);
+}
+.seg.is-out .seg-name {
+  font-style: italic;
 }
 
 /* Two columns, so sixty people fit without scrolling at 1440px. */
@@ -244,15 +358,88 @@ body {
   align-items: baseline;
   gap: 10px;
 }
+/* Which segment is up: the top of the hierarchy in this column, so it is the
+   one label on the console that is bigger than the body rather than smaller.
+   Colour unchanged (--muted, 5.84:1 dark / 5.38:1 light on --ground); the
+   size and the tracking do the work. Placed after the 11px label rule above,
+   which it has to beat at equal specificity. */
+.panel-head .label {
+  font-size: 15px;
+  letter-spacing: 0.16em;
+}
 .panel-sub {
   color: var(--muted);
-  font-size: 12px;
+  font-size: 11px;
   letter-spacing: 0.14em;
   text-transform: uppercase;
 }
+
+/*
+ * Before the room arrives the ceiling comes off.
+ *
+ * Setup is three stacked blocks — the pre-flight list, the runbook and the
+ * arcade's running order — and it is the one panel a host reads at length,
+ * on Thursday, with nobody watching. It is also the one panel where the
+ * scoring grid has nothing in it: no scores exist yet. So in `draft` and
+ * `lobby` the panel takes what it needs and the grid falls back to its floor,
+ * and from the moment the session is running the ceiling is back on.
+ */
+.panel.is-setup .panel-body {
+  max-height: none;
+}
+
+/*
+ * The activity sizes to its own content; it does not stretch.
+ *
+ * It used to take `flex: 1`, which stretched it to fill whatever the scoring
+ * block left — and since the scoring block was `flex: none` under a 46vh cap,
+ * that put a hundred-and-fifty-pixel hole in the middle of the console during
+ * every segment whose panel is short: the holding card, the lobby once the
+ * checklist has gone, the arcade between rounds. Now content runs from the
+ * top with no gap in it, the grid sits directly under it, and the slack
+ * collects immediately above the primary button, where it reads as breathing
+ * room rather than as a fault.
+ *
+ * It is also the part that keeps its height when there is not enough to go
+ * round. That is the opposite of what happened before: the grid was
+ * `flex: none` under a 46vh cap, so with thirty people in the room it took
+ * 550px and left the panel 95px — and 95px of trivia panel is the question
+ * with "24 of 27 answered" sliced in half below the fold, and 95px of Glass
+ * Bridge is the round's own controls off the bottom of a box nothing tells
+ * you to scroll. Both were measured, at 1280 × 800 and at 1440 × 900.
+ *
+ * So the grid gives way instead, and the panel keeps what it needs. The grid
+ * can afford it: it scrolls under a sticky header, and Enter walks the cursor
+ * down the column on its own, so the host types down thirty people without
+ * touching it. Nothing in the panel has an equivalent — a line you cannot see
+ * is a line you do not know is there.
+ *
+ * `flex: 0 1 auto` against the grid's `0 30 auto`: it still shrinks last
+ * rather than never, so an unusually tall panel scrolls instead of pushing
+ * the primary button off the screen.
+ *
+ * The 340px ceiling is the other half of the bargain, and every digit in it
+ * was measured rather than guessed:
+ *
+ *   315px  the Glass Bridge, the deepest panel in the product, whole — its
+ *          last round control sits at 256px, 272px with the Out-this-round
+ *          line wrapped to two
+ *   226px  trivia's tallest state, question and four answers and the counts
+ *   334px  what the lobby's own panel gets today, so the pre-flight list and
+ *          the running order are not given less room than they have now
+ *
+ * Everything a host reads or presses *during* something therefore sits under
+ * it whole, and nothing live is ever cut. What does not fit is the long
+ * lists: thirty people of standings, a backing list that grows a row per
+ * player. Those scroll, as they already did, rather than taking three hundred
+ * pixels off a scoring grid the host may be typing into at the same time —
+ * which is a thing that happens, because scoring is not a segment and manual
+ * entry goes on while the standings are in front of the room.
+ */
 .panel-body {
-  flex: 1;
+  flex: 0 1 auto;
   min-height: 0;
+  max-height: 340px;
   overflow: auto;
 }
 .pb {
@@ -332,14 +519,17 @@ body {
   padding-left: 102px;
 }
 
+/* Thirty people in one 520px column is a standings list the host has to
+   scroll to see the bottom of, on a panel that had six hundred unused pixels
+   to its right. Columns, not a strip: the flow is down each column and then
+   across, so ranks stay in reading order. */
 .h-rows {
   list-style: none;
   margin: 0;
   padding: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  max-width: 520px;
+  max-width: none;
+  columns: 260px 3;
+  column-gap: 24px;
 }
 .h-row {
   display: grid;
@@ -347,6 +537,8 @@ body {
   gap: 10px;
   align-items: baseline;
   padding: 4px 8px;
+  margin-bottom: 2px;
+  break-inside: avoid;
   background: var(--panel);
   border-radius: 3px;
 }
@@ -371,14 +563,37 @@ body {
    segment is up, because manual entry happens while the holding card or the
    standings are in front of the room. */
 
+/*
+ * Sized to its rows, and the last thing on the panel to give ground.
+ *
+ * No grow, so it is never padded out into an empty bordered box, and a shrink
+ * factor of 30 against the panel's 1, so this is what gives way when thirty
+ * rows and a live round both want the same six hundred pixels. See the note
+ * on `.panel-body` for why round that way.
+ *
+ * It must be able to shrink at all, and the floor must be a real number.
+ * `flex: none` here — which is what it had — let thirty rows grow the block to
+ * 930px inside a 650px column and push the primary button clean off the bottom
+ * of the screen, silently, with nothing to scroll it back. And `min-height:
+ * auto` does not save it: Chrome resolves a column flex container's automatic
+ * minimum to the full height of its contents, so the item refuses to shrink at
+ * all. 272px is the head, the bench line, the Spot Award box and three rows —
+ * a floor, tested against a thirty-row grid at 1280 × 800.
+ */
 .scoring {
-  flex: none;
+  flex: 0 30 auto;
   display: flex;
   flex-direction: column;
   gap: 8px;
-  min-height: 0;
+  min-height: 272px;
   padding-top: 10px;
   border-top: 1px solid var(--line);
+}
+/* Everything in here is a fixed piece except the grid, which is the one thing
+   worth scrolling. Without this the bench line shrank to eight pixels and the
+   Spot Award box was clipped off its own bottom edge. */
+.scoring > * {
+  flex: none;
 }
 
 .sc-head {
@@ -392,8 +607,18 @@ body {
   letter-spacing: 0.04em;
 }
 
+/* Sized to its rows rather than capped at 46vh, and the only part of the
+   scoring block that gives way when there is not enough height for all of
+   them. Six people is six rows and no empty box; thirty is as many as fit,
+   and the rest is one scroll. */
+/* 92px is the sticky header and three rows: the floor under everything the
+   scoring block is allowed to give up. The 46vh cap is gone with it — the
+   grid is now bounded by the height the panel actually leaves it, which on a
+   taller window is more rows rather than the same twelve. */
 .sc-grid-wrap {
-  max-height: 46vh;
+  flex: 0 1 auto;
+  min-height: 92px;
+  max-height: none;
   overflow: auto;
   border: 1px solid var(--line);
   border-radius: 4px;
@@ -433,10 +658,24 @@ body {
   min-width: 150px;
   max-width: 200px;
 }
+/* An activity column was as wide as its *title* — "Agentic Security TTX" set
+   a 182px column over a 110px cell — and three of those pushed the table past
+   the panel at 1280, so the host scored a 1280px laptop through a sideways
+   scrollbar. The title wraps instead. Nothing is truncated: the host still
+   reads the whole column name, on two lines, under a sticky header. */
+.sc-th-title {
+  display: inline-block;
+  max-width: 106px;
+  white-space: normal;
+  /* A single word longer than the box breaks rather than spilling into the
+     next column. Nothing this session's titles do; a net, not a behaviour. */
+  overflow-wrap: break-word;
+  vertical-align: top;
+}
 .sc-th-spot,
 .sc-th-total,
 .sc-th-rank {
-  padding-left: 18px;
+  padding-left: 10px;
 }
 .sc-th-swatch {
   display: inline-block;
@@ -459,8 +698,10 @@ body {
   background: var(--panel-2);
 }
 
+/* 5px, not 6. The three or four pixels a column gives up here are what keep
+   the whole table inside a 1280px window — see `.sc-th-title`. */
 .sc-grid td {
-  padding: 1px 6px;
+  padding: 1px 5px;
   border-bottom: 1px solid color-mix(in srgb, var(--line) 50%, transparent);
   vertical-align: middle;
 }
@@ -506,10 +747,11 @@ body {
   color: var(--dim);
 }
 
-/* The points the raw became, live, as you type down the column. */
+/* The points the raw became, live, as you type down the column. 26px is three
+   digits at this size; anything wider grows the cell as it always did. */
 .sc-pts {
   display: inline-block;
-  min-width: 30px;
+  min-width: 26px;
   margin-left: 6px;
   font-size: 12px;
   color: var(--muted);
@@ -717,8 +959,13 @@ body {
 
 /* --------------------------------------------------------- the foot -- */
 
+/* Pinned to the bottom. Slack on a short panel collects immediately above the
+   primary button rather than in a hole in the middle of the console, and the
+   button is in the same place in every segment — which is the whole promise
+   the space bar is making. */
 .panel-foot {
   flex: none;
+  margin-top: auto;
   display: flex;
   align-items: center;
   gap: 8px;
@@ -774,13 +1021,19 @@ body {
 .ctl-primary {
   margin-left: auto;
 }
+/* 17px against the secondary buttons' 13px, so the one button that matters is
+   the one button that reads as bigger rather than merely greener. min-width
+   stays 260px: the foot has three secondary controls beside it and at 1280
+   there is no room to widen it without wrapping them onto a second row.
+   #062a20 on --nomad #06d092 is 7.68:1, theme-independent — --nomad is a
+   brand fill and does not move between light and dark. */
 .ctl-primary .ctl-button {
   background: var(--nomad);
   border-color: var(--nomad);
   color: #062a20;
   font-weight: 600;
-  font-size: 15px;
-  padding: 10px 20px;
+  font-size: 17px;
+  padding: 12px 22px;
   min-width: 260px;
   justify-content: center;
 }
@@ -860,18 +1113,41 @@ body {
   flex-direction: column;
   gap: 8px;
 }
-/* 180px wide, live. It answers "what does the room see right now" without
-   the host switching tabs, which is the question the host asks most. */
+/*
+ * Live, and in the shape the room is actually in.
+ *
+ * It used to render the participant surface at 360 × 740 and halve it: a
+ * phone, on a console labelled "the room sees exactly this", for a room that
+ * is on laptops. participant.css keys its landscape composition to
+ * `@container pv (min-width: 700px)` against `.p-root`, which is
+ * `container-type: size` — so the layout that appears is decided by the box's
+ * *rendered* size, before any transform. Rendering 1280 × 800 and scaling it
+ * down therefore previews the laptop layout, which is the one nearly every
+ * participant will be looking at; a transform does not touch layout, so the
+ * container still measures 1280px and still resolves the ≥700px and ≥1200px
+ * rules the same way a real 1280px window does.
+ *
+ * It fills its column and keeps the laptop's proportions, and the scale is
+ * recomputed from the measured width every time that column changes — by the
+ * window resizing, or by the host dragging the splitter. The number in the
+ * stylesheet is only what it looks like for the one frame before the first
+ * measurement lands.
+ */
+.tray-preview {
+  --pv-scale: 0.175;
+}
 .preview-frame {
-  width: 180px;
-  height: 370px;
+  width: 100%;
+  aspect-ratio: 1280 / 800;
   overflow: hidden;
   border: 1px solid var(--line);
   border-radius: 8px;
   background: var(--ground);
 }
 .preview-frame .p-root.compact {
-  transform: scale(0.5);
+  width: 1280px;
+  height: 800px;
+  transform: scale(var(--pv-scale));
   transform-origin: top left;
 }
 .tray-toasts {
@@ -948,7 +1224,7 @@ body {
 
 .t-head-line {
   margin: 0;
-  font-size: 13px;
+  font-size: 14px;
   letter-spacing: 0.14em;
   color: var(--muted);
 }
@@ -958,14 +1234,15 @@ body {
 .t-round-card {
   margin: 0;
   align-self: flex-start;
-  font-size: 13px;
+  font-size: 14px;
   color: var(--muted);
 }
 .t-round-card[hidden] {
   display: none;
 }
 .t-round-card.is-card {
-  padding: 6px 10px;
+  font-size: 15px;
+  padding: 7px 12px;
   border-radius: 6px;
   border-left: 3px solid var(--trivia);
   background: var(--panel-2);
@@ -973,10 +1250,12 @@ body {
   font-weight: 600;
 }
 
+/* The one thing in front of the room, and the one thing the host says out
+   loud. 22px against a 14px panel. --ink: 16.80:1 dark, 18.72:1 light. */
 .t-q {
   margin: 0;
-  font-size: 19px;
-  line-height: 1.3;
+  font-size: 22px;
+  line-height: 1.25;
 }
 
 .t-answers {
@@ -1000,7 +1279,7 @@ body {
   padding: 4px 8px;
   border-radius: 5px;
   background: var(--panel-2);
-  font-size: 13px;
+  font-size: 14px;
   overflow: hidden;
 }
 .t-answer-bar {
@@ -1046,9 +1325,12 @@ body {
   color: var(--hit);
 }
 
+/* The number the host's next decision turns on — wait, or close. 18px.
+   --ink 16.80:1 / 18.72:1; .all-in takes --hit, 9.82:1 dark / 5.08:1 light
+   on --ground. */
 .t-counts {
   margin: 0;
-  font-size: 15px;
+  font-size: 18px;
   font-weight: 600;
 }
 .t-counts.all-in {
@@ -1198,9 +1480,12 @@ body {
   width: 7rem;
 }
 
+/* What the round is doing right now, read off the console mid-sentence.
+   Inherits --ink: 16.80:1 dark, 18.72:1 light on --ground. */
 .a-item {
   margin: 0;
-  font-size: 15px;
+  font-size: 17px;
+  line-height: 1.35;
 }
 .a-note {
   margin: 0;
@@ -1324,11 +1609,14 @@ body {
    the console answers to is printed at the bottom of the rail, and again in
    driving mode, where the rail is not on screen. --muted, not --dim: --dim
    never carries text that has to be read. Measured 5.41:1 dark (#8b8a9c on
-   #14141d) and 5.19:1 light (#656a76 on HDS surface-faint #fafafa). */
+   #14141d) and 5.19:1 light (#656a76 on HDS surface-faint #fafafa); on the
+   rail's own background, --ground, it is 5.84:1 dark and 5.38:1 light. 11px,
+   up from 10px: this is the list the host reads when they have forgotten
+   which key does what, so it is the last thing that should be hard to read. */
 .rail-keys {
   margin: 0;
   flex: none;
-  font-size: 10px;
+  font-size: 11px;
   line-height: 1.6;
   letter-spacing: 0.08em;
   color: var(--muted);
@@ -1552,10 +1840,46 @@ body {
   color: var(--sealed);
 }
 
+/* ------------------------------------------------------- the runbook -- */
+
+/*
+ * A runbook row: the arcade's setup row, plus a grip — these rows can be
+ * dragged, and a row that can be dragged has to look like one. The grip is
+ * decoration in the accessibility tree; the two arrow buttons and Alt+Arrow
+ * are the reorder, and the drag is the extra.
+ */
+.rb-row {
+  grid-template-columns: 1.1em 1.6em minmax(0, 1fr) auto;
+  align-items: center;
+}
+/* --muted, not --dim: this is the "you can pick this up" mark, and an
+   affordance nobody can see is an affordance that is not there. #8b8a9c on
+   --panel-2 #1d1d28 is 4.94:1 dark, #656a76 on #f1f2f3 5.06:1 light. */
+.rb-grip {
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1;
+  cursor: grab;
+  text-align: center;
+}
+.rb-row.is-dragging {
+  opacity: 0.5;
+}
+.rb-row.is-dragging .rb-grip {
+  cursor: grabbing;
+}
+/* Where it would land. A rule rather than a fill, so the row underneath is
+   still readable while the pointer is over it. */
+.rb-row.is-over {
+  box-shadow: inset 0 2px 0 var(--nomad-ink);
+}
+
 /* The line that says which round the button is about to announce. */
+/* Which round the primary button is about to announce — the line that has to
+   agree with the button. --ink: 16.80:1 dark, 18.72:1 light. */
 .a-upnext {
   margin: 0;
-  font-size: 15px;
+  font-size: 17px;
   color: var(--ink);
 }
 .a-upnext[hidden] {
