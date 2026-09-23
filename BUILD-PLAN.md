@@ -236,6 +236,39 @@ and it needs humans, not bots.
 
 ## Phase 5 — Operations
 
+**Queued 23 Sep 2026: tell participants how scoring works.** Nothing on the
+participant surface explains the numbers it shows them. They get a strip
+reading `YOU 143 · TRIVIA 80 · ARCADE 63` and, since the per-round rules
+landed, one line about how the round in front of them scores — and that is
+everything.
+
+Four things are never explained anywhere a participant can look:
+
+- **Why a trivia score of 14,300 appears as 80.** Each activity is normalised
+  so its top scorer takes 100 and everyone else scales against them. This is
+  the single most confusable thing in the scoring model and the one people
+  will ask about at 3:15.
+- **Bench Credit** — why somebody has a score for an activity they ran instead
+  of played.
+- **Spot Awards** — that they exist, are worth 10, and that each facilitator
+  has two.
+- **That only the top five are ever shown**, and that this is deliberate so
+  nobody's name sits at the bottom of a list in front of their team.
+
+The design assumes the host says all of it in the 2:00 welcome, and the event
+README carries a short version for exactly that. That covers the room on the
+day and leaves nothing for whoever joins late, stops listening, or wonders
+later why their number looks small.
+
+The place for it is the **standings screen**, because that is where somebody
+looks at their own number and forms the question. Same shape as the per-round
+play rules: static text, no state, nothing that could leak. It was deliberately
+not built before the 25 September huddle — the console already had a layout
+rework, a modular runbook, a resizable tray and a banner change in flight two
+days out, and another participant-surface change on top of that bought more
+risk than the gap cost.
+
+
 - A runbook: pre-session checklist, what to do when the host's browser dies,
   how to restore a session
 - Load test at 2× expected headcount
