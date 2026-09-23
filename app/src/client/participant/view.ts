@@ -24,6 +24,7 @@ import {
   HOUSE,
   KEY_HINT,
   LIGHT_FACE,
+  PLAY_RULE,
   STAFF_CARD,
   STATE_LOCK_ERROR,
   answerKeyIndex,
@@ -497,6 +498,11 @@ function sceneTrivia(ctx: SceneCtx): Scene {
   const grid = h("div", { class: "t-grid" });
   const keys = keyHint(KEY_HINT.trivia);
   const status = h("p", { class: "t-status label" });
+  // Under the timer and above the tiles, which is where the eye already is
+  // while somebody is deciding. In the head, so the laptop grid — which
+  // places `head`, `status`, `keys` and `reveal` by name — needs no new area
+  // and the two-column layout is untouched.
+  const rule = playRule(PLAY_RULE.trivia);
 
   const verdict = h("p", { class: "display t-verdict" });
   const points = h("p", { class: "mono t-points" });
@@ -512,7 +518,7 @@ function sceneTrivia(ctx: SceneCtx): Scene {
   ]);
 
   const node = h("section", { class: "v v-trivia" }, [
-    h("div", { class: "t-head" }, [kicker, roundCard, question, timer]),
+    h("div", { class: "t-head" }, [kicker, roundCard, question, timer, rule]),
     grid,
     keys,
     status,
@@ -589,6 +595,7 @@ function sceneTrivia(ctx: SceneCtx): Scene {
       replace(grid, []);
       tiles = [];
       keys.hidden = true;
+      rule.hidden = false;
       builtFor = "";
       setText(status, "The host is about to open the question.");
       reveal.hidden = true;
@@ -631,6 +638,10 @@ function sceneTrivia(ctx: SceneCtx): Scene {
     if (revealed) {
       timer.hidden = true;
       keys.hidden = true;
+      // The question is answered and the tiles are not a control any more.
+      // Hidden on the phase, which every screen in the room can already see,
+      // and never on anything about this person's answer.
+      rule.hidden = true;
       setText(status, "");
       status.hidden = true;
       reveal.hidden = false;
@@ -672,6 +683,7 @@ function sceneTrivia(ctx: SceneCtx): Scene {
     }
 
     reveal.hidden = true;
+    rule.hidden = false;
     countedFrom = null;
     status.hidden = false;
     keys.hidden = chosen !== null || trivia.phase !== "open";
@@ -816,6 +828,21 @@ function keyHint(text: string): HTMLElement {
 }
 
 /**
+ * The round's rule, in one plain line, on the screen the whole time it is
+ * being played. See `PLAY_RULE` for why it exists and what it may not say.
+ *
+ * Built once per scene and never rewritten: the text is a constant, so there
+ * is nothing here for a repaint to change and nothing that could come to
+ * depend on the state. A round with no line yet renders an empty, hidden
+ * paragraph rather than a gap, so wiring one up later is a string.
+ */
+function playRule(text: string | undefined): HTMLElement {
+  const node = h("p", { class: "p-rule", text: text ?? "" });
+  node.hidden = text === undefined;
+  return node;
+}
+
+/**
  * Whether a keystroke belongs to something the person is typing into.
  *
  * The page-level key handlers are what make the keyboard work without first
@@ -924,6 +951,7 @@ function sceneArcade(ctx: SceneCtx): Scene {
   const recruitStatus = h("div", { class: "a-recruit-status" });
   const recruitNode = h("div", { class: "a-recruit" }, [
     recruitTimer,
+    playRule(PLAY_RULE.recruitment),
     cue,
     cueRead,
     h("div", { class: "a-recruit-row" }, [field, submit]),
@@ -996,6 +1024,9 @@ function sceneArcade(ctx: SceneCtx): Scene {
   };
   const planNode = h("div", { class: "a-plan" }, [
     bar,
+    // Above the button, not under it: the button fills the rest of the screen
+    // and the rule has to be readable before the first light, not after it.
+    playRule(PLAY_RULE.plan_apply),
     planHouse.node,
     bigButton,
     keyHint(KEY_HINT.tap),
@@ -1091,6 +1122,10 @@ function sceneArcade(ctx: SceneCtx): Scene {
     glassWave,
     glassTimer,
     glassBar,
+    // Above the bridge, so it is on the screen of a wave that is still
+    // waiting — which is the wave with the most time to read it and the one
+    // that has not yet learned what the round is by losing it.
+    playRule(PLAY_RULE.glass_bridge),
     bridge,
     glassProduct,
     glassPanes,

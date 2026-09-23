@@ -202,6 +202,39 @@ body.phone #app {
   line-height: 1.4;
 }
 
+/* ---- the rule, on the player's own screen --------------------------- */
+
+/*
+ * One plain line saying what the player does, on screen for as long as the
+ * round is being played. See `PLAY_RULE` in shared/view.ts for the copy and
+ * for why it may not vary with the state.
+ *
+ * Quiet, not silent. It sits under a timer while somebody is deciding, so it
+ * is --muted body type rather than the --ink the question and the answers
+ * own: measured against --ground it is 5.84:1 on dark and 5.42:1 on light,
+ * both clear of the 4.5:1 floor, and it is carried entirely by its words —
+ * nothing here is distinguished by colour. It is deliberately not `.label`:
+ * the key hints are uppercase mono at 11px because they are an aside, and
+ * this is a sentence somebody has to read once and act on.
+ *
+ * `flex: none` everywhere it is used — the trivia head, the Recruitment
+ * column, the Plan / Apply stack, the bridge — so it never takes height from
+ * the control underneath it and never absorbs the shrink that keeps a
+ * shallow window from scrolling. Its measure is capped so the line breaks
+ * where a sentence breaks rather than running the width of a laptop.
+ */
+.p-rule {
+  margin: 0;
+  flex: none;
+  max-width: 62ch;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.35;
+}
+.p-rule[hidden] {
+  display: none;
+}
+
 .display.xl {
   margin: 0;
   font-size: clamp(34px, 11vw, 56px);
@@ -1844,6 +1877,11 @@ body.phone:has(.v-splash) {
     display: block;
     font-size: 12px;
   }
+  /* A laptop window can afford the extra point; a shallow one cannot, which
+     is what the cqh term is for. */
+  .p-rule {
+    font-size: clamp(13px, 1.9cqh, 15px);
+  }
   .t-key {
     display: block;
     min-width: 1.8em;
@@ -2109,9 +2147,10 @@ body.phone:has(.v-splash) {
     max-width: 1180px;
     margin-inline: auto;
     grid-template-columns: minmax(0, 1fr) minmax(300px, 0.85fr);
-    grid-template-rows: auto auto auto auto;
+    grid-template-rows: auto auto auto auto auto;
     grid-template-areas:
       "cue timer"
+      "cue rule"
       "cue row"
       "cue keys"
       "cue status";
@@ -2123,6 +2162,9 @@ body.phone:has(.v-splash) {
     grid-area: timer;
     font-size: clamp(16px, 3cqh, 22px);
     align-self: end;
+  }
+  .a-recruit .p-rule {
+    grid-area: rule;
   }
   .a-recruit .a-cue {
     grid-area: cue;
@@ -2188,10 +2230,11 @@ body.phone:has(.v-splash) {
   .a-glass {
     display: grid;
     grid-template-columns: minmax(0, 1fr) auto;
-    grid-template-rows: auto auto auto auto minmax(0, 1fr) auto;
+    grid-template-rows: auto auto auto auto auto minmax(0, 1fr) auto;
     grid-template-areas:
       "wave    timer"
       "bar     bar"
+      "rule    rule"
       "bridge  bridge"
       "product status"
       "panes   panes"
@@ -2212,6 +2255,9 @@ body.phone:has(.v-splash) {
   .a-glass .a-step-bar {
     grid-area: bar;
     height: clamp(6px, 1.2cqh, 10px);
+  }
+  .a-glass .p-rule {
+    grid-area: rule;
   }
   .a-glass .a-bridge {
     grid-area: bridge;

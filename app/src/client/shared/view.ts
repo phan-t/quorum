@@ -466,6 +466,86 @@ export const HOUSE = {
 export const STATE_LOCK_ERROR = "Error: state lock held by another process";
 
 /* ------------------------------------------------------------------ */
+/* The rule, on the player's own screen                                */
+/* ------------------------------------------------------------------ */
+
+/**
+ * One line per activity, on the participant's own screen, while it is being
+ * played: what you do, and what it costs you.
+ *
+ * The instructions the room gets are the Desktop's round card, and the card
+ * is up for twenty seconds before the round. That works for a room reading
+ * together and for nobody else: somebody who joined late, or who was looking
+ * at the video call, or who is in their second window and never saw the big
+ * screen, arrives at a surface that used to say "Pick one. It is final." and,
+ * in Plan / Apply and on the bridge, effectively nothing. The card is theatre
+ * and it is gone; this is the rule and it stays.
+ *
+ * So these are deliberately *not* in the Front-End Man's register — no
+ * announcer, no `>` prompt, no joke. They are the plainest sentences in the
+ * product. `ARCADE_ROUND_CARD` beside them is what the room hears; this is
+ * what the player reads while deciding, under a timer, on their own.
+ *
+ * Three rules, and all three are load-bearing:
+ *
+ * - **Static per round.** Never a function of the state. A line that changed
+ *   with what the server knows is a line that could carry what the server
+ *   knows, and SCORING.md and SPEC.md are unambiguous that no participant
+ *   surface may say whether an answer was right, which way the light is about
+ *   to turn, or which pane is real, before the moment that says it.
+ * - **Say the thing that ends your round.** Plan / Apply *is* the rule that a
+ *   tap during the lock drains you; the bridge *is* the rule that one of the
+ *   two names was made up. A player who does not know either has not been
+ *   given a chance to play.
+ * - **Say nothing about which.** The bridge's line names the shape of the
+ *   choice and nothing about the answer to it.
+ *
+ * Every round kind has a key, and the three that have no participant surface
+ * yet hold `undefined` on purpose: the record is exhaustive, so a new round
+ * cannot be built without this file asking what its line is, and building one
+ * is filling in the string here.
+ */
+export const PLAY_RULE: Readonly<
+  Record<"trivia" | ArcadeRoundKind, string | undefined>
+> = {
+  /**
+   * The speed bonus is the part nobody is told. "Pick one. It is final." is
+   * already on the screen and says the half that stops a second tap; this
+   * says the half that explains why the timer is there at all. It promises
+   * nothing about *this* answer — it is the scoring rule, stated in advance,
+   * exactly as the facilitator guide states it to the room.
+   */
+  trivia: "Tap one answer. Correct answers score more the sooner they land.",
+  /**
+   * The emoji are `aria-hidden` decoration to a screen reader and a riddle to
+   * everybody else: the missing word was always *product*.
+   */
+  recruitment: "Type the product these two emoji mean. You get one try.",
+  /**
+   * The whole game, in one sentence.
+   *
+   * It names the word on the button — `LOCKED` — and never the colour, because
+   * the pink state is pink *and* says LOCKED *and* carries the ■ glyph, and
+   * the one of those three a colour-blind player cannot use is the one this
+   * line must not lean on.
+   */
+  plan_apply:
+    "Tap to add resources. A tap while it reads LOCKED drains you to the Lounge.",
+  unseal: undefined,
+  tug_of_raft: undefined,
+  gganbu: undefined,
+  /**
+   * The round is unplayable without this and the screen never said it: two
+   * product feature names, one of them invented, and no statement anywhere on
+   * the participant's own surface that one of them is a fake or what happens
+   * if you pick it. Which pane is which is not hinted at, here or anywhere
+   * else before the reveal.
+   */
+  glass_bridge:
+    "One pane is a real HashiCorp feature. The other is invented, and it drains you.",
+};
+
+/* ------------------------------------------------------------------ */
 /* The keyboard                                                        */
 /* ------------------------------------------------------------------ */
 
