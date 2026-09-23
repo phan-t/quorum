@@ -808,6 +808,50 @@ export type Event =
   | { type: "open" }
   | { type: "start" }
   | { type: "close" }
+  /**
+   * Undo a close. `closed` -> `running`, and **nothing else moves**.
+   *
+   * `close` is the one lifecycle transition with no way back, and an
+   * accidental one ends the afternoon: the reducer refuses every rule event on
+   * a closed session, so the alternative is a new session, a re-upload, a new
+   * join code and thirty people rejoining. This is the cheap way back, and it
+   * costs nobody a point.
+   *
+   * It deliberately restores only what it can restore *honestly*. `close` also
+   * sets `segment: "final"` and `seal: "revealed"`, and this does not put
+   * either back, for two reasons. The state carries no memory of where they
+   * were — inventing a field to hold it would be a field a snapshot could
+   * disagree with the rest of the state about — and more to the point, the
+   * room has already seen the final and already seen the scoreboard. Un-seeing
+   * it is not on offer. What is on offer is carrying on: one press of the rail
+   * puts the segment back and one press of the scoreboard control puts the
+   * seal back, and both of those are things the host does in front of people
+   * all afternoon anyway.
+   *
+   * Joins are unlocked, because `close` locked them as a side effect rather
+   * than because the host asked. See {@link Event} `restartSession` for the
+   * other, destructive way back.
+   */
+  | { type: "reopen" }
+  /**
+   * Back to a clean lobby, from any phase including `closed`.
+   *
+   * The dry run's undo, and the accident's. **Keeps** the session id, the join
+   * code, every participant with their nickname and their join-order number,
+   * the loaded question set, the activity list — and, outside the engine, the
+   * host, screen and rejoin tokens, which live in the runtime. Nobody rejoins
+   * and nothing is re-uploaded.
+   *
+   * **Clears** every score, every Spot Award, all trivia progress (back to
+   * question 1, with the same questions), the arcade entirely, the holding
+   * card, the seal, the segment and the join lock.
+   *
+   * One event, not a sequence, and that is the point: a projection is built
+   * from a whole `SessionState`, so there is no instant at which a phone can
+   * be handed a session that is half cleared — trivia rewound with the arcade
+   * still standing, or scores gone with the seal still hiding them.
+   */
+  | { type: "restartSession" }
   | { type: "setSegment"; segment: Segment }
   | { type: "setSeal"; seal: Seal }
   | { type: "setHolding"; holding: HoldingCard | null }

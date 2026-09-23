@@ -848,6 +848,19 @@ function commandToEvent(cmd: HostCommand, runtime: SessionRuntime): Event | null
       return { type: "start" };
     case "close":
       return { type: "close" };
+    case "session.reopen":
+      return { type: "reopen" };
+    case "session.restart":
+      // The one command that has to name the session it is wiping. Compared
+      // plainly and not in constant time on purpose: this is not a secret —
+      // the console reads it off the state it was already sent — it is a
+      // check that the frame was built for *this* session by something that
+      // knew which session it was attached to. Returning null puts it on the
+      // `refusedCmd` path, so a console that gets this wrong sees a refusal
+      // rather than silence.
+      return cmd.confirm === runtime.state.joinCode
+        ? { type: "restartSession" }
+        : null;
     case "segment":
       return { type: "setSegment", segment: cmd.kind };
     case "holding":

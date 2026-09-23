@@ -320,3 +320,112 @@ describe("the key layout", () => {
     assert.ok(eventSortKey(99) < eventSortKey(100));
   });
 });
+
+/**
+ * A restart has to survive a restart.
+ *
+ * `restartSession` is an ordinary event: it emits a `persist` effect, so the
+ * snapshot and the log entry go down the same path every other transition
+ * uses. What is worth testing out here is the two things the engine cannot
+ * know about — that the stored META's `phase` moves back to something
+ * `loadRecoverable` scans for, and that the join code goes back in the table
+ * after a close took it out. Without either, the session comes back as a
+ * lobby nobody can reach.
+ */
+describe("restarting a session, durably", () => {
+  it("snapshots the wipe and appends it to the log", async () => {
+    const store = new MemoryStore();
+    const s = await playAnAfternoon(store);
+    const before = (await store.loadSession(s.sid))?.events.length ?? 0;
+
+    s.created.runtime.apply({ type: "restartSession" }, Date.now());
+    await s.persister.drain();
+
+    const loaded = await store.loadSession(s.sid);
+    assert.equal(loaded?.events.length, before + 1);
+    assert.equal(
+      loaded?.events.at(-1)?.event.type,
+      "restartSession",
+      "the wipe is in the audit trail like everything else",
+    );
+    assert.deepEqual(loaded?.snapshot?.state.scores["trivia"], {});
+    assert.equal(loaded?.snapshot?.state.spots.length, 0);
+    assert.equal(loaded?.snapshot?.state.phase, "lobby");
+    assert.equal(loaded?.meta.phase, "lobby", "META is what a restart scans on");
+  });
+
+  it("comes back from a process restart as the clean lobby, with the room in it", async () => {
+    const store = new MemoryStore();
+    const s = await playAnAfternoon(store);
+    s.created.runtime.apply({ type: "restartSession" }, Date.now());
+    await s.persister.drain();
+
+    const registry2 = new SessionRegistry(new Persister(store, () => {}));
+    const recovered = await recoverSessions(store, registry2, () => {});
+    assert.equal(recovered.length, 1, "a restarted session is still recoverable");
+
+    const back = registry2.bySessionId(s.sid);
+    assert.ok(back);
+    assert.equal(back.state.phase, "lobby");
+    assert.equal(back.state.seal, "live");
+    assert.deepEqual(back.state.scores["trivia"], {});
+    assert.equal(back.state.spots.length, 0);
+    assert.deepEqual(computeStandings(back.state).map((x) => x.total), [0, 0]);
+    // And the room is still the room.
+    assert.deepEqual(Object.keys(back.state.participants).sort(), ["p1", "p2"]);
+    assert.equal(back.state.participants["p1"]?.playerNumber, 1);
+    assert.equal(back.pidForRejoin(s.token), "p1", "phones still come back as themselves");
+    assert.equal(registry2.byJoinCode(back.state.joinCode)?.state.sid, s.sid);
+  });
+
+  it("puts the join code back when a closed session is restarted", async () => {
+    const store = new MemoryStore();
+    const s = await playAnAfternoon(store);
+    s.created.runtime.apply({ type: "close" }, Date.now());
+    await s.persister.drain();
+    assert.equal(store.codeCount(), 0, "closing drops it");
+
+    s.created.runtime.apply({ type: "restartSession" }, Date.now());
+    await s.persister.drain();
+    assert.equal(store.codeCount(), 1, "restarting puts it back");
+  });
+
+  it("puts the join code back on a reopen too, keeping every score", async () => {
+    const store = new MemoryStore();
+    const s = await playAnAfternoon(store);
+    const wanted = computeStandings(s.created.runtime.state);
+    s.created.runtime.apply({ type: "close" }, Date.now());
+    await s.persister.drain();
+
+    s.created.runtime.apply({ type: "reopen" }, Date.now());
+    await s.persister.drain();
+    assert.equal(store.codeCount(), 1);
+
+    const registry2 = new SessionRegistry(new Persister(store, () => {}));
+    await recoverSessions(store, registry2, () => {});
+    const back = registry2.bySessionId(s.sid);
+    assert.equal(back?.state.phase, "running");
+    assert.deepEqual(computeStandings(back!.state), wanted);
+  });
+
+  it("recovers by replaying the wipe when the snapshot is older than it", async () => {
+    // The slow path, and the one that would show an off-by-one: a snapshot
+    // from before the restart, plus the log entry for the restart itself.
+    const store = new MemoryStore();
+    const s = await playAnAfternoon(store);
+    const stale = await store.loadSession(s.sid);
+    assert.ok(stale?.snapshot);
+
+    s.created.runtime.apply({ type: "restartSession" }, Date.now());
+    await s.persister.drain();
+    const fresh = await store.loadSession(s.sid);
+    assert.ok(fresh);
+
+    const rebuilt = rehydrate({ ...fresh, snapshot: stale.snapshot });
+    assert.ok(rebuilt);
+    assert.ok(rebuilt.replayed >= 1, "the restart had to be replayed");
+    assert.equal(rebuilt.state.phase, "lobby");
+    assert.deepEqual(rebuilt.state.scores["trivia"], {});
+    assert.deepEqual(rebuilt.state, fresh.snapshot?.state);
+  });
+});

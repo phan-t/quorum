@@ -131,6 +131,29 @@ export type HostCommand =
   | { name: "open" }
   | { name: "start" }
   | { name: "close" }
+  /**
+   * Undo a close: `closed` -> `running`, keeping every score. Nothing else
+   * moves — see the `reopen` event in engine/types.ts.
+   */
+  | { name: "session.reopen" }
+  /**
+   * Back to a clean lobby, wiping every score. The room, the join code and the
+   * loaded questions stay.
+   *
+   * `confirm` carries the session's own join code, and the server refuses the
+   * command unless it matches. It is not authentication — the socket is
+   * already the host's — it is the reason this one command cannot be fired by
+   * a frame that merely names it. Every other command in this union is
+   * expressible as a bare `{ name }`, which is fine for a command that shows a
+   * holding card and is not fine for the one that wipes the afternoon. A
+   * replayed frame, a fuzzed frame, or a console that has lost track of which
+   * session it is attached to all fail this check rather than land.
+   *
+   * The host's own guard is a different one and lives in the console: they
+   * type a word into a field. The join code is not something anybody should be
+   * asked to type — it is `hvs.` and twenty-four case-sensitive characters.
+   */
+  | { name: "session.restart"; confirm: string }
   | { name: "segment"; kind: Segment }
   | { name: "holding"; title: string; line: string }
   | { name: "seal"; state: Seal }
@@ -985,6 +1008,16 @@ function parseHostCommand(v: unknown): HostCommand | null {
       return { name: "start" };
     case "close":
       return { name: "close" };
+    case "session.reopen":
+      return { name: "session.reopen" };
+    case "session.restart": {
+      // No default. A restart with no `confirm` is a restart nobody typed, and
+      // the frame is refused here rather than turned into an event the server
+      // then has to second-guess. Whether the string is the *right* join code
+      // is the server's question — this file has no session to compare it to.
+      const confirm = str("confirm");
+      return confirm === null ? null : { name: "session.restart", confirm };
+    }
     case "segment": {
       const kind = c["kind"];
       return SEGMENTS.includes(kind as Segment)

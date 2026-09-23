@@ -427,6 +427,15 @@ export class SessionRuntime {
         // code stops resolving rather than sending someone to a dead lobby.
         this.persistence.deleteJoinCode(this.state.joinCode);
       }
+      if (before.phase === "closed" && this.state.phase !== "closed") {
+        // And back again, for `reopen` and `restartSession`. The in-memory
+        // registry never forgot the code — `byCode` is not pruned on close —
+        // so this process would have kept resolving it either way; the stored
+        // row is what a *later* process reads, and without this line a
+        // reopened session would come back from a restart with a join code
+        // that resolves to nothing and a room that cannot get back in.
+        this.persistence.joinCode(this.state.joinCode, this.state.sid);
+      }
       if ("pid" in event) this.persistParticipant(event.pid);
     }
 

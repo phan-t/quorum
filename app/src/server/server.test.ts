@@ -1941,3 +1941,216 @@ describe("the trivia CSV upload", () => {
     assert.equal(missing.status, 401);
   });
 });
+
+/* ------------------------------------------------------------------ */
+/* Starting over, and undoing a close                                   */
+/* ------------------------------------------------------------------ */
+
+/**
+ * The two ways back, over the wire.
+ *
+ * Expected behaviour is the contract the events promise (engine/types.ts) plus
+ * the one thing that only exists out here: `session.restart` carries the
+ * session's join code and the server refuses a frame that does not name the
+ * session it is wiping. That check is not authentication — the socket is
+ * already the host's — it is what stops a bare `{ name: "session.restart" }`,
+ * which is the shape every other command in the union takes.
+ */
+describe("restart and reopen over the wire", () => {
+  /** A session with two people in it, a score each, and a Spot Award. */
+  async function withScores(): Promise<{
+    s: TestSession;
+    host: Conn;
+    kenji: Joined;
+    priya: Joined;
+  }> {
+    const s = makeSession("running");
+    const host = await connectHost(s);
+    const kenji = await join(s.joinCode, "Kenji");
+    const priya = await join(s.joinCode, "Priya");
+    applyEvent(s, { type: "setScore", activityId: "trivia", pid: kenji.pid, raw: 18400 });
+    applyEvent(s, { type: "setScore", activityId: "trivia", pid: priya.pid, raw: 14720 });
+    applyEvent(s, {
+      type: "grantSpot",
+      pid: priya.pid,
+      activityId: "trivia",
+      reason: "best recovery",
+    });
+    applyEvent(s, { type: "enterArcade", activityId: "arcade" });
+    return { s, host, kenji, priya };
+  }
+
+  it("wipes the scores, keeps the room, and the phones land in a clean lobby", async () => {
+    const { s, host, kenji, priya } = await withScores();
+    assert.ok(s.runtime.state.arcade, "the arcade is open before the wipe");
+    kenji.conn.mark();
+
+    await ackOk(host, { name: "session.restart", confirm: s.joinCode });
+
+    const after = await kenji.conn.next(
+      (f) => f.msg?.t === "state" && f.msg.state.phase === "lobby",
+    );
+    assert.equal(after.msg.state.segment, "lobby");
+    assert.equal(after.msg.state.seal, "live");
+    assert.deepEqual(after.msg.state.standings, [], "nothing on the board");
+    assert.equal(after.msg.state.arcade, undefined, "no arcade on a lobby phone");
+    assert.equal(after.msg.state.arcadeMine, undefined);
+    // Their own points strip is the participant's copy of the scoreboard.
+    assert.equal(after.msg.state.own?.total ?? 0, 0);
+    // Nobody was thrown off.
+    assert.ok(!kenji.conn.isClosed);
+    assert.ok(!priya.conn.isClosed);
+    assert.equal(after.msg.state.roster.length, 2, "the room is still here");
+
+    assert.equal(s.runtime.state.spots.length, 0);
+    assert.equal(s.runtime.state.arcade, null);
+    assert.equal(Object.keys(s.runtime.state.participants).length, 2);
+    assert.equal(s.runtime.state.joinCode, s.joinCode, "the join code did not change");
+
+    await host.close();
+    await kenji.conn.close();
+    await priya.conn.close();
+  });
+
+  it("refuses a restart that does not name the session", async () => {
+    const { s, host, kenji, priya } = await withScores();
+    for (const bad of [
+      { name: "session.restart" },
+      { name: "session.restart", confirm: "" },
+      { name: "session.restart", confirm: "hvs.wrongwrongwrongwrongwrong" },
+      // Join codes are base62 and case is significant. Nothing may fold them.
+      { name: "session.restart", confirm: s.joinCode.toLowerCase() },
+      { name: "session.restart", confirm: `${s.joinCode} ` },
+      { name: "session.restart", confirm: 17 },
+    ]) {
+      const r = await cmd(host, bad);
+      assert.equal(r.msg.t, "refusedCmd", `expected a refusal for ${JSON.stringify(bad)}`);
+      assert.ok(r.msg.message.length > 0, "a refusal says something");
+    }
+    assert.ok(s.runtime.state.scores["trivia"]?.[kenji.pid], "nothing was wiped");
+    assert.equal(s.runtime.state.spots.length, 1);
+
+    await host.close();
+    await kenji.conn.close();
+    await priya.conn.close();
+  });
+
+  it("works on a closed session, and the code is joinable again afterwards", async () => {
+    const { s, host, kenji, priya } = await withScores();
+    await ackOk(host, { name: "close" });
+    await kenji.conn.next((f) => f.msg?.t === "state" && f.msg.state.phase === "closed");
+    await refusedJoin(s.joinCode, "Zoe");
+
+    await ackOk(host, { name: "session.restart", confirm: s.joinCode });
+    assert.equal(s.runtime.state.phase, "lobby");
+    assert.equal(s.runtime.state.joinsLocked, false);
+
+    // The point of keeping the code: somebody who never got in still can.
+    const zoe = await join(s.joinCode, "Zoe");
+    assert.equal(zoe.state.msg.state.phase, "lobby");
+
+    await host.close();
+    await kenji.conn.close();
+    await priya.conn.close();
+    await zoe.conn.close();
+  });
+
+  it("reopen puts a closed session back with every score on it", async () => {
+    const { s, host, kenji, priya } = await withScores();
+    const before = s.runtime.state.scores;
+    await ackOk(host, { name: "close" });
+    await kenji.conn.next((f) => f.msg?.t === "state" && f.msg.state.phase === "closed");
+
+    await ackOk(host, { name: "session.reopen" });
+    const back = await kenji.conn.next(
+      (f) => f.msg?.t === "state" && f.msg.state.phase === "running",
+    );
+    assert.ok(back);
+    assert.deepEqual(s.runtime.state.scores, before, "not a point moved");
+    assert.equal(s.runtime.state.spots.length, 1);
+
+    // And the console can drive it again, which a closed session refuses.
+    await ackOk(host, { name: "segment", kind: "holding" });
+    assert.equal(s.runtime.state.segment, "holding");
+
+    await host.close();
+    await kenji.conn.close();
+    await priya.conn.close();
+  });
+
+  it("reopen on a session that is not closed is refused", async () => {
+    const s = makeSession("running");
+    const host = await connectHost(s);
+    const r = await cmd(host, { name: "session.reopen" });
+    assert.equal(r.msg.t, "refusedCmd");
+    assert.ok(r.msg.message.length > 0);
+    await host.close();
+  });
+
+  it("only the host can do either", async () => {
+    const s = makeSession("running");
+    const kenji = await join(s.joinCode, "Kenji");
+    const screen = await connectScreen(s);
+    for (const conn of [kenji.conn, screen]) {
+      cidCounter += 1;
+      const cid = `x${cidCounter}`;
+      conn.send({
+        t: "host.cmd",
+        cid,
+        cmd: { name: "session.restart", confirm: s.joinCode },
+      });
+      const r = await conn.next((f) => f.msg?.t === "refusedCmd" && f.msg.cid === cid);
+      assert.equal(r.msg.code, "forbidden");
+    }
+    assert.equal(s.runtime.state.phase, "running");
+    await kenji.conn.close();
+    await screen.close();
+  });
+
+  it("a participant who was mid-question sees the lobby, not half a question", async () => {
+    const s = makeSession("running");
+    const host = await connectHost(s);
+    const kenji = await join(s.joinCode, "Kenji");
+    applyEvent(s, {
+      type: "loadTrivia",
+      activityId: "trivia",
+      questions: [
+        {
+          text: "Which one?",
+          answers: ["A", "B", "C", "D"],
+          timeLimitSec: 20,
+          correct: [1],
+          note: "because",
+          round: null,
+          basePoints: 1000,
+        },
+      ],
+    });
+    await ackOk(host, { name: "segment", kind: "trivia" });
+    await ackOk(host, { name: "trivia.open", suddenDeath: false });
+    await kenji.conn.next((f) => f.msg?.t === "state" && f.msg.state.trivia?.phase === "open");
+    kenji.conn.mark();
+
+    await ackOk(host, { name: "session.restart", confirm: s.joinCode });
+    const after = await kenji.conn.next(
+      (f) => f.msg?.t === "state" && f.msg.state.phase === "lobby",
+    );
+    // The set is still loaded, so the phone still has a trivia block — it is
+    // just an idle one, on question 1, with no clock and no answers.
+    assert.equal(after.msg.state.segment, "lobby");
+    assert.equal(after.msg.state.trivia?.phase, "idle");
+    assert.equal(after.msg.state.trivia?.index, 0);
+    assert.equal(after.msg.state.trivia?.opensAt, null);
+    assert.equal(after.msg.state.trivia?.closesAt, null);
+    assert.equal(after.msg.state.triviaMine?.state, "unanswered");
+    assert.equal(s.runtime.armedCloseAt, null, "the question's timer is disarmed");
+    assert.equal(
+      s.runtime.state.trivia?.questions.length,
+      1,
+      "the question set survived the wipe",
+    );
+
+    await host.close();
+    await kenji.conn.close();
+  });
+});

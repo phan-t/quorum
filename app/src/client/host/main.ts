@@ -495,12 +495,206 @@ const closeControl = control({
   onFire: (c) => issue({ name: "close" }, c),
 });
 
+/**
+ * The way back from a close, which used to not exist.
+ *
+ * Closing was one press behind an inline Yes and it was final: the engine
+ * refuses every rule event on a closed session, so a mis-press cost the
+ * scores, the join code and thirty rejoins. This puts the session back on
+ * `running` with everything it had. It is an ordinary two-step control,
+ * because nothing about it is destructive — it is the *undo*, and an undo
+ * behind a wall of confirmation is an undo nobody reaches in time.
+ *
+ * Shown only when the session is closed. There is nothing to reopen otherwise,
+ * and a button that is permanently greyed out is a button the eye stops
+ * reading.
+ */
+const reopenControl = control({
+  label: "Reopen the session",
+  className: "ctl-secondary",
+  question: "Carry on where you left off, scores and all?",
+  title:
+    "Puts the session back to running with every score intact. The segment and the scoreboard stay where the close left them; move them with the rail and the scoreboard button.",
+  onFire: (c) => issue({ name: "session.reopen" }, c),
+});
+
 replace(footLeft, [
   lockControl.el,
   sealControl.el,
   unsealControl.el,
+  reopenControl.el,
   closeControl.el,
 ]);
+
+/* ------------------------------------------------------------------ */
+/* Starting the session over                                           */
+/* ------------------------------------------------------------------ */
+
+/**
+ * The wipe, and the three deliberate acts it takes.
+ *
+ * This is the one control on the console that destroys something nobody can
+ * get back, and the console's usual two-step is not enough for it: an inline
+ * Yes is one stray click away from a second stray click, and the Yes takes
+ * focus on purpose, which puts a destructive button under the space bar's
+ * nose. So this is not a {@link control} at all. It is:
+ *
+ *   1. press **Start the session over…**, which only opens a panel;
+ *   2. **type the word** into a field — the console will not accept anything
+ *      else, and a field is the one widget on this page that a stray keypress
+ *      cannot turn into an action;
+ *   3. press **Wipe the scores and start over**, which is disabled until the
+ *      word matches.
+ *
+ * None of those three is the space bar, and that is structural rather than a
+ * rule this file remembers to follow. `bindSpace` ignores the key entirely
+ * while the cursor is in a text field, and for any other button it *blurs* the
+ * button and fires the primary instead — only the Yes and No of an inline
+ * confirm are exempt, and neither of these buttons is one. So space typed at
+ * step 2 puts a space in the field, space at step 1 or 3 advances the run of
+ * show, and there is no state of this page in which space wipes anything.
+ *
+ * Escape abandons it at any point and empties the field. So does pressing the
+ * arm button again, switching to driving mode, or leaving it thirty seconds —
+ * a console armed for a wipe must not still be armed when the host comes back
+ * from talking to the room.
+ *
+ * Why a typed word and not the join code: the code is `hvs.` and twenty-four
+ * case-sensitive characters, which is not something a host does in a few
+ * seconds under pressure. The join code still guards the *wire* — the command
+ * carries it and the server refuses a mismatch — the console just fills it in
+ * from the state it was already sent, rather than asking anybody to type it.
+ */
+const RESTART_WORD = "restart";
+
+/** Long enough to type seven letters, short enough not to sit armed. */
+const RESTART_DISARM_MS = 30_000;
+
+const restartArm = handsBackSpace(
+  h("button", {
+    class: "rs-arm",
+    type: "button",
+    text: "Start the session over…",
+    attrs: { "aria-expanded": "false", "aria-controls": "restart-panel" },
+  }),
+) as HTMLButtonElement;
+
+const restartKeeps = h("p", { class: "pb-note rs-keeps" });
+
+const restartField = h("input", {
+  class: "field rs-field",
+  type: "text",
+  attrs: {
+    autocomplete: "off",
+    autocorrect: "off",
+    autocapitalize: "off",
+    spellcheck: "false",
+    placeholder: RESTART_WORD,
+    "aria-label": `Type ${RESTART_WORD} to confirm`,
+  },
+}) as HTMLInputElement;
+
+const restartGo = h("button", {
+  class: "rs-go",
+  type: "button",
+  text: "Wipe the scores and start over",
+  disabled: true,
+}) as HTMLButtonElement;
+
+const restartCancel = handsBackSpace(
+  h("button", { class: "rs-cancel", type: "button", text: "Cancel" }),
+) as HTMLButtonElement;
+
+const restartPanel = h(
+  "section",
+  { class: "rs-panel", attrs: { id: "restart-panel", hidden: true } },
+  [
+    h("p", { class: "label rs-label", text: "Start the session over" }),
+    h("p", {
+      class: "rs-loses",
+      text: "This wipes every score, every Spot Award, and everything the arcade has done. It cannot be undone.",
+    }),
+    restartKeeps,
+    h("div", { class: "rs-row" }, [
+      h("label", { class: "rs-ask", attrs: { for: "restart-word" } }, [
+        "Type ",
+        h("span", { class: "mono rs-word", text: RESTART_WORD }),
+        " to switch the button on",
+      ]),
+      restartField,
+      restartGo,
+      restartCancel,
+    ]),
+  ],
+);
+setAttr(restartField, "id", "restart-word");
+
+let restartArmed = false;
+let restartTimer: ReturnType<typeof setTimeout> | null = null;
+
+function restartTyped(): boolean {
+  return restartField.value.trim().toLowerCase() === RESTART_WORD;
+}
+
+function syncRestartGo(): void {
+  const s = lastState;
+  restartGo.disabled =
+    !restartTyped() || s === null || s.phase === "draft";
+}
+
+function setRestartArmed(on: boolean): void {
+  if (on === restartArmed) return;
+  restartArmed = on;
+  restartPanel.hidden = !on;
+  setAttr(restartArm, "aria-expanded", on ? "true" : "false");
+  restartArm.classList.toggle("is-armed", on);
+  setText(restartArm, on ? "Never mind" : "Start the session over…");
+  // Emptied on the way in as well as on the way out: a field that still holds
+  // the word from last time would turn the button on before anybody typed.
+  restartField.value = "";
+  syncRestartGo();
+  if (restartTimer !== null) clearTimeout(restartTimer);
+  restartTimer = null;
+  if (on) {
+    restartField.focus();
+    restartTimer = setTimeout(() => setRestartArmed(false), RESTART_DISARM_MS);
+  } else {
+    releaseFocus();
+  }
+}
+
+restartArm.addEventListener("click", () => setRestartArmed(!restartArmed));
+restartCancel.addEventListener("click", () => setRestartArmed(false));
+restartField.addEventListener("input", syncRestartGo);
+restartField.addEventListener("keydown", (ev) => {
+  if ((ev as KeyboardEvent).key !== "Enter") return;
+  ev.preventDefault();
+  fireRestart();
+});
+restartGo.addEventListener("click", () => fireRestart());
+
+function fireRestart(): void {
+  // Two gates, and the second is not decoration. `disabled` is the word the
+  // host typed; the join code is the session the command is for, and a console
+  // that has not been told which session it is attached to has no business
+  // wiping one.
+  if (restartGo.disabled) return;
+  const code = lastState?.hostExtras?.joinCode ?? "";
+  if (code === "") {
+    primary.flash("not connected — nothing was changed");
+    return;
+  }
+  // Refusals land in the primary button, which is the one place on this
+  // console the host is always looking.
+  issue({ name: "session.restart", confirm: code }, primary);
+  setRestartArmed(false);
+}
+
+// The arm button lives with the other footer controls; the panel it opens is
+// a row of its own directly above them, so it pushes nothing sideways and the
+// host reads it where they are already looking.
+footLeft.appendChild(restartArm);
+panel.insertBefore(restartPanel, panelFoot);
 
 /* ------------------------------------------------------------------ */
 /* The runbook                                                         */
@@ -2098,6 +2292,7 @@ function primaryPlan(): { label: string; cmd: HostCommand | null } {
 function render(s: RenderState): void {
   lastState = s;
   loadPlayed(s.sid);
+  forgetPlayedIfStartingOver(s);
 
   /* status bar */
   setText(elTitle, s.title);
@@ -2135,6 +2330,25 @@ function render(s: RenderState): void {
   sealControl.setDisabled(s.seal === "revealed");
   unsealControl.el.hidden = s.seal === "live";
   closeControl.setDisabled(s.phase === "closed" || s.phase === "draft");
+  // There is nothing to reopen unless it is shut, and a permanently greyed
+  // button is a button the eye stops reading.
+  reopenControl.el.hidden = s.phase !== "closed";
+  if (s.phase !== "closed") reopenControl.disarm();
+
+  /* starting over — armable in every phase the session has actually run in,
+     including closed, which is the phase a host most often wants it from */
+  restartArm.disabled = s.phase === "draft";
+  if (s.phase === "draft" && restartArmed) setRestartArmed(false);
+  syncRestartGo();
+  const loaded = s.hostExtras?.trivia?.loaded ?? 0;
+  setText(
+    restartKeeps,
+    `${s.roster.length} ${s.roster.length === 1 ? "person stays" : "people stay"} in the room with the same nickname, the join code does not change, and ` +
+      (loaded > 0
+        ? `the ${loaded} trivia question${loaded === 1 ? "" : "s"} stay loaded. `
+        : "anything you have uploaded stays loaded. ") +
+      "Nobody has to rejoin and nothing has to be uploaded again.",
+  );
 
   /* panel */
   const bodyKey = s.phase === "draft" ? "lobby" : s.segment;
@@ -2213,6 +2427,32 @@ function render(s: RenderState): void {
 
   /* driving mode, when it is on. The console above is rendered either way. */
   if (driving) renderDriving(s);
+}
+
+/**
+ * A session in a lobby with no arcade register has not played an arcade round,
+ * whatever this browser remembers.
+ *
+ * Which rounds have been played is kept in `localStorage`, so that a console
+ * reloaded in the middle of the afternoon comes back offering the right one.
+ * That memory is per *session id*, and a restart keeps the session id — so
+ * without this, a host who does a dry run in the morning and then wipes it
+ * finds the button offering round three of three to a room that has played
+ * nothing. It is the exact workflow the wipe exists for.
+ *
+ * The condition is exact rather than a guess at "was that a restart": the
+ * session is back in `lobby`, and `arcade` is absent, which together are only
+ * true before the arcade has ever been entered — at the top of a session, and
+ * after a restart. Once `enterArcade` has happened `arcade` is present for the
+ * rest of the session, so this cannot fire mid-afternoon and hand the host
+ * back a round they have already run.
+ */
+function forgetPlayedIfStartingOver(s: RenderState): void {
+  if (s.phase !== "lobby" || s.arcade !== undefined) return;
+  if (arcadePlayed.size === 0 && arcadeOverride === null) return;
+  arcadePlayed.clear();
+  arcadeOverride = null;
+  savePlayed(s.sid);
 }
 
 /**
@@ -2699,6 +2939,9 @@ let driving = false;
 function setDriving(on: boolean): void {
   if (on === driving) return;
   driving = on;
+  // Driving mode hides the whole console, and a half-armed wipe that is
+  // off-screen is a half-armed wipe nobody can see to cancel.
+  setRestartArmed(false);
   document.body.classList.toggle("driving", on);
   drivingView.hidden = !on;
   const home = on ? dvPrimary : panelFoot;
@@ -2739,9 +2982,24 @@ bindEscape(() => [
   lockControl,
   sealControl,
   unsealControl,
+  reopenControl,
   closeControl,
   primary,
 ]);
+
+/**
+ * Escape abandons the wipe too.
+ *
+ * `bindEscape` only knows about {@link Control}s, and the restart panel is
+ * deliberately not one — it has a text field in it. Its own listener, so the
+ * promise the rail makes ("ESC cancel") is true of every half-pressed thing on
+ * this page and not only of the ones that happen to be controls. It fires
+ * whatever has focus, including the field itself.
+ */
+document.addEventListener("keydown", (ev) => {
+  if (ev.key !== "Escape") return;
+  setRestartArmed(false);
+});
 
 /**
  * `G` puts the cursor in the scoring grid, from anywhere that is not already

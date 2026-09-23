@@ -273,11 +273,21 @@ export function reduce(
 
   // A closed session is frozen. Only connection churn still lands — people
   // close laptops after the winner is announced, and that is not a rule change.
+  //
+  // The two exits are exempt, and they are the reason this guard is no longer
+  // a one-way door. `close` was irreversible: an accidental one cost the
+  // scores, the join code and thirty rejoins, because every route back went
+  // through an event this branch refuses. `reopen` carries on with everything
+  // intact; `restartSession` goes back to a clean lobby. Both are host-only,
+  // both are deliberate, and a closed session is exactly where a host most
+  // needs one of them.
   if (
     state.phase === "closed" &&
     event.type !== "disconnect" &&
     event.type !== "reconnect" &&
-    event.type !== "close" // closing twice is idempotent, not an error
+    event.type !== "close" && // closing twice is idempotent, not an error
+    event.type !== "reopen" &&
+    event.type !== "restartSession"
   ) {
     return unchanged(
       reject("host", "session_closed", "The session is closed."),
@@ -533,6 +543,124 @@ export function reduce(
           segment: "final",
           seal: "revealed",
           joinsLocked: true,
+        },
+        [BROADCAST_STATE, ...BROADCAST_STANDINGS, PERSIST],
+      );
+    }
+
+    /**
+     * Undo a close. See the note on the `reopen` event in types.ts.
+     *
+     * `running` rather than `lobby`, because a close is something that happens
+     * to a session that was running and the host's next press should be the
+     * one they were about to make. `lobby` would additionally disable every
+     * segment button on the console, which is a second thing to undo.
+     */
+    case "reopen": {
+      if (state.phase !== "closed") {
+        return unchanged(
+          reject(
+            "host",
+            "wrong_phase",
+            state.phase === "draft"
+              ? "The session was never opened."
+              : "The session is not closed.",
+          ),
+        );
+      }
+      return applied({ ...state, phase: "running", joinsLocked: false }, [
+        BROADCAST_STATE,
+        ...BROADCAST_STANDINGS,
+        PERSIST,
+      ]);
+    }
+
+    /**
+     * Back to a clean lobby, keeping the room and the content. See the note on
+     * the `restartSession` event in types.ts for what survives and what does
+     * not, and why it is one event rather than a sequence of them.
+     *
+     * Three things here are worth their own sentence.
+     *
+     * **`arcade: null`, not a rewound arcade.** SPEC.md's promise is that
+     * "every participant gets a three-digit number … and keeps it for the
+     * whole arcade", and a restart *ends* that arcade: there is no arcade
+     * afterwards until the host enters one again, and `enterArcade` hands the
+     * numbers out at that point exactly as it did the first time. Keeping the
+     * register alive across a restart would mean keeping a non-null `arcade`
+     * with no round in it, and `renderStateFor` projects a non-null arcade as
+     * "the room is in the arcade" — so a phone sitting in a fresh lobby would
+     * be handed an arcade view with a player number and a Floor. That is the
+     * half-cleared state this event exists not to produce. In practice the
+     * numbers do not even move: `assignPlayerNumbers` walks `rosterOrder`,
+     * which sorts on join order, so the same roster is dealt the same numbers
+     * second time round. What changes is that somebody who joined *after* the
+     * first `enterArcade` — and was therefore appended at the end — takes
+     * their place in join order instead. That is the honest answer for a room
+     * that is starting again.
+     *
+     * **The scores are rebuilt from a union.** Every activity in the list, and
+     * every key `scores` happens to hold, so there is no bucket left behind
+     * for an activity the list no longer mentions — a log-only recovery builds
+     * a state with an empty activity list, and a restart there must still
+     * leave nothing scored.
+     *
+     * **`nextPlayerNumber` is kept.** It is the join-order counter, and
+     * participants are kept, so re-using a number would hand two people the
+     * same one. A restart clears what a session *did*, never who was in it.
+     */
+    case "restartSession": {
+      if (state.phase === "draft") {
+        return unchanged(
+          reject(
+            "host",
+            "wrong_phase",
+            "The session was never opened, so there is nothing to clear.",
+          ),
+        );
+      }
+      const activityIds = new Set([
+        ...state.activities.map((a) => a.id),
+        ...Object.keys(state.scores),
+      ]);
+      return applied(
+        {
+          ...state,
+          phase: "lobby",
+          segment: "lobby",
+          seal: "live",
+          // Participants, nicknames, join-order numbers and kick decisions all
+          // survive untouched. A kick is a decision about a person, not a
+          // score, and un-kicking somebody as a side effect of wiping the
+          // board would be a surprise the host did not ask for.
+          scores: Object.fromEntries([...activityIds].map((id) => [id, {}])),
+          spots: [],
+          holding: null,
+          trivia:
+            state.trivia === null
+              ? null
+              : {
+                  // The questions and the sudden-death pool stay exactly as
+                  // loaded — that is the whole reason not to make the host
+                  // re-upload — and everything the set *did* goes.
+                  activityId: state.trivia.activityId,
+                  questions: state.trivia.questions,
+                  tiebreakers: state.trivia.tiebreakers,
+                  at: 0,
+                  phase: "idle",
+                  opensAt: null,
+                  closesAt: null,
+                  tiebreakAt: 0,
+                  tiebreakUsed: 0,
+                  tiebreakHeld: null,
+                  suddenDeath: false,
+                  suddenDeathWinner: null,
+                  answers: {},
+                  totals: {},
+                  streaks: {},
+                },
+          arcade: null,
+          joinsLocked: false,
         },
         [BROADCAST_STATE, ...BROADCAST_STANDINGS, PERSIST],
       );

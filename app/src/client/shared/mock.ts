@@ -486,6 +486,59 @@ class MockSession {
     return this.arcadeNumbers[pid] ?? 0;
   }
 
+  /**
+   * Back to a clean lobby, keeping the room and the content.
+   *
+   * The mock's copy of the `restartSession` reducer case. It has to clear
+   * exactly the same fields, because the whole point of driving the console
+   * against `?mock=1` is that what the host sees here is what they will see on
+   * Friday — a mock that left the arcade register standing would show a clean
+   * console over a dirty session and hide the bug this feature exists to
+   * avoid.
+   *
+   * Kept: participants, nicknames, join-order numbers, the join code, the
+   * question set. Cleared: every score, every Spot Award, all trivia progress,
+   * the arcade entirely, the holding card, the seal and the join lock.
+   */
+  restart(): void {
+    this.phase = "lobby";
+    this.segment = "lobby";
+    this.seal = "live";
+    this.holding = null;
+    this.joinsLocked = false;
+    this.spots = [];
+    for (const p of this.participants) {
+      p.raw = {};
+      p.status = {};
+    }
+
+    this.at = 0;
+    this.questionPhase = "idle";
+    this.opensAt = null;
+    this.closesAt = null;
+    this.suddenDeath = false;
+    this.suddenDeathWinner = null;
+    this.answers = {};
+    this.triviaTotals = {};
+    this.triviaStreaks = {};
+
+    // The whole register, numbers included. `arcadeOn` is what the projection
+    // reads as "the room is in the arcade", so leaving it true would put an
+    // arcade view on a phone that is looking at a lobby.
+    this.arcadeOn = false;
+    this.arcadeNumbers = {};
+    this.arcadeRound = null;
+    this.arcadeRoundIndex = 0;
+    this.arcadePhase = "idle";
+    this.arcadeStanding = {};
+    this.arcadeLounge = {};
+    this.arcadeBanked = {};
+    this.arcadeTotals = {};
+    this.arcadeStartedAt = null;
+    this.arcadeEndsAt = null;
+    this.arcadePlay = null;
+  }
+
   /** Everyone back on the Floor: a drain lasts exactly one round. */
   resetFloor(): void {
     this.arcadeStanding = {};
@@ -1502,6 +1555,38 @@ class MockHub {
         s.seal = "revealed";
         s.joinsLocked = true;
         break;
+      case "session.reopen":
+        if (s.phase !== "closed") {
+          return reject(
+            "wrong_phase",
+            s.phase === "draft"
+              ? "The session was never opened."
+              : "The session is not closed.",
+          );
+        }
+        s.phase = "running";
+        s.joinsLocked = false;
+        break;
+      case "session.restart": {
+        if (s.phase === "draft") {
+          return reject(
+            "wrong_phase",
+            "The session was never opened, so there is nothing to clear.",
+          );
+        }
+        // The server's own check, mirrored: a restart frame that does not name
+        // this session is not one this session performs.
+        if (cmd.confirm !== s.joinCode) {
+          return reject("malformed", "Unrecognised command.");
+        }
+        // The clocks first. A Floor timer that fires after the wipe would
+        // start settling a round that no longer exists.
+        if (this.#closeTimer !== null) clearTimeout(this.#closeTimer);
+        this.#closeTimer = null;
+        this.#clearArcadeTimers();
+        s.restart();
+        break;
+      }
       case "segment":
         if (s.phase !== "running") {
           return reject("wrong_phase", "Start the session first.");
