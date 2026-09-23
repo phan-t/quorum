@@ -414,7 +414,10 @@ body {
 }
 .s-answer-shape {
   flex: 0 0 auto;
-  opacity: 0.85;
+  /* Full ink, matching the phone's `.t-shape`. At 36px this cleared its 3:1
+     floor even at 0.85, but it is the same glyph doing the same job — the
+     non-colour channel that says which tile is which — and this one is read
+     off a screen-shared window over a video call. */
 }
 .s-answer-text {
   flex: 1;
@@ -599,7 +602,7 @@ body {
   border-radius: 6px;
   background: var(--nomad);
   color: var(--on-fill-dark);
-  border: 1px solid #00996c;
+  border: 1px solid var(--nomad-edge);
 }
 .s-cell-num {
   font-weight: 600;
@@ -612,7 +615,7 @@ body {
 }
 .s-cell[data-standing="drained"] {
   background: var(--vault);
-  border-color: #c69f00;
+  border-color: var(--vault-edge);
 }
 /* Away is grey, and it is also dimmer and un-bordered: never the hue alone. */
 .s-cell[data-away="yes"] {
@@ -831,13 +834,13 @@ body {
   border-radius: 4px;
   background: var(--nomad);
   color: var(--on-fill-dark);
-  border: 1px solid #00996c;
+  border: 1px solid var(--nomad-edge);
 }
 .s-wave-tag[data-standing="drained"] {
   background: var(--vault);
-  border-color: #c69f00;
+  border-color: var(--vault-edge);
   text-decoration: line-through;
-  text-decoration-color: var(--consul);
+  text-decoration-color: var(--consul-fg);
   text-decoration-thickness: 2px;
 }
 .s-wave-tag[data-away="yes"] {

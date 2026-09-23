@@ -69,7 +69,7 @@ body {
   border-color: var(--sealed);
 }
 .sb-seal[data-seal="revealed"] {
-  color: var(--terraform);
+  color: var(--terraform-ink);
   border-color: var(--terraform);
 }
 /* Sealed is loud. */
@@ -155,7 +155,7 @@ body {
   font-size: 11px;
 }
 .seg.current .seg-mark {
-  color: var(--nomad);
+  color: var(--nomad-ink);
 }
 .seg-phase {
   margin-left: auto;
@@ -518,12 +518,12 @@ body {
 /* The top scorer lands on 100. Seeing it land is the check that the column
    went in against the right people. */
 .sc-pts-top {
-  color: var(--nomad);
+  color: var(--nomad-ink);
   font-weight: 600;
 }
 /* Bench Credit shows the credited number — never a blank — and says so. */
 .sc-pts-bench {
-  color: var(--vault);
+  color: var(--vault-ink);
 }
 .sc-pts-bench::after {
   content: " B";
@@ -824,7 +824,7 @@ body {
 }
 .ctl-flash-ok {
   border-color: var(--nomad);
-  color: var(--nomad);
+  color: var(--nomad-ink);
 }
 
 .ctl-row .ctl-button {
@@ -1018,8 +1018,13 @@ body {
 .t-answer-i {
   color: var(--dim);
 }
+/* The glyph echoes the tile, but --tile is a *fill* hue and this is 13px
+   text on --panel-2: as --vault it measured 1.32:1 light / 11.29:1 dark,
+   as --nomad 1.79:1 light. Two of the four failed in each theme. Neutral
+   is 4.83:1 light / 4.94:1 dark for all four, and the hue is still right
+   there in the bar behind it. */
 .t-answer-shape {
-  color: var(--tile);
+  color: var(--muted);
 }
 .t-answer-text {
   min-width: 0;
@@ -1155,7 +1160,7 @@ body {
 .a-pick.on {
   background: var(--nomad);
   color: var(--on-fill-dark);
-  border-color: #00996c;
+  border-color: var(--nomad-edge);
   font-weight: 600;
 }
 /* The tick rides the name, so it does not land on a line of its own. */
@@ -1318,8 +1323,8 @@ body {
 /* A shortcut a host has to guess is a shortcut that does not exist. Every key
    the console answers to is printed at the bottom of the rail, and again in
    driving mode, where the rail is not on screen. --muted, not --dim: --dim
-   never carries text that has to be read. Measured 5.51:1 dark (#8b8a9c on
-   #14141d) and 5.12:1 light (#656a76 on #f9f9fa). */
+   never carries text that has to be read. Measured 5.41:1 dark (#8b8a9c on
+   #14141d) and 5.19:1 light (#656a76 on HDS surface-faint #fafafa). */
 .rail-keys {
   margin: 0;
   flex: none;
@@ -1336,11 +1341,14 @@ body {
  * each said three ways — a glyph, a word and a colour — because nothing on
  * this console is carried by colour alone, and this list is read in a hurry.
  *
- * Measured on --panel, both themes, AA needs 4.5:1:
- *   ready   --hit      #00ca8e on #14141d  8.72:1   #007a58 on #f9f9fa  5.08:1
- *   not     --danger   #ff6b5a on #14141d  6.66:1   #c02a1b on #f9f9fa  5.59:1
- *   by eye  --sealed   #ffcf25 on #14141d 12.58:1   #8a6d00 on #f9f9fa  4.74:1
- *   body    --ink                         15.6:1                       17.5:1
+ * Measured on --panel, both themes, AA needs 4.5:1. Re-measured after the
+ * palette was grounded in HDS: --panel is now HDS surface-faint #fafafa,
+ * --hit is the corrected Nomad brand, --danger is HDS critical walked to
+ * the theme, --sealed's light value is HDS Vault foreground walked down.
+ *   ready   --hit      #06d092 on #14141d  9.10:1   #007e5a on #fafafa  4.87:1
+ *   not     --danger   #f83b39 on #14141d  4.95:1   #dc121f on #fafafa  4.85:1
+ *   by eye  --sealed   #ffcf25 on #14141d 12.38:1   #926700 on #fafafa  4.83:1
+ *   body    --ink      #f6f5f3 on #14141d 16.80:1   #0c0c0e on #fafafa 18.72:1
  */
 .pf {
   display: flex;

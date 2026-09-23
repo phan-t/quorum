@@ -12,6 +12,44 @@
  *   @media (prefers-color-scheme:light)  the viewer's OS, when they have not chosen
  *   :root[data-theme="..."]          an explicit choice, which wins either way
  *
+ * ---- Where the colours come from -------------------------------------
+ *
+ * Every hex below is either lifted from HashiCorp's Helios design system
+ * (HDS, the `@hashicorp/design-system-tokens` package — the values are
+ * transcribed here rather than installed, because this repo has almost no
+ * dependencies on purpose and `tsc` is the whole build), or derived from an
+ * HDS value by the method stated next to it and then measured.
+ *
+ * HDS draws a distinction this file used to collapse, and collapsing it has
+ * produced a readable-text bug three separate times — white on all four
+ * trivia tiles, `--terraform` purple as body text at 3.15:1, and the Lounge
+ * mirror at 2.95:1. The distinction is:
+ *
+ *   BRAND       `--terraform`, `--vault`, ...  the logo colour. A FILL.
+ *               Never text. HDS `color-<product>-brand`.
+ *   FOREGROUND  `--terraform-fg`, ...          the accessible colour. TEXT.
+ *               HDS `color-foreground-<product>`. Specified against white.
+ *   SURFACE     `--terraform-surface`, ...     a tinted BLOCK behind neutral
+ *               text. HDS `color-surface-<product>`.
+ *
+ * Those three are not interchangeable and the tokens are now named so that
+ * reaching for the wrong one reads wrong.
+ *
+ * ---- HDS is a light-mode design system -------------------------------
+ *
+ * Its foregrounds are tuned to sit on #ffffff with almost no headroom: all
+ * eleven of them measure between 4.51:1 and 6.80:1 there, and several drop
+ * under 4.5:1 on `--panel-2` (#f1f2f3), which is a surface HDS also
+ * publishes. So they are taken verbatim only where they clear 4.5:1 on all
+ * three light surfaces; where they do not, the value below is the HDS
+ * foreground walked down in OKLCH lightness — hue and chroma held — until it
+ * clears 4.5:1 on #f1f2f3, the worst case. That is a handful of units.
+ *
+ * On the dark theme they do not apply at all: `--terraform-fg` #773cb4 on
+ * `--panel` #14141d is 2.69:1. Dark-theme text tokens are derived the other
+ * way, walking the HDS *brand* hue up in OKLCH lightness until it clears
+ * 4.5:1 on #1d1d28. Nothing dark-tuned here was pasted from HDS.
+ *
  * Product hues do not move between themes — they are brand colours and they
  * are used as fills. The semantic tokens drawn as *text* do move, because
  * Vault yellow on white is unreadable.
@@ -19,6 +57,71 @@
 
 :root {
   color-scheme: dark;
+
+  /* ---- HDS constants. Theme-independent; both themes read from here. ---- */
+
+  /* Product BRAND — HDS `color-<product>-brand`. Fills and logos, never text.
+     Terraform and Vault were already exact; Consul and Nomad had drifted
+     (#dc477d, #00ca8e); Boundary and Packer were missing. */
+  --terraform: #7b42bc;
+  --vault: #ffcf25;
+  --consul: #e03875;
+  --nomad: #06d092;
+  --boundary: #f24c53;
+  --packer: #02a8ef;
+
+  /* Product FOREGROUND — HDS `color-foreground-<product>`. Text, on white.
+     Measured on #ffffff / #fafafa / #f1f2f3:
+       terraform #773cb4  6.80  6.51  6.06
+       consul    #d01c5b  5.25  5.03  4.68
+       boundary  #cf2d32  5.15  4.94  4.60
+       nomad     #008661  4.58  4.39  4.09  <- under 4.5 on --panel-2
+       vault     #9a6f00  4.52  4.33  4.03  <- under 4.5 on --panel/-2
+       packer    #007eb4  4.52  4.33  4.03  <- under 4.5 on --panel/-2
+     The light theme therefore uses the top three verbatim and a darkened
+     step for the others; see the light block. */
+  --terraform-fg: #773cb4;
+  --vault-fg: #9a6f00;
+  --consul-fg: #d01c5b;
+  --nomad-fg: #008661;
+  --boundary-fg: #cf2d32;
+  --packer-fg: #007eb4;
+
+  /* Product SURFACE — HDS `color-surface-<product>`. A tinted block, under
+     NEUTRAL text (`--ink`, 15:1+). Not under its own foreground: HDS does
+     not intend that pairing and it does not hold — #9a6f00 on #feec7b is
+     3.76:1, #007eb4 on #b4e4ff is 3.33:1. Published here for completeness;
+     nothing uses them yet, and anything that starts to must measure. */
+  --terraform-surface: #ebdbfc;
+  --vault-surface: #feec7b;
+  --consul-surface: #ffcede;
+  --nomad-surface: #bff3dd;
+  --boundary-surface: #fbd7d8;
+  --packer-surface: #b4e4ff;
+
+  /* Semantic — HDS `color-foreground-*`. Same light-mode caveat: these are
+     white-tuned. On #ffffff: success 4.51, warning 4.59, critical 4.57,
+     highlight 4.53, action 5.07. Only `--action` is used as text as-is, and
+     only on #ffffff (the sign-in button). */
+  --success: #008a22;
+  --warning: #bb5a00;
+  --critical: #e52228;
+  --highlight: #a737ff;
+  --action: #1060ff;
+  /* The focus ring was IBM Carbon blue #0f62fe; HDS action is a half-step
+     off it and is already what the sign-in button uses, so the two now
+     agree. Non-text UI, 3:1 floor: 3.89:1 on #0a0a0f, 5.07:1 on #ffffff. */
+  --ibm-blue: var(--action);
+
+  /* A 1px darker edge on a brand fill — DESIGN.md's tracksuit patch. HDS
+     publishes no per-product border, so these are Quorum's: the fill:edge
+     lightness-and-chroma ratio the old #00ca8e/#00996c pair had, re-applied
+     to the corrected brand hue. 1.68:1 against the fill, where the old pair
+     was 1.70:1. Vault's brand did not move, so its edge is unchanged. */
+  --nomad-edge: #0e9f6f;
+  --vault-edge: #c69f00;
+
+  /* ---- dark theme (the default) ---------------------------------------- */
 
   /* ground */
   --ground: #0a0a0f;
@@ -29,30 +132,46 @@
   --muted: #8b8a9c;
   --dim: #5e5d6e;
 
-  /* product hues — the only saturated colours in the system */
-  --terraform: #7b42bc;
-  --vault: #ffcf25;
-  --consul: #dc477d;
-  --nomad: #00ca8e;
-  --ibm-blue: #0f62fe;
+  /* Product hue as TEXT, on dark. HDS publishes no dark foregrounds, so
+     these are the HDS *brand* hue walked up in OKLCH lightness (hue and
+     chroma held) until the value clears 4.5:1 on #1d1d28, the lightest
+     surface in this theme. Nomad and Vault already clear it unmodified and
+     are the brand value; Terraform and Consul are lifted.
+     Measured on #0a0a0f / #14141d / #1d1d28:
+       --nomad-ink     #06d092  9.82  9.10  8.30   (= brand, dL 0)
+       --vault-ink     #ffcf25 13.36 12.38 11.29   (= brand, dL 0)
+       --consul-ink    #ec447e  5.36  4.96  4.52   (dL +0.032)
+       --terraform-ink #a06ae6  5.36  4.97  4.53   (dL +0.126)
+     `--terraform` itself is 3.15:1 / 2.92:1 / 2.66:1 here and is a fill. */
+  --nomad-ink: var(--nomad);
+  --vault-ink: var(--vault);
+  --consul-ink: #ec447e;
+  --terraform-ink: #a06ae6;
 
   /* semantic */
-  --hit: var(--nomad);
-  --miss: #ff6b5a;
-  --live: var(--nomad);
-  --sealed: var(--vault);
-  --danger: #ff6b5a;
+  --hit: var(--nomad-ink);
+  --live: var(--nomad-ink);
+  --sealed: var(--vault-ink);
+  /* HDS critical #e52228 walked up in OKLCH to clear 4.5:1 on #1d1d28
+     (dL +0.051): 5.34 / 4.95 / 4.51. Replaces #ff6b5a, a salmon that was
+     not an HDS colour. */
+  --miss: #f83b39;
+  --danger: #f83b39;
 
-  /* activity accents — fixed per activity across every surface */
-  --ttx: var(--terraform);
-  --trivia: var(--consul);
-  --arcade: var(--nomad);
-  --spot: var(--vault);
+  /* activity accents — fixed per activity across every surface. These are
+     read as text as well as drawn as rules, so they take the ink. */
+  --ttx: var(--terraform-ink);
+  --trivia: var(--consul-ink);
+  --arcade: var(--nomad-ink);
+  --spot: var(--vault-ink);
 
   /* Ink for text sitting *on* a product hue — an answer tile, a distribution
      bar's label. Fixed in both themes, because the hue underneath is fixed:
      --ink and --ground swap between light and dark and would take the label
-     with them, off a fill that did not move. */
+     with them, off a fill that did not move.
+     Re-measured against the corrected brand hues:
+       light ink on --terraform 5.76   dark ink on --consul 4.70
+       dark ink on --vault     13.36   dark ink on --nomad  9.82 */
   --on-fill-light: #f6f5f3;
   --on-fill-dark: #0a0a0f;
 
@@ -62,87 +181,150 @@
   --body: "IBM Plex Sans", ui-sans-serif, system-ui, sans-serif;
   --mono: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace;
 
-
-  /* Arcade inks — DESIGN.md's recast palette, drawn as *text*.
-     The four product hues stay the four product hues as fills; these are the
-     readable counterparts, because a fill and a label are not the same
-     contrast problem. Measured against --ground, WCAG AA needs 4.5:1:
-       --arc-players  #00ca8e on #0a0a0f   9.03:1
-       --arc-staff    #dc477d on #0a0a0f   4.80:1
-       --arc-lounge   #ffcf25 on #0a0a0f  13.03:1
-       --arc-house    #a06ce4 on #0a0a0f   5.30:1
-     The house hue is lightened from --terraform #7b42bc, which measures
-     3.07:1 as text on the dark ground and fails. DESIGN.md asks for the
-     Front-End Man in purple; it does not ask for him to be unreadable. */
-  --arc-players: var(--nomad);
-  --arc-staff: var(--consul);
-  --arc-lounge: var(--vault);
-  --arc-house: #a06ce4;
+  /* Arcade inks — DESIGN.md's recast palette, drawn as *text*. The four
+     product hues stay the four product hues as fills; these are the readable
+     counterparts, because a fill and a label are not the same contrast
+     problem. Green is players, pink is staff, gold is the Lounge, purple is
+     the house — the meaning does not move, only the hex. */
+  --arc-players: var(--nomad-ink);
+  --arc-staff: var(--consul-ink);
+  --arc-lounge: var(--vault-ink);
+  --arc-house: var(--terraform-ink);
 
   /* motion — one easing for reveals, 300ms */
   --pop: cubic-bezier(0.2, 0.9, 0.3, 1.2);
   --pop-ms: 300ms;
 }
-/* ---- light ---------------------------------------------------------- */
+
+/* ---- light --------------------------------------------------------------
+ *
+ * The HDS block above is the light theme's home ground: HDS is a light-mode
+ * design system and almost everything here is taken from it verbatim.
+ * ---------------------------------------------------------------------- */
 
 @media (prefers-color-scheme: light) {
   :root:not([data-theme="dark"]) {
     color-scheme: light;
 
+    /* HDS neutrals, verbatim:
+         --ground   surface-primary       #ffffff
+         --panel    surface-faint         #fafafa   (was #f9f9fa)
+         --panel-2  surface-strong        #f1f2f3
+         --ink      foreground-strong     #0c0c0e
+         --muted    foreground-faint      #656a76
+         --dim      foreground-disabled   #8c909c
+       (HDS foreground-primary is #3b3d45; the sign-in card already uses it as
+       --v-body.) --line is HDS border-primary, published as #656a7633, flattened
+       over --ground: --line is fed to color-mix() in three places and an alpha
+       there compounds into a border that is barely present. */
     --ground: #ffffff;
-    --panel: #f9f9fa;
+    --panel: #fafafa;
     --panel-2: #f1f2f3;
-    --line: #dedfe3;
+    --line: #e0e1e4;
     --ink: #0c0c0e;
     --muted: #656a76;
     --dim: #8c909c;
 
-    /* Drawn as text, so they need to hold on white. The fills above keep the
-       brand hues; these are the readable counterparts. */
-    --hit: #007a58;
-    --live: #007a58;
-    --miss: #c02a1b;
-    --danger: #c02a1b;
-    --sealed: #8a6d00;
+    /* Product hue as TEXT, on light: the HDS foreground where it holds on all
+       three light surfaces, and where it does not, the HDS foreground walked
+       down in OKLCH lightness — hue and chroma held — until it does.
+       Measured on #ffffff / #fafafa / #f1f2f3:
+         --terraform-ink #773cb4  6.80  6.51  6.06   (= HDS fg, dL 0)
+         --consul-ink    #d01c5b  5.25  5.03  4.68   (= HDS fg, dL 0)
+         --nomad-ink     #007e5a  5.08  4.87  4.53   (dL -0.025 from #008661)
+         --vault-ink     #926700  5.05  4.83  4.50   (dL -0.026 from #9a6f00)
+       The brand hues here are 6.27 / 4.21 / 2.01 / 1.48 on white; three of the
+       four fail, which is what these tokens exist for. */
+    --terraform-ink: var(--terraform-fg);
+    --consul-ink: var(--consul-fg);
+    --nomad-ink: #007e5a;
+    --vault-ink: #926700;
 
-    /* Arcade inks on white. Every one of the four fails there unmodified:
-       #00ca8e 2.13:1, #dc477d 4.01:1, #ffcf25 1.48:1, #7b42bc 5.68:1 — only
-       the last passes, and it is the one that fails on dark. Measured:
-       #007a58 5.35:1, #b52e60 5.96:1, #8a6d00 5.02:1, #6a2fa8 8.17:1. */
-    --arc-players: #007a58;
-    --arc-staff: #b52e60;
-    --arc-lounge: #8a6d00;
-    --arc-house: #6a2fa8;
+    --hit: var(--nomad-ink);
+    --live: var(--nomad-ink);
+    --sealed: var(--vault-ink);
+    /* HDS critical #e52228 walked down to clear 4.5:1 on #f1f2f3 (dL -0.024):
+       5.06 / 4.85 / 4.52. Replaces the hand-mixed #c02a1b. */
+    --miss: #dc121f;
+    --danger: #dc121f;
+
+    /* The activity accents are read as text on this theme as well as drawn as
+       bars, so they take the ink. Left on the brand hue they were --spot
+       #ffcf25 on white at 1.48:1 and --trivia #dc477d on --panel-2 at 3.81:1. */
+    --ttx: var(--terraform-ink);
+    --trivia: var(--consul-ink);
+    --arcade: var(--nomad-ink);
+    --spot: var(--vault-ink);
+
+    --arc-players: var(--nomad-ink);
+    --arc-staff: var(--consul-ink);
+    --arc-lounge: var(--vault-ink);
+    --arc-house: var(--terraform-ink);
   }
 }
 
 :root[data-theme="light"] {
   color-scheme: light;
 
+  /* HDS neutrals, verbatim:
+       --ground   surface-primary       #ffffff
+       --panel    surface-faint         #fafafa   (was #f9f9fa)
+       --panel-2  surface-strong        #f1f2f3
+       --ink      foreground-strong     #0c0c0e
+       --muted    foreground-faint      #656a76
+       --dim      foreground-disabled   #8c909c
+     (HDS foreground-primary is #3b3d45; the sign-in card already uses it as
+     --v-body.) --line is HDS border-primary, published as #656a7633, flattened
+     over --ground: --line is fed to color-mix() in three places and an alpha
+     there compounds into a border that is barely present. */
   --ground: #ffffff;
-  --panel: #f9f9fa;
+  --panel: #fafafa;
   --panel-2: #f1f2f3;
-  --line: #dedfe3;
+  --line: #e0e1e4;
   --ink: #0c0c0e;
   --muted: #656a76;
   --dim: #8c909c;
 
-  --hit: #007a58;
-  --live: #007a58;
-  --miss: #c02a1b;
-  --danger: #c02a1b;
-  --sealed: #8a6d00;
+  /* Product hue as TEXT, on light: the HDS foreground where it holds on all
+     three light surfaces, and where it does not, the HDS foreground walked
+     down in OKLCH lightness — hue and chroma held — until it does.
+     Measured on #ffffff / #fafafa / #f1f2f3:
+       --terraform-ink #773cb4  6.80  6.51  6.06   (= HDS fg, dL 0)
+       --consul-ink    #d01c5b  5.25  5.03  4.68   (= HDS fg, dL 0)
+       --nomad-ink     #007e5a  5.08  4.87  4.53   (dL -0.025 from #008661)
+       --vault-ink     #926700  5.05  4.83  4.50   (dL -0.026 from #9a6f00)
+     The brand hues here are 6.27 / 4.21 / 2.01 / 1.48 on white; three of the
+     four fail, which is what these tokens exist for. */
+  --terraform-ink: var(--terraform-fg);
+  --consul-ink: var(--consul-fg);
+  --nomad-ink: #007e5a;
+  --vault-ink: #926700;
 
-    /* Arcade inks on white. Every one of the four fails there unmodified:
-       #00ca8e 2.13:1, #dc477d 4.01:1, #ffcf25 1.48:1, #7b42bc 5.68:1 — only
-       the last passes, and it is the one that fails on dark. Measured:
-       #007a58 5.35:1, #b52e60 5.96:1, #8a6d00 5.02:1, #6a2fa8 8.17:1. */
-    --arc-players: #007a58;
-    --arc-staff: #b52e60;
-    --arc-lounge: #8a6d00;
-    --arc-house: #6a2fa8;
+  --hit: var(--nomad-ink);
+  --live: var(--nomad-ink);
+  --sealed: var(--vault-ink);
+  /* HDS critical #e52228 walked down to clear 4.5:1 on #f1f2f3 (dL -0.024):
+     5.06 / 4.85 / 4.52. Replaces the hand-mixed #c02a1b. */
+  --miss: #dc121f;
+  --danger: #dc121f;
+
+  /* The activity accents are read as text on this theme as well as drawn as
+     bars, so they take the ink. Left on the brand hue they were --spot
+     #ffcf25 on white at 1.48:1 and --trivia #dc477d on --panel-2 at 3.81:1. */
+  --ttx: var(--terraform-ink);
+  --trivia: var(--consul-ink);
+  --arcade: var(--nomad-ink);
+  --spot: var(--vault-ink);
+
+  --arc-players: var(--nomad-ink);
+  --arc-staff: var(--consul-ink);
+  --arc-lounge: var(--vault-ink);
+  --arc-house: var(--terraform-ink);
 }
 
+/* An explicit dark choice. Same values as :root; kept written out rather
+   than inherited, because a token added to :root and forgotten here is a
+   token that changes when the viewer's OS is light. */
 :root[data-theme="dark"] {
   color-scheme: dark;
 
@@ -154,21 +336,34 @@
   --muted: #8b8a9c;
   --dim: #5e5d6e;
 
-  --hit: var(--nomad);
-  --live: var(--nomad);
-  --miss: #ff6b5a;
-  --danger: #ff6b5a;
-  --sealed: var(--vault);
+  --nomad-ink: var(--nomad);
+  --vault-ink: var(--vault);
+  --consul-ink: #ec447e;
+  --terraform-ink: #a06ae6;
 
-  --arc-players: var(--nomad);
-  --arc-staff: var(--consul);
-  --arc-lounge: var(--vault);
-  --arc-house: #a06ce4;
+  --hit: var(--nomad-ink);
+  --live: var(--nomad-ink);
+  --sealed: var(--vault-ink);
+  --miss: #f83b39;
+  --danger: #f83b39;
+
+  --ttx: var(--terraform-ink);
+  --trivia: var(--consul-ink);
+  --arcade: var(--nomad-ink);
+  --spot: var(--vault-ink);
+
+  --arc-players: var(--nomad-ink);
+  --arc-staff: var(--consul-ink);
+  --arc-lounge: var(--vault-ink);
+  --arc-house: var(--terraform-ink);
 }
 
 /* The big screen is shared to a room over compressed video, where light text
    on dark survives chroma subsampling and dark-on-light does not. It does not
-   follow the switch. */
+   follow the switch, so every token the screen touches is pinned dark here —
+   including the inks. Without this a laptop whose OS is set to light drives
+   the big screen with the light theme's inks, and --nomad-ink #007e5a on
+   #0a0a0f is 3.69:1. */
 :root[data-surface="screen"] {
   color-scheme: dark;
 
@@ -180,20 +375,26 @@
   --muted: #8b8a9c;
   --dim: #5e5d6e;
 
-  /* The semantic inks have to come back with the ground. Without this a
-     laptop whose OS is set to light drives the big screen — which is always
-     dark — with the light theme's inks, and #007a58 on #0a0a0f is 3.60:1.
-     The screen does not follow the switch, so nothing it uses may. */
-  --hit: var(--nomad);
-  --live: var(--nomad);
-  --miss: #ff6b5a;
-  --danger: #ff6b5a;
-  --sealed: var(--vault);
+  --nomad-ink: var(--nomad);
+  --vault-ink: var(--vault);
+  --consul-ink: #ec447e;
+  --terraform-ink: #a06ae6;
 
-  --arc-players: var(--nomad);
-  --arc-staff: var(--consul);
-  --arc-lounge: var(--vault);
-  --arc-house: #a06ce4;
+  --hit: var(--nomad-ink);
+  --live: var(--nomad-ink);
+  --sealed: var(--vault-ink);
+  --miss: #f83b39;
+  --danger: #f83b39;
+
+  --ttx: var(--terraform-ink);
+  --trivia: var(--consul-ink);
+  --arcade: var(--nomad-ink);
+  --spot: var(--vault-ink);
+
+  --arc-players: var(--nomad-ink);
+  --arc-staff: var(--consul-ink);
+  --arc-lounge: var(--vault-ink);
+  --arc-house: var(--terraform-ink);
 }
 
 

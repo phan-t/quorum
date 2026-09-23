@@ -252,7 +252,7 @@ body.phone #app {
 .lobby-nick {
   margin: 0;
   font-size: 32px;
-  color: var(--nomad);
+  color: var(--nomad-ink);
 }
 .lobby-title {
   margin: 4px 0 0;
@@ -262,7 +262,7 @@ body.phone #app {
   margin: 0;
   font-size: 17px;
   line-height: 1.35;
-  color: var(--vault);
+  color: var(--vault-ink);
 }
 .lobby-here {
   display: flex;
@@ -575,7 +575,10 @@ body.phone #app {
   font-size: 18px;
   line-height: 1;
   flex: 0 0 auto;
-  opacity: 0.85;
+  /* Full ink. At 0.85 this measured 4.17:1 on the Consul tile at 18px, under
+     the 4.5 floor — and the glyph is a non-colour channel, so it is the thing
+     a colour-blind player reads the tile by. Size already makes it
+     subordinate, which is the call `.t-key` made for the keycap. */
 }
 .t-answer {
   flex: 1;
@@ -600,8 +603,9 @@ body.phone #app {
   text-align: center;
   /* Not dimmed. At 0.6 the keycap measured 2.96:1 on --consul and 3.11:1 on
      --terraform, and it is the only thing on screen that says which key picks
-     which answer. Full ink is the tile's own ink, which is measured: 5.76 /
-     4.93 / 9.25 / 13.36. Size and the outline make it subordinate, not alpha. */
+     which answer. Full ink is the tile's own ink, which is measured against
+     the HDS brand hues: 5.76 / 4.70 / 9.82 / 13.36. Size and the outline
+     make it subordinate, not alpha. */
   opacity: 1;
 }
 @media (hover: hover) and (pointer: fine) {
@@ -1028,11 +1032,11 @@ body.phone:has(.v-splash) {
   background: var(--nomad);
   color: var(--on-fill-dark);
   /* A tracksuit patch: 1px darker border, per DESIGN.md's motif. */
-  border: 1px solid #00996c;
+  border: 1px solid var(--nomad-edge);
 }
 .a-badge[data-standing="drained"] {
   background: var(--vault);
-  border-color: #c69f00;
+  border-color: var(--vault-edge);
 }
 .a-badge-label {
   color: inherit;
@@ -1065,7 +1069,10 @@ body.phone:has(.v-splash) {
   gap: 0.5rem;
 }
 .a-prompt {
-  opacity: 0.7;
+  /* Full ink. At 0.7 the Front-End Man's `>` measured 3.52:1 light and 3.14:1
+     dark — under the floor in both, and worse since the house purple became
+     HDS's lighter #773cb4. Nothing here is decorative enough to be unreadable:
+     it is the announcer's voice, and the copy beside it is full ink already. */
 }
 /* Entering the arcade, and the banked checkpoint. Both are the announcer
    talking over something that is already on screen, so they sit above it
@@ -1742,6 +1749,14 @@ body.phone:has(.v-splash) {
 .a-mirror-cell[data-away="yes"] {
   opacity: 0.45;
 }
+/* The strike keeps the *brand* hue, not the HDS Consul foreground, because
+   unlike the big screen's wave tag — which is always on raw gold, where the
+   darker #d01c5b measures 3.55:1 against 2.85:1 — this cell is struck over
+   two very different grounds: the Floor cell (#d3ac21) and the drained wash
+   (#362d13). Measured on the pair: #e03875 gives 1.94 / 3.24, #d01c5b gives
+   2.42 / 2.59. The drained wash is where the strike actually has to be seen,
+   so the brand hue wins here. It is a third channel either way — the ▣ and
+   the wash carry the standing. */
 .a-mirror-cell[data-struck="yes"] {
   text-decoration: line-through;
   text-decoration-color: var(--consul);

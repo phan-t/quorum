@@ -135,9 +135,10 @@ export function nextSegment(current: Segment): Segment | null {
  * The ink is per hue and not white. DESIGN used to say white text on all four
  * tiles, which failed its own 4.5:1 floor — white on `--nomad` measures
  * 1.96:1 — so the light hues take dark ink instead. DESIGN.md has since been
- * corrected to match, and carries the measured figures: 5.76 / 4.93 / 9.25 /
- * 13.36. Consul's 4.93 is the thin one; darkening that hue means measuring
- * again.
+ * corrected to match, and carries the measured figures. Re-measured after
+ * the hues were grounded in HDS (`--consul` #dc477d -> #e03875, `--nomad`
+ * #00ca8e -> #06d092): 5.76 / 4.70 / 9.82 / 13.36. Consul's 4.70 is the
+ * thin one; darkening that hue further means measuring again.
  */
 export interface AnswerTile {
   /** 0-based, which is what goes on the wire. The glyph is what people say. */
@@ -296,7 +297,7 @@ export function refusalCopy(
  * Two entries per motif, because a brand hue used as a *fill* and the same
  * hue used as *text* are not the same colour problem. The fills are the
  * product hues and do not move between themes; the inks do, because
- * `--terraform` as text measures 3.07:1 on the dark ground and `--vault` as
+ * `--terraform` as text measures 3.15:1 on the dark ground and `--vault` as
  * text measures 1.48:1 on white. Both fail DESIGN.md's own 4.5:1 floor, which
  * is the same failure DESIGN.md already had to correct once for the trivia
  * tiles. The ink tokens are defined in tokens.css and measured there.
