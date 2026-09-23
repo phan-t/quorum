@@ -41,7 +41,28 @@ import {
   questionLabel,
   remainingMs,
 } from "../shared/view.ts";
-import { bindEscape, bindSpace, control, primaryControl, type Control } from "./controls.ts";
+import {
+  bindEscape,
+  bindSpace,
+  control,
+  handsBackSpace,
+  primaryControl,
+  releaseFocus,
+  type Control,
+} from "./controls.ts";
+import {
+  ARCADE_PLAYABLE,
+  defaultPlan,
+  isLastIncluded,
+  movePlan,
+  nextRound,
+  parseSetup,
+  planIncluded,
+  planSummary,
+  togglePlan,
+  type ArcadePick,
+  type ArcadePlan,
+} from "./plan.ts";
 import { createScoringPanel } from "./scoring.ts";
 import { createParticipantView } from "../participant/view.ts";
 
@@ -119,6 +140,16 @@ const railSegments = h("ul", { class: "rail-list" });
 const railRoster = h("ul", { class: "roster" });
 const railCount = h("span", { class: "mono rail-count" });
 
+/**
+ * Every key this console answers to, on the console.
+ *
+ * A host will not guess a shortcut, and a shortcut nobody guesses is a feature
+ * that does not exist. It is in the rail, where it is out of the way, and
+ * again in driving mode, where the rail is not.
+ */
+const KEYS_HINT =
+  "SPACE next \u00b7 G scoring grid \u00b7 SHIFT+H holding card \u00b7 SHIFT+D driving mode \u00b7 ESC cancel";
+
 const rail = h("aside", { class: "rail" }, [
   h("section", { class: "rail-block" }, [
     h("p", { class: "label", text: "Run of show" }),
@@ -128,6 +159,7 @@ const rail = h("aside", { class: "rail" }, [
     h("p", { class: "label" }, ["Participants ", railCount]),
     railRoster,
   ]),
+  h("p", { class: "mono rail-keys", text: KEYS_HINT }),
 ]);
 
 const panelKind = h("span", { class: "label" });
@@ -148,11 +180,14 @@ const primary = primaryControl((c) => {
  */
 const scoring = createScoringPanel({ issue: (cmd, from) => issue(cmd, from) });
 
+/** The primary button's home. Driving mode borrows the button and gives it back. */
+const panelFoot = h("div", { class: "panel-foot" }, [footLeft, primary.el]);
+
 const panel = h("main", { class: "panel" }, [
   h("div", { class: "panel-head" }, [panelKind, panelSub]),
   panelBody,
   scoring.el,
-  h("div", { class: "panel-foot" }, [footLeft, primary.el]),
+  panelFoot,
 ]);
 
 const preview = createParticipantView({
@@ -173,7 +208,43 @@ const tray = h("aside", { class: "tray" }, [
   ]),
 ]);
 
-replace(app, [statusBar, h("div", { class: "cols" }, [rail, panel, tray])]);
+/* ------------------------------------------------------------------ */
+/* Driving mode                                                        */
+/* ------------------------------------------------------------------ */
+
+/**
+ * The console with everything taken off it except the two things a host who
+ * is also facilitating actually needs: what happens next, and who is still
+ * answering.
+ *
+ * Strictly additive. The whole console stays mounted and stays rendered
+ * underneath — this view is shown over it and the columns are hidden — so
+ * turning the mode off puts the host back exactly where they were. The one
+ * thing that moves is the primary button itself, which is *moved* rather than
+ * copied: a second copy of the most important string in the product is a
+ * second copy that can get out of step, and a refusal has to land in the
+ * button the host is looking at.
+ */
+const dvContext = h("p", { class: "mono dv-context" });
+const dvBig = h("p", { class: "dv-big" });
+const dvSub = h("p", { class: "mono dv-sub" });
+const dvWaiting = h("p", { class: "dv-waiting" });
+const dvPrimary = h("div", { class: "dv-primary" });
+const drivingView = h("section", { class: "driving-view", attrs: { hidden: true } }, [
+  h("p", { class: "label dv-label", text: "Driving mode" }),
+  dvContext,
+  dvBig,
+  dvSub,
+  dvWaiting,
+  dvPrimary,
+  h("p", { class: "mono dv-keys", text: KEYS_HINT }),
+]);
+
+replace(app, [
+  statusBar,
+  h("div", { class: "cols" }, [rail, panel, tray]),
+  drivingView,
+]);
 if (mock) document.body.appendChild(mockBadge());
 
 /* ------------------------------------------------------------------ */
@@ -244,6 +315,7 @@ for (const seg of SEGMENTS) {
       ? null
       : h("span", { class: "seg-phase mono", text: `P${SEGMENT_PHASE[seg]}` }),
   ]);
+  handsBackSpace(button);
   button.addEventListener("click", () => issue({ name: "segment", kind: seg }, null));
   const li = h("li", {}, [button]);
   railSegments.appendChild(li);
@@ -316,6 +388,87 @@ const bodyLobbyCode = h("span", { class: "mono join-code" });
 const bodyLobbyUrl = h("span", { class: "mono join-url" });
 const bodyLobbyCount = h("span", { class: "mono big-num" });
 const bodyLobbyLock = h("span", { class: "mono lock-state" });
+/* ---- pre-flight ---------------------------------------------------- */
+
+/**
+ * What is ready and what is not, before the room is looking.
+ *
+ * "No questions loaded" used to be found out when trivia was opened in front
+ * of thirty people. It is knowable an hour earlier, so it is said an hour
+ * earlier. This list informs and never blocks: nothing on it touches the
+ * primary button, and a host who wants to start anyway presses start.
+ *
+ * Three states, each said three ways — a glyph, a word and a colour — because
+ * nothing on this console is carried by colour alone.
+ */
+type PreflightState = "ready" | "not" | "ask";
+
+interface PreflightRow {
+  readonly el: HTMLLIElement;
+  set(state: PreflightState, text: string): void;
+}
+
+function preflightRow(extra?: HTMLElement): PreflightRow {
+  const mark = h("span", { class: "mono pf-mark", attrs: { "aria-hidden": "true" } });
+  const word = h("span", { class: "mono pf-word" });
+  const text = h("span", { class: "pf-text" });
+  const el = h("li", { class: "pf-row", attrs: { "data-state": "ask" } }, [
+    mark,
+    word,
+    text,
+    extra ?? null,
+  ]);
+  return {
+    el,
+    set(state, body) {
+      setAttr(el, "data-state", state);
+      setText(mark, state === "ready" ? "✓" : state === "not" ? "✗" : "?");
+      setText(
+        word,
+        state === "ready" ? "ready" : state === "not" ? "not ready" : "by eye",
+      );
+      setText(text, body);
+    },
+  };
+}
+
+/**
+ * The Desktop is the one item the console cannot check. Nothing on the wire
+ * tells the host whether the big screen is connected — so rather than guess,
+ * or quietly leave it off the list, it asks the host to look and tick. An
+ * honest question beats a tick that means nothing.
+ */
+let deskSeen = false;
+const deskTick = handsBackSpace(
+  h("button", { class: "pf-tick", type: "button", text: "Tick when you can see it" }),
+);
+deskTick.addEventListener("click", () => {
+  deskSeen = !deskSeen;
+  if (lastState) render(lastState);
+});
+
+const pfQuestions = preflightRow();
+const pfArcade = preflightRow();
+const pfDesktop = preflightRow(deskTick);
+const pfPeople = preflightRow();
+
+const preflight = h("section", { class: "pf" }, [
+  h("p", { class: "label", text: "Before the room arrives" }),
+  h("ul", { class: "pf-list" }, [
+    pfQuestions.el,
+    pfArcade.el,
+    pfDesktop.el,
+    pfPeople.el,
+  ]),
+  h("p", {
+    class: "pb-note",
+    text: "None of this stops you starting. It is what the console can see from where it sits — the projector it cannot, so that one is yours to look at.",
+  }),
+]);
+
+/** Where the arcade running order sits while the session has not started. */
+const lobbySetupSlot = h("div", { class: "lobby-setup" });
+
 const bodyLobby = h("section", { class: "pb" }, [
   h("div", { class: "kv" }, [
     h("span", { class: "label", text: "Join code" }),
@@ -333,6 +486,8 @@ const bodyLobby = h("section", { class: "pb" }, [
     h("span", { class: "label", text: "Joining" }),
     bodyLobbyLock,
   ]),
+  preflight,
+  lobbySetupSlot,
 ]);
 
 const holdingTitle = h("input", {
@@ -374,6 +529,10 @@ for (const field of [holdingTitle, holdingLine]) {
   field.addEventListener("keydown", (ev) => {
     if ((ev as KeyboardEvent).key !== "Enter") return;
     holdingApply.el.querySelector("button")?.click();
+    // Applied, so the space bar goes back to the run of show: a host who
+    // left the cursor in this field would otherwise type spaces into it
+    // while the room waited for the next thing to happen.
+    field.blur();
   });
 }
 const bodyHolding = h("section", { class: "pb" }, [
@@ -571,10 +730,43 @@ const ARCADE_BUILT: Readonly<Record<ArcadeRoundKind, boolean>> = {
   glass_bridge: true,
 };
 
-type ArcadePick = "recruitment" | "plan_apply" | "glass_bridge";
+/**
+ * The running order, chosen during setup rather than mid-session. See
+ * plan.ts. Once the session is running, the arcade advances on the primary
+ * button like everything else: the button says "Announce Plan / Apply"
+ * because Plan / Apply is what the host said comes next.
+ */
+let arcadePlan: ArcadePlan = defaultPlan();
 
-let arcadePick: ArcadePick = "recruitment";
+/**
+ * Rounds this session has played *and revealed*. Revealed is the line,
+ * because revealing is what puts the points on the board — a round that was
+ * played and not revealed is not finished with.
+ */
+const arcadePlayed = new Set<ArcadePick>();
 
+/**
+ * A deviation, good for one announce: the round the host picked by hand
+ * because the room is running long, or because a round has to be run again.
+ * It clears itself once that round is revealed and the order picks back up.
+ */
+let arcadeOverride: ArcadePick | null = null;
+
+/** The round the primary button is offering; null when the order is finished. */
+function currentPick(): ArcadePick | null {
+  if (arcadeOverride !== null) return arcadeOverride;
+  return nextRound(arcadePlan, arcadePlayed);
+}
+
+function isPlayable(kind: ArcadeRoundKind): kind is ArcadePick {
+  return (ARCADE_PLAYABLE as readonly string[]).includes(kind);
+}
+
+/**
+ * The six-item picker, which is now the way *off* the running order rather
+ * than the way onto it: it lives behind "Run a different round", and a round
+ * chosen here overrides the order for the next announce only.
+ */
 const arcadePicker = h("div", { class: "a-picker", role: "radiogroup" });
 const arcadePickButtons = new Map<ArcadeRoundKind, HTMLButtonElement>();
 for (const kind of ARCADE_ROUNDS) {
@@ -594,8 +786,9 @@ for (const kind of ARCADE_ROUNDS) {
     built ? null : h("span", { class: "mono a-pick-todo", text: "not built yet" }),
   ]) as HTMLButtonElement;
   if (built) {
+    handsBackSpace(button);
     button.addEventListener("click", () => {
-      arcadePick = kind as ArcadePick;
+      arcadeOverride = kind as ArcadePick;
       if (lastState) render(lastState);
     });
   }
@@ -699,6 +892,247 @@ const arcadeGlassCfg = h("div", { class: "a-cfg" }, [
   }),
 ]);
 
+/* ---- the running order, set before the session ---------------------- */
+
+/** Which settings belong to which round, so the order can carry them. */
+const ARCADE_CFG: Readonly<Record<ArcadePick, HTMLElement>> = {
+  recruitment: arcadeRecruitCfg,
+  plan_apply: arcadePlanCfg,
+  glass_bridge: arcadeGlassCfg,
+};
+
+/**
+ * The order and the timings, kept in this browser.
+ *
+ * A console reloaded at 2:45pm has to come back with the order still set. It
+ * is best-effort on purpose: a browser with storage turned off gets the
+ * default order and a working console, never a broken one.
+ */
+const SETUP_KEY = "quorum.host.arcade.v1";
+
+const TIMING_FIELDS: readonly (readonly [HTMLInputElement, string])[] = [
+  [arcadeSeconds, "secondsPerItem"],
+  [arcadeTarget, "target"],
+  [arcadeFloorSeconds, "seconds"],
+  [arcadeWave1, "wave1"],
+  [arcadeWave2, "wave2"],
+  [arcadeWave3, "wave3"],
+];
+
+function saveSetup(): void {
+  const timings: Record<string, number> = {};
+  for (const [field, key] of TIMING_FIELDS) {
+    const v = Number(field.value);
+    if (Number.isFinite(v) && v > 0) timings[key] = Math.round(v);
+  }
+  try {
+    localStorage.setItem(SETUP_KEY, JSON.stringify({ plan: arcadePlan, timings }));
+  } catch {
+    // Storage off, or full. The order still works; it just will not survive
+    // a reload, and nothing about that is worth an error in front of a room.
+  }
+}
+
+/**
+ * Which rounds have already been played, against the session they were played
+ * in.
+ *
+ * A console reloaded in the middle of the arcade would otherwise come back
+ * offering a round the room has already played. Stored under the session id,
+ * so it is never restored into a different session, and best-effort like the
+ * order itself: without it the console still works, it just offers a round
+ * the host then has to correct by hand.
+ */
+const PLAYED_KEY = "quorum.host.arcade.played.v1";
+let playedLoadedFor: string | null = null;
+
+function loadPlayed(sid: string): void {
+  if (playedLoadedFor === sid) return;
+  playedLoadedFor = sid;
+  let raw: string | null = null;
+  try {
+    raw = localStorage.getItem(PLAYED_KEY);
+  } catch {
+    return;
+  }
+  if (raw === null) return;
+  try {
+    const v: unknown = JSON.parse(raw);
+    if (typeof v !== "object" || v === null) return;
+    const o = v as { sid?: unknown; played?: unknown };
+    if (o.sid !== sid || !Array.isArray(o.played)) return;
+    for (const k of o.played as unknown[]) {
+      if (typeof k !== "string") continue;
+      if (!(ARCADE_PLAYABLE as readonly string[]).includes(k)) continue;
+      arcadePlayed.add(k as ArcadePick);
+    }
+  } catch {
+    // Nothing usable stored. The order starts from the top, which is visible
+    // on the button rather than silent.
+  }
+}
+
+function savePlayed(sid: string): void {
+  try {
+    localStorage.setItem(PLAYED_KEY, JSON.stringify({ sid, played: [...arcadePlayed] }));
+  } catch {
+    // See saveSetup.
+  }
+}
+
+function loadSetup(): void {
+  let raw: string | null = null;
+  try {
+    raw = localStorage.getItem(SETUP_KEY);
+  } catch {
+    return;
+  }
+  const stored = parseSetup(raw);
+  if (stored === null) return;
+  arcadePlan = stored.plan;
+  for (const [field, key] of TIMING_FIELDS) {
+    const v = stored.timings[key];
+    if (v !== undefined) field.value = String(v);
+  }
+}
+
+for (const [field] of TIMING_FIELDS) {
+  field.addEventListener("change", () => saveSetup());
+}
+
+const arcadeSetupRows = h("div", { class: "a-setup-rows" });
+const arcadeSetupNote = h("p", { class: "pb-note a-setup-note", attrs: { hidden: true } });
+
+const arcadeSetup = h("section", { class: "a-setup" }, [
+  h("p", { class: "label", text: "Arcade running order" }),
+  h("p", {
+    class: "pb-note",
+    text: "Set this before you start. Once the session is running, the main button announces these rounds in this order \u2014 it always says which one is next.",
+  }),
+  arcadeSetupRows,
+  arcadeSetupNote,
+  h("p", {
+    class: "pb-note",
+    text: "Unseal, Tug of Raft and Gganbu are designed but not built, so they are not in the order.",
+  }),
+]);
+
+function noteSetup(message: string): void {
+  setText(arcadeSetupNote, message);
+  arcadeSetupNote.hidden = message === "";
+}
+
+function changeSetup(next: ArcadePlan, refused: string): void {
+  if (next === arcadePlan) {
+    noteSetup(refused);
+    return;
+  }
+  arcadePlan = next;
+  noteSetup("");
+  saveSetup();
+  renderArcadeSetup();
+  if (lastState) render(lastState);
+}
+
+/**
+ * One row per built round: where it comes in the order, what the game is, its
+ * own settings, and the two things the host can do to it — move it, or take
+ * it out. The rows are rebuilt on every change; the settings fields are moved
+ * into them rather than recreated, so a number the host typed survives.
+ */
+function renderArcadeSetup(): void {
+  const included = planIncluded(arcadePlan);
+  replace(
+    arcadeSetupRows,
+    arcadePlan.map((entry, i) => {
+      const kind = entry.kind;
+      const cfg = ARCADE_CFG[kind];
+      cfg.hidden = false;
+      const up = handsBackSpace(
+        h("button", {
+          class: "a-setup-move",
+          type: "button",
+          text: "\u2191",
+          disabled: i === 0,
+          attrs: { "aria-label": `Move ${ARCADE_ROUND_LABEL[kind]} earlier` },
+        }),
+      );
+      up.addEventListener("click", () =>
+        changeSetup(movePlan(arcadePlan, kind, -1), ""),
+      );
+      const down = handsBackSpace(
+        h("button", {
+          class: "a-setup-move",
+          type: "button",
+          text: "\u2193",
+          disabled: i === arcadePlan.length - 1,
+          attrs: { "aria-label": `Move ${ARCADE_ROUND_LABEL[kind]} later` },
+        }),
+      );
+      down.addEventListener("click", () =>
+        changeSetup(movePlan(arcadePlan, kind, 1), ""),
+      );
+      const inOut = handsBackSpace(
+        h("button", {
+          class: entry.included ? "a-setup-in on" : "a-setup-in",
+          type: "button",
+          text: entry.included ? "Playing" : "Skipped",
+          attrs: { "aria-pressed": entry.included ? "true" : "false" },
+        }),
+      );
+      inOut.addEventListener("click", () =>
+        changeSetup(
+          togglePlan(arcadePlan, kind),
+          isLastIncluded(arcadePlan, kind)
+            ? "Keep at least one round \u2014 the arcade has to have something to announce."
+            : "",
+        ),
+      );
+      return h(
+        "div",
+        { class: entry.included ? "a-setup-row" : "a-setup-row is-out" },
+        [
+          h("span", {
+            class: "mono a-setup-pos",
+            text: entry.included ? String(included.indexOf(kind) + 1) : "\u2013",
+          }),
+          h("div", { class: "a-setup-main" }, [
+            h("span", { class: "a-setup-name", text: ARCADE_ROUND_LABEL[kind] }),
+            h("span", { class: "a-setup-what", text: ARCADE_ROUND_WHAT[kind] }),
+            entry.included ? cfg : null,
+          ]),
+          h("div", { class: "a-setup-acts" }, [up, down, inOut]),
+        ],
+      );
+    }),
+  );
+}
+
+/** The line that says which round the button is about to announce. */
+const arcadeUpNext = h("p", { class: "a-upnext" });
+
+const arcadeAltToggle = handsBackSpace(
+  h("button", {
+    class: "a-alt-toggle",
+    type: "button",
+    text: "Run a different round",
+    attrs: { "aria-expanded": "false" },
+  }),
+);
+const arcadeAlt = h("div", { class: "a-alt", attrs: { hidden: true } }, [
+  h("p", {
+    class: "pb-note",
+    text: "Pick a round here to run it next instead of the one in the order \u2014 to skip ahead, or to run one again. The order picks up again afterwards.",
+  }),
+  arcadePicker,
+]);
+arcadeAltToggle.addEventListener("click", () => {
+  const open = arcadeAlt.hidden;
+  arcadeAlt.hidden = !open;
+  setAttr(arcadeAltToggle, "aria-expanded", open ? "true" : "false");
+  setText(arcadeAltToggle, open ? "Hide the other rounds" : "Run a different round");
+});
+
 /** The bridge, as the host reads it out: the step, the clock and the answer. */
 const arcadeBridge = h("div", { class: "a-bridge-host", attrs: { hidden: true } });
 
@@ -738,10 +1172,9 @@ const arcadeNextWave = control({
 
 const bodyArcade = h("section", { class: "pb pb-arcade" }, [
   arcadeState,
-  arcadePicker,
-  arcadeRecruitCfg,
-  arcadePlanCfg,
-  arcadeGlassCfg,
+  arcadeUpNext,
+  arcadeAltToggle,
+  arcadeAlt,
   arcadeItem,
   arcadeNote,
   arcadeBridge,
@@ -764,20 +1197,20 @@ const bodyArcade = h("section", { class: "pb pb-arcade" }, [
   arcadeBacking,
 ]);
 
-/** The round command the picker and its fields currently describe. */
-function arcadeRoundCommand(): HostCommand {
+/** The round command the running order and its fields describe. */
+function arcadeRoundCommand(pick: ArcadePick): HostCommand {
   const int = (el: HTMLInputElement, dflt: number): number => {
     const v = Number(el.value);
     return Number.isFinite(v) && Number.isInteger(v) && v > 0 ? v : dflt;
   };
-  if (arcadePick === "recruitment") {
+  if (pick === "recruitment") {
     return {
       name: "arcade.round",
       kind: "recruitment",
       secondsPerItem: int(arcadeSeconds, 20),
     };
   }
-  if (arcadePick === "glass_bridge") {
+  if (pick === "glass_bridge") {
     return {
       name: "arcade.round",
       kind: "glass_bridge",
@@ -798,22 +1231,52 @@ function arcadeRoundCommand(): HostCommand {
 
 function renderArcade(s: RenderState): void {
   const a = s.arcade;
+  // A round that has been revealed is a round that has been played: revealing
+  // is what puts the points on the board. That is what moves the running
+  // order on, and what ends a deviation.
+  if (
+    a !== undefined &&
+    a.phase === "reveal" &&
+    a.round !== null &&
+    isPlayable(a.round)
+  ) {
+    arcadePlayed.add(a.round);
+    savePlayed(s.sid);
+    if (arcadeOverride === a.round) arcadeOverride = null;
+  }
+
+  const pick = currentPick();
   for (const [kind, button] of arcadePickButtons) {
-    const on = ARCADE_BUILT[kind] && kind === arcadePick;
+    const on = ARCADE_BUILT[kind] && kind === pick;
     button.classList.toggle("on", on);
     setAttr(button, "aria-checked", on ? "true" : "false");
   }
-  // The picker and the settings are for choosing a round, and once the card
-  // is up the choice is made: `startRound` refuses a second one. They come
-  // off the panel for the duration, so the controls that *are* live during a
-  // round are not pushed below the fold of a panel that scrolls — the Glass
-  // Bridge added three settings and two buttons, and the two buttons are the
-  // ones the host needs at 14:40.
+
+  // Which round is next was decided during setup, and the line below says so.
+  // Once the card is up the choice is made either way — `startRound` refuses a
+  // second one — so the line and the way off the order both come off the
+  // panel for the duration, leaving the controls that *are* live during a
+  // round where the host can press them without scrolling. The Glass Bridge
+  // added two of those, and they are the ones the host needs at 14:40.
   const inPlay = a !== undefined && (a.phase === "card" || a.phase === "running");
-  arcadePicker.hidden = inPlay;
-  arcadeRecruitCfg.hidden = inPlay || arcadePick !== "recruitment";
-  arcadePlanCfg.hidden = inPlay || arcadePick !== "plan_apply";
-  arcadeGlassCfg.hidden = inPlay || arcadePick !== "glass_bridge";
+  arcadeUpNext.hidden = inPlay;
+  arcadeAltToggle.hidden = inPlay;
+  if (inPlay && !arcadeAlt.hidden) {
+    arcadeAlt.hidden = true;
+    setAttr(arcadeAltToggle, "aria-expanded", "false");
+    setText(arcadeAltToggle, "Run a different round");
+  }
+
+  const order = planIncluded(arcadePlan);
+  const at = pick === null ? -1 : order.indexOf(pick);
+  setText(
+    arcadeUpNext,
+    pick === null
+      ? "Every round you chose has been played. The button moves on to the standings."
+      : arcadeOverride !== null
+        ? `Next: ${ARCADE_ROUND_LABEL[pick]} — you picked this one by hand.`
+        : `Next: ${ARCADE_ROUND_LABEL[pick]} — round ${at + 1} of ${order.length} in your running order.`,
+  );
 
   if (a === undefined) {
     setText(arcadeState, "NOT IN THE ARCADE YET");
@@ -830,7 +1293,8 @@ function renderArcade(s: RenderState): void {
     arcadeNext.setDisabled(true);
     arcadeNextStep.setDisabled(true);
     arcadeNextWave.setDisabled(true);
-    // The picker is still live: the host chooses the round before entering.
+    // The running order is still live: the host can still change it, and the
+    // line above says which round entering leads to.
     return;
   }
 
@@ -1053,6 +1517,22 @@ function issue(cmd: HostCommand, from: Control | null): void {
   if (from) pending.set(cid, from);
 }
 
+/**
+ * The next round in the order the host set during setup — or, when they have
+ * all been played, the next thing in the run of show. The button never says
+ * "choose something": the choosing was done before the room arrived.
+ */
+function announceNext(): { label: string; cmd: HostCommand | null } {
+  const pick = currentPick();
+  if (pick === null) {
+    return { label: "Show standings", cmd: { name: "segment", kind: "standings" } };
+  }
+  return {
+    label: `Announce ${ARCADE_ROUND_LABEL[pick]}`,
+    cmd: arcadeRoundCommand(pick),
+  };
+}
+
 function primaryPlan(): { label: string; cmd: HostCommand | null } {
   const s = lastState;
   if (s === null) return { label: "Connecting", cmd: null };
@@ -1106,15 +1586,9 @@ function primaryPlan(): { label: string; cmd: HostCommand | null } {
             cmd: { name: "arcade.reveal" },
           };
         }
-        return {
-          label: `Announce ${ARCADE_ROUND_LABEL[arcadePick]}`,
-          cmd: arcadeRoundCommand(),
-        };
+        return announceNext();
       case "reveal":
-        return {
-          label: `Announce ${ARCADE_ROUND_LABEL[arcadePick]}`,
-          cmd: arcadeRoundCommand(),
-        };
+        return announceNext();
     }
   }
 
@@ -1137,6 +1611,7 @@ function primaryPlan(): { label: string; cmd: HostCommand | null } {
 
 function render(s: RenderState): void {
   lastState = s;
+  loadPlayed(s.sid);
 
   /* status bar */
   setText(elTitle, s.title);
@@ -1239,6 +1714,10 @@ function render(s: RenderState): void {
      the room sees, and a host who cannot see the scores cannot score. */
   scoring.update(s);
 
+  /* pre-flight, and where the running order sits */
+  renderPreflight(s);
+  placeArcadeSetup(s);
+
   /* primary */
   const plan = primaryPlan();
   primary.setLabel(plan.label);
@@ -1246,6 +1725,136 @@ function render(s: RenderState): void {
 
   /* preview — what the room sees, not what the console sees */
   preview.update(roomView(s), null);
+
+  /* driving mode, when it is on. The console above is rendered either way. */
+  if (driving) renderDriving(s);
+}
+
+/**
+ * The checklist, filled in. Four things, three of which the console can see
+ * for itself.
+ */
+function renderPreflight(s: RenderState): void {
+  const setup = s.phase === "draft" || s.phase === "lobby";
+  preflight.hidden = !setup;
+  if (!setup) return;
+
+  const loaded = s.hostExtras?.trivia?.loaded ?? 0;
+  pfQuestions.set(
+    loaded > 0 ? "ready" : "not",
+    loaded > 0
+      ? `${loaded} trivia question${loaded === 1 ? "" : "s"} loaded.`
+      : "No trivia questions loaded. Open Trivia and upload the CSV, or trivia opens empty in front of the room.",
+  );
+
+  const order = planIncluded(arcadePlan);
+  pfArcade.set(
+    order.length > 0 ? "ready" : "not",
+    order.length > 0
+      ? `Arcade rounds: ${planSummary(arcadePlan, ARCADE_ROUND_LABEL)}.`
+      : "No arcade rounds chosen.",
+  );
+
+  pfDesktop.set(
+    deskSeen ? "ready" : "ask",
+    deskSeen
+      ? "You have seen the Desktop up on the projector."
+      : "The console cannot see the Desktop from here. Look at the big screen, then tick.",
+  );
+  setText(deskTick, deskSeen ? "Untick" : "Tick when you can see it");
+
+  const joined = s.roster.length;
+  const on = s.roster.filter((r) => r.conn === "on").length;
+  const away = s.roster.filter((r) => r.conn === "away").length;
+  pfPeople.set(
+    joined > 0 ? "ready" : "not",
+    joined > 0
+      ? `${joined} joined · ${on} on, ${away} away.`
+      : "Nobody has joined yet. The join code is above.",
+  );
+}
+
+/**
+ * The running order lives where the host is when they need it: in the lobby
+ * panel before the session starts, and behind "Run a different round" in the
+ * arcade panel once it has. One element that moves, not two that can
+ * disagree — and moving it keeps the numbers the host typed into it.
+ */
+function placeArcadeSetup(s: RenderState): void {
+  const home =
+    s.phase === "draft" || s.phase === "lobby" ? lobbySetupSlot : arcadeAlt;
+  if (arcadeSetup.parentElement !== home) home.appendChild(arcadeSetup);
+}
+
+/**
+ * Driving mode's two lines: what is happening, and who is still answering.
+ *
+ * Both are read off the console that is still rendering underneath, so there
+ * is one place each number is worked out and driving mode cannot drift from
+ * the console it is covering.
+ */
+function renderDriving(s: RenderState): void {
+  setText(dvContext, drivingContext(s));
+  const counts = drivingCounts(s);
+  setText(dvBig, counts.big);
+  setText(dvSub, counts.sub);
+  const waiting = drivingWaiting(s);
+  dvWaiting.hidden = waiting === "";
+  setText(dvWaiting, waiting);
+}
+
+function drivingContext(s: RenderState): string {
+  if (s.phase !== "running") {
+    return `${SEGMENT_LABEL[s.segment].toUpperCase()} · ${s.phase.toUpperCase()}`;
+  }
+  if (s.segment === "trivia" && s.trivia !== undefined) {
+    return triviaHead.textContent ?? "";
+  }
+  if (s.segment === "arcade" && s.arcade !== undefined) {
+    return arcadeState.textContent ?? "";
+  }
+  return `${SEGMENT_LABEL[s.segment].toUpperCase()} · ${s.phase.toUpperCase()}`;
+}
+
+function drivingCounts(s: RenderState): { big: string; sub: string } {
+  const on = s.roster.filter((r) => r.conn === "on").length;
+  const away = s.roster.filter((r) => r.conn === "away").length;
+  const room = `${on} on · ${away} away`;
+
+  if (s.segment === "trivia" && s.trivia !== undefined) {
+    const t = s.trivia;
+    return { big: `${t.answered ?? 0} of ${t.eligible ?? 0} answered`, sub: room };
+  }
+
+  if (s.segment === "arcade" && s.arcade !== undefined) {
+    const a = s.arcade;
+    const r = a.recruitment;
+    const gl = a.glass;
+    const pa = a.planApply;
+    let detail = room;
+    if (r !== undefined) {
+      detail = `${r.answered ?? 0} of ${r.eligible ?? 0} answered this item`;
+    } else if (gl !== undefined) {
+      const onBridge = bridgeEntries(a, s.roster, gl).filter((e) => e.onBridge);
+      const stepped = new Set(s.hostExtras?.arcade?.answeredBy ?? []);
+      detail = `${onBridge.filter((e) => stepped.has(e.pid)).length} of ${onBridge.length} have picked`;
+    } else if (pa !== undefined) {
+      detail = `${pa.crossed ?? 0} finished`;
+    }
+    return { big: `${a.onFloor} still playing · ${a.inLounge} out`, sub: detail };
+  }
+
+  return { big: room, sub: `${s.roster.length} in the room` };
+}
+
+function drivingWaiting(s: RenderState): string {
+  if (s.segment === "trivia" && s.trivia?.phase === "open") {
+    return triviaWaiting.hidden ? "" : (triviaWaiting.textContent ?? "");
+  }
+  if (s.segment === "arcade" && s.arcade !== undefined) {
+    return arcadeFloorList.textContent ?? "";
+  }
+  return "";
 }
 
 /**
@@ -1530,7 +2139,106 @@ setInterval(() => {
   if (lastState.segment === "arcade" && lastState.arcade !== undefined) {
     renderArcade(lastState);
   }
+  // Driving mode reads its lines off the console above, so it has to be
+  // refreshed on the same beat — otherwise its clock stops at whatever the
+  // last state said, which is a frozen console as far as the host can tell.
+  if (driving) renderDriving(lastState);
 }, 250);
+
+/* ------------------------------------------------------------------ */
+/* The rest of the keyboard                                            */
+/* ------------------------------------------------------------------ */
+
+/**
+ * The holding card, in one key.
+ *
+ * Recovery used to be three actions at the moment a host least wants three:
+ * switch to Holding, type a title, type a line, press the button. This is one
+ * key, and it reuses whatever the card last said — falling back to something
+ * neutral and true if it has never been set.
+ *
+ * Shift is deliberate. A bare letter is a key a hand resting on a laptop can
+ * find by accident, and this one puts a new slide in front of thirty people.
+ * H for holding: it collides with nothing — space advances, G is the scoring
+ * grid, Escape disarms — and it is printed in the rail and in driving mode,
+ * because a host will not guess a shortcut.
+ */
+const HOLDING_FALLBACK_TITLE = "Back shortly";
+const HOLDING_FALLBACK_LINE = "Sit tight — we'll pick this up in a moment.";
+
+function showHoldingNow(): void {
+  const s = lastState;
+  if (s === null) return;
+  if (s.phase !== "running") {
+    primary.flash("nothing is in front of the room yet");
+    return;
+  }
+  const title =
+    holdingTitle.value.trim() ||
+    (s.holding?.title ?? "").trim() ||
+    HOLDING_FALLBACK_TITLE;
+  const line =
+    holdingLine.value.trim() ||
+    (s.holding?.line ?? "").trim() ||
+    HOLDING_FALLBACK_LINE;
+  // The card's words go first, so the room never sees the previous card's
+  // second line under this one's title.
+  holdingTitle.value = title;
+  holdingLine.value = line;
+  holdingDirty = false;
+  issue({ name: "holding", title, line }, primary);
+  if (s.segment !== "holding") issue({ name: "segment", kind: "holding" }, primary);
+}
+
+/* ---- driving mode ---- */
+
+/**
+ * The console with everything taken off it but the primary button and the
+ * live counts, for the half of the session the host is also facilitating.
+ *
+ * Additive by construction: the console underneath stays mounted and stays
+ * rendered, so turning the mode off is not a rebuild — it is the same console
+ * the host left, in the same state. The primary button is moved rather than
+ * copied, so the most important string in the product has exactly one copy
+ * and a refusal lands where the host is looking.
+ */
+let driving = false;
+
+function setDriving(on: boolean): void {
+  if (on === driving) return;
+  driving = on;
+  document.body.classList.toggle("driving", on);
+  drivingView.hidden = !on;
+  const home = on ? dvPrimary : panelFoot;
+  if (primary.el.parentElement !== home) home.appendChild(primary.el);
+  // The button just moved out from under the cursor; space must still work.
+  releaseFocus();
+  if (lastState) render(lastState);
+}
+
+document.addEventListener("keydown", (ev) => {
+  if (!ev.shiftKey || ev.metaKey || ev.ctrlKey || ev.altKey) return;
+  if (ev.repeat) return;
+  const el = ev.target as HTMLElement | null;
+  const tag = el?.tagName;
+  if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
+  if (el?.isContentEditable) return;
+  const key = ev.key.toLowerCase();
+  if (key === "h") {
+    ev.preventDefault();
+    showHoldingNow();
+    return;
+  }
+  if (key === "d") {
+    ev.preventDefault();
+    setDriving(!driving);
+  }
+});
+
+/* ---- the running order, as the console last had it ---- */
+
+loadSetup();
+renderArcadeSetup();
 
 bindSpace(primary);
 bindEscape(() => [
@@ -1554,6 +2262,9 @@ document.addEventListener("keydown", (ev) => {
   if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
   if (el?.isContentEditable) return;
   ev.preventDefault();
+  // The grid is on the console, and driving mode is the console put away.
+  // Asking for the grid is asking for the console back.
+  setDriving(false);
   scoring.focusFirst();
 });
 

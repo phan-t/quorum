@@ -1312,3 +1312,355 @@ body {
 .a-backing-name {
   color: var(--muted);
 }
+
+/* ------------------------------------------------- the keyboard hint -- */
+
+/* A shortcut a host has to guess is a shortcut that does not exist. Every key
+   the console answers to is printed at the bottom of the rail, and again in
+   driving mode, where the rail is not on screen. --muted, not --dim: --dim
+   never carries text that has to be read. Measured 5.51:1 dark (#8b8a9c on
+   #14141d) and 5.12:1 light (#656a76 on #f9f9fa). */
+.rail-keys {
+  margin: 0;
+  flex: none;
+  font-size: 10px;
+  line-height: 1.6;
+  letter-spacing: 0.08em;
+  color: var(--muted);
+}
+
+/* ------------------------------------------------------- pre-flight -- */
+
+/*
+ * What is ready and what is not, before the room is looking. Three states,
+ * each said three ways — a glyph, a word and a colour — because nothing on
+ * this console is carried by colour alone, and this list is read in a hurry.
+ *
+ * Measured on --panel, both themes, AA needs 4.5:1:
+ *   ready   --hit      #00ca8e on #14141d  8.72:1   #007a58 on #f9f9fa  5.08:1
+ *   not     --danger   #ff6b5a on #14141d  6.66:1   #c02a1b on #f9f9fa  5.59:1
+ *   by eye  --sealed   #ffcf25 on #14141d 12.58:1   #8a6d00 on #f9f9fa  4.74:1
+ *   body    --ink                         15.6:1                       17.5:1
+ */
+.pf {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--panel);
+}
+
+.pf-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.pf-row {
+  display: grid;
+  grid-template-columns: 1.2em 5.5em minmax(0, 1fr) auto;
+  align-items: baseline;
+  gap: 10px;
+  font-size: 13px;
+  line-height: 1.4;
+}
+
+.pf-mark {
+  font-size: 13px;
+  font-weight: 600;
+  text-align: center;
+}
+.pf-word {
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+}
+.pf-text {
+  color: var(--ink);
+}
+
+.pf-row[data-state="ready"] .pf-mark,
+.pf-row[data-state="ready"] .pf-word {
+  color: var(--hit);
+}
+.pf-row[data-state="not"] .pf-mark,
+.pf-row[data-state="not"] .pf-word {
+  color: var(--danger);
+}
+.pf-row[data-state="ask"] .pf-mark,
+.pf-row[data-state="ask"] .pf-word {
+  color: var(--sealed);
+}
+
+/* The one item the console cannot check for itself. */
+.pf-tick {
+  background: var(--panel-2);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  padding: 3px 8px;
+  font-size: 11px;
+  font-family: var(--mono);
+  color: var(--ink);
+  white-space: nowrap;
+}
+.pf-tick:hover {
+  border-color: var(--muted);
+}
+
+/* ------------------------------------------- the arcade's own order -- */
+
+/*
+ * Which rounds, in which order, and how long each one runs: all knowable at
+ * 9am, so all asked at 9am. The block lives in the lobby panel while the
+ * session has not started and moves into the arcade panel once it has —
+ * the same element, moved, so the numbers typed into it survive.
+ */
+.lobby-setup {
+  display: contents;
+}
+
+.a-setup {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--panel);
+}
+.a-setup[hidden] {
+  display: none;
+}
+
+.a-setup-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.a-setup-row {
+  display: grid;
+  grid-template-columns: 1.6em minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: start;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  background: var(--panel-2);
+}
+/* Out of the order, said three ways and none of them colour: a dashed edge,
+   a dash where the position number was, and the word Skipped on the button. */
+.a-setup-row.is-out {
+  background: none;
+  border-style: dashed;
+}
+.a-setup-row.is-out .a-setup-name {
+  color: var(--muted);
+}
+
+.a-setup-pos {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--ink);
+  text-align: center;
+}
+.a-setup-row.is-out .a-setup-pos {
+  color: var(--muted);
+}
+
+.a-setup-main {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+.a-setup-name {
+  font-weight: 600;
+  font-size: 14px;
+}
+.a-setup-what {
+  font-size: 12px;
+  line-height: 1.35;
+  color: var(--muted);
+}
+/* The round's own settings, inside its row in the order. A number field that
+   stretches the width of the panel is a number field the eye has to travel
+   across on a row it has already read. */
+.a-setup-main .a-cfg {
+  margin-top: 2px;
+}
+.a-setup-main .field-num {
+  flex: none;
+}
+.a-setup-main .field-row .label {
+  width: 8.5em;
+}
+
+.a-setup-acts {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.a-setup-move {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  color: var(--ink);
+  font-size: 13px;
+  line-height: 1;
+  padding: 5px 8px;
+}
+.a-setup-move:hover:not(:disabled) {
+  border-color: var(--muted);
+}
+.a-setup-move:disabled {
+  color: var(--dim);
+  cursor: default;
+}
+.a-setup-in {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  color: var(--ink);
+  font-family: var(--mono);
+  font-size: 11px;
+  letter-spacing: 0.1em;
+  padding: 5px 8px;
+  white-space: nowrap;
+}
+.a-setup-in.on {
+  border-color: var(--nomad);
+}
+.a-setup-in:hover {
+  border-color: var(--muted);
+}
+.a-setup-note {
+  color: var(--sealed);
+}
+
+/* The line that says which round the button is about to announce. */
+.a-upnext {
+  margin: 0;
+  font-size: 15px;
+  color: var(--ink);
+}
+.a-upnext[hidden] {
+  display: none;
+}
+
+/* The way off the running order: present, and not the default path. */
+.a-alt-toggle {
+  align-self: flex-start;
+  background: none;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  color: var(--muted);
+  font-family: var(--mono);
+  font-size: 11px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  padding: 4px 10px;
+}
+.a-alt-toggle:hover {
+  color: var(--ink);
+  border-color: var(--muted);
+}
+.a-alt-toggle[hidden] {
+  display: none;
+}
+.a-alt {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+}
+.a-alt[hidden] {
+  display: none;
+}
+
+/* ---------------------------------------------------- driving mode -- */
+
+/*
+ * The console with everything taken off it but the primary button and the
+ * live counts, for the half of the session the host is also facilitating.
+ * Toggled with Shift+D, printed on screen, and strictly additive: the console
+ * underneath is hidden rather than unbuilt, so turning it off puts the host
+ * back exactly where they were.
+ *
+ * Measured on --ground, both themes:
+ *   --ink   #f6f5f3 on #0a0a0f  18.13:1   #0c0c0e on #ffffff  19.54:1
+ *   --muted #8b8a9c on #0a0a0f   5.84:1   #656a76 on #ffffff   5.38:1
+ */
+body.driving .cols {
+  display: none;
+}
+
+.driving-view {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 18px;
+  padding: 24px;
+  text-align: center;
+}
+
+.dv-label {
+  font-size: 11px;
+}
+.dv-context {
+  margin: 0;
+  font-size: 15px;
+  letter-spacing: 0.16em;
+  color: var(--muted);
+}
+.dv-big {
+  margin: 0;
+  font-family: var(--display);
+  font-weight: 700;
+  font-size: 56px;
+  line-height: 1;
+  letter-spacing: -0.02em;
+  color: var(--ink);
+}
+.dv-sub {
+  margin: 0;
+  font-size: 16px;
+  color: var(--muted);
+}
+.dv-waiting {
+  margin: 0;
+  max-width: 60ch;
+  font-size: 14px;
+  color: var(--muted);
+}
+.dv-waiting[hidden] {
+  display: none;
+}
+.dv-primary {
+  display: flex;
+  justify-content: center;
+}
+/* The real button, moved here. Bigger, because at this size it is the only
+   thing on screen and it is read from arm's length. */
+.driving-view .ctl-primary {
+  margin-left: 0;
+}
+.driving-view .ctl-primary .ctl-button {
+  font-size: 22px;
+  padding: 16px 32px;
+  min-width: 420px;
+}
+.dv-keys {
+  margin: 0;
+  font-size: 11px;
+  letter-spacing: 0.1em;
+  color: var(--muted);
+}

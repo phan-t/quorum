@@ -40,6 +40,41 @@ interface Opts {
 const FLASH_MS = 3_000;
 const ARM_TIMEOUT_MS = 6_000;
 
+/**
+ * Hand the space bar back.
+ *
+ * A button keeps focus after it is clicked, and a focused button owns space.
+ * So the host clicks Lock joining, or a round pill, or a roster action, then
+ * presses space mid-sentence to advance — and nothing visible happens, because
+ * space re-pressed the button they clicked last. They have to look down, which
+ * is the one thing this console exists to avoid.
+ *
+ * Every control blurs itself the moment it has fired, so space always means
+ * "next". The deliberate exception is the inline confirm, which focuses its
+ * Yes on purpose and is left alone here and in {@link bindSpace}.
+ */
+export function releaseFocus(within?: HTMLElement): void {
+  const active = document.activeElement;
+  if (!(active instanceof HTMLElement)) return;
+  if (active.tagName !== "BUTTON") return;
+  if (isConfirmButton(active)) return;
+  if (within !== undefined && !within.contains(active)) return;
+  active.blur();
+}
+
+/**
+ * The same promise for a plain button — the rail, the round pills — which is
+ * not a {@link Control} and so does not re-render itself on the way out.
+ */
+export function handsBackSpace<T extends HTMLElement>(button: T): T {
+  button.addEventListener("click", () => releaseFocus(button));
+  return button;
+}
+
+function isConfirmButton(el: HTMLElement): boolean {
+  return el.classList.contains("ctl-yes") || el.classList.contains("ctl-no");
+}
+
 export function control(opts: Opts): Control {
   const el = h("span", {
     class: `ctl${opts.className ? ` ${opts.className}` : ""}`,
@@ -96,6 +131,8 @@ export function control(opts: Opts): Control {
     }
     armed = false;
     render();
+    // Fired, so the space bar goes back to the run of show. See `releaseFocus`.
+    releaseFocus(el);
     opts.onFire(api);
   }
 
@@ -171,8 +208,16 @@ export function bindSpace(target: Control): () => void {
     const tag = el?.tagName;
     if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
     if (el?.isContentEditable) return;
-    // If a button already has focus, space is that button's.
-    if (tag === "BUTTON") return;
+    // A focused button owns the space bar — but only the Yes and No of a
+    // half-pressed confirm, which took focus deliberately and is being
+    // answered. Any other button has already done its job and is holding the
+    // key hostage: it hands it back rather than firing a second time. This is
+    // the belt to `releaseFocus`'s braces, and it covers the buttons this file
+    // does not own, like the theme toggle.
+    if (tag === "BUTTON") {
+      if (el !== null && isConfirmButton(el)) return;
+      el?.blur();
+    }
     ev.preventDefault();
     const now = Date.now();
     if (now - lastFired < SPACE_DEBOUNCE_MS) return;
