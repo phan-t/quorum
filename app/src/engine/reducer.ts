@@ -692,10 +692,17 @@ export function reduce(
           ),
         );
       }
-      if (
-        state.arcade &&
-        (state.arcade.phase === "card" || state.arcade.phase === "running")
-      ) {
+      // The round card is the exception, and it is where the decision is
+      // actually made: the host is reading the how-to-play out to a room that
+      // has never seen this game, which is the moment "let us practise this
+      // one" occurs to them. Nothing has been played yet — `startRound` only
+      // puts the card up, `beginPlay` is what starts the clock, and
+      // `revealRound` is the single place an arcade round reaches the board —
+      // so there are no totals for the flag to rule on after the fact.
+      // `running` stays refused because by then there are: the room is
+      // mid-round, and flipping it there decides retrospectively whether what
+      // they just did counted.
+      if (state.arcade && state.arcade.phase === "running") {
         return unchanged(
           reject(
             "host",

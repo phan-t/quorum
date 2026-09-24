@@ -19,6 +19,7 @@ import { describe, test } from "node:test";
 import type { Activity, Effect, Event, RejectCode, SessionState } from "./types.ts";
 import { newSession, reduce, replay } from "./reducer.ts";
 import { computeStandings } from "./scoring.ts";
+import { recruitmentRound } from "../arcade/recruitment.ts";
 
 function rejects(effects: readonly Effect[]) {
   return effects.filter((e): e is Extract<Effect, { kind: "reject" }> => e.kind === "reject");
@@ -90,6 +91,14 @@ function playOne(s: SessionState): SessionState {
     { type: "answerQuestion", pid: "p2", choice: 2, ms: 2000 },
     { type: "closeQuestion" },
     { type: "revealQuestion" },
+  ]);
+}
+
+/** In the arcade with a round card up — the how-to-play, before any play. */
+function cardUp(): SessionState {
+  return accept(ready(), [
+    { type: "enterArcade", activityId: "arcade" },
+    { type: "startRound", round: "recruitment", config: recruitmentRound() },
   ]);
 }
 
@@ -165,6 +174,23 @@ describe("turning practice on and off", () => {
   test("is allowed once the question is revealed", () => {
     const s = playOne(ready());
     assert.equal(accept(s, [{ type: "setPractice", on: true }]).practice, true);
+  });
+
+  test("is allowed while an arcade round card is up", () => {
+    // The card is the briefing, and the briefing is when the host decides the
+    // room should learn this one first. Nothing has been played, so the flag
+    // is not being asked to rule on anything after the fact.
+    const s = cardUp();
+    assert.equal(accept(s, [{ type: "setPractice", on: true }]).practice, true);
+    assert.equal(accept(cardUp(), [
+      { type: "setPractice", on: true },
+      { type: "setPractice", on: false },
+    ]).practice, false, "it only went one way");
+  });
+
+  test("is refused once the arcade round is running", () => {
+    const s = accept(cardUp(), [{ type: "beginPlay" }]);
+    refused(s, { type: "setPractice", on: true }, "wrong_round_phase");
   });
 
   test("does nothing when it is already that way", () => {

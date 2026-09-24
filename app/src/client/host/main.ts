@@ -2559,6 +2559,26 @@ const arcadePlayed = new Set<ArcadePick>();
  */
 let arcadeOverride: ArcadePick | null = null;
 
+/**
+ * Whether the round in front of the room is being played as practice, latched
+ * while the card is up and while it runs.
+ *
+ * This is not the same thing as `s.practice` at the reveal, which is what the
+ * mark below used to read, and reading it there is the bug a host hits the
+ * first time they use practice properly. The engine allows the flag to move at
+ * the reveal, and moving it is the very next thing the host does — the whole
+ * point of a practice run is the scored run after it. So turning practice off
+ * at the reveal re-ran the mark with the flag already cleared, the practice
+ * round was struck off the running order at that instant, and the console
+ * offered the next game instead of the re-run the host had just asked for.
+ *
+ * The card and the round decide it, the reveal only reads what was decided.
+ * Persisted with the played set, because a console reloaded between the end of
+ * a round and its reveal would otherwise come back believing the round it is
+ * about to bank was a scored one.
+ */
+let arcadePractising = false;
+
 /** The round the primary button is offering; null when the order is finished. */
 function currentPick(): ArcadePick | null {
   if (arcadeOverride !== null) return arcadeOverride;
@@ -2884,13 +2904,17 @@ function loadPlayed(sid: string): void {
   try {
     const v: unknown = JSON.parse(raw);
     if (typeof v !== "object" || v === null) return;
-    const o = v as { sid?: unknown; played?: unknown };
+    const o = v as { sid?: unknown; played?: unknown; practising?: unknown };
     if (o.sid !== sid || !Array.isArray(o.played)) return;
     for (const k of o.played as unknown[]) {
       if (typeof k !== "string") continue;
       if (!(ARCADE_PLAYABLE as readonly string[]).includes(k)) continue;
       arcadePlayed.add(k as ArcadePick);
     }
+    // Missing in anything written before practice existed, which reads as the
+    // round in progress being a scored one — the answer that was always right
+    // until there was a flag to be wrong about.
+    arcadePractising = o.practising === true;
   } catch {
     // Nothing usable stored. The order starts from the top, which is visible
     // on the button rather than silent.
@@ -2899,7 +2923,10 @@ function loadPlayed(sid: string): void {
 
 function savePlayed(sid: string): void {
   try {
-    localStorage.setItem(PLAYED_KEY, JSON.stringify({ sid, played: [...arcadePlayed] }));
+    localStorage.setItem(
+      PLAYED_KEY,
+      JSON.stringify({ sid, played: [...arcadePlayed], practising: arcadePractising }),
+    );
   } catch {
     // See saveSetup.
   }
@@ -3165,13 +3192,22 @@ function renderArcade(s: RenderState): void {
   // sentence above is the whole reason, and in practice it is false. A
   // practice round that counted as played left the room having learned the
   // game and the console refusing to offer it again, which is the opposite of
-  // the point. The engine will not let practice change while a round is live,
-  // so the flag at the reveal is the flag the round was played under.
+  // the point.
+  //
+  // The flag the *round* was played under, latched while it was still the
+  // round's to decide, and not the flag as it stands right now: see
+  // `arcadePractising`.
+  if (a !== undefined && (a.phase === "card" || a.phase === "running")) {
+    if (arcadePractising !== s.practice) {
+      arcadePractising = s.practice;
+      savePlayed(s.sid);
+    }
+  }
   if (
     a !== undefined &&
     a.phase === "reveal" &&
     a.round !== null &&
-    !s.practice &&
+    !arcadePractising &&
     isPlayable(a.round)
   ) {
     arcadePlayed.add(a.round);
@@ -3632,11 +3668,14 @@ function render(s: RenderState): void {
   for (const c of practiceControls) {
     c.setLabel(`Practice: ${s.practice ? "on" : "off"}`);
     c.el.classList.toggle("on", s.practice);
-    // The engine refuses to change it under a live question or round, so the
-    // button says so by being unpressable rather than by being refused.
+    // The engine refuses to change it under a live question or a running
+    // round, so the button says so by being unpressable rather than by being
+    // refused. The round card is not live: it is the briefing, and it is the
+    // moment the host decides to practise this one, so the button is pressable
+    // there.
     c.setDisabled(
       (s.trivia !== undefined && s.trivia.phase !== "idle" && s.trivia.phase !== "revealed") ||
-        (s.arcade !== undefined && (s.arcade.phase === "card" || s.arcade.phase === "running")),
+        (s.arcade !== undefined && s.arcade.phase === "running"),
     );
   }
   sealControl.setLabel(
@@ -3783,9 +3822,12 @@ function render(s: RenderState): void {
  */
 function forgetPlayedIfStartingOver(s: RenderState): void {
   if (s.phase !== "lobby" || s.arcade !== undefined) return;
-  if (arcadePlayed.size === 0 && arcadeOverride === null) return;
+  if (arcadePlayed.size === 0 && arcadeOverride === null && !arcadePractising) return;
   arcadePlayed.clear();
   arcadeOverride = null;
+  // A restart turns practice off in the engine, so a latch left on would be a
+  // stale answer to a question nobody has asked yet.
+  arcadePractising = false;
   savePlayed(s.sid);
 }
 

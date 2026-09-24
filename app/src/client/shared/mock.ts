@@ -1607,6 +1607,28 @@ class MockHub {
       case "lobby.lock":
         s.joinsLocked = cmd.locked;
         break;
+      // Practice. The mock had no case for it at all, so the frame fell off
+      // the end of the switch, was acked as applied, and changed nothing — the
+      // one thing a mock must never do, because it is the console's only way
+      // to be driven without a room. The engine's two refusals, mirrored: not
+      // under a live question, and not under a running round. The round card
+      // is allowed, which is where a host decides to practise a game.
+      case "practice":
+        if (s.questionPhase !== "idle" && s.questionPhase !== "revealed") {
+          return reject(
+            "wrong_question_phase",
+            "A question is open. Reveal it before changing practice.",
+          );
+        }
+        if (s.arcadeOn && s.arcadePhase === "running") {
+          return reject(
+            "wrong_round_phase",
+            "A round is in play. Finish it before changing practice.",
+          );
+        }
+        if (s.practice === cmd.on) return noop();
+        s.practice = cmd.on;
+        break;
       case "participant.kick": {
         const i = s.participants.findIndex((p) => p.pid === cmd.pid);
         if (i === -1) return reject("unknown_participant", "No such participant.");

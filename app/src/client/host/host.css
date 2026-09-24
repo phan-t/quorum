@@ -615,10 +615,17 @@ body {
 .field:focus {
   border-color: var(--ibm-blue);
 }
+/* Flush with the panel, like everything else in it.
+   It used to be indented 102px — the 90px label column plus its 12px gap — so
+   that a row of buttons sat under the fields rather than under their labels.
+   No panel that has this row still has a field above it: the holding block and
+   the trivia panel had both already opted out by hand, and the arcade's row
+   never had fields at all, so the indent survived only there, pushing the five
+   buttons the host presses during a round a hundred pixels off the frame with
+   nothing in the gap to explain why. */
 .field-actions {
   display: flex;
   gap: 8px;
-  padding-left: 102px;
 }
 
 /* Thirty people in one 520px column is a standings list the host has to
@@ -1152,9 +1159,15 @@ body {
   border-color: var(--line);
   cursor: default;
 }
+/* On: the gold fill, and the theme's own ground as the ink on it.
+   #2a2205 was a near-black chosen against dark's --sealed #ffcf25, where it is
+   10.68:1. Light's --sealed is #926700, a dark amber, and a near-black on it is
+   3.13:1 — a label the host has to lean in to read on the one button whose
+   whole job is to say a state is on. --ground inverts with the theme exactly as
+   the fill does: 13.36:1 dark, 5.05:1 light. */
 .ctl.on .ctl-button {
   background: var(--sealed);
-  color: #2a2205;
+  color: var(--ground);
   border-color: var(--sealed);
 }
 
@@ -1520,10 +1533,6 @@ body {
   display: none;
 }
 
-.pb-trivia .field-actions {
-  padding-left: 0;
-}
-
 .t-load[hidden] {
   display: none;
 }
@@ -1542,14 +1551,12 @@ body {
   font-variant-numeric: tabular-nums;
 }
 
-/* On, and saying so. The console's other toggles use `.on` the same way; this
-   one matters more than most, because the cost of forgetting it is a round the
-   room played for nothing. */
-.ctl-practice.on {
-  background: var(--sealed);
-  border-color: var(--sealed);
-  color: #2a2205;
-}
+/* Practice on used to be said twice: once by `.ctl.on .ctl-button`, which is
+   the button, and once here on `.ctl-practice`, which is the wrapper `<span>`
+   around it. The wrapper's copy painted gold behind a button already painting
+   itself gold and set a label colour on an element that holds no label, so it
+   did nothing it looked like it was doing. One toggle, one rule, and it is the
+   one every other toggle on this console already uses. */
 
 /* ---- arcade --------------------------------------------------------- */
 
@@ -2042,11 +2049,6 @@ body {
   font-size: 13px;
   color: var(--muted);
 }
-/* No fields in this block, so nothing to line up with. */
-.hc-actions {
-  padding-left: 0;
-}
-
 .a-setup {
   display: flex;
   flex-direction: column;
