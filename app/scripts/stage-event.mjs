@@ -270,16 +270,35 @@ if (sendoffRaw !== null) {
         failures.push(`${key} — no such file in the event directory`);
         return;
       }
+      // Three attempts, backing off. Forty-three uploads over a real network
+      // is not forty-three uploads over localhost: staging this event against
+      // the deployed service dropped seven of them on the first run and every
+      // one of those seven succeeded on a straight retry. Nothing about them
+      // was different — same sizes as their neighbours, no pattern, no 4xx.
+      //
+      // Retrying matters more here than the failure count suggests, because a
+      // missing photo is invisible afterwards: the montage preloads each key
+      // and silently steps over one that 404s, which is the right behaviour on
+      // a shared screen and means nobody would ever notice the gap. This
+      // report is the only place a dropped upload shows up at all.
+      //
+      // A 4xx is not retried. The file is too big, or the key is wrong, or the
+      // token is: none of those get better by asking again.
       let res;
-      try {
-        res = await post(
-          `/api/sessions/${encodeURIComponent(sid)}/assets/${encodeURIComponent(key)}`,
-          bytes,
-          hostToken,
-          assetType(key),
-        );
-      } catch (err) {
-        res = { ok: false, status: 0, body: null, text: err.message };
+      for (let attempt = 1; attempt <= 3; attempt += 1) {
+        try {
+          res = await post(
+            `/api/sessions/${encodeURIComponent(sid)}/assets/${encodeURIComponent(key)}`,
+            bytes,
+            hostToken,
+            assetType(key),
+          );
+        } catch (err) {
+          res = { ok: false, status: 0, body: null, text: err.message };
+        }
+        if (res.ok) break;
+        if (res.status >= 400 && res.status < 500) break;
+        if (attempt < 3) await new Promise((r) => setTimeout(r, attempt * 400));
       }
       if (!res.ok) {
         failures.push(
@@ -312,8 +331,8 @@ if (sendoffRaw !== null) {
       process.stderr.write(
         `\n  ${failures.length} of ${keys.length} send-off assets did not upload:\n\n` +
           failures.map((f) => `    ${f}\n`).join("") +
-          `\n  The send-off itself is loaded. Do NOT re-run staging — that creates a\n` +
-          `  second session. Re-upload the missing files one at a time:\n\n` +
+          `\n  Each was tried three times. The send-off itself is loaded, so do NOT\n` +
+          `  re-run staging: that creates a second session. Re-upload these:\n\n` +
           `    curl -X POST "$QUORUM_URL/api/sessions/${sid}/assets/photos%2Fp01.jpg" \\\n` +
           `      -H "Authorization: Bearer $HOST_TOKEN" -H 'content-type: image/jpeg' \\\n` +
           `      --data-binary @config/events/${event}/photos/p01.jpg\n`,
