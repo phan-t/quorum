@@ -608,6 +608,25 @@ body {
   display: flex;
   gap: 0.6rem;
 }
+/* How to play, read from across a video call. Smaller than the house's 30px
+   because there are three of them and they are prose rather than slogans, but
+   still --ink on the card's own ground rather than the house green: this is
+   the room being told the rules, not the Front-End Man performing. */
+.s-how {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  margin: 1.6rem 0 0;
+  padding-top: 1.3rem;
+  border-top: 2px solid var(--line);
+}
+.s-how-line {
+  margin: 0;
+  color: var(--ink);
+  font-size: 24px;
+  line-height: 1.4;
+}
+
 .s-prompt {
   opacity: 0.7;
 }

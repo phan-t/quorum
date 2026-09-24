@@ -506,6 +506,66 @@ export const STATE_LOCK_ERROR = "Error: state lock held by another process";
  * cannot be built without this file asking what its line is, and building one
  * is filling in the string here.
  */
+/**
+ * How to play, read on the round card before the round starts.
+ *
+ * There are now three registers for a round's words and they do different
+ * jobs. {@link ARCADE_ROUND_CARD} is the Front-End Man — atmosphere, aimed at
+ * the room. {@link PLAY_RULE} is one line on the phone *during* play, for a
+ * player who has forgotten the rule mid-round. This is the briefing: what the
+ * game is, what you do, and what ends it, for somebody who has never seen it.
+ *
+ * The room has not played any of these before. A game whose rules are only in
+ * the host's spoken introduction is a game the people who joined late, or were
+ * reading chat, or dropped and rejoined, do not get to play — and over video
+ * that is most of a round. So the rules go on the screen, in front of everyone,
+ * in the twenty seconds the card is up anyway.
+ *
+ * Three lines each, in a fixed order, and the order is the point: **what this
+ * is**, **what you do**, **what ends it**. A player who reads only the third
+ * line still knows the thing that would otherwise be learned by losing.
+ *
+ * Same two rules as PLAY_RULE, for the same reasons. Static per round, never a
+ * function of the state — a line that changed with what the server knows is a
+ * line that could carry what the server knows. And nothing about *which*: the
+ * bridge's lines name the shape of the choice and say nothing that helps with
+ * an actual pane.
+ */
+export const HOW_TO_PLAY: Readonly<
+  Record<ArcadeRoundKind, readonly [string, string, string]>
+> = {
+  recruitment: [
+    "Two emoji stand for one HashiCorp product.",
+    "Type the product's name before the timer runs out.",
+    "Everyone plays every item. Nobody is knocked out.",
+  ],
+  plan_apply: [
+    "A sign that switches between PLAN and LOCKED.",
+    "Tap to add resources while it reads PLAN.",
+    "One tap while it reads LOCKED and you are out.",
+  ],
+  unseal: [
+    "You choose a shape, and the shape decides how long your word is.",
+    "The letters arrive scrambled. Tap them in the right order.",
+    "One wrong letter cracks the tin and you are out.",
+  ],
+  tug_of_raft: [
+    "Two teams, one rope, and a steady beat.",
+    "Tap on the beat to pull. Tapping off the beat does nothing.",
+    "Nobody is knocked out. Three pulls, and the sides are reshuffled.",
+  ],
+  gganbu: [
+    "You are paired with one other player. Ten tokens each.",
+    "Six over-or-under questions — bet tokens on your answer.",
+    "Run out of tokens and you are out.",
+  ],
+  glass_bridge: [
+    "Six steps. Two panes at each: one real HashiCorp feature, one invented.",
+    "Tap the one you think is real.",
+    "Tap the invented one and you fall.",
+  ],
+};
+
 export const PLAY_RULE: Readonly<
   Record<"trivia" | ArcadeRoundKind, string | undefined>
 > = {

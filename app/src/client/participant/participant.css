@@ -1206,6 +1206,26 @@ body.phone:has(.v-splash) {
   margin: 0.4rem 0 0;
 }
 
+/* How to play. Set apart from the house's lines above it by a rule and by
+   being the only plainly-set text on the card: the announcer is atmosphere and
+   this is the thing you need in order to play. Full --ink, not --muted, for
+   the same reason. */
+.a-how {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  margin: 0.9rem 0 0;
+  padding-top: 0.8rem;
+  border-top: 1px solid var(--line);
+  text-align: left;
+}
+.a-how-line {
+  margin: 0;
+  color: var(--ink);
+  font-size: 14px;
+  line-height: 1.4;
+}
+
 /* ---- Recruitment ---------------------------------------------------- */
 
 .a-recruit {

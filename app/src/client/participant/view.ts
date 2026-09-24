@@ -20,6 +20,7 @@ import type {
 import { append, h, replace, setAttr, setClass, setText } from "../shared/dom.ts";
 import {
   ARCADE_ROUND_CARD,
+  HOW_TO_PLAY,
   ARCADE_ROUND_LABEL,
   HOUSE,
   KEY_HINT,
@@ -1465,6 +1466,19 @@ function sceneArcade(ctx: SceneCtx): Scene {
           h("span", { text: "□" }),
         ]),
         ...lines.map((line) => houseLine(line)),
+        // How to play, under the announcer's lines and in a plainer voice.
+        // The room has not played this before, and the twenty seconds the card
+        // is up is the only moment everybody is looking at the same thing and
+        // nobody is under a timer.
+        ...(round
+          ? [
+              h(
+                "div",
+                { class: "a-how" },
+                HOW_TO_PLAY[round].map((line) => h("p", { class: "a-how-line", text: line })),
+              ),
+            ]
+          : []),
         // The card that explains the masks appears once, before Game 1.
         ...(round === "plan_apply"
           ? [

@@ -23,6 +23,7 @@ import { QuorumClient } from "../shared/net.ts";
 import { mockBadge, mockTransport, readMockConfig } from "../shared/mock.ts";
 import {
   ARCADE_ROUND_CARD,
+  HOW_TO_PLAY,
   ARCADE_ROUND_LABEL,
   HOUSE,
   LIGHT_FACE,
@@ -956,6 +957,20 @@ function sceneArcade(): Scene {
               h("span", { text: line }),
             ]),
           ),
+          // How to play, in the room's own language rather than the house's.
+          // This is the only moment everybody is looking at the same screen
+          // and nobody is under a timer, and none of them has played it before.
+          ...(!between && arcade.round
+            ? [
+                h(
+                  "div",
+                  { class: "s-how" },
+                  HOW_TO_PLAY[arcade.round].map((line) =>
+                    h("p", { class: "s-how-line", text: line }),
+                  ),
+                ),
+              ]
+            : []),
           // The mask card, once, before Game 1.
           ...(!between && arcade.round === "plan_apply"
             ? [
