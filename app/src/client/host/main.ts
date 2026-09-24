@@ -634,7 +634,7 @@ const reopenControl = control({
  * focus on purpose, which puts a destructive button under the space bar's
  * nose. So this is not a {@link control} at all. It is:
  *
- *   1. press **Reset session**, which only opens a panel;
+ *   1. press **Restart session**, which only opens a panel;
  *   2. **type the word** into a field — the console will not accept anything
  *      else, and a field is the one widget on this page that a stray keypress
  *      cannot turn into an action;
@@ -669,7 +669,7 @@ const restartArm = handsBackSpace(
   h("button", {
     class: "rs-arm",
     type: "button",
-    text: "Reset session",
+    text: "Restart session",
     attrs: { "aria-expanded": "false", "aria-controls": "restart-panel" },
   }),
 ) as HTMLButtonElement;
@@ -704,7 +704,7 @@ const restartPanel = h(
   "section",
   { class: "rs-panel", attrs: { id: "restart-panel", hidden: true } },
   [
-    h("p", { class: "label rs-label", text: "Reset session" }),
+    h("p", { class: "label rs-label", text: "Restart session" }),
     h("p", {
       class: "rs-loses",
       text: "This wipes every score, every Spot Award, and everything the arcade has done. It cannot be undone.",
@@ -743,7 +743,7 @@ function setRestartArmed(on: boolean): void {
   restartPanel.hidden = !on;
   setAttr(restartArm, "aria-expanded", on ? "true" : "false");
   restartArm.classList.toggle("is-armed", on);
-  setText(restartArm, on ? "Never mind" : "Reset session");
+  setText(restartArm, on ? "Never mind" : "Restart session");
   // Emptied on the way in as well as on the way out: a field that still holds
   // the word from last time would turn the button on before anybody typed.
   restartField.value = "";
@@ -822,7 +822,7 @@ function fireRestart(): void {
  *
  * The two that cannot be undone are not merely moved, they are walled off —
  * their own bordered block, in the danger colour, under a heading that says
- * so. Close session and Reset session must not read as the same
+ * so. Close session and Restart session must not read as the same
  * kind of thing as Lock joining, and next to each other in a wrapping row of
  * grey buttons is exactly how they read before.
  *
@@ -2374,61 +2374,17 @@ const triviaNote = h("p", { class: "pb-note t-note", attrs: { hidden: true } });
 const triviaWaiting = h("p", { class: "mono t-waiting", attrs: { hidden: true } });
 
 /**
- * The question set. SPEC: "Questions load per session. Editing a loaded set
- * means re-uploading; there is no in-app editor by design."
+ * The question set, as a statement rather than a control.
  *
- * Errors are listed here rather than flashed in a button, because a button
- * shows one line for three seconds and a rejected file has four things wrong
- * with it in four different questions.
+ * There used to be a file picker here. It went because the set is a file in
+ * the event's own directory and is uploaded once, by the command in that
+ * event's runbook, before the room arrives — loading questions is a thing you
+ * do at nine in the morning with a terminal open, not a thing you do on the
+ * console you are driving in front of thirty people. What the console needs is
+ * to say whether a set is loaded, which the Preflight Checklist also says and
+ * this repeats where a host looking at Trivia will see it.
  */
-const triviaUpload = h("input", {
-  class: "field t-upload",
-  type: "file",
-  attrs: { accept: ".json,application/json", "aria-label": "Trivia questions" },
-}) as HTMLInputElement;
-const triviaUploadNote = h("p", { class: "pb-note" });
-const triviaErrors = h("ul", { class: "t-errors", attrs: { hidden: true } });
-
-triviaUpload.addEventListener("change", () => {
-  const file = triviaUpload.files?.[0];
-  if (!file || lastState === null) return;
-  const sid = lastState.sid;
-  setText(triviaUploadNote, `Loading ${file.name}…`);
-  triviaErrors.hidden = true;
-  void file
-    .text()
-    .then((text) =>
-      fetch(`/api/sessions/${encodeURIComponent(sid)}/content/trivia`, {
-        method: "POST",
-        // The token travels in a header, never a query string: the whole
-        // reason it lives in the URL fragment is to stay out of access logs.
-        headers: { authorization: `Bearer ${hostToken}`, "content-type": "application/json" },
-        body: text,
-      }),
-    )
-    .then(async (res) => {
-      const body = (await res.json().catch(() => ({}))) as {
-        questions?: number;
-        errors?: string[];
-        message?: string;
-        error?: string;
-      };
-      if (res.ok) {
-        setText(triviaUploadNote, `${body.questions ?? 0} questions loaded.`);
-        triviaErrors.hidden = true;
-        return;
-      }
-      setText(triviaUploadNote, body.message ?? "That file was not loaded.");
-      const lines = body.errors ?? [body.error ?? "Upload failed."];
-      triviaErrors.hidden = lines.length === 0;
-      replace(triviaErrors, lines.map((line) => h("li", { text: line })));
-    })
-    .catch(() => setText(triviaUploadNote, "Upload failed. Check the connection."))
-    .finally(() => {
-      // Cleared so re-uploading the same corrected file still fires `change`.
-      triviaUpload.value = "";
-    });
-});
+const triviaSet = h("p", { class: "pb-note t-set" });
 
 const closeEarly = control({
   label: "Close early",
@@ -2451,10 +2407,8 @@ const suddenDeath = control({
 });
 
 const triviaLoad = h("div", { class: "t-load" }, [
-  h("label", { class: "label", text: "Question set (CSV)" }),
-  triviaUpload,
-  triviaUploadNote,
-  triviaErrors,
+  h("label", { class: "label", text: "Question set" }),
+  triviaSet,
 ]);
 
 const bodyTrivia = h("section", { class: "pb pb-trivia" }, [
@@ -3710,7 +3664,7 @@ function renderPreflight(s: RenderState): void {
     loaded > 0 ? "ready" : "not",
     loaded > 0
       ? `${loaded} trivia question${loaded === 1 ? "" : "s"} loaded.`
-      : "No trivia questions loaded. Open Trivia and upload the CSV, or trivia opens empty in front of the room.",
+      : "No trivia questions loaded. Upload the event's trivia-questions.json — the command is in its runbook — or trivia opens empty in front of the room.",
   );
 
   const order = planIncluded(arcadePlan);
@@ -3879,11 +3833,18 @@ function drivingWaiting(s: RenderState): string {
  */
 function renderTrivia(s: RenderState): void {
   const t = s.trivia;
+  const loaded = s.hostExtras?.trivia?.loaded ?? 0;
+  setText(
+    triviaSet,
+    loaded > 0
+      ? `${loaded} question${loaded === 1 ? "" : "s"} loaded, from this event's trivia-questions.json.`
+      : "Nothing loaded. Upload the event's trivia-questions.json — the command is in its runbook.",
+  );
   if (t === undefined) {
     setText(triviaHead, "NO QUESTIONS LOADED");
     setText(
       triviaQuestion,
-      "Upload this session's questions below — a CSV exported from Kahoot — before you open trivia.",
+      "This session has no questions. Upload the event's trivia-questions.json before you open trivia — the command is in that event's runbook.",
     );
     triviaRound.hidden = true;
     replace(triviaAnswers, []);

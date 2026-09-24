@@ -1511,27 +1511,12 @@ body {
   padding-top: 10px;
   border-top: 1px solid var(--line);
 }
-.t-upload {
-  height: auto;
-  padding: 8px;
-  font-size: 13px;
-}
-/* Every bad row, not the first: a rejected CSV usually has four things wrong
-   with it on four different lines, and a host fixing them one at a time is a
-   host uploading five times. */
-.t-errors {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  font-family: var(--mono);
-  font-size: 12px;
-  color: var(--danger);
-}
-.t-errors[hidden] {
-  display: none;
+/* The file picker and its error list lived here. Both went when loading
+   questions moved out of the console and into the event's runbook: the set is
+   uploaded once, from a terminal, before the room arrives. What is left says
+   whether a set is loaded. */
+.t-set {
+  font-variant-numeric: tabular-nums;
 }
 
 /* ---- arcade --------------------------------------------------------- */
@@ -2563,7 +2548,7 @@ body.driving .cols {
 /*
  * The two that cannot be undone, walled off rather than merely relocated.
  *
- * Close session and Reset session used to sit in the panel foot in
+ * Close session and Restart session used to sit in the panel foot in
  * the same grey as Lock joining, eight pixels from Open trivia (space). They
  * have their own bordered block now, their own heading, and the danger colour
  * on the edge and on both buttons — three ways of saying "not like the
