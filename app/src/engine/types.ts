@@ -29,12 +29,34 @@ export type Segment =
 /**
  * Where the send-off has got to.
  *
- * `opening` and `closing` are photo montages; `kudos` is the messages, one at
- * a time. `done` is a real state rather than an absence: the last message
- * having been read is not the same as the segment never having started, and
- * the Desktop shows something different for each.
+ * `closing` is a photo montage and a line; `done` is a real state rather than
+ * an absence — the last message having been read is not the same as the
+ * segment never having started, and the Desktop shows something different for
+ * each.
+ *
+ * `title` is the Farewell card, and it is a real state rather than the first
+ * frame of the montage: it holds until the host presses, so the room reads
+ * the name before anything moves. `run` is the single interleaved sequence of
+ * photographs and messages — see engine/sendoff.ts for how it is dealt.
  */
-export type SendoffPhase = "opening" | "kudos" | "closing" | "done";
+export type SendoffPhase = "title" | "run" | "closing" | "done";
+
+/**
+ * One frame of the run.
+ *
+ * A kudo slide carries the index of the message in `content.kudos` rather
+ * than its text, and which part of it this is. The text is derived by
+ * `partsOf` wherever it is needed, which keeps the split in one place and
+ * keeps every message out of the state a second time.
+ */
+export type SendoffSlide =
+  | { readonly kind: "photo"; readonly key: string }
+  | {
+      readonly kind: "kudo";
+      readonly at: number;
+      readonly part: number;
+      readonly parts: number;
+    };
 
 /** One message. No photo: see docs/sendoff.md — they are not paired. */
 export interface Kudo {
@@ -69,14 +91,37 @@ export interface SendoffContent {
 export interface SendoffState {
   readonly content: SendoffContent;
   readonly phase: SendoffPhase;
-  /** Index into `content.kudos`. Meaningful only while `phase` is `kudos`. */
+  /**
+   * The dealt sequence of photographs and messages. Built once by
+   * `buildPlan` when the content loads, from a seed drawn at the socket
+   * boundary, and never rebuilt — a plan that changed under a reload would
+   * show the room a photograph it had already seen.
+   */
+  readonly plan: readonly SendoffSlide[];
+  /** Index into `plan`. Meaningful only while `phase` is `run`. */
   readonly at: number;
   /**
-   * When the montage started, so the Desktop can place itself in it after a
-   * reload. Null outside `opening`. The engine does not end the montage on
-   * this — the host does, with the same key as everything else.
+   * Whether the run advances itself. Off at the title card whatever this
+   * says: the room reads the name on a press, never on a timer.
+   *
+   * The host turns it on and off mid-run from the console, because the two
+   * modes are wanted at different moments of the same segment — photographs
+   * play themselves and a message is read aloud.
    */
-  readonly openingStartedAt: number | null;
+  readonly auto: boolean;
+  /**
+   * Seconds a photograph holds under auto-advance. The console's slider.
+   *
+   * A message holds longer, scaled by its length — see `slideMs`. One
+   * control rather than two, because a host setting two numbers in front of
+   * a room is a host not watching the room.
+   */
+  readonly autoSeconds: number;
+  /**
+   * When the current slide arrived, so a surface joining late can place
+   * itself in the run rather than restarting it. Null outside `run`.
+   */
+  readonly slideAt: number | null;
 }
 
 /** Whether cumulative standings are visible. See SPEC.md "Seal and reveal". */
@@ -950,7 +995,11 @@ export type Event =
    */
   | { type: "setPractice"; on: boolean }
   /** Replace the send-off content. Refused once it has started, like trivia. */
-  | { type: "loadSendoff"; content: SendoffContent }
+  /**
+   * `seed` deals the plan. Drawn at the socket boundary like every other seed
+   * in this engine, which has no randomness of its own — see engine/sendoff.ts.
+   */
+  | { type: "loadSendoff"; content: SendoffContent; seed: number }
   /**
    * Forward and back through the send-off, a step at a time.
    *
@@ -961,6 +1010,10 @@ export type Event =
    */
   | { type: "sendoffNext" }
   | { type: "sendoffBack" }
+  /** The console's Auto / Manual button. */
+  | { type: "setSendoffAuto"; auto: boolean }
+  /** The console's speed slider, in seconds per photograph. */
+  | { type: "setSendoffSpeed"; seconds: number }
   | { type: "setSegment"; segment: Segment }
   | { type: "setSeal"; seal: Seal }
   | { type: "setHolding"; holding: HoldingCard | null }

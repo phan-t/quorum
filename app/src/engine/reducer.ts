@@ -74,6 +74,12 @@ import {
   waveOf,
 } from "./arcade.ts";
 import type { GganbuPlay, GlassPlay, TugPlay, UnsealPlay } from "./arcade.ts";
+import {
+  buildPlan,
+  DEFAULT_AUTO_SECONDS,
+  MAX_AUTO_SECONDS,
+  MIN_AUTO_SECONDS,
+} from "./sendoff.ts";
 import { clampMs, currentQuestion, idleQuestion, isCorrect,
   partitionTiebreakers, settleQuestion,
   triviaHasBegun,
@@ -196,21 +202,23 @@ const BROADCAST_STANDINGS: Effect[] = [
  * One step through the send-off, forward or back, or `null` at either end.
  *
  * Forward and back are the same list read in two directions, so they are one
- * function: an `opening → kudos → closing → done` written twice is two things
- * to keep in step, and the one that gets forgotten is always the reverse.
+ * function: a `title → run → closing → done` written twice is two things to
+ * keep in step, and the one that gets forgotten is always the reverse.
  *
  * Stepping back out of `done` lands on the last thing there was, not on
  * `closing` unconditionally — a send-off with no closing photos and no closing
  * line would otherwise put an empty screen in front of the room when the host
  * corrects an overshoot.
+ *
+ * The title card is the floor. Back out of the first slide returns to it, and
+ * back out of *it* is nothing: there is nowhere before the name.
  */
 function stepSendoff(
   so: SendoffState,
   dir: 1 | -1,
   now: number,
 ): SendoffState | null {
-  const kudos = so.content.kudos.length;
-  const hasOpening = so.content.opening.photos.length > 0;
+  const slides = so.plan.length;
   const hasClosing =
     so.content.closing.photos.length > 0 || (so.content.closing.line ?? "") !== "";
 
@@ -218,16 +226,18 @@ function stepSendoff(
     ...so,
     phase,
     at: index,
-    // Stamped on the way in and cleared on the way out, so a Desktop that
-    // reloads mid-montage knows how far through it is rather than restarting
-    // it in front of everyone.
-    openingStartedAt: phase === "opening" ? now : null,
+    // Stamped on the way in and cleared on the way out, so a surface that
+    // reloads mid-run knows how long the slide has been up rather than
+    // restarting its clock in front of everyone.
+    slideAt: phase === "run" ? now : null,
   });
 
   if (dir === 1) {
-    if (so.phase === "opening") return kudos > 0 ? at("kudos", 0) : hasClosing ? at("closing", 0) : at("done", 0);
-    if (so.phase === "kudos") {
-      if (so.at + 1 < kudos) return at("kudos", so.at + 1);
+    if (so.phase === "title") {
+      return slides > 0 ? at("run", 0) : hasClosing ? at("closing", 0) : at("done", 0);
+    }
+    if (so.phase === "run") {
+      if (so.at + 1 < slides) return at("run", so.at + 1);
       return hasClosing ? at("closing", 0) : at("done", 0);
     }
     if (so.phase === "closing") return at("done", 0);
@@ -236,16 +246,14 @@ function stepSendoff(
 
   if (so.phase === "done") {
     if (hasClosing) return at("closing", 0);
-    if (kudos > 0) return at("kudos", kudos - 1);
-    return hasOpening ? at("opening", 0) : null;
+    return slides > 0 ? at("run", slides - 1) : at("title", 0);
   }
   if (so.phase === "closing") {
-    if (kudos > 0) return at("kudos", kudos - 1);
-    return hasOpening ? at("opening", 0) : null;
+    return slides > 0 ? at("run", slides - 1) : at("title", 0);
   }
-  if (so.phase === "kudos") {
-    if (so.at > 0) return at("kudos", so.at - 1);
-    return hasOpening ? at("opening", 0) : null;
+  if (so.phase === "run") {
+    if (so.at > 0) return at("run", so.at - 1);
+    return at("title", 0);
   }
   return null;
 }
@@ -708,9 +716,13 @@ export function reduce(
               ? null
               : {
                   ...state.sendoff,
-                  phase: state.sendoff.content.opening.photos.length > 0 ? "opening" : "kudos",
+                  // Back to the name card, which is where a send-off starts.
+                  // The plan is kept rather than re-dealt: a restart is the
+                  // host recovering from something, not a request for a
+                  // different running order.
+                  phase: "title",
                   at: 0,
-                  openingStartedAt: null,
+                  slideAt: null,
                 },
           // Participants, nicknames, join-order numbers and kick decisions all
           // survive untouched. A kick is a decision about a person, not a
@@ -806,7 +818,7 @@ export function reduce(
           reject("host", "no_questions_loaded", "That send-off has no messages and no photos."),
         );
       }
-      if (state.sendoff !== null && state.sendoff.phase !== "opening") {
+      if (state.sendoff !== null && state.sendoff.phase !== "title") {
         return unchanged(
           reject("host", "wrong_phase", "The send-off has started. Restart the session to change it."),
         );
@@ -816,9 +828,17 @@ export function reduce(
           ...state,
           sendoff: {
             content: event.content,
-            phase: event.content.opening.photos.length > 0 ? "opening" : "kudos",
+            // The name card, held. Nothing moves until the host presses.
+            phase: "title",
+            plan: buildPlan(event.content, event.seed),
             at: 0,
-            openingStartedAt: null,
+            // Manual is the default because docs/sendoff.md says the host
+            // advances it, and a segment that starts playing itself is a
+            // segment that has already walked past a moment before anybody
+            // has decided it should.
+            auto: false,
+            autoSeconds: DEFAULT_AUTO_SECONDS,
+            slideAt: null,
           },
         },
         [BROADCAST_STATE, PERSIST],
@@ -838,6 +858,49 @@ export function reduce(
       const next = stepSendoff(so, 1, now);
       if (next === null) return unchanged();
       return applied({ ...state, sendoff: next }, [BROADCAST_STATE, PERSIST]);
+    }
+
+    /**
+     * Auto on or off, mid-run.
+     *
+     * Not a property of the send-off's content, and not fixed when it loads:
+     * the photographs want to play themselves and a message wants to be read,
+     * and both happen inside one segment. So it is a switch the host reaches
+     * for while the room is watching, which is why the console draws it as a
+     * button rather than burying it in the file.
+     */
+    case "setSendoffAuto": {
+      const so = state.sendoff;
+      if (!so) {
+        return unchanged(reject("host", "wrong_phase", "No send-off is loaded."));
+      }
+      if (so.auto === event.auto) return unchanged();
+      return applied(
+        // `slideAt` is restamped so switching to auto gives the slide on
+        // screen its full time, rather than advancing it the instant the
+        // host presses because it has already been up for a while.
+        { ...state, sendoff: { ...so, auto: event.auto, slideAt: so.phase === "run" ? now : so.slideAt } },
+        [BROADCAST_STATE, PERSIST],
+      );
+    }
+
+    case "setSendoffSpeed": {
+      const so = state.sendoff;
+      if (!so) {
+        return unchanged(reject("host", "wrong_phase", "No send-off is loaded."));
+      }
+      if (!Number.isFinite(event.seconds)) {
+        return unchanged(reject("host", "invalid_round_config", "That speed is not a number."));
+      }
+      const seconds = Math.min(
+        MAX_AUTO_SECONDS,
+        Math.max(MIN_AUTO_SECONDS, Math.round(event.seconds)),
+      );
+      if (so.autoSeconds === seconds) return unchanged();
+      return applied(
+        { ...state, sendoff: { ...so, autoSeconds: seconds } },
+        [BROADCAST_STATE, PERSIST],
+      );
     }
 
     case "sendoffBack": {

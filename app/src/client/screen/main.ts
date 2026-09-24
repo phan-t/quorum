@@ -322,7 +322,11 @@ function stopMusic(): void {
 
 /** The range the message is fitted within — see `fitMessage`. */
 const KUDO_MIN_PX = 24;
-const KUDO_MAX_PX = 112;
+/* Raised from 112 with the split. The ceiling used to be unreachable — the
+   longest message forced every message down near 39px — and now that no slide
+   runs past 260 characters the fit can actually arrive at the top of the
+   range, which is the size increase. */
+const KUDO_MAX_PX = 168;
 
 /** The shortest a photo may hold, however many there are. */
 const PHOTO_MIN_MS = 2_500;
@@ -372,7 +376,21 @@ function sceneSendoff(): Scene {
   const message = h("p", { class: "s-kudo" });
   const from = h("p", { class: "s-kudo-from" });
   const counter = h("p", { class: "mono s-kudo-count" });
-  const card = h("div", { class: "s-sendoff-card" }, [kicker, kickerSub, message, from, counter]);
+  const farewellName = h("p", { class: "s-farewell-name", attrs: { hidden: true } });
+  // The message sits inside a box rather than being the box. The fit needs
+  // something with a fixed height to measure against — a paragraph that
+  // shrink-wraps always "fits", and the search would run to the top of the
+  // range and overflow — and the words need to be centred *within* that
+  // height rather than hanging from its top edge. One element cannot be both.
+  const messageBox = h("div", { class: "s-kudo-box" }, [message]);
+  const card = h("div", { class: "s-sendoff-card" }, [
+    kicker,
+    farewellName,
+    kickerSub,
+    messageBox,
+    from,
+    counter,
+  ]);
   const node = h("section", { class: "s-stage s-sendoff" }, [montage, card]);
 
   /** The longest message in the set, so every message is set at one size. */
@@ -386,6 +404,8 @@ function sceneSendoff(): Scene {
   let runSeconds = 0;
   /** Phase and photo list, so a broadcast does not restart the montage. */
   let signature = "";
+  /** A run key named before it had decoded, shown the moment it does. */
+  let pending: string | null = null;
 
   const layers = [photoA, photoB];
 
@@ -445,7 +465,31 @@ function sceneSendoff(): Scene {
     front = 1 - front;
     shown = at;
     montage.hidden = false;
-    schedule();
+    // The closing montage times itself; the run is advanced by the server, so
+    // there is nothing local to queue.
+    if (runPhase !== "run") schedule();
+  }
+
+  /**
+   * Show one photograph, by key, from the set already preloaded.
+   *
+   * The run's cadence is the server's — every surface swaps on the same
+   * broadcast — so this is the montage's cross-fade without its clock. A key
+   * that has not decoded, or never will, leaves the previous photograph up:
+   * the room sees a slightly longer beat rather than a broken-image glyph.
+   */
+  function showKey(key: string): void {
+    const at = photos.findIndex((p) => p.key === key);
+    if (at === -1) return;
+    if (photos[at]?.ok !== true) {
+      // Not yet decoded. `startMontage`'s probe calls back into here when it
+      // lands, so a photo that is merely slow still arrives.
+      pending = key;
+      return;
+    }
+    pending = null;
+    if (at === shown) return;
+    show(at);
   }
 
   function startMontage(sid: string, keys: readonly string[], phase: string, seconds: number): void {
@@ -477,7 +521,12 @@ function sceneSendoff(): Scene {
         // A photo that belongs to a montage this scene has since left is a
         // photo with nowhere to go.
         if (!photos.includes(photo)) return;
-        if (shown === -1) {
+        if (pending !== null) {
+          // The run is waiting on exactly this one.
+          if (pending === photo.key) showKey(pending);
+        } else if (runPhase === "run") {
+          // Nothing waiting: the run shows what the server last named.
+        } else if (shown === -1) {
           const first = nextLoaded(-1);
           if (first !== null) show(first);
         } else if (timer === null) {
@@ -540,10 +589,11 @@ function sceneSendoff(): Scene {
     message.textContent = probe.slice(0, target);
     let lo = KUDO_MIN_PX;
     let hi = KUDO_MAX_PX;
+    const room = messageBox.clientHeight;
     for (let i = 0; i < 8; i += 1) {
       const mid = (lo + hi) / 2;
       message.style.fontSize = `${mid.toFixed(1)}px`;
-      if (message.scrollHeight <= message.clientHeight) lo = mid;
+      if (message.scrollHeight <= room) lo = mid;
       else hi = mid;
     }
     message.textContent = real;
@@ -560,6 +610,7 @@ function sceneSendoff(): Scene {
     clearTimer();
     photos = [];
     shown = -1;
+    pending = null;
     montage.hidden = true;
     for (const layer of layers) {
       layer.classList.remove("is-on");
@@ -577,9 +628,11 @@ function sceneSendoff(): Scene {
         // screen: a blank screen in front of the room is a bug the host
         // cannot diagnose from where they are standing.
         node.dataset["phase"] = "none";
+        node.dataset["shows"] = "words";
         setText(kicker, "Send-off");
         setText(message, "Nothing staged for this event.");
         message.hidden = false;
+        messageBox.hidden = false;
         from.hidden = true;
         counter.hidden = true;
         signature = "";
@@ -594,16 +647,34 @@ function sceneSendoff(): Scene {
 
       node.dataset["phase"] = so.phase;
       longestChars = so.longest;
-      setText(kicker, so.name);
+      setText(kicker, so.phase === "title" ? "Farewell" : so.name);
+      // On the title card the name is the thing on the screen, so it is the
+      // heading rather than the kicker above one — see `.s-farewell-name`.
+      setText(farewellName, so.name);
       setText(kickerSub, so.subtitle ?? "");
       kickerSub.hidden = (so.subtitle ?? "") === "";
+      farewellName.hidden = so.phase !== "title";
 
       /* ---- the montage ---- */
+      // The list is what a montage is built from, so the signature is the
+      // list and the phase — not the slide. A run that re-preloaded on every
+      // advance would fetch forty-three photographs forty-three times.
       const sig = `${so.phase}|${so.photos.join("|")}`;
       if (sig !== signature) {
         signature = sig;
         if (so.photos.length > 0) startMontage(state.sid, so.photos, so.phase, so.seconds);
         else stopMontage();
+      }
+      // Within the run the server names the photograph, or none: a message
+      // slide clears the picture rather than leaving the last one behind it.
+      if (so.phase === "run") {
+        if (so.photo !== null) showKey(so.photo);
+        else {
+          for (const layer of layers) layer.classList.remove("is-on");
+          montage.hidden = true;
+          shown = -1;
+          pending = null;
+        }
       }
 
       /* ---- the music ---- */
@@ -625,10 +696,22 @@ function sceneSendoff(): Scene {
         setText(message, line ?? "");
         message.hidden = line === null || line === "";
       }
+      // The box goes with the words. Left standing it would keep its share of
+      // the card, and the Farewell name would sit against the top edge.
+      messageBox.hidden = message.hidden;
       fitMessage();
 
-      setText(counter, so.phase === "kudos" ? `${so.index} of ${so.total}` : "");
-      counter.hidden = so.phase !== "kudos";
+      // Whether a photograph is up, which is what decides the card's shape —
+      // a caption band under a picture, or the whole screen for the words.
+      // Phase alone cannot say it any more: the run is both, slide by slide.
+      node.dataset["shows"] =
+        so.phase === "closing" || (so.phase === "run" && so.photo !== null) ? "photo" : "words";
+
+      // "9 of 13", and on a split message which part of it this is — the room
+      // should be able to tell a paragraph that continues from one that ended.
+      const part = so.parts > 1 ? ` · ${so.part}/${so.parts}` : "";
+      setText(counter, so.kudo !== null ? `${so.index} of ${so.total}${part}` : "");
+      counter.hidden = so.kudo === null;
     },
     stop() {
       stopMontage();

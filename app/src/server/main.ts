@@ -505,7 +505,12 @@ async function loadSendoffContent(
     });
   }
 
-  const out = runtime.apply({ type: "loadSendoff", content: result.content }, Date.now());
+  // The seed the plan is dealt from, drawn here rather than in the engine for
+  // the reason every other seed is: a replayed log has to deal the same run.
+  const out = runtime.apply(
+    { type: "loadSendoff", content: result.content, seed: pickSeed(runtime.rng) },
+    Date.now(),
+  );
   if (out.rejection) {
     return json(res, 409, {
       error: out.rejection.code,
@@ -1487,6 +1492,10 @@ function commandToEvent(cmd: HostCommand, runtime: SessionRuntime): Event | null
       return { type: "sendoffNext" };
     case "sendoff.back":
       return { type: "sendoffBack" };
+    case "sendoff.auto":
+      return { type: "setSendoffAuto", auto: cmd.auto };
+    case "sendoff.speed":
+      return { type: "setSendoffSpeed", seconds: cmd.seconds };
     case "lobby.lock":
       return { type: "setJoinsLocked", locked: cmd.locked };
     case "participant.kick":

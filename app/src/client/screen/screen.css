@@ -1597,12 +1597,26 @@ body {
   padding: 4vh 5vw;
   background: var(--ground);
 }
-.s-sendoff[data-phase="kudos"] .s-sendoff-card,
-.s-sendoff[data-phase="done"] .s-sendoff-card,
-.s-sendoff[data-phase="none"] .s-sendoff-card {
+/* Keyed on whether a photograph is up rather than on the phase: the run is
+   both, slide by slide, so the phase stopped being able to say. Words with no
+   picture behind them get the whole screen. */
+.s-sendoff[data-shows="words"] .s-sendoff-card {
   flex: 1;
   min-height: 0;
   padding: 5vh 5vw; /* the safe margin, once the photos are gone */
+  /* Centred, which is new and is the point: a message that has been split is
+     two or three lines rather than a block, and a short block pinned to the
+     top of a 1080p screen reads as a page that failed to finish loading. */
+  justify-content: center;
+  text-align: center;
+}
+/* The kicker is a flex row, so `text-align` never reaches it — centring the
+   card without this leaves the label hanging off the left while the name
+   under it is centred. Scoped to the words layout: under a photograph the
+   caption band is still read from the left. */
+.s-sendoff[data-shows="words"] .s-kicker,
+.s-sendoff[data-shows="words"] .s-kicker-sub {
+  justify-content: center;
 }
 /* Under a montage the words are a caption, so the band is given a top rule
    rather than being allowed to blend into a dark photograph — and a ceiling,
@@ -1610,8 +1624,7 @@ body {
    line to the box it is given, and a band free to grow with its content is a
    box that can never overflow, so a two-word closing line would be set at the
    top of the range and leave the photographs a strip. */
-.s-sendoff[data-phase="opening"] .s-sendoff-card,
-.s-sendoff[data-phase="closing"] .s-sendoff-card {
+.s-sendoff[data-shows="photo"] .s-sendoff-card {
   max-height: 45%;
   border-top: 1px solid var(--line);
 }
@@ -1645,22 +1658,37 @@ body {
    first line of text still starts on the same edge as the name above it —
    a quote mark that pushes the first line in is the thing that makes a block
    of type look accidentally indented. */
-.s-kudo {
-  margin: 0;
-  quotes: "\201C" "\201D";
-  text-indent: -0.42em;
-  /* The box the fit measures against: whatever the card has left once the
-     name, the attribution and the counter have taken theirs. `min-height: 0`
-     is what lets a flex item be smaller than its content, and `overflow:
-     hidden` is the net — the fit means it should never be needed. */
+/* The box the fit measures against, and the thing that centres the words in
+   it. `min-height: 0` lets a flex item be smaller than its content; `overflow:
+   hidden` is the net the fit means you never to see. */
+.s-kudo-box {
   flex: 1 1 auto;
   min-height: 0;
   overflow: hidden;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.s-kudo-box[hidden] {
+  display: none;
+}
+
+.s-kudo {
+  margin: 0;
+  quotes: "\201C" "\201D";
+  /* The hanging opening mark was for text set flush left, where it kept the
+     first line on the same edge as the name above it. Centred type has no
+     such edge, and the negative indent simply pulls the first line off
+     centre — so it is zero here and the mark sits in the line. */
+  text-indent: 0;
   line-height: 1.18;
-  /* The measure. Wider than prose wants because the alternative is a smaller
-     size: at 46 characters the longest of the real messages lands near 39px
-     on a 1080p tab, and at 34 it lands near 30. */
-  max-width: 46ch;
+  /* The measure, and it is narrower than it was. 46 characters bought size
+     back when the fit had to swallow a 489-character message whole; now that
+     the longest *slide* is 260, the constraint is the box's height rather
+     than its width, and a line the eye can find its way back along matters
+     more. Centred at 46ch the return sweep is the width of the screen. */
+  max-width: 34ch;
+  margin-inline: auto;
   text-wrap: pretty;
 }
 .s-kudo[hidden] {
@@ -1670,6 +1698,25 @@ body {
    comes out at the top of the range. The "nothing staged" line does not: it
    is a notice rather than the content, and a fault set in 110px type is a
    fault the whole room reads first. */
+/* The Farewell card. The name is the screen, and the word above it is a label
+   for what the room is about to watch rather than a heading in its own right. */
+.s-farewell-name {
+  margin: 0.4em 0 0;
+  font-size: clamp(48px, 7vw, 132px);
+  font-weight: 650;
+  line-height: 1.04;
+  letter-spacing: -0.02em;
+}
+.s-farewell-name[hidden] {
+  display: none;
+}
+/* Nothing else is on the title card, so the name and its date sit together in
+   the middle rather than the name floating above an empty message box. */
+.s-sendoff[data-phase="title"] .s-kicker-sub {
+  margin-top: 0.9rem;
+  font-size: clamp(16px, 1.9vh, 30px);
+}
+
 .s-sendoff[data-phase="none"] .s-kudo {
   font-size: clamp(32px, 2.6vw, 56px);
   color: var(--muted);

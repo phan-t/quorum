@@ -29,10 +29,12 @@ import {
   unsealMeView,
 } from "../engine/arcade.ts";
 import { currentQuestion } from "../engine/trivia.ts";
+import { longestSlide, partsOf, slideMs } from "../engine/sendoff.ts";
 import type {
   ArcadeState,
   ParticipantId,
   Question,
+  SendoffState,
   SessionState,
   TriviaState,
 } from "../engine/types.ts";
@@ -987,32 +989,89 @@ export function sendoffViewFor(
 ): SendoffView | undefined {
   const so = state.sendoff;
   if (!so) return undefined;
-  const { content, phase } = so;
-  const kudo = phase === "kudos" ? (content.kudos[so.at] ?? null) : null;
-  const photos =
-    phase === "opening"
-      ? content.opening.photos
-      : phase === "closing"
-        ? content.closing.photos
-        : [];
+  const { content, phase, plan } = so;
+
+  // Where the messages fall in the running order, so "9 of 13" counts the
+  // room's experience rather than the file's. Cheap enough to walk: the plan
+  // is a few dozen slides and this runs once per broadcast per surface.
+  const messageSlides: number[] = [];
+  plan.forEach((slide, i) => {
+    if (slide.kind === "kudo" && slide.part === 0) messageSlides.push(i);
+  });
+
+  const here = phase === "run" ? plan[so.at] : undefined;
+  const kudoSlide = here?.kind === "kudo" ? here : null;
+  const kudo = kudoSlide === null ? null : (content.kudos[kudoSlide.at] ?? null);
+  const parts = kudo === null ? null : partsOf(kudo);
+
+  // The ordinal of the message on screen: how many messages have begun at or
+  // before this slide.
+  const ordinal =
+    kudoSlide === null ? 0 : messageSlides.filter((i) => i <= so.at).length;
+
+  const advanceAt =
+    phase === "run" && so.auto && so.slideAt !== null && here !== undefined
+      ? so.slideAt + slideMs(here, content, so.autoSeconds)
+      : null;
+
   const view: SendoffView = {
     name: content.name,
     subtitle: content.subtitle,
     phase,
-    index: phase === "kudos" ? so.at + 1 : 0,
+    index: ordinal,
     total: content.kudos.length,
-    longest: content.kudos.reduce((n, k) => Math.max(n, k.message.length), 0),
-    kudo: kudo === null ? null : { from: kudo.from, message: kudo.message },
-    photos,
+    part: kudoSlide === null ? 1 : kudoSlide.part + 1,
+    parts: kudoSlide === null ? 1 : kudoSlide.parts,
+    kudo:
+      kudoSlide === null || kudo === null || kudo === undefined
+        ? null
+        : { from: kudo.from, message: parts?.[kudoSlide.part] ?? kudo.message },
+    longest: longestSlide(content),
+    photo: here?.kind === "photo" ? here.key : null,
+    photos:
+      phase === "closing"
+        ? content.closing.photos
+        : phase === "run"
+          ? plan.flatMap((s) => (s.kind === "photo" ? [s.key] : []))
+          : [],
     seconds: content.opening.seconds,
-    // Only ever the montage's, and only while the montage is up: a music key
-    // on a message frame is a track that would start under somebody reading.
-    music: phase === "opening" ? content.opening.music : null,
+    // Only ever under the photographs, and only before the first message: a
+    // track still playing while somebody's words are on the screen is the
+    // failure docs/sendoff.md's music section is entirely about.
+    music: phase === "run" && beforeFirstMessage(plan, so.at) ? content.opening.music : null,
     line: phase === "closing" || phase === "done" ? content.closing.line : null,
+    auto: so.auto,
+    autoSeconds: so.autoSeconds,
+    advanceAt,
   };
   if (role !== "host") return view;
-  const after = phase === "kudos" ? (content.kudos[so.at + 1] ?? null) : (content.kudos[0] ?? null);
-  return { ...view, next: after === null ? null : { from: after.from, message: after.message } };
+
+  // The next message the room has not had, in running order. At the title
+  // card that is the first one; past the last it is nothing, rather than
+  // wrapping round to message one and inviting the host to read the set
+  // twice.
+  const after = messageSlides.find((i) => i > (phase === "run" ? so.at : -1));
+  const nextKudo =
+    phase === "closing" || phase === "done"
+      ? null
+      : after === undefined
+        ? null
+        : content.kudos[(plan[after] as { at: number }).at];
+  return {
+    ...view,
+    next:
+      nextKudo === undefined || nextKudo === null
+        ? null
+        : { from: nextKudo.from, message: nextKudo.message },
+  };
+}
+
+/** True while no message has been shown yet — the opening run of photographs. */
+function beforeFirstMessage(plan: SendoffState["plan"], at: number): boolean {
+  for (let i = 0; i <= at && i < plan.length; i += 1) {
+    if (plan[i]!.kind === "kudo") return false;
+  }
+  return true;
 }
 
 export function renderStateFor(

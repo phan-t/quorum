@@ -392,6 +392,18 @@ body.phone #app {
 .so-note[hidden] {
   display: none;
 }
+/* The Farewell card on the phone: the name, and under it the date. The word
+   "Farewell" is already in `.so-for` above it, as the label. */
+.so-farewell-name {
+  margin: 0.35rem 0 0;
+  font-size: clamp(26px, 7vw, 40px);
+  font-weight: 650;
+  line-height: 1.1;
+}
+.so-farewell-name[hidden] {
+  display: none;
+}
+
 .so-for-sub {
   margin: 0.1rem 0 0;
   color: var(--muted);

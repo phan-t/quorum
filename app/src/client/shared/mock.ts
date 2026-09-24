@@ -92,7 +92,9 @@ import type {
   GlassWave,
   QuestionPhase,
   Seal,
+  SendoffContent,
   SendoffPhase,
+  SendoffSlide,
   ScoreStatus,
   Segment,
   SessionPhase,
@@ -100,6 +102,15 @@ import type {
   UnsealShape,
   WaveSeconds,
 } from "../../engine/types.ts";
+import {
+  buildPlan,
+  DEFAULT_AUTO_SECONDS,
+  longestSlide,
+  MAX_AUTO_SECONDS,
+  MIN_AUTO_SECONDS,
+  partsOf,
+  slideMs,
+} from "../../engine/sendoff.ts";
 import { RECRUITMENT_ITEMS } from "../../arcade/recruitment.ts";
 import { GLASS_BRIDGE_STEPS } from "../../arcade/glass-bridge.ts";
 import { UNSEAL_ITEMS } from "../../arcade/unseal.ts";
@@ -889,8 +900,13 @@ class MockSession {
   /* ---- the send-off ---- */
   /** Loaded the way the engine loads it: at start-up, before anybody arrives. */
   sendoff: MockSendoff | null = MOCK_SENDOFF;
-  sendoffPhase: SendoffPhase = MOCK_SENDOFF.opening.photos.length > 0 ? "opening" : "kudos";
+  sendoffPhase: SendoffPhase = "title";
+  /** The dealt run. A fixed seed: the mock is for looking at, and a layout
+      that reshuffled on every reload could not be compared with itself. */
+  sendoffPlan: readonly SendoffSlide[] = buildPlan(MOCK_SENDOFF as SendoffContent, 1);
   sendoffAt = 0;
+  sendoffAuto = false;
+  sendoffSeconds = DEFAULT_AUTO_SECONDS;
 
   /* ---- arcade ---- */
   arcadeOn = false;
@@ -951,8 +967,7 @@ class MockSession {
     // The send-off's content stays loaded and the walk goes back to the
     // start — the reducer's `restartSession`, which says the same thing about
     // re-uploading not being the point of a restart.
-    this.sendoffPhase =
-      this.sendoff !== null && this.sendoff.opening.photos.length > 0 ? "opening" : "kudos";
+    this.sendoffPhase = "title";
     this.sendoffAt = 0;
 
     this.at = 0;
@@ -1405,8 +1420,7 @@ class MockSession {
     this.phase = "draft";
     this.segment = "lobby";
     this.seal = "live";
-    this.sendoffPhase =
-      this.sendoff !== null && this.sendoff.opening.photos.length > 0 ? "opening" : "kudos";
+    this.sendoffPhase = "title";
     this.sendoffAt = 0;
     this.holding = null;
     this.joinsLocked = false;
@@ -1812,8 +1826,7 @@ class MockSession {
   stepSendoff(dir: 1 | -1): boolean {
     const so = this.sendoff;
     if (so === null) return false;
-    const kudos = so.kudos.length;
-    const hasOpening = so.opening.photos.length > 0;
+    const slides = this.sendoffPlan.length;
     const hasClosing =
       so.closing.photos.length > 0 || (so.closing.line ?? "") !== "";
     const at = (phase: SendoffPhase, index: number): boolean => {
@@ -1823,11 +1836,11 @@ class MockSession {
     };
 
     if (dir === 1) {
-      if (this.sendoffPhase === "opening") {
-        return kudos > 0 ? at("kudos", 0) : hasClosing ? at("closing", 0) : at("done", 0);
+      if (this.sendoffPhase === "title") {
+        return slides > 0 ? at("run", 0) : hasClosing ? at("closing", 0) : at("done", 0);
       }
-      if (this.sendoffPhase === "kudos") {
-        if (this.sendoffAt + 1 < kudos) return at("kudos", this.sendoffAt + 1);
+      if (this.sendoffPhase === "run") {
+        if (this.sendoffAt + 1 < slides) return at("run", this.sendoffAt + 1);
         return hasClosing ? at("closing", 0) : at("done", 0);
       }
       if (this.sendoffPhase === "closing") return at("done", 0);
@@ -1836,16 +1849,14 @@ class MockSession {
 
     if (this.sendoffPhase === "done") {
       if (hasClosing) return at("closing", 0);
-      if (kudos > 0) return at("kudos", kudos - 1);
-      return hasOpening ? at("opening", 0) : false;
+      return slides > 0 ? at("run", slides - 1) : at("title", 0);
     }
     if (this.sendoffPhase === "closing") {
-      if (kudos > 0) return at("kudos", kudos - 1);
-      return hasOpening ? at("opening", 0) : false;
+      return slides > 0 ? at("run", slides - 1) : at("title", 0);
     }
-    if (this.sendoffPhase === "kudos") {
-      if (this.sendoffAt > 0) return at("kudos", this.sendoffAt - 1);
-      return hasOpening ? at("opening", 0) : false;
+    if (this.sendoffPhase === "run") {
+      if (this.sendoffAt > 0) return at("run", this.sendoffAt - 1);
+      return at("title", 0);
     }
     return false;
   }
@@ -1864,34 +1875,68 @@ class MockSession {
     // is what views.ts does. The surfaces decide what to draw from `segment`.
     if (so === null) return undefined;
     const phase = this.sendoffPhase;
-    const kudo = phase === "kudos" ? (so.kudos[this.sendoffAt] ?? null) : null;
-    const photos =
-      phase === "opening"
-        ? so.opening.photos
-        : phase === "closing"
-          ? so.closing.photos
-          : [];
+    const plan = this.sendoffPlan;
+    const content = so as SendoffContent;
+
+    const messageSlides: number[] = [];
+    plan.forEach((slide, i) => {
+      if (slide.kind === "kudo" && slide.part === 0) messageSlides.push(i);
+    });
+
+    const here = phase === "run" ? plan[this.sendoffAt] : undefined;
+    const kudoSlide = here?.kind === "kudo" ? here : null;
+    const kudo = kudoSlide === null ? null : (so.kudos[kudoSlide.at] ?? null);
+    const parts = kudo === null ? null : partsOf(kudo);
+    const ordinal =
+      kudoSlide === null ? 0 : messageSlides.filter((i) => i <= this.sendoffAt).length;
+
+    let beforeFirst = true;
+    for (let i = 0; i <= this.sendoffAt && i < plan.length; i += 1) {
+      if (plan[i]!.kind === "kudo") beforeFirst = false;
+    }
+
     const view: SendoffView = {
       name: so.name,
       subtitle: so.subtitle,
       phase,
-      index: phase === "kudos" ? this.sendoffAt + 1 : 0,
+      index: ordinal,
       total: so.kudos.length,
-      longest: so.kudos.reduce((n: number, k: { message: string }) => Math.max(n, k.message.length), 0),
-      kudo: kudo === null ? null : { from: kudo.from, message: kudo.message },
-      photos,
+      part: kudoSlide === null ? 1 : kudoSlide.part + 1,
+      parts: kudoSlide === null ? 1 : kudoSlide.parts,
+      kudo:
+        kudoSlide === null || kudo === null
+          ? null
+          : { from: kudo.from, message: parts?.[kudoSlide.part] ?? kudo.message },
+      longest: longestSlide(content),
+      photo: here?.kind === "photo" ? here.key : null,
+      photos:
+        phase === "closing"
+          ? so.closing.photos
+          : phase === "run"
+            ? plan.flatMap((slide) => (slide.kind === "photo" ? [slide.key] : []))
+            : [],
       seconds: so.opening.seconds,
-      // Only the montage's, and only while the montage is up: a music key on
-      // a message frame is a track that would start under somebody reading.
-      music: phase === "opening" ? so.opening.music : null,
+      // Only under the photographs, and only before the first message: a
+      // track playing while somebody's words are up is the failure the design
+      // note's music section is entirely about.
+      music: phase === "run" && beforeFirst ? so.opening.music : null,
       line: phase === "closing" || phase === "done" ? so.closing.line : null,
+      auto: this.sendoffAuto,
+      autoSeconds: this.sendoffSeconds,
+      advanceAt:
+        phase === "run" && this.sendoffAuto && here !== undefined
+          ? Date.now() + slideMs(here, content, this.sendoffSeconds)
+          : null,
     };
     if (role !== "host") return view;
-    const after =
-      phase === "kudos" ? (so.kudos[this.sendoffAt + 1] ?? null) : (so.kudos[0] ?? null);
+    const after = messageSlides.find((i) => i > (phase === "run" ? this.sendoffAt : -1));
+    const nextKudo =
+      phase === "closing" || phase === "done" || after === undefined
+        ? null
+        : (so.kudos[(plan[after] as { at: number }).at] ?? null);
     return {
       ...view,
-      next: after === null ? null : { from: after.from, message: after.message },
+      next: nextKudo === null ? null : { from: nextKudo.from, message: nextKudo.message },
     };
   }
 
@@ -2352,6 +2397,25 @@ class MockHub {
         }
         if (!s.stepSendoff(-1)) return noop();
         break;
+      case "sendoff.auto":
+        if (s.sendoff === null) {
+          return reject("wrong_phase", "No send-off is loaded.");
+        }
+        if (s.sendoffAuto === cmd.auto) return noop();
+        s.sendoffAuto = cmd.auto;
+        break;
+      case "sendoff.speed": {
+        if (s.sendoff === null) {
+          return reject("wrong_phase", "No send-off is loaded.");
+        }
+        const seconds = Math.min(
+          MAX_AUTO_SECONDS,
+          Math.max(MIN_AUTO_SECONDS, Math.round(cmd.seconds)),
+        );
+        if (s.sendoffSeconds === seconds) return noop();
+        s.sendoffSeconds = seconds;
+        break;
+      }
       case "participant.kick": {
         const i = s.participants.findIndex((p) => p.pid === cmd.pid);
         if (i === -1) return reject("unknown_participant", "No such participant.");

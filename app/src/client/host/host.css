@@ -1655,6 +1655,35 @@ body {
  * steps down to the body size, where the whole of it fits the frame at once.
  * Two sizes, both on the console's five-step scale.
  */
+/* Auto / Manual and its speed, on one line under the message being read
+   ahead. The slider only exists while auto is on: a control that does nothing
+   is a control a host tries anyway, in front of a room. */
+.so-pace {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+  margin: 0.6rem 0 0;
+}
+.so-speed-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+.so-speed-row[hidden] {
+  display: none;
+}
+.so-speed {
+  /* Big enough to hit without looking down, which is the whole constraint on
+     a console being driven while somebody is talking. */
+  width: 10rem;
+  accent-color: var(--nomad-ink);
+}
+.so-speed-value {
+  min-width: 2.5ch;
+  color: var(--muted);
+}
+
 .so-next.is-long .so-next-text {
   font-size: 13px;
 }

@@ -21,6 +21,7 @@ import type {
 } from "../../protocol.ts";
 import { initTheme, themeToggle } from "../shared/theme.ts";
 import type { ArcadePhase, ArcadeRoundKind, Seal, Segment } from "../../engine/types.ts";
+import { MAX_AUTO_SECONDS, MIN_AUTO_SECONDS } from "../../engine/sendoff.ts";
 import { h, keyedList, qs, replace, setAttr, setText } from "../shared/dom.ts";
 import { QuorumClient } from "../shared/net.ts";
 import { mockBadge, mockTransport, readMockConfig } from "../shared/mock.ts";
@@ -2440,6 +2441,59 @@ const sendoffNext = h("section", { class: "so-next" }, [
 ]);
 const sendoffNote = h("p", { class: "pb-note so-hint" });
 
+/**
+ * Auto / Manual, and how fast auto goes.
+ *
+ * Both modes are wanted inside one segment, which is why this is a button on
+ * the console rather than a setting in the file: the photographs play
+ * themselves while the host talks over them, and then a message goes up and
+ * the room reads it at its own pace. docs/sendoff.md's "the host advances it"
+ * is still the default and still what the space bar does — this is the host
+ * choosing to hand the photographs over to a clock, and taking them back with
+ * one press.
+ *
+ * The slider is seconds per photograph. A message holds longer than whatever
+ * it says, scaled by its length, because a message that leaves the screen
+ * mid-sentence is the one failure this segment cannot have — see `slideMs`.
+ */
+const sendoffAutoControl = control({
+  label: "Auto",
+  className: "ctl-secondary",
+  title:
+    "Play the run on a clock. The title card and the closing card still wait for you, and Manual takes it back at any point.",
+  onFire: (c) => issue({ name: "sendoff.auto", auto: !(lastState?.sendoff?.auto ?? false) }, c),
+});
+
+const sendoffSpeedValue = h("span", { class: "mono so-speed-value" });
+const sendoffSpeed = h("input", {
+  class: "so-speed",
+  attrs: {
+    type: "range",
+    min: String(MIN_AUTO_SECONDS),
+    max: String(MAX_AUTO_SECONDS),
+    step: "1",
+    "aria-label": "Seconds per photograph",
+  },
+}) as HTMLInputElement;
+const sendoffSpeedRow = h("label", { class: "so-speed-row" }, [
+  h("span", { class: "label", text: "Speed" }),
+  sendoffSpeed,
+  sendoffSpeedValue,
+]);
+
+// Dragging updates the number under the thumb; releasing sends it. A command
+// per pixel of travel would be a broadcast per pixel of travel.
+sendoffSpeed.addEventListener("input", () => {
+  setText(sendoffSpeedValue, `${sendoffSpeed.value}s`);
+});
+sendoffSpeed.addEventListener("change", () => {
+  issue({ name: "sendoff.speed", seconds: Number(sendoffSpeed.value) }, null);
+  // Handed back deliberately: `spaceVerdict` ignores any key that lands in an
+  // input, so a slider still holding focus is a space bar that has stopped
+  // advancing the run — which the host would discover in front of the room.
+  sendoffSpeed.blur();
+});
+
 const sendoffBackControl = control({
   label: "Back",
   className: "ctl-secondary",
@@ -2480,6 +2534,7 @@ const sendoffSkipControl = control({
 const bodySendoff = h("section", { class: "pb pb-sendoff" }, [
   sendoffWhere,
   sendoffNext,
+  h("div", { class: "so-pace" }, [sendoffAutoControl.el, sendoffSpeedRow]),
   h("div", { class: "field-actions" }, [
     sendoffBackControl.el,
     sendoffSkipControl.el,
@@ -2494,6 +2549,8 @@ function renderSendoff(s: RenderState): void {
     sendoffNext.hidden = true;
     sendoffBackControl.setDisabled(true);
     sendoffSkipControl.setDisabled(true);
+    sendoffAutoControl.setDisabled(true);
+    sendoffSpeedRow.hidden = true;
     setText(
       sendoffNote,
       "This event has no sendoff.json, so the room is looking at a card that says so. Stage one and reload, or take the step out of the run of show.",
@@ -2503,12 +2560,15 @@ function renderSendoff(s: RenderState): void {
 
   // Where the room is. The count is the thing a host is asked out loud —
   // "how many more?" — so it is said in the same words the Desktop uses.
+  const part = so.parts > 1 ? ` (${so.part} of ${so.parts})` : "";
   setText(
     sendoffWhere,
-    so.phase === "kudos"
-      ? `Message ${so.index} of ${so.total}`
-      : so.phase === "opening"
-        ? `Opening montage · ${so.total} ${so.total === 1 ? "message" : "messages"} to come`
+    so.phase === "title"
+      ? `Farewell card · ${so.total} ${so.total === 1 ? "message" : "messages"} to come`
+      : so.phase === "run"
+        ? so.kudo !== null
+          ? `Message ${so.index} of ${so.total}${part}`
+          : `Photograph · ${so.total - so.index} of ${so.total} messages to come`
         : so.phase === "closing"
           ? "Closing card"
           : "Finished",
@@ -2518,12 +2578,12 @@ function renderSendoff(s: RenderState): void {
   // kudo again once the messages are behind the room, which is true and not
   // useful — a closing card with "up next: message one" under it is a console
   // inviting the host to read the whole set a second time.
-  const ahead = so.phase === "opening" || so.phase === "kudos" ? (so.next ?? null) : null;
+  const ahead = so.phase === "title" || so.phase === "run" ? (so.next ?? null) : null;
   sendoffNext.hidden = false;
   if (ahead !== null) {
     setText(
       sendoffNextLabel,
-      so.phase === "opening" ? "First message. Nobody has seen this" : "Next. The room has not seen this",
+      so.phase === "title" ? "First message. Nobody has seen this" : "Next. The room has not seen this",
     );
     setText(sendoffNextFrom, ahead.from);
     setText(sendoffNextText, ahead.message);
@@ -2545,18 +2605,32 @@ function renderSendoff(s: RenderState): void {
     sendoffNext.classList.add("is-empty");
   }
 
-  // Back out of the montage is the one step the engine has nowhere to take.
-  sendoffBackControl.setDisabled(so.phase === "opening");
-  if (so.phase === "opening") sendoffBackControl.disarm();
+  // Back out of the title card is the one step the engine has nowhere to take.
+  sendoffBackControl.setDisabled(so.phase === "title");
+  if (so.phase === "title") sendoffBackControl.disarm();
   sendoffSkipControl.setDisabled(ahead === null);
   if (ahead === null) sendoffSkipControl.disarm();
 
+  // Auto is offered wherever it would do something. On the title card it is
+  // armed but idle — the card holds until the host presses, and then the run
+  // starts playing itself, which is the shape a host setting up before the
+  // room arrives will want.
+  sendoffAutoControl.setLabel(so.auto ? "Manual" : "Auto");
+  sendoffAutoControl.setDisabled(so.phase === "closing" || so.phase === "done");
+  sendoffSpeedRow.hidden = !so.auto;
+  if (document.activeElement !== sendoffSpeed) {
+    sendoffSpeed.value = String(so.autoSeconds);
+    setText(sendoffSpeedValue, `${so.autoSeconds}s`);
+  }
+
   setText(
     sendoffNote,
-    so.phase === "opening"
-      ? "Space shows the first message. Music only plays if the Desktop tab has had a click in it."
-      : so.phase === "kudos"
-        ? "Space shows the next one. Read ahead here; Skip advances past one without putting it on the screen."
+    so.phase === "title"
+      ? "Space starts the run. Nothing moves until you press it. Music only plays if the Desktop tab has had a click in it."
+      : so.phase === "run"
+        ? so.auto
+          ? "Playing itself. Space still steps on early; Manual takes it back. Skip passes one without putting it on the screen."
+          : "Space shows the next slide. Read ahead here; Skip advances past a message without putting it on the screen."
         : so.phase === "closing"
           ? "Space finishes the send-off and leaves this frame up."
           : "The send-off is finished. Space moves on to the next step in the run of show.",
@@ -3927,28 +4001,31 @@ function primaryPlan(): Plan {
           : advanceFromHere(s);
     }
   }
-  // Inside the send-off the primary button walks the send-off: the montage,
-  // then one message at a time, then the closing card. Same key as every
-  // other segment, which is the decision the design note calls the most
-  // important one in it — an auto-advancing montage walks past the message
-  // that makes the room go quiet, with the person it is about sitting there
-  // watching it happen.
+  // Inside the send-off the primary button walks the send-off: the Farewell
+  // card, then the run of photographs and messages a slide at a time, then
+  // the closing card. Same key as every other segment, which is the decision
+  // the design note calls the most important one in it — an auto-advancing
+  // montage walks past the message that makes the room go quiet, with the
+  // person it is about sitting there watching it happen. Auto exists for the
+  // photographs and hands the key straight back: space steps on early from
+  // inside it, and the two cards at either end never move on their own.
   if (s.segment === "sendoff") {
     const so = s.sendoff;
     // No send-off staged. The space bar goes back to walking the runbook
     // rather than pressing a button that can only be refused.
     if (so === undefined) return advanceFromHere(s);
     switch (so.phase) {
-      case "opening":
+      case "title":
+        return cmdPlan(so.total > 0 ? "Start the send-off" : "Finish the send-off", {
+          name: "sendoff.next",
+        });
+      case "run":
         return cmdPlan(
-          so.total > 0 ? "Show the first message" : "Finish the send-off",
-          { name: "sendoff.next" },
-        );
-      case "kudos":
-        return cmdPlan(
-          so.index < so.total
-            ? `Next message — ${so.index + 1} of ${so.total}`
-            : "End the messages",
+          so.parts > 1 && so.part < so.parts
+            ? `Continue message ${so.index}`
+            : so.index < so.total
+              ? `Next — message ${so.index + 1} of ${so.total}`
+              : "End the run",
           { name: "sendoff.next" },
         );
       case "closing":

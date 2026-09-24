@@ -222,6 +222,15 @@ export type HostCommand =
   | { name: "sendoff.next" }
   /** Back one step, for an overshoot. The engine's `sendoffBack`. */
   | { name: "sendoff.back" }
+  /**
+   * Auto / Manual, and the speed of auto in seconds per photograph.
+   *
+   * Two commands rather than one settings blob: the button and the slider are
+   * pressed at different moments, and a slider drag that also re-sent the mode
+   * would fight a host who had just switched back to manual.
+   */
+  | { name: "sendoff.auto"; auto: boolean }
+  | { name: "sendoff.speed"; seconds: number }
   | { name: "lobby.lock"; locked: boolean }
   | { name: "participant.kick"; pid: ParticipantId }
   | { name: "participant.release"; pid: ParticipantId }
@@ -1064,26 +1073,58 @@ export interface KudoView {
 export interface SendoffView {
   readonly name: string;
   readonly subtitle: string | null;
-  readonly phase: "opening" | "kudos" | "closing" | "done";
-  /** 1-based, for "4 of 15". Zero outside the messages. */
+  readonly phase: "title" | "run" | "closing" | "done";
+  /**
+   * Which message, of how many, in the order the room is getting them.
+   *
+   * The plan shuffles the messages, so this is the ordinal within the run
+   * rather than the index in the file — "9 of 13" has to mean four more to
+   * come, which is the only thing anybody asks out loud. Zero on a photograph.
+   */
   readonly index: number;
   readonly total: number;
-  /** The message on screen now, or null in a montage. */
+  /**
+   * Which slide of a split message this is, 1-based, and how many it takes.
+   * `1 of 1` for a message that fits on one, which is most of them.
+   */
+  readonly part: number;
+  readonly parts: number;
+  /** The words on screen now — one part of a message — or null. */
   readonly kudo: KudoView | null;
   /**
-   * The longest message in the set, in characters.
+   * The longest *slide* in the set, in characters.
    *
-   * The Desktop sets every message at one size, and the size that works is the
-   * one the longest message needs — but a surface only ever holds the message
-   * it is showing, so it cannot find that out by looking. This is the whole
-   * reason the number is on the wire.
+   * The Desktop sets every message at one size and the size that works is the
+   * one the longest needs, but a surface only ever holds the slide it is
+   * showing and cannot find that out by looking. It is a slide rather than a
+   * whole message now that long messages are split, which is most of why the
+   * type got bigger.
    */
   readonly longest: number;
-  /** Photo keys for the montage this phase is showing; empty otherwise. */
+  /** The photograph on screen now, during the run. Null otherwise. */
+  readonly photo: string | null;
+  /**
+   * Every photograph this phase will need, in the order it will need them.
+   *
+   * The run sends the whole list even though it shows one at a time, because
+   * the Desktop preloads them and only ever displays what has decoded — a
+   * key whose asset row is missing has to leave the previous photograph up
+   * rather than draw a broken-image glyph in front of the room. Fetching one
+   * per slide would also put a four-second cadence on the network.
+   */
   readonly photos: readonly string[];
   readonly seconds: number;
   readonly music: string | null;
   readonly line: string | null;
+  /** The console's Auto / Manual, and its slider in seconds per photograph. */
+  readonly auto: boolean;
+  readonly autoSeconds: number;
+  /**
+   * When this slide advances itself, in server time, or null in manual and
+   * anywhere outside the run. On the wire so a surface can draw the wait and
+   * so a reload lands where the room already is.
+   */
+  readonly advanceAt: number | null;
   /** Host only. The reason the console can skip one without anybody knowing. */
   readonly next?: KudoView | null;
 }
@@ -1451,6 +1492,14 @@ function parseHostCommand(v: unknown): HostCommand | null {
       return { name: "sendoff.next" };
     case "sendoff.back":
       return { name: "sendoff.back" };
+    case "sendoff.auto":
+      return typeof c["auto"] === "boolean" ? { name: "sendoff.auto", auto: c["auto"] } : null;
+    case "sendoff.speed":
+      // Range-checked in the engine, which is the only place that may decide
+      // what the slider means. This asks only whether it is a number at all.
+      return typeof c["seconds"] === "number" && Number.isFinite(c["seconds"])
+        ? { name: "sendoff.speed", seconds: c["seconds"] }
+        : null;
     case "lobby.lock":
       return typeof c["locked"] === "boolean"
         ? { name: "lobby.lock", locked: c["locked"] }

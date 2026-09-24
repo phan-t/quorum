@@ -10,6 +10,7 @@ import type { WebSocket } from "ws";
 import { reduce } from "../engine/reducer.ts";
 import { DEFAULT_SPOT_CAP } from "../activities/import.ts";
 import { lockInForceAt } from "../engine/arcade.ts";
+import { slideMs } from "../engine/sendoff.ts";
 import type {
   Activity,
   Audience,
@@ -257,6 +258,9 @@ export class SessionRuntime {
   readonly createdAt: number;
   /** The armed `closeQuestion`, and exactly which question it is armed for. */
   #closeTimer: ReturnType<typeof setTimeout> | null = null;
+  /** The send-off's auto-advance, and which slide it is armed for. */
+  #slideTimer: ReturnType<typeof setTimeout> | null = null;
+  #slideTimerFor: { at: number; fireAt: number } | null = null;
   #closeTimerFor: { index: number; closesAt: number } | null = null;
   /** The arcade's three clocks. See {@link armArcadeTimers}. */
   #lightTimer: ReturnType<typeof setTimeout> | null = null;
@@ -479,6 +483,11 @@ export class SessionRuntime {
     // state, so deriving them at the end of every event means there is no
     // path that can leave one armed for a round that is over.
     this.armArcadeTimers(now);
+    // And the send-off's, for the same reason: auto-advance is a function of
+    // the state, so a host who switches back to manual, presses next by hand,
+    // or walks out of the segment altogether cannot leave a slide clock
+    // running behind them.
+    this.#armSlideTimer(now);
     return rejection ? { applied: result.applied, rejection } : { applied: result.applied };
   }
 
@@ -588,6 +597,58 @@ export class SessionRuntime {
    * matches or the timer is moot. And if one slipped through anyway, the
    * engine refuses the event; it stays the only writer of the rule.
    */
+  /**
+   * The send-off's slide clock, when the host has it playing itself.
+   *
+   * The server holds it rather than the Desktop, so the console, the Desktop
+   * and thirty phones move together and a surface that reloads mid-run lands
+   * where the room already is. A montage each client timed for itself was
+   * fine while the photographs were a block of their own; once a message can
+   * be the next slide, three surfaces drifting apart means the host presses
+   * Skip on a message the Desktop has not reached.
+   *
+   * Only during `run`, and only on auto: the title card and the closing card
+   * hold until somebody presses, which is the whole of what "do not start it
+   * until I click" and "leave the last frame up" mean.
+   *
+   * Keyed on the slide and its deadline, so re-arming is idempotent and a
+   * timeout in flight when the host presses by hand finds the state has moved
+   * and does nothing.
+   */
+  #armSlideTimer(now: number): void {
+    const so = this.state.sendoff;
+    const here = so?.phase === "run" ? so.plan[so.at] : undefined;
+    if (!so || !so.auto || here === undefined || so.slideAt === null) {
+      return this.#clearSlideTimer();
+    }
+    const want = {
+      at: so.at,
+      fireAt: so.slideAt + slideMs(here, so.content, so.autoSeconds),
+    };
+    const armed = this.#slideTimerFor;
+    if (armed !== null && armed.at === want.at && armed.fireAt === want.fireAt) return;
+    this.#clearSlideTimer();
+    this.#slideTimerFor = want;
+    const timer = setTimeout(
+      () => {
+        this.#slideTimer = null;
+        this.#slideTimerFor = null;
+        const at = this.state.sendoff;
+        if (!at || at.phase !== "run" || !at.auto || at.at !== want.at) return;
+        this.apply({ type: "sendoffNext" }, Date.now());
+      },
+      Math.max(0, want.fireAt - now),
+    );
+    timer.unref?.();
+    this.#slideTimer = timer;
+  }
+
+  #clearSlideTimer(): void {
+    if (this.#slideTimer !== null) clearTimeout(this.#slideTimer);
+    this.#slideTimer = null;
+    this.#slideTimerFor = null;
+  }
+
   armArcadeTimers(now = Date.now()): void {
     this.#armLightTimer(now);
     this.#armItemTimer(now);

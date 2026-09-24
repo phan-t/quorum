@@ -19,7 +19,8 @@
  */
 
 import { newSession, replay } from "../engine/reducer.ts";
-import type { SessionState } from "../engine/types.ts";
+import { buildPlan, DEFAULT_AUTO_SECONDS } from "../engine/sendoff.ts";
+import type { SendoffPhase, SessionState } from "../engine/types.ts";
 import type { SessionRegistry, SessionRuntime } from "./runtime.ts";
 import type { LoadedSession, SessionStore } from "./store/types.ts";
 
@@ -64,10 +65,57 @@ export function rehydrate(loaded: LoadedSession): {
   const from: "snapshot" | "log" = loaded.snapshot ? "snapshot" : "log";
   const after = loaded.events.filter((e) => e.seq > (loaded.snapshot?.seq ?? 0));
   const state = replay(
-    base,
+    migrateSendoff(base),
     after.map((e) => ({ event: e.event, at: e.at })),
   );
   return { state, from, replayed: after.length };
+}
+
+/**
+ * Bring a send-off written by the old engine up to the current shape.
+ *
+ * A snapshot is trusted as state and replayed as-is, which is right until the
+ * shape of the state changes under it. The send-off used to be an `opening`
+ * montage followed by a `kudos` walk with no plan; it is now a dealt run, and
+ * the first thing any surface does with one is read `plan`. Without this, one
+ * closed session from last week is a TypeError on the first projection after
+ * the deploy — and every session this process holds is in the same registry.
+ *
+ * The plan is rebuilt from seed 0 rather than a drawn one: this is a session
+ * that has already happened, nobody is going to watch it again, and a stable
+ * number is worth more here than a shuffle. The phase maps across as closely
+ * as it can, landing a part-read set of messages on the right message.
+ *
+ * Deletable once nothing older than this deploy is still in the table.
+ */
+function migrateSendoff(state: SessionState): SessionState {
+  const so = state.sendoff as (SessionState["sendoff"] & { openingStartedAt?: unknown }) | null;
+  if (so === null || Array.isArray(so.plan)) return state;
+
+  const legacy = so as unknown as { phase: string; at: number };
+  const plan = buildPlan(so.content, 0);
+  const phase: SendoffPhase =
+    legacy.phase === "closing" ? "closing" : legacy.phase === "done" ? "done" : legacy.phase === "kudos" ? "run" : "title";
+  const at =
+    phase === "run"
+      ? Math.max(
+          0,
+          plan.findIndex((s) => s.kind === "kudo" && s.at === legacy.at && s.part === 0),
+        )
+      : 0;
+
+  return {
+    ...state,
+    sendoff: {
+      content: so.content,
+      phase,
+      plan,
+      at,
+      auto: false,
+      autoSeconds: DEFAULT_AUTO_SECONDS,
+      slideAt: null,
+    },
+  };
 }
 
 /**

@@ -398,7 +398,16 @@ function sceneSendoff(): Scene {
     class: "so-photo",
     attrs: { alt: "", decoding: "async", hidden: true },
   }) as HTMLImageElement;
-  const node = h("section", { class: "v v-sendoff" }, [who, whoSub, note, photo, message, from]);
+  const farewellName = h("p", { class: "so-farewell-name", attrs: { hidden: true } });
+  const node = h("section", { class: "v v-sendoff" }, [
+    who,
+    farewellName,
+    whoSub,
+    note,
+    photo,
+    message,
+    from,
+  ]);
   let rotation: ReturnType<typeof setInterval> | null = null;
   let showing = "";
 
@@ -407,6 +416,23 @@ function sceneSendoff(): Scene {
     rotation = null;
     photo.hidden = true;
     showing = "";
+  };
+
+  /**
+   * Show the one photograph the server says is up.
+   *
+   * The run has a clock and it is the server's, so the phone follows the
+   * broadcast rather than rotating on its own — a pocket screen a beat ahead
+   * of the shared one is the thing that makes a room look at their phones
+   * instead of the front.
+   */
+  const showPhoto = (sid: string, key: string): void => {
+    if (rotation !== null) clearInterval(rotation);
+    rotation = null;
+    if (key === showing) return;
+    showing = key;
+    photo.src = `/api/sessions/${encodeURIComponent(sid)}/assets/${encodeURIComponent(key)}`;
+    photo.hidden = false;
   };
 
   /** Cycle a phase's photos. Restarted only when the set itself changes. */
@@ -451,10 +477,22 @@ function sceneSendoff(): Scene {
         from.hidden = true;
         return;
       }
-      setText(who, so.name);
+      setText(who, so.phase === "title" ? "Farewell" : so.name);
+      setText(farewellName, so.name);
+      farewellName.hidden = so.phase !== "title";
       setText(whoSub, so.subtitle ?? "");
       whoSub.hidden = (so.subtitle ?? "") === "";
       node.dataset["phase"] = so.phase;
+
+      // The Farewell card: the name and its date, and nothing else. The room
+      // is being asked to read one thing.
+      if (so.phase === "title") {
+        message.hidden = true;
+        from.hidden = true;
+        note.hidden = true;
+        stopPhotos();
+        return;
+      }
 
       const k = so.kudo;
       if (k !== null) {
@@ -465,7 +503,12 @@ function sceneSendoff(): Scene {
         message.style.setProperty("--so-size", kudoSize(so.longest));
         // Which one of how many, so a phone that lost the share still knows
         // where the room is. Quiet: it is not the content.
-        setText(note, `${so.index} of ${so.total}`);
+        setText(
+          note,
+          so.parts > 1
+            ? `${so.index} of ${so.total} · ${so.part}/${so.parts}`
+            : `${so.index} of ${so.total}`,
+        );
         note.hidden = false;
         stopPhotos();
         return;
@@ -476,7 +519,12 @@ function sceneSendoff(): Scene {
       setText(message, line ?? "");
       message.hidden = line === null || line === "";
       message.style.removeProperty("--so-size");
-      runPhotos(state.sid, so.photos, so.seconds);
+      // The run is stepped by the server, one key at a time; the closing
+      // montage still cycles here because nothing else is driving it.
+      if (so.phase === "run") {
+        if (so.photo !== null) showPhoto(state.sid, so.photo);
+        else stopPhotos();
+      } else runPhotos(state.sid, so.photos, so.seconds);
       setText(note, "");
       note.hidden = true;
     },

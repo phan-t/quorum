@@ -42,9 +42,29 @@ and who wrote it, set large.
 portraits of the person who wrote each message — they are group shots, and
 nobody can say which of forty-three belongs beside which of fifteen messages.
 Pairing them would mean guessing, and a wrong guess on a farewell slideshow is
-wrong in front of everyone at once. So the photos run as montages and the
-messages are text. This is a decision about what the material actually is, not
+wrong in front of everyone at once. So a photo is its own frame and a message
+is its own frame. This is a decision about what the material actually is, not
 a simplification.
+
+**A Farewell card, first, held.** The name and the date, and nothing else,
+until the host presses. A segment that begins by moving is a segment whose
+first frame nobody read, and the first frame is the only one that says who
+this is for.
+
+**One run, not two blocks.** The photos and the messages are dealt into a
+single sequence rather than played as a montage and then read as a list. Both
+are shuffled, and the messages are spaced so every photo is used exactly once
+and the run opens and closes on pictures. The old shape put forty-three
+photographs in front of the room before a single person was quoted, which is
+long enough for the photographs to stop being looked at and long enough for
+the messages to arrive as a list to be got through. See `engine/sendoff.ts`.
+
+**A long message is split across slides.** Cut at sentence ends and nowhere
+else, with the author shown throughout. The real set runs to 489 characters,
+and the whole of that on one screen is a paragraph the room reads rather than
+a sentence it hears — and because every message is set at one size, the
+longest one was deciding the size of all thirteen. Splitting is most of why
+the type is now roughly twice what it was.
 
 **The host advances it.** This is the most important decision in the design and
 the easiest one to get wrong. An auto-advancing montage walks past the moment
@@ -54,10 +74,24 @@ The host presses the same space bar that drives every other segment. Auto-
 advance exists as an option and is **off by default**, for the same reason a
 timer is not the host.
 
-**An opening montage, then silence.** Photos with music for thirty to forty
-seconds, nobody speaking, and then the music stops and the messages begin. See
-the music section: this shape is not a preference, it is the only one that
-works over a video call.
+Auto is a button on the console rather than a setting in the file, because
+both modes are wanted inside one segment: the photographs will play themselves
+while the host talks over them, and then a message goes up and the room reads
+it at its own pace. A slider sets seconds per photograph; a message holds
+longer than whatever it says, scaled by its length, because a message that
+leaves the screen mid-sentence is the one failure this segment cannot have.
+Space still steps on early, Manual takes it back in one press, and the two
+cards at either end never move on their own.
+
+**The clock is the server's.** Auto-advance is a timer on the session, not on
+each surface. Three surfaces each counting for themselves drift, and a console
+a slide ahead of the Desktop is a host pressing Skip on a message the room is
+still reading.
+
+**An opening stretch with music, then silence.** The run opens on photographs,
+and the music plays under them until the first message — then it stops and does
+not come back, however many photographs follow. See the music section: this
+shape is not a preference, it is the only one that works over a video call.
 
 ---
 
@@ -129,7 +163,8 @@ failed write at 3:40.
 
 ## Music
 
-**Supported, scoped to the opening, and off unless the file says otherwise.**
+**Supported, scoped to the photographs before the first message, and off
+unless the file says otherwise.**
 
 Three things go wrong with music over a video call, and the first fails
 silently:
@@ -144,8 +179,10 @@ silently:
 3. **Music under a person reading aloud means neither is heard.** The room gets
    a muddy compromise instead of either thing.
 
-So the music plays under the opening montage, while nobody is speaking, and
-stops before the first message. A **preflight row** covers the first failure:
+So the music plays under the photographs that open the run, while nobody is
+speaking, and stops at the first message and stays stopped — the run returns
+to photographs several times after that, and a track fading up and down under
+a farewell six times is worse than one that simply ended. A **preflight row** covers the first failure:
 *play three seconds and ask somebody in the room whether they heard it.* That
 is the only way to know, and it takes ten seconds at 1:50pm rather than
 discovering it at 3:41.
