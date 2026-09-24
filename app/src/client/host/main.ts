@@ -1087,6 +1087,27 @@ const AT_KEY = "quorum.host.at.v1";
 let atSid: string | null = null;
 let atId: string | null = null;
 
+/**
+ * The step the console has just *asked* the room to go to, until the room
+ * says it is there.
+ *
+ * Arriving at a holding step is two commands, and the engine broadcasts after
+ * each: the card first, then the segment. So between them a state arrives
+ * that carries the new card and the *old* segment \u2014 and a cursor checked
+ * against that state looks wrong, gets re-derived to the segment the room is
+ * still in, and is gone by the time the second broadcast lands. The console
+ * then falls back to "the first holding step", which with two of them is a
+ * coin toss, and the space bar walks the wrong way. That is exactly the
+ * failure this cursor exists to prevent, and it showed up on the second
+ * holding card the first time the run of show was walked end to end.
+ *
+ * So the intent outlives the gap. It is consulted only when its kind matches
+ * the segment the room reports, which means a stale one can never point the
+ * console at the wrong *segment* \u2014 at worst it would prefer one holding step
+ * over another \u2014 and every navigation overwrites it.
+ */
+let atWanted: string | null = null;
+
 /** The card the console last put in front of the room, for SHIFT+H. */
 let lastShownCardId: string | null = null;
 
@@ -1139,8 +1160,30 @@ function saveAt(): void {
  */
 function currentEntry(s: RenderState): RunbookEntry | null {
   const rail = runbookRail(runbook);
+  // The step we asked for wins the moment the room is in its segment. This is
+  // the only thing that can tell two holding steps apart across the two
+  // broadcasts it takes to arrive at one.
+  const wanted = atWanted === null ? undefined : rail.find((e) => e.id === atWanted);
+  if (wanted !== undefined && wanted.kind === s.segment) {
+    atWanted = null;
+    return wanted;
+  }
   const at = atId === null ? undefined : rail.find((e) => e.id === atId);
-  if (at !== undefined && at.kind === s.segment) return at;
+  if (at !== undefined && at.kind === s.segment) {
+    // Two holding steps, and the cursor is on the one the room is *not*
+    // looking at. That happens after a reload, and after a card is put up
+    // some other way; the card on the screen is the better evidence, so the
+    // console moves to the step that owns it. Only when the cursor's own card
+    // disagrees, so a step is never dragged off a card it is correctly on.
+    if (s.segment === "holding") {
+      const up = cardMatching(deck, s.holding?.title, s.holding?.line);
+      if (up !== null && cardForEntry(at)?.id !== up.id) {
+        const owner = stepForCard(up.id);
+        if (owner !== null) return owner;
+      }
+    }
+    return at;
+  }
   return (
     rail.find((e) => e.kind === s.segment && e.included) ??
     rail.find((e) => e.kind === s.segment) ??
@@ -1169,6 +1212,7 @@ function firstHoldingStepId(): string | null {
  */
 function goToEntry(entry: RunbookEntry, from: Control | null): void {
   atId = entry.id;
+  atWanted = entry.id;
   if (entry.kind === "holding") {
     const card = cardForEntry(entry);
     lastShownCardId = card?.id ?? null;
@@ -1211,6 +1255,7 @@ function showCard(card: HoldingCard | null, from: Control | null): void {
   }
   const step = card === null ? null : stepForCard(card.id);
   atId = step?.id ?? firstHoldingStepId();
+  atWanted = atId;
   saveAt();
   // See `goToEntry`: the state coming back is the repaint, and a render
   // against the segment we are leaving would undo the cursor.

@@ -1950,7 +1950,10 @@ body {
 /* A step pointing at a card that has been deleted. On --panel rather than the
    row's --panel-2, because --sealed is measured against it: #ffcf25 on
    #14141d is 12.38:1 dark, #926700 on #fafafa is 4.83:1 light. */
-.rb-missing {
+/* `.a-setup-what` is later in this file and sets --muted at equal
+   specificity, so this rule names both classes rather than quietly losing
+   the colour to the cascade. */
+.a-setup-what.rb-missing {
   color: var(--sealed);
   background: var(--panel);
   border-radius: 4px;
