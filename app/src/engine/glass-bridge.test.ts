@@ -218,7 +218,7 @@ describe("the launch content", () => {
 
   test("the existing three reals and three fakes survive verbatim", () => {
     // SPEC.md: "the existing three real and three fake Real-or-Fake items".
-    // These six strings are the team-building artifact's, character for
+    // These six strings are the activity library's, character for
     // character, which is the whole point of reusing them.
     const existing: readonly [string, string][] = [
       [

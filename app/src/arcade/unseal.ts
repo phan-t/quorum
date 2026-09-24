@@ -7,8 +7,12 @@
  *
  * ## Where the content comes from
  *
+ * The activity library was a private repo, folded into this one in September
+ * 2026 and then deleted. Its history survives as a git bundle in `private/`,
+ * which is where to look if one of these strings is ever in doubt.
+ *
  * SPEC.md: "6 existing Scrambled items + 3". The six are the existing Scrambled
- * board from the team-building repo, **verbatim** — cue, answer and note — and
+ * board from the activity library, **verbatim** — cue, answer and note — and
  * the three additions are the umbrella tier, which the existing board has
  * nothing in: "The umbrella tier needs three long words added; they are in the
  * round file with the same `cue / ans / note` shape."

@@ -195,7 +195,7 @@ describe("the launch content", () => {
 
   test("the existing six are the Scrambled board, verbatim", () => {
     // Cue, answer and note, exactly as they are in
-    // team-building/activities/hashi-arcade/index.html under key:"scrambled".
+    // the activity library's hashi-arcade/index.html under key:"scrambled".
     assert.deepEqual(UNSEAL_ITEMS.slice(0, 6).map((i) => [i.cue, i.answer, i.note]), [
       [
         "T F A R",
