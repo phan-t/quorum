@@ -4,6 +4,13 @@ dist/
 .env.*
 !.env.example
 
+# The real question set is content about real people — Round S names a
+# colleague's previous employer, their internal role and what they spent on a
+# home lab — and this repo is public. Only the example is committed. The live
+# file is a symlink to the private team-building repo, which is where the set
+# is actually versioned; a copy here would be an unbacked-up second truth.
+config/trivia-questions.json
+
 # Terraform
 .terraform/
 *.tfstate

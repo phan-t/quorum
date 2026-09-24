@@ -2,10 +2,10 @@
  * Phase 3's acceptance test. BUILD-PLAN.md: "thirty bots play a full
  * 20-question round and the scores match a hand-computed expectation."
  *
- * Thirty bots play the real launch set — `src/trivia/fixtures/kahoot-import.csv`,
- * byte-identical to `activities/hashicorp-ibm-trivia/kahoot-import.csv` in the
- * team-building repo — through the *runtime* (`SessionRuntime`, fake sockets,
- * fake clock), so the path under test is the one a real tap takes: the socket
+ * Thirty bots play the real launch set — `config/trivia-questions.example.json`,
+ * the twenty HashiCorp and IBM questions, which is the generic set without the
+ * event-specific block an event adds — through the *runtime* (`SessionRuntime`,
+ * fake sockets, fake clock), so the path under test is the one a real tap takes: the socket
  * boundary computes the latency-corrected response time, the reducer settles
  * the question, the projection reports it.
  *
@@ -125,7 +125,7 @@ const BASE = 1000;
 
 function loadSet(): readonly Question[] {
   const text = readFileSync(
-    new URL("../trivia/fixtures/trivia-questions.json", import.meta.url),
+    new URL("../../../config/trivia-questions.example.json", import.meta.url),
     "utf8",
   );
   const result = importTriviaJson(text);

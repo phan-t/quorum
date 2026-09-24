@@ -225,8 +225,13 @@ describe("what is refused", () => {
   });
 });
 
-describe("the fixture set", () => {
-  const text = readFileSync(new URL("./fixtures/trivia-questions.json", import.meta.url), "utf8");
+describe("the committed example set", () => {
+  // The example the README points people at. If it stops loading, the thing we
+  // tell people to copy is broken.
+  const text = readFileSync(
+    new URL("../../../config/trivia-questions.example.json", import.meta.url),
+    "utf8",
+  );
 
   it("loads", () => {
     assert.equal(ok(text).length, 20);
