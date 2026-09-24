@@ -36,6 +36,22 @@ export interface SessionMeta {
   readonly screenTokenHash: string;
   readonly createdAt: number;
   readonly updatedAt: number;
+  /**
+   * Console setup, staged with the session and handed back to the console.
+   *
+   * Holding cards, the runbook order and the arcade running order are things a
+   * host decides beforehand, and until now they lived only in one browser's
+   * `localStorage` — clear your site data, or drive from a second profile, and
+   * the console had forgotten them. Staging writes them here so the setup
+   * belongs to the *session* rather than to a browser.
+   *
+   * Stored as the JSON text the host staged, verbatim and unparsed. The server
+   * has no opinion about its contents and never acts on them: it is the
+   * console's own vocabulary, versioned by the console, and a server that
+   * understood it would be a second place to change when the console's storage
+   * format moves. It is handed back only to the host token.
+   */
+  readonly setup?: string | null;
 }
 
 /**

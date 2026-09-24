@@ -1,5 +1,10 @@
 # Running an event
 
+> **Staging is one command.** `make stage EVENT=<event>` creates the session,
+> loads its questions and stages the console's setup, then prints the tokens.
+> See [event-config.md](event-config.md). The steps below are what that command
+> does, and what to do when you need to do one of them by hand.
+
 The operator's guide: how to take a deployed Quorum from parked to a CSV of
 scores. It covers any session, whatever the activities are. Deploying and
 changing the infrastructure is [`infra/README.md`](../infra/README.md); what

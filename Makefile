@@ -102,6 +102,17 @@ down: check
 	cd $(INFRA) && terraform apply -auto-approve -var="image_tag=$(DEPLOYED)" -var="desired_count=0"
 	@echo "Parked. The ALB stays up; that is the ~\$$20/month floor."
 
+## Stage an event: create the session, load its questions, stage the console's
+## setup, and print the tokens. Run it the morning of, from a terminal, with
+## AWS credentials — the admin key is read from SSM and never stored here.
+stage: check
+	@test -n "$(EVENT)" || { echo "Set EVENT, e.g. make stage EVENT=2026-09-25-sa-apj-huddle"; exit 1; }
+	@test -d config/events/$(EVENT) || { echo "No config/events/$(EVENT)"; exit 1; }
+	@cd app && QUORUM_URL="https://$(HOST)" \
+	  QUORUM_ADMIN_KEY="$$(aws ssm get-parameter --name /quorum/prod/admin_key \
+	    --with-decryption --region $(REGION) --query Parameter.Value --output text)" \
+	  EVENT="$(EVENT)" node scripts/stage-event.mjs
+
 url:
 	@curl -fsS https://$(HOST)/healthz || echo "not answering (parked?)"
 

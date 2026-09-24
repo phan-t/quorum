@@ -139,6 +139,10 @@ export class DynamoStore implements SessionStore {
       screenTokenHash: meta.screenTokenHash,
       createdAt: meta.createdAt,
       updatedAt: meta.updatedAt,
+      // Omitted rather than written null: DynamoDB stores what it is given,
+      // and a session staged with no setup should read back the same as one
+      // written before this field existed.
+      ...(meta.setup == null ? {} : { setup: meta.setup }),
       ttl: ttlAt(meta.updatedAt),
     });
   }
@@ -239,6 +243,7 @@ export class DynamoStore implements SessionStore {
       screenTokenHash: str(metaItem["screenTokenHash"]),
       createdAt: num(metaItem["createdAt"]),
       updatedAt: num(metaItem["updatedAt"]),
+      setup: typeof metaItem["setup"] === "string" ? metaItem["setup"] : null,
     };
 
     const snapItem = items.find((i) => i["SK"] === "SNAPSHOT");

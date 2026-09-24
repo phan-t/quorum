@@ -50,7 +50,17 @@ git clone ~/Developer/HashiCorp/team-building-archive.bundle /tmp/tb
 git -C /tmp/tb show 3fa324e:config/trivia-questions.json
 ```
 
-## Uploading
+## Staging
+
+```bash
+make stage EVENT=2026-09-25-sa-apj-huddle
+```
+
+One command: creates the session, loads the questions, stages the console's
+holding cards and running order, prints the tokens. See
+[docs/event-config.md](../docs/event-config.md).
+
+## Uploading one thing by hand
 
 ```bash
 curl -s -X POST "$QUORUM_URL/api/sessions/$SID/content/trivia" \

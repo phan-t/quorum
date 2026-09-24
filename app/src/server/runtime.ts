@@ -327,6 +327,17 @@ export class SessionRuntime {
     this.persistence.participant(record);
   }
 
+  /**
+   * The console's staged setup, verbatim.
+   *
+   * Held on the runtime rather than in `SessionState` on purpose. It is not
+   * part of the session's history: no event produces it, the reducer never
+   * reads it, and replaying the log must not depend on it. It rides in the
+   * META row beside the token hashes, which is where the other things a
+   * snapshot cannot carry already live.
+   */
+  setup: string | null = null;
+
   meta(now = Date.now()): SessionMeta {
     return {
       sid: this.state.sid,
@@ -338,6 +349,7 @@ export class SessionRuntime {
       screenTokenHash: this.secrets.screenTokenHash,
       createdAt: this.createdAt,
       updatedAt: now,
+      setup: this.setup,
     };
   }
 
@@ -1243,7 +1255,7 @@ export class SessionRegistry {
     return this.persister ? this.persister.forSession(sid) : NO_PERSISTENCE;
   }
 
-  add(state: SessionState, now = Date.now()): CreatedSession {
+  add(state: SessionState, now = Date.now(), setup: string | null = null): CreatedSession {
     const hostToken = newToken();
     const screenToken = newToken();
     const runtime = new SessionRuntime(
@@ -1255,6 +1267,7 @@ export class SessionRegistry {
       this.persistenceFor(state.sid),
       now,
     );
+    runtime.setup = setup;
     this.bySid.set(state.sid, runtime);
     // No case folding: the code is base62 and case is significant.
     this.byCode.set(state.joinCode, state.sid);
@@ -1288,6 +1301,7 @@ export class SessionRegistry {
       this.persistenceFor(state.sid),
       loaded.meta.createdAt,
     );
+    runtime.setup = loaded.meta.setup ?? null;
     for (const p of loaded.participants) {
       runtime.restoreRejoinTokens(p.pid, p.rejoinTokenHashes);
     }

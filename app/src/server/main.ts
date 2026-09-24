@@ -33,6 +33,13 @@ import { recoverSessions, rehydrate } from "./recovery.ts";
 import { recruitmentRound } from "../arcade/recruitment.ts";
 import { glassBridgeRound } from "../arcade/glass-bridge.ts";
 import { formatErrors, importTriviaJson } from "../trivia/import.ts";
+
+/**
+ * A ceiling on the staged console setup, which the server stores without
+ * understanding. Generous for a dozen holding cards and a running order, and
+ * far below anything that would trouble a DynamoDB item.
+ */
+const MAX_SETUP_CHARS = 64_000;
 import {
   eventsJsonl,
   mergeEventLogs,
@@ -366,6 +373,40 @@ function handleHttp(req: IncomingMessage, res: ServerResponse): void {
     }
   }
 
+  // GET /api/sessions/:sid/setup — the staged console setup, host token only.
+  //
+  // The console asks for this once, on load, and uses it only to fill in what
+  // it has no stored answer for. It is behind the host token because it names
+  // the holding cards, which are the words the room is about to read.
+  if (req.method === "GET" && path.startsWith("/api/sessions/")) {
+    const rest = path.slice("/api/sessions/".length);
+    const cut = rest.indexOf("/");
+    if (cut > 0 && rest.slice(cut + 1) === "setup") {
+      let sid = rest.slice(0, cut);
+      try {
+        sid = decodeURIComponent(sid);
+      } catch {
+        /* use it as typed; it will simply not match a session */
+      }
+      const runtime = registry.bySessionId(sid);
+      const presented = bearer(req);
+      // Unknown session and wrong token answer alike, as everywhere else here:
+      // a 404 that only appears for a real sid is a session-id oracle.
+      if (
+        !runtime ||
+        presented === "" ||
+        !tokenMatches(presented, runtime.secrets.hostTokenHash)
+      ) {
+        json(res, 401, { error: "unauthorized" });
+        return;
+      }
+      send(res, 200, "application/json; charset=utf-8", runtime.setup ?? "null", {
+        "cache-control": "no-store",
+      });
+      return;
+    }
+  }
+
   // POST /api/sessions/:sid/content/trivia — the question JSON, host token only.
   if (req.method === "POST" && path.startsWith("/api/sessions/")) {
     const rest = path.slice("/api/sessions/".length);
@@ -402,13 +443,23 @@ function handleHttp(req: IncomingMessage, res: ServerResponse): void {
       .then((body) => {
         const b = (body ?? {}) as Record<string, unknown>;
         const title = typeof b["title"] === "string" ? b["title"] : "Team Huddle";
+        // The console's staged setup, kept as the text it arrived as. The
+        // server never parses it: it is the console's vocabulary, versioned by
+        // the console, and a server that understood it would be a second place
+        // to change when that format moves. Capped because it is opaque, and
+        // an opaque thing with no ceiling is a way to fill a DynamoDB row.
+        const rawSetup = b["setup"];
+        const setup =
+          rawSetup === undefined || rawSetup === null
+            ? null
+            : JSON.stringify(rawSetup).slice(0, MAX_SETUP_CHARS);
         const state = newSession({
           sid: newId("ses"),
           title,
           joinCode: newJoinCode(registry.takenCodes()),
           activities: DEFAULT_ACTIVITIES,
         });
-        const created = registry.add(state);
+        const created = registry.add(state, Date.now(), setup);
         json(res, 201, {
           sid: state.sid,
           joinCode: state.joinCode,

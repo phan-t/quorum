@@ -966,20 +966,28 @@ let deck: HoldingDeck = defaultDeck();
 /** True when the deck came from the old single-card key, for the note below. */
 let deckMigrated = false;
 
-try {
-  const stored = parseDeck(localStorage.getItem(CARDS_KEY));
-  if (stored !== null) {
-    deck = stored;
-  } else {
+/**
+ * Read the deck from storage. A function rather than a block at load, because
+ * staged setup arrives after the first state and re-runs exactly this.
+ */
+function loadDeck(): void {
+  try {
+    const stored = parseDeck(localStorage.getItem(CARDS_KEY));
+    if (stored !== null) {
+      deck = stored;
+      return;
+    }
     const legacy = migrateDeck(localStorage.getItem(HOLDING_KEY));
     if (legacy !== null) {
       deck = legacy;
       deckMigrated = true;
     }
+  } catch {
+    // Storage off, or blocked. One blank card and a working console.
   }
-} catch {
-  // Storage off, or blocked. One blank card and a working console.
 }
+
+loadDeck();
 
 function saveDeck(): void {
   try {
@@ -1054,11 +1062,16 @@ const RUNBOOK_KEY = "quorum.host.runbook.v1";
 
 let runbook: Runbook = defaultRunbook();
 
-try {
-  runbook = parseRunbook(localStorage.getItem(RUNBOOK_KEY)) ?? defaultRunbook();
-} catch {
-  // Storage off, or blocked. The default runbook is the shipped run of show.
+/** As `loadDeck`, and for the same reason. */
+function loadRunbook(): void {
+  try {
+    runbook = parseRunbook(localStorage.getItem(RUNBOOK_KEY)) ?? defaultRunbook();
+  } catch {
+    // Storage off, or blocked. The default runbook is the shipped run of show.
+  }
 }
+
+loadRunbook();
 
 // Every holding step gets the id of the card it shows written into it. For a
 // runbook stored by the build before this one that is the first card, which
@@ -2729,6 +2742,124 @@ function saveSetup(): void {
 const PLAYED_KEY = "quorum.host.arcade.played.v1";
 let playedLoadedFor: string | null = null;
 
+/**
+
+ * Apply the setup staged with the session, the first time this console opens
+ * it.
+ *
+ * Holding cards, the runbook order and the arcade running order are decided
+ * before the room arrives and, until now, lived only in one browser's
+ * `localStorage`. Clear your site data, or open the console in a second
+ * profile, and the console had forgotten them — which is a poor way to find
+ * out at 1:55pm. Staging writes them onto the session; this reads them back.
+ *
+ * **Once per session id, and then never again.** The first version of this
+ * only filled keys that were empty, which sounded safer and did not work: the
+ * console writes its own default runbook at startup, so by the time the staged
+ * copy arrived the key was occupied by a default nobody had chosen, and the
+ * staged order was skipped in favour of it. The rule that does work follows
+ * from what the setup *is* — it belongs to the session, so opening a session
+ * this console has not seen applies it, and every edit the host makes
+ * afterwards is theirs and survives every reload. A host who staged one
+ * session and hand-built another does not have the two bleed together.
+ *
+ * Everything else is unchanged and load-bearing. It writes the raw text and
+ * re-runs the existing loaders rather than parsing the staged shape itself, so
+ * there is one parser per format and a staged file the loader would reject
+ * fails the way a corrupt stored value does — by being ignored. And it cannot
+ * fail loudly: no network, no storage, a 401, malformed JSON, an older server
+ * with no such endpoint all leave the console exactly as it was without it.
+ */
+const STAGED_KEYS: Readonly<Record<string, string>> = {
+  cards: CARDS_KEY,
+  runbook: RUNBOOK_KEY,
+  arcade: SETUP_KEY,
+};
+
+/** Session ids whose staged setup this browser has already applied. */
+const STAGED_SEEN_KEY = "quorum.host.staged.v1";
+let stagedAskedFor: string | null = null;
+
+function stagedAlreadyApplied(sid: string): boolean {
+  try {
+    const raw = localStorage.getItem(STAGED_SEEN_KEY);
+    if (raw === null) return false;
+    const seen: unknown = JSON.parse(raw);
+    return Array.isArray(seen) && seen.includes(sid);
+  } catch {
+    // Unreadable storage means we cannot prove it was applied. Applying twice
+    // to the same session is a smaller harm than never applying at all: the
+    // second time round it writes the same bytes.
+    return false;
+  }
+}
+
+function markStagedApplied(sid: string): void {
+  try {
+    const raw = localStorage.getItem(STAGED_SEEN_KEY);
+    const seen: unknown = raw === null ? [] : JSON.parse(raw);
+    const list = Array.isArray(seen) ? seen.filter((x) => typeof x === "string") : [];
+    if (!list.includes(sid)) list.push(sid);
+    // Keep the last few. This list exists to answer one question about the
+    // session in front of you, not to be a history.
+    localStorage.setItem(STAGED_SEEN_KEY, JSON.stringify(list.slice(-8)));
+  } catch {
+    /* storage off: the setup still applied, it may simply apply again */
+  }
+}
+
+function seedStagedSetup(sid: string): void {
+  if (stagedAskedFor === sid) return;
+  stagedAskedFor = sid;
+  if (stagedAlreadyApplied(sid)) return;
+  void fetch(`/api/sessions/${encodeURIComponent(sid)}/setup`, {
+    headers: { authorization: `Bearer ${hostToken}` },
+  })
+    .then((r) => (r.ok ? r.json() : null))
+    .then((staged: unknown) => {
+      if (staged === null || typeof staged !== "object" || Array.isArray(staged)) return;
+      let applied = false;
+      for (const [name, key] of Object.entries(STAGED_KEYS)) {
+        const value = (staged as Record<string, unknown>)[name];
+        if (value === undefined || value === null) continue;
+        try {
+          localStorage.setItem(key, JSON.stringify(value));
+          applied = true;
+        } catch {
+          // Storage off or full. Nothing staged applies, and the console is
+          // exactly as usable as it was a moment ago.
+          return;
+        }
+      }
+      if (!applied) return;
+      markStagedApplied(sid);
+      loadDeck();
+      loadRunbook();
+      loadSetup();
+      // The runbook's holding steps name cards by id; a staged pair is already
+      // consistent, but a staged runbook with a card the staged deck does not
+      // have would leave a step pointing at nothing. Anchor to the first card,
+      // which is what a runbook from before named cards gets.
+      const first = deck[0];
+      if (first !== undefined) runbook = anchorHoldingCards(runbook, first.id);
+      // The same five calls the console makes at startup, in the same order.
+      // `render` alone is not enough: the setup panels and the rail are built
+      // from the deck and the runbook rather than from the session state, so
+      // without these the staged cards were in storage and on screen nowhere,
+      // which reads exactly like staging having silently failed.
+      renderCardsSetup();
+      renderHoldingPanel();
+      renderArcadeSetup();
+      renderRunbookSetup();
+      renderRail();
+      if (lastState) render(lastState);
+    })
+    .catch(() => {
+      // Offline, or an older server with no such endpoint. Both mean "nothing
+      // was staged", which is how the console has always behaved.
+    });
+}
+
 function loadPlayed(sid: string): void {
   if (playedLoadedFor === sid) return;
   playedLoadedFor = sid;
@@ -3437,6 +3568,7 @@ function primaryPlan(): Plan {
 function render(s: RenderState): void {
   lastState = s;
   loadPlayed(s.sid);
+  seedStagedSetup(s.sid);
   loadAt(s.sid);
   forgetPlayedIfStartingOver(s);
 
