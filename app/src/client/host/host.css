@@ -541,6 +541,12 @@ body {
 .copy-btn {
   flex: none;
   align-self: center;
+  /* Wide enough for the longest thing it can say. The button is a glyph
+     almost always, but the no-clipboard fallback says "Select it, then ⌘C" —
+     without a floor the row would jump under the cursor at the moment the
+     host is reaching for it. */
+  min-width: 2.2em;
+  text-align: center;
   background: var(--panel-2);
   border: 1px solid var(--line);
   border-radius: 4px;

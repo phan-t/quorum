@@ -1095,13 +1095,22 @@ function selectElement(el: HTMLElement): void {
 
 const COPY_SAID_MS = 2_500;
 
+/** The two-sheets copy mark. Its own constant so the idle and reset paths
+ *  cannot drift apart. */
+const COPY_MARK = "⧉";
+
 function copyButton(what: string, source: HTMLElement): HTMLButtonElement {
   const button = handsBackSpace(
     h("button", {
       class: "copy-btn",
       type: "button",
-      text: "Copy",
-      attrs: { "aria-label": `Copy the ${what}` },
+      // A glyph, with the words in `aria-label` and `title`. The row is the
+      // join code or a long URL and both want the width; the button is beside
+      // text that already says what it is. ⧉ is the two-sheets copy mark, and
+      // the system stack has it — which it would not reliably have had under
+      // IBM Plex.
+      text: COPY_MARK,
+      attrs: { "aria-label": `Copy the ${what}`, title: `Copy the ${what}` },
     }),
   ) as HTMLButtonElement;
   let timer: ReturnType<typeof setTimeout> | null = null;
@@ -1111,7 +1120,7 @@ function copyButton(what: string, source: HTMLElement): HTMLButtonElement {
     if (timer !== null) clearTimeout(timer);
     timer = setTimeout(() => {
       timer = null;
-      setText(button, "Copy");
+      setText(button, COPY_MARK);
       button.classList.remove("is-done");
     }, COPY_SAID_MS);
   };
@@ -1123,7 +1132,10 @@ function copyButton(what: string, source: HTMLElement): HTMLButtonElement {
     }
     void copyText(text).then((ok) => {
       if (!ok) selectElement(source);
-      say(ok ? "Copied" : "Select it, then ⌘C", ok);
+      // A tick rather than the word: the state is carried by the glyph
+      // changing, not by the colour, and the button keeps its width so the
+      // row does not jump under the cursor.
+      say(ok ? "✓" : "Select it, then ⌘C", ok);
     });
   });
   return button;
@@ -1176,32 +1188,23 @@ function preflightRow(extra?: HTMLElement): PreflightRow {
   };
 }
 
-/**
- * The Desktop is the one item the console cannot check. Nothing on the wire
- * tells the host whether the big screen is connected — so rather than guess,
- * or quietly leave it off the list, it asks the host to look and tick. An
- * honest question beats a tick that means nothing.
- */
-let deskSeen = false;
-const deskTick = handsBackSpace(
-  h("button", { class: "pf-tick", type: "button", text: "Tick when you can see it" }),
-);
-deskTick.addEventListener("click", () => {
-  deskSeen = !deskSeen;
-  if (lastState) render(lastState);
-});
+/* The Desktop had a row here, ticked by hand: nothing on the wire tells the
+   console whether a Desktop is connected, so it asked the host to look at the
+   projector and confirm. Removed at the user's request. A checklist the host
+   has to answer on the product's behalf is a checklist item about the
+   product, not about the room — and the host is looking at the shared screen
+   anyway. If it comes back it should come back as a real check, which needs a
+   field on the wire. */
 
 const pfQuestions = preflightRow();
 const pfArcade = preflightRow();
-const pfDesktop = preflightRow(deskTick);
 const pfPeople = preflightRow();
 
 const preflight = h("section", { class: "pf" }, [
-  h("p", { class: "label", text: "Before the room arrives" }),
+  h("p", { class: "label", text: "Preflight checklist" }),
   h("ul", { class: "pf-list" }, [
     pfQuestions.el,
     pfArcade.el,
-    pfDesktop.el,
     pfPeople.el,
   ]),
   h("p", {
@@ -1227,6 +1230,29 @@ const preflight = h("section", { class: "pf" }, [
  * the rows are rebuilt: a keyboard user pressing Alt+Down twice must move the
  * same row twice.
  */
+/**
+ * What the console calls a segment.
+ *
+ * The holding card is the segment an *off-platform* activity is run in — the
+ * TTX has no Quorum surface, so for thirty-five minutes the holding card is
+ * the TTX. Once it has been given a title, the console calls it by that title
+ * instead, so the runbook and the rail read like the actual run of show:
+ * `Lobby · Agentic Security TTX · Trivia · Arcade` rather than a generic
+ * placeholder sitting where the afternoon's first activity should be.
+ *
+ * Console only. The room sees the card itself, which has always carried the
+ * title; this is about the host being able to read their own plan.
+ */
+const SEGMENT_MAX_NAME = 22;
+function segmentName(seg: Segment): string {
+  if (seg !== "holding") return SEGMENT_LABEL[seg];
+  const given = holdingTitle.value.trim();
+  if (given === "") return SEGMENT_LABEL[seg];
+  return given.length > SEGMENT_MAX_NAME
+    ? `${given.slice(0, SEGMENT_MAX_NAME - 1)}\u2026`
+    : given;
+}
+
 const runbookRows = h("div", { class: "a-setup-rows" });
 const runbookNote = h("p", { class: "pb-note a-setup-note", attrs: { hidden: true } });
 
@@ -1303,7 +1329,7 @@ function renderRunbookSetup(): void {
     runbookRows,
     runbook.map((entry, i) => {
       const kind = entry.kind;
-      const name = SEGMENT_LABEL[kind];
+      const name = segmentName(kind);
       const move = (role: "up" | "down", delta: -1 | 1): HTMLButtonElement => {
         const button = handsBackSpace(
           h("button", {
@@ -1570,6 +1596,12 @@ for (const field of [holdingTitle, holdingLine]) {
   field.addEventListener("input", () => {
     holdingDirty = true;
     saveHolding();
+    // The runbook and the rail call the holding segment by this title, so
+    // they have to follow it as it is typed.
+    if (field === holdingTitle) {
+      renderRunbookSetup();
+      if (lastState) render(lastState);
+    }
   });
   field.addEventListener("keydown", (ev) => {
     const e = ev as KeyboardEvent;
@@ -2728,6 +2760,10 @@ function render(s: RenderState): void {
     row.button.classList.toggle("current", current);
     const mark = row.button.querySelector(".seg-mark");
     if (mark instanceof HTMLElement) setText(mark, current ? "●" : "○");
+    // The rail follows the holding card's title too, so the run of show reads
+    // the same in both places. Built once at start-up, so it is set here.
+    const nameEl = row.button.querySelector(".seg-name");
+    if (nameEl instanceof HTMLElement) setText(nameEl, segmentName(seg));
     row.button.disabled = s.phase !== "running";
   }
   setText(railCount, `${s.roster.length}`);
@@ -2913,14 +2949,6 @@ function renderPreflight(s: RenderState): void {
       ? `Arcade rounds: ${planSummary(arcadePlan, ARCADE_ROUND_LABEL)}.`
       : "No arcade rounds chosen.",
   );
-
-  pfDesktop.set(
-    deskSeen ? "ready" : "ask",
-    deskSeen
-      ? "You have seen the Desktop up on the projector."
-      : "The console cannot see the Desktop from here. Look at the big screen, then tick.",
-  );
-  setText(deskTick, deskSeen ? "Untick" : "Tick when you can see it");
 
   const joined = s.roster.length;
   const on = s.roster.filter((r) => r.conn === "on").length;
