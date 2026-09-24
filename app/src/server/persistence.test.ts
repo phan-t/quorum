@@ -239,7 +239,7 @@ describe("restart recovery", () => {
     assert.equal(back?.secrets.hostTokenHash, s.created.runtime.secrets.hostTokenHash);
   });
 
-  it("recovers a draft session, and leaves a closed one where it is", async () => {
+  it("recovers a session in every phase, closed included", async () => {
     // A draft session is one created but not yet opened, which is exactly
     // when a host sets one up in advance. Leaving it out meant a deploy — or
     // ECS replacing a task — rebuilt the registry without it, and a correct
@@ -249,8 +249,10 @@ describe("restart recovery", () => {
     // event; the test that used to be here asserted the behaviour that broke
     // it.
     //
-    // A closed session stays out: it is finished, there is nothing to drive,
-    // and there could be a great many inside the retention window.
+    // A closed one comes back too, because `reopen` exists to undo an
+    // accidental close and could not reach a session the restart had dropped.
+    // The worry was a retention window full of finished sessions; the table
+    // held two rows. If that changes, bound it by `updatedAt`, not by phase.
     const store = new MemoryStore();
     const s = await playAnAfternoon(store);
     s.created.runtime.apply({ type: "close" }, Date.now());
@@ -260,12 +262,15 @@ describe("restart recovery", () => {
     const registry2 = new SessionRegistry(new Persister(store, () => {}));
     const recovered = await recoverSessions(store, registry2, () => {});
 
-    assert.equal(recovered.length, 1, "the draft session, and only it");
+    assert.equal(recovered.length, 2, "the draft one and the closed one");
     assert.ok(
       registry2.bySessionId(draft.sid),
-      "a draft session is reachable by its host token after a restart",
+      "a draft session is reachable after a restart — that is when a host sets one up",
     );
-    assert.equal(registry2.bySessionId(s.sid), undefined, "the closed one is not");
+    assert.ok(
+      registry2.bySessionId(s.sid),
+      "and a closed one, or an accidental close outlives the process and cannot be undone",
+    );
   });
 
   it("replays events written after the snapshot", async () => {

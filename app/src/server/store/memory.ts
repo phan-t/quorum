@@ -108,7 +108,7 @@ export class MemoryStore implements SessionStore {
       // These two must agree, or the tests pass against behaviour production
       // does not have.
       const phase = row.meta?.phase;
-      if (phase !== "draft" && phase !== "lobby" && phase !== "running") continue;
+      if (phase === undefined) continue;
       const s = this.assemble(sid, row);
       if (s) out.push(s);
     }

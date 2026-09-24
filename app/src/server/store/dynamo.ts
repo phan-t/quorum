@@ -300,17 +300,29 @@ export class DynamoStore implements SessionStore {
           // the socket needs the registry. This bit a real setup the day
           // before an event.
           //
-          // `closed` stays out. A closed session is finished, there is
-          // nothing to drive, and inside the 90-day retention window there
-          // could be a lot of them to pull at boot.
+          // `closed` is in here too, and it has to be: `reopen` exists to
+          // undo an accidental close, and a close that outlives the process
+          // could not be undone at all — the host socket got `bad_token` for
+          // a correct link. That is not hypothetical either; it happened, and
+          // the deploy that followed is what put the session out of reach.
+          //
+          // The argument for leaving it out was that a 90-day retention
+          // window could hold a lot of finished sessions to pull at boot.
+          // Worth checking rather than assuming: this table holds two META
+          // rows. At roughly one event a month, and with the TTL clearing
+          // them at 90 days, the scan stays trivial. If that ever stops being
+          // true, bound it by `updatedAt` rather than by phase — a close from
+          // six weeks ago does not need reopening, one from six minutes ago
+          // very much does.
           FilterExpression:
-            "SK = :meta AND #phase IN (:draft, :lobby, :running)",
+            "SK = :meta AND #phase IN (:draft, :lobby, :running, :closed)",
           ExpressionAttributeNames: { "#phase": "phase" },
           ExpressionAttributeValues: {
             ":meta": "META",
             ":draft": "draft",
             ":lobby": "lobby",
             ":running": "running",
+            ":closed": "closed",
           },
           ProjectionExpression: "sid",
           ...(start ? { ExclusiveStartKey: start } : {}),
