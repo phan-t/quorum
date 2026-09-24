@@ -108,7 +108,7 @@ import { createParticipantView } from "../participant/view.ts";
 
 initTheme();
 
-document.title = "DO NOT SHARE · Quorum host";
+document.title = "Quorum host";
 
 const mock = readMockConfig();
 const app = qs<HTMLElement>("#app");
@@ -141,9 +141,7 @@ if (hostToken === "") {
 /* ------------------------------------------------------------------ */
 
 const elTitle = h("span", { class: "sb-title" });
-const elCounts = h("span", { class: "sb-counts mono" });
 const elScoreboard = h("span", { class: "sb-seal mono" });
-const elPhase = h("span", { class: "sb-phase mono" });
 
 /**
  * The scoreboard's three states, said as what the room can see.
@@ -165,21 +163,19 @@ const elConn = h("span", { class: "sb-conn mono", attrs: { hidden: true } });
 const elTheme = themeToggle();
 
 /**
- * Four things and a switch.
+ * Whose session, whether it is connected, whether the room can see the scores.
  *
- * The bar used to open with a red DO NOT SHARE chip and then the join code.
- * Both are gone from here and neither is lost. The warning is in the tab
- * title, which is the one place it does any work — the screen-share picker
- * lists tab titles, and a title is legible while the console is behind
- * another window, which a bar inside it is not. The join code is in the lobby
- * panel beside the join link, with a copy button on each, which is where a
- * host gets at it. What is left is what the bar is for: whose session, who is in it,
- * what phase it is in, and whether the room can see the scores.
+ * Four things have left this bar and none of them is lost. A red DO NOT SHARE
+ * chip and the join code went first: the code is in the lobby panel beside the
+ * join link with a copy button on each, which is where a host reaches for it.
+ * The head count and the phase followed, because both were second copies — the
+ * rail counts the roster two inches to the left, and the panel head says the
+ * phase directly above the controls the phase governs. A bar of duplicates is
+ * a bar the eye stops reading, and then it is not there for the one line that
+ * is only here.
  */
 const statusBar = h("header", { class: "statusbar" }, [
   elTitle,
-  elCounts,
-  elPhase,
   elConn,
   elScoreboard,
   elTheme,
@@ -683,7 +679,7 @@ const reopenControl = control({
  *   2. **type the word** into a field — the console will not accept anything
  *      else, and a field is the one widget on this page that a stray keypress
  *      cannot turn into an action;
- *   3. press **Wipe the scores and start over**, which is disabled until the
+ *   3. press **Wipe**, which is disabled until the
  *      word matches.
  *
  * None of those three is the space bar, and that is structural rather than a
@@ -737,7 +733,7 @@ const restartField = h("input", {
 const restartGo = h("button", {
   class: "rs-go",
   type: "button",
-  text: "Wipe the scores and start over",
+  text: "Wipe",
   disabled: true,
 }) as HTMLButtonElement;
 
@@ -3613,13 +3609,6 @@ function render(s: RenderState): void {
   /* status bar */
   setText(elTitle, s.title);
   const code = s.hostExtras?.joinCode ?? "————";
-  // Counts come from the roster, not from `hostExtras`: a `roster` delta
-  // updates the roster and leaves `hostExtras` behind, so the roster is the
-  // only field guaranteed to be current. See the report.
-  const on = s.roster.filter((r) => r.conn === "on").length;
-  const away = s.roster.filter((r) => r.conn === "away").length;
-  setText(elCounts, `${on} on · ${away} away`);
-  setText(elPhase, s.phase.toUpperCase());
   setText(elScoreboard, SCOREBOARD_STATE[s.seal]);
   setAttr(elScoreboard, "data-seal", s.seal);
   // Hidden is loud: the whole bar carries it, so the host never has to wonder
@@ -3666,15 +3655,10 @@ function render(s: RenderState): void {
   restartArm.disabled = s.phase === "draft";
   if (s.phase === "draft" && restartArmed) setRestartArmed(false);
   syncRestartGo();
-  const loaded = s.hostExtras?.trivia?.loaded ?? 0;
-  setText(
-    restartKeeps,
-    `${s.roster.length} ${s.roster.length === 1 ? "person stays" : "people stay"} in the room with the same nickname, the join code does not change, and ` +
-      (loaded > 0
-        ? `the ${loaded} trivia question${loaded === 1 ? "" : "s"} stay loaded. `
-        : "anything you have uploaded stays loaded. ") +
-      "Nobody has to rejoin and nothing has to be uploaded again.",
-  );
+  // What it does, and nothing about what it spares. The long version listed
+  // everything that survives — the room, the code, the questions — which read
+  // as reassurance at the exact moment a host should be reading the warning.
+  setText(restartKeeps, "Clears every score. Nobody has to rejoin.");
 
   /* panel */
   const bodyKey = s.phase === "draft" ? "lobby" : s.segment;

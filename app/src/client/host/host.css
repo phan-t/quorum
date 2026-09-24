@@ -53,7 +53,7 @@
  */
 
 body {
-  font-size: 14px;
+  font-size: 13px;
   overflow: hidden;
 }
 
@@ -84,6 +84,22 @@ body {
   display: flex;
   flex-direction: column;
 }
+
+/* ---------------------------------------------------------------------
+   Type scale. Five sizes, and every rule below uses one of them:
+
+     11px  labels, eyebrows, meta — uppercase and letter-spaced
+     13px  body, and every control
+     16px  panel and section headings
+     24px  numbers meant to be read across the room
+     56px  the one display number
+
+   There were eleven sizes before this, which is not a scale but an accretion:
+   10, 12, 14, 15 and 18 had each arrived once to solve one row and then been
+   copied. Differences that small are not read as hierarchy, they are read as
+   carelessness, and they make every new rule a guess about which neighbour to
+   match. Add a sixth only with a reason.
+   --------------------------------------------------------------------- */
 
 /* ----------------------------------------------------------- status -- */
 
@@ -265,7 +281,7 @@ body {
   border-radius: 4px;
   text-align: left;
   color: var(--muted);
-  font-size: 14px;
+  font-size: 13px;
 }
 .seg:hover:not(:disabled) {
   background: var(--panel-2);
@@ -287,7 +303,7 @@ body {
 }
 .seg-phase {
   margin-left: auto;
-  font-size: 10px;
+  font-size: 11px;
   letter-spacing: 0.1em;
   color: var(--muted);
   border: 1px solid var(--line);
@@ -513,7 +529,7 @@ body {
  */
 .join-code,
 .join-url {
-  font-size: 14px;
+  font-size: 13px;
   min-width: 0;
   overflow-wrap: anywhere;
   user-select: all;
@@ -594,7 +610,7 @@ body {
   background: var(--panel);
   border: 1px solid var(--line);
   border-radius: 4px;
-  font-size: 14px;
+  font-size: 13px;
 }
 .field:focus {
   border-color: var(--ibm-blue);
@@ -630,7 +646,7 @@ body {
 }
 .h-rank {
   color: var(--muted);
-  font-size: 12px;
+  font-size: 11px;
 }
 .h-name {
   overflow: hidden;
@@ -732,7 +748,7 @@ body {
   text-align: left;
   padding: 5px 8px;
   font-family: var(--mono);
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 600;
   letter-spacing: 0.16em;
   text-transform: uppercase;
@@ -820,7 +836,7 @@ body {
   border-radius: 3px;
   font-family: var(--mono);
   font-variant-numeric: tabular-nums;
-  font-size: 12px;
+  font-size: 11px;
   text-align: right;
 }
 .sc-raw:focus {
@@ -839,7 +855,7 @@ body {
   display: inline-block;
   min-width: 26px;
   margin-left: 6px;
-  font-size: 12px;
+  font-size: 11px;
   color: var(--muted);
   text-align: right;
 }
@@ -855,7 +871,7 @@ body {
 }
 .sc-pts-bench::after {
   content: " B";
-  font-size: 10px;
+  font-size: 11px;
   letter-spacing: 0.12em;
 }
 .sc-cell[data-status="bench"] {
@@ -883,7 +899,7 @@ body {
   border-radius: 3px;
   color: var(--muted);
   font-family: var(--mono);
-  font-size: 10px;
+  font-size: 11px;
   line-height: 1;
   padding: 2px 4px;
 }
@@ -926,7 +942,7 @@ body {
 }
 .sc-spot-cell {
   color: var(--dim);
-  font-size: 12px;
+  font-size: 11px;
 }
 .sc-has-spot {
   color: var(--spot);
@@ -937,7 +953,7 @@ body {
 }
 .sc-rank {
   color: var(--muted);
-  font-size: 12px;
+  font-size: 11px;
 }
 
 .sc-bench-line {
@@ -973,7 +989,7 @@ body {
   background: var(--panel);
   border: 1px solid var(--line);
   border-radius: 3px;
-  font-size: 12px;
+  font-size: 11px;
 }
 .sc-reason {
   flex: 1;
@@ -1014,14 +1030,14 @@ body {
   display: flex;
   align-items: center;
   gap: 8px;
-  font-size: 12px;
+  font-size: 11px;
   padding: 2px 4px;
   border-left: 2px solid var(--spot);
   background: var(--panel);
   border-radius: 2px;
 }
 .sc-spot-activity {
-  font-size: 10px;
+  font-size: 11px;
   letter-spacing: 0.14em;
   text-transform: uppercase;
   color: var(--muted);
@@ -1103,6 +1119,9 @@ body {
   border-radius: 4px;
   padding: 6px 12px;
   font-size: 13px;
+  /* Explicit, so a Yes standing in for a button is exactly its height
+     whatever the two words happen to be. */
+  min-height: 31px;
   color: var(--ink);
 }
 .ctl-button:hover:not(:disabled) {
@@ -1155,7 +1174,7 @@ body {
   border-color: var(--nomad);
   color: #062a20;
   font-weight: 600;
-  font-size: 18px;
+  font-size: 16px;
   padding: 12px 22px;
   min-width: 260px;
   justify-content: center;
@@ -1170,18 +1189,22 @@ body {
    question is how a host presses the wrong thing. */
 .ctl-question {
   font-family: var(--mono);
-  font-size: 12px;
+  font-size: 11px;
   color: var(--sealed);
   letter-spacing: 0.06em;
 }
+/* The same box as `.ctl-button`, because they stand in for one.
+   A confirm replaces the button that was just pressed, in the place it was,
+   and a Yes two pixels shorter than the thing it replaced makes the row jump
+   and reads as a different class of control than the one it is answering. */
 .ctl-yes,
 .ctl-no {
   background: var(--panel-2);
   border: 1px solid var(--line);
-  border-radius: 3px;
-  padding: 4px 10px;
-  font-size: 12px;
-  font-family: var(--mono);
+  border-radius: 4px;
+  padding: 6px 12px;
+  font-size: 13px;
+  min-height: 31px;
 }
 .ctl-yes {
   border-color: var(--danger);
@@ -1191,7 +1214,7 @@ body {
 /* Refusals live in the button that caused them, for three seconds. */
 .ctl-flash {
   font-family: var(--mono);
-  font-size: 12px;
+  font-size: 11px;
   padding: 6px 10px;
   border-radius: 4px;
   border: 1px solid var(--danger);
@@ -1205,7 +1228,7 @@ body {
 
 .ctl-row .ctl-button {
   padding: 1px 5px;
-  font-size: 10px;
+  font-size: 11px;
   font-family: var(--mono);
   letter-spacing: 0.08em;
   background: transparent;
@@ -1213,12 +1236,12 @@ body {
   white-space: nowrap;
 }
 .ctl-row .ctl-question {
-  font-size: 10px;
+  font-size: 11px;
 }
 .ctl-row .ctl-yes,
 .ctl-row .ctl-no {
   padding: 1px 5px;
-  font-size: 10px;
+  font-size: 11px;
 }
 
 /* --------------------------------------------------------------- tray -- */
@@ -1326,7 +1349,7 @@ body {
   border-left-color: var(--spot);
 }
 .toast-kind {
-  font-size: 10px;
+  font-size: 11px;
   letter-spacing: 0.18em;
   text-transform: uppercase;
   color: var(--muted);
@@ -1342,7 +1365,7 @@ body {
 /* Helios display 30. The gate is a full page with one sentence on it; 40px
    was off the scale and bought nothing a 30 does not. */
 .gate h1 {
-  font-size: 30px;
+  font-size: 24px;
   margin: 8px 0 12px;
 }
 .gate-note {
@@ -1371,7 +1394,7 @@ body {
 
 .t-head-line {
   margin: 0;
-  font-size: 14px;
+  font-size: 13px;
   letter-spacing: 0.14em;
   color: var(--muted);
 }
@@ -1381,7 +1404,7 @@ body {
 .t-round-card {
   margin: 0;
   align-self: flex-start;
-  font-size: 14px;
+  font-size: 13px;
   color: var(--muted);
 }
 .t-round-card[hidden] {
@@ -1427,7 +1450,7 @@ body {
   padding: 4px 8px;
   border-radius: 5px;
   background: var(--panel-2);
-  font-size: 14px;
+  font-size: 13px;
   overflow: hidden;
 }
 .t-answer-bar {
@@ -1478,7 +1501,7 @@ body {
    on --ground. */
 .t-counts {
   margin: 0;
-  font-size: 18px;
+  font-size: 16px;
   font-weight: 600;
 }
 .t-counts.all-in {
@@ -1628,7 +1651,7 @@ body {
    Inherits --ink: 16.80:1 dark, 18.72:1 light on --ground. */
 .a-item {
   margin: 0;
-  font-size: 18px;
+  font-size: 16px;
   line-height: 1.35;
 }
 .a-note {
@@ -1660,7 +1683,7 @@ body {
 .a-bridge-broken,
 .a-bridge-across {
   margin: 0;
-  font-size: 12px;
+  font-size: 11px;
   color: var(--muted);
 }
 .a-bridge-answer {
@@ -1673,7 +1696,7 @@ body {
 }
 .a-bridge-mark {
   grid-row: span 2;
-  font-size: 10px;
+  font-size: 11px;
   letter-spacing: 0.1em;
   color: var(--muted);
 }
@@ -1719,12 +1742,12 @@ body {
 .a-split-text {
   margin: 0.3rem 0 0;
   color: var(--muted);
-  font-size: 12px;
+  font-size: 11px;
 }
 .a-floor-list {
   margin: 0;
   color: var(--arc-lounge);
-  font-size: 12px;
+  font-size: 11px;
   word-break: break-all;
 }
 .a-backing {
@@ -1741,7 +1764,7 @@ body {
   display: flex;
   align-items: baseline;
   gap: 0.45rem;
-  font-size: 12px;
+  font-size: 11px;
 }
 .a-backing-name {
   color: var(--muted);
@@ -1816,7 +1839,7 @@ body {
   text-align: center;
 }
 .pf-word {
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 600;
   letter-spacing: 0.16em;
   text-transform: uppercase;
@@ -1908,7 +1931,7 @@ body {
    a row and not a warning — the confirmation is that the list is right there
    and nothing has gone to the room. */
 .rb-drop {
-  font-size: 15px;
+  font-size: 16px;
 }
 .rb-drop:hover:not(:disabled) {
   border-color: var(--danger);
@@ -2001,7 +2024,7 @@ body {
 }
 .hc-title {
   font-weight: 600;
-  font-size: 14px;
+  font-size: 13px;
 }
 /* On screen now, said twice: a dot in the live green and the word beside it.
    --live is --nomad-ink, 8.30:1 dark and 4.53:1 light on --panel-2. */
@@ -2011,7 +2034,7 @@ body {
 }
 .hc-onair {
   color: var(--live);
-  font-size: 10px;
+  font-size: 11px;
   letter-spacing: 0.12em;
   text-transform: uppercase;
 }
@@ -2081,7 +2104,7 @@ body {
 }
 .a-setup-name {
   font-weight: 600;
-  font-size: 14px;
+  font-size: 13px;
 }
 .a-setup-what {
   font-size: 13px;
@@ -2182,7 +2205,7 @@ body {
    agree with the button. --ink: 16.80:1 dark, 18.72:1 light. */
 .a-upnext {
   margin: 0;
-  font-size: 18px;
+  font-size: 16px;
   color: var(--ink);
 }
 .a-upnext[hidden] {
@@ -2273,7 +2296,7 @@ body.driving .cols {
 .dv-waiting {
   margin: 0;
   max-width: 60ch;
-  font-size: 14px;
+  font-size: 13px;
   color: var(--muted);
 }
 .dv-waiting[hidden] {
@@ -2365,7 +2388,7 @@ body.driving .cols {
 .rs-loses {
   margin: 0;
   color: var(--ink);
-  font-size: 14px;
+  font-size: 13px;
   line-height: 1.4;
   max-width: 70ch;
 }
@@ -2499,7 +2522,7 @@ body.driving .cols {
 }
 .cp-lifecycle .ctl-primary .ctl-button {
   min-width: 0;
-  font-size: 15px;
+  font-size: 16px;
   padding: 10px 12px;
 }
 
@@ -2652,7 +2675,7 @@ body.driving .cols {
 }
 .cp-key-cap {
   flex: none;
-  font-size: 10px;
+  font-size: 11px;
   letter-spacing: 0.1em;
   color: var(--muted);
   border: 1px solid var(--line);
