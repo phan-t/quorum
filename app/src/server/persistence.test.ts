@@ -239,16 +239,33 @@ describe("restart recovery", () => {
     assert.equal(back?.secrets.hostTokenHash, s.created.runtime.secrets.hostTokenHash);
   });
 
-  it("leaves closed and draft sessions where they are", async () => {
+  it("recovers a draft session, and leaves a closed one where it is", async () => {
+    // A draft session is one created but not yet opened, which is exactly
+    // when a host sets one up in advance. Leaving it out meant a deploy — or
+    // ECS replacing a task — rebuilt the registry without it, and a correct
+    // console link answered `bad_token`. The rows were all still in the
+    // store, so the CSV export kept working while the socket did not, which
+    // is what made it confusing. This happened for real the day before an
+    // event; the test that used to be here asserted the behaviour that broke
+    // it.
+    //
+    // A closed session stays out: it is finished, there is nothing to drive,
+    // and there could be a great many inside the retention window.
     const store = new MemoryStore();
     const s = await playAnAfternoon(store);
     s.created.runtime.apply({ type: "close" }, Date.now());
-    freshSession(store); // never opened: still draft
+    const draft = freshSession(store); // never opened: still draft
     await s.persister.drain();
 
     const registry2 = new SessionRegistry(new Persister(store, () => {}));
     const recovered = await recoverSessions(store, registry2, () => {});
-    assert.deepEqual(recovered, []);
+
+    assert.equal(recovered.length, 1, "the draft session, and only it");
+    assert.ok(
+      registry2.bySessionId(draft.sid),
+      "a draft session is reachable by its host token after a restart",
+    );
+    assert.equal(registry2.bySessionId(s.sid), undefined, "the closed one is not");
   });
 
   it("replays events written after the snapshot", async () => {

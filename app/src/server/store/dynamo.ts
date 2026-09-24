@@ -290,10 +290,25 @@ export class DynamoStore implements SessionStore {
       } = await this.doc.send(
         new ScanCommand({
           TableName: this.table,
-          FilterExpression: "SK = :meta AND #phase IN (:lobby, :running)",
+          // `draft` is in here because a session is created before it is
+          // opened, and that gap is exactly when a host sets one up in
+          // advance. Without it a deploy — or ECS replacing a task for its
+          // own reasons — rebuilds the registry without the session, and the
+          // console gets `bad_token` for a link that was correct. The rows
+          // are all still in the table, which is the confusing part: the CSV
+          // export keeps working because it reads the store directly, while
+          // the socket needs the registry. This bit a real setup the day
+          // before an event.
+          //
+          // `closed` stays out. A closed session is finished, there is
+          // nothing to drive, and inside the 90-day retention window there
+          // could be a lot of them to pull at boot.
+          FilterExpression:
+            "SK = :meta AND #phase IN (:draft, :lobby, :running)",
           ExpressionAttributeNames: { "#phase": "phase" },
           ExpressionAttributeValues: {
             ":meta": "META",
+            ":draft": "draft",
             ":lobby": "lobby",
             ":running": "running",
           },

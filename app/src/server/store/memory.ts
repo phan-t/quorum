@@ -104,7 +104,11 @@ export class MemoryStore implements SessionStore {
   async loadRecoverable(): Promise<LoadedSession[]> {
     const out: LoadedSession[] = [];
     for (const [sid, row] of this.rows) {
-      if (row.meta?.phase !== "lobby" && row.meta?.phase !== "running") continue;
+      // Mirrors the DynamoDB scan, `draft` included — see the note there.
+      // These two must agree, or the tests pass against behaviour production
+      // does not have.
+      const phase = row.meta?.phase;
+      if (phase !== "draft" && phase !== "lobby" && phase !== "running") continue;
       const s = this.assemble(sid, row);
       if (s) out.push(s);
     }
