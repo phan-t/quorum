@@ -384,15 +384,13 @@ body {
   align-items: baseline;
   gap: 10px;
 }
-/* Which segment is up: the top of the hierarchy in this column, so it is the
-   one label on the console that is bigger than the body rather than smaller.
-   Colour unchanged (--muted, 5.84:1 dark / 5.38:1 light on --ground); the
-   size and the tracking do the work. Placed after the 11px label rule above,
-   which it has to beat at equal specificity. */
-.panel-head .label {
-  font-size: 16px;
-  letter-spacing: 0.16em;
-}
+/* The head used to open with the segment's name, set at 16px: the top of the
+   hierarchy in this column. It is gone. The rail two inches to the left marks
+   the same step with a dot against it and says the same word, so the name was
+   on screen twice in every segment; and once a holding step is called by the
+   card it shows, the two copies could not even agree on the word. What is
+   left is the half nothing else says: the phase.
+   --muted on --ground is 5.84:1 dark and 5.38:1 light. */
 .panel-sub {
   color: var(--muted);
   font-size: 11px;
@@ -1873,14 +1871,160 @@ body {
   display: contents;
 }
 
-/* The holding card's two fields are one block with two homes — the lobby
-   panel before the session starts, the Holding card segment once it is
-   running. Both wrappers are transparent so the rows lay out as direct
-   children of whichever block they are in, and moving them cannot change how
-   they look. See `placeHolding`. */
-.holding-fields,
-.holding-slot {
-  display: contents;
+/* ------------------------------------------------- holding cards -- */
+
+/*
+ * The card editor, in the lobby panel.
+ *
+ * The same row as the runbook's and the arcade's, minus the grip and the
+ * In/Out button and plus the two fields: a host who has learned one of these
+ * lists has learned all three. The fields are the console's ordinary `.field`
+ * at 32px, so nothing here is a new control.
+ */
+.hc-edit .field-row .label {
+  width: 5.5em;
+}
+
+/* Add a card, add a holding step. Quiet: it is pressed once or twice during
+   setup and never again, so it does not compete with the rows above it.
+   --muted on --panel is 5.41:1 dark and 5.19:1 light; the border is non-text
+   UI at a 3:1 floor. */
+.a-setup-addrow {
+  display: flex;
+}
+.a-setup-add {
+  background: var(--panel);
+  border: 1px dashed var(--line);
+  border-radius: 4px;
+  color: var(--muted);
+  font-size: 13px;
+  padding: 6px 10px;
+}
+.a-setup-add:hover:not(:disabled) {
+  border-color: var(--muted);
+  color: var(--ink);
+}
+.a-setup-add:disabled {
+  color: var(--dim);
+  cursor: default;
+}
+
+/* Delete a card, or a holding step the host added. The same size and shape as
+   the two move arrows beside it, because it is the third thing you can do to
+   a row and not a warning — the confirmation is that the list is right there
+   and nothing has gone to the room. */
+.rb-drop {
+  font-size: 15px;
+}
+.rb-drop:hover:not(:disabled) {
+  border-color: var(--danger);
+  color: var(--danger);
+}
+
+/* Which card a holding step shows. A native select, so it is keyboard
+   operable everywhere without this file reimplementing one. --ink on --panel
+   is 16.80:1 dark and 18.72:1 light. */
+.rb-card-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 2px;
+  min-width: 0;
+}
+.rb-card {
+  flex: 1;
+  min-width: 0;
+  max-width: 260px;
+  height: 26px;
+  padding: 0 6px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 3px;
+  color: var(--ink);
+  font-size: 13px;
+}
+.rb-card:focus {
+  border-color: var(--ibm-blue);
+}
+
+/* A step pointing at a card that has been deleted. On --panel rather than the
+   row's --panel-2, because --sealed is measured against it: #ffcf25 on
+   #14141d is 12.38:1 dark, #926700 on #fafafa is 4.83:1 light. */
+.rb-missing {
+  color: var(--sealed);
+  background: var(--panel);
+  border-radius: 4px;
+  padding: 4px 6px;
+  margin-top: 2px;
+}
+
+/*
+ * The rail's mark for the same thing. The word does the work; the border is
+ * the colour, which keeps the text on --ink (14.86:1 dark on --panel-2,
+ * 17.53:1 light) rather than on a token that is at its floor there. --sealed
+ * as a 1px border is non-text UI against a 3:1 floor, and it clears it on
+ * both themes and both row states (11.29:1 / 4.50:1 at worst).
+ */
+.seg-phase.is-missing {
+  color: var(--ink);
+  border-color: var(--sealed);
+}
+
+/*
+ * The Holding card segment, once the session is running: every card with a
+ * button, and no typing. The row wraps at a narrow panel rather than pushing
+ * the button off the edge.
+ */
+.hc-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.hc-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  background: var(--panel-2);
+}
+.hc-main {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  flex: 1;
+  min-width: 12em;
+}
+.hc-name {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+}
+.hc-title {
+  font-weight: 600;
+  font-size: 14px;
+}
+/* On screen now, said twice: a dot in the live green and the word beside it.
+   --live is --nomad-ink, 8.30:1 dark and 4.53:1 light on --panel-2. */
+.hc-now {
+  color: var(--live);
+  font-size: 11px;
+}
+.hc-onair {
+  color: var(--live);
+  font-size: 10px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+.hc-line {
+  font-size: 13px;
+  color: var(--muted);
+}
+/* No fields in this block, so nothing to line up with. */
+.hc-actions {
+  padding-left: 0;
 }
 
 .a-setup {

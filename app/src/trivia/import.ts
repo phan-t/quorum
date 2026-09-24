@@ -289,10 +289,13 @@ function readQuestion(at: number, raw: unknown, errors: ImportError[]): Question
 /**
  * `"C"`, or `["A", "C"]` when more than one option counts.
  *
- * Numbers are refused with a message that names the fix. The file this format
- * replaced marked the answer with a 1-based column number, so a number here is
- * almost always a half-finished migration rather than a new mistake — and it
- * is the one mistake that produces a working import of the wrong answer.
+ * Numbers are refused, and the message deliberately **does not pick a letter**.
+ * The file this format replaced marked the answer with a 1-based column number,
+ * so a `2` here is most likely someone's half-finished migration meaning the
+ * second answer — but it is just as readable as a 0-based index meaning the
+ * third. Naming one of them would be a confident wrong answer in the one place
+ * this format exists to make impossible, so the message gives both readings and
+ * makes the author choose.
  */
 function readCorrect(
   raw: unknown,
@@ -302,7 +305,7 @@ function readCorrect(
   const letters = typeof raw === "string" ? [raw] : Array.isArray(raw) ? raw : null;
   if (letters === null) {
     if (typeof raw === "number") {
-      fail("correct", `Use the answer's letter, not a number: "${ANSWER_LETTERS[raw] ?? "A"}" rather than ${raw}.`);
+      fail("correct", numberMessage(raw));
     } else {
       fail("correct", 'Missing. Give the correct answer\'s letter, like "C".');
     }
@@ -316,7 +319,7 @@ function readCorrect(
   const correct: number[] = [];
   for (const entry of letters) {
     if (typeof entry === "number") {
-      fail("correct", `Use the answer's letter, not a number: "${ANSWER_LETTERS[entry] ?? "A"}" rather than ${entry}.`);
+      fail("correct", numberMessage(entry));
       continue;
     }
     if (typeof entry !== "string") {
@@ -342,6 +345,24 @@ function readCorrect(
 
   correct.sort((a, b) => a - b);
   return correct;
+}
+
+/**
+ * Both readings of a number, never one.
+ *
+ * The old CSV counted answers from 1 and the engine counts them from 0, so a
+ * bare `2` is "B" to whoever wrote the CSV and "C" to whoever wrote the code.
+ * Guessing gets it right half the time and is wrong silently the other half,
+ * which is the failure this whole format was chosen to remove.
+ */
+function numberMessage(n: number): string {
+  const oneBased = ANSWER_LETTERS[n - 1];
+  const zeroBased = ANSWER_LETTERS[n];
+  const readings =
+    oneBased && zeroBased
+      ? ` Counting answers from 1, as the old CSV did, ${n} is "${oneBased}"; counting from 0 it is "${zeroBased}".`
+      : "";
+  return `Use the answer's letter, not a number.${readings} Write the one you mean.`;
 }
 
 function readOptionalText(

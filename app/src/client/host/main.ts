@@ -27,8 +27,6 @@ import {
   ARCADE_ROUND_LABEL,
   ARCADE_ROUND_NUMBER,
   LIGHT_FACE,
-  SEGMENTS,
-  SEGMENT_BUILT,
   SEGMENT_LABEL,
   SEGMENT_PHASE,
   answerTiles,
@@ -63,21 +61,48 @@ import {
   type ArcadePlan,
 } from "./plan.ts";
 import {
+  HOLDING_STEPS_MAX,
   TRAY_MAX,
   TRAY_MIN,
+  addHoldingStep,
+  anchorHoldingCards,
   clampTray,
   defaultRunbook,
   dropRunbook,
+  entryById,
+  holdingSteps,
   isLastIncludedSegment,
+  isRemovableStep,
   moveRunbook,
-  nextInRunbook,
+  nextEntryAfter,
   parseRunbook,
   parseTrayWidth,
-  runbookIncluded,
+  removeStep,
+  runbookIncludedEntries,
   runbookRail,
+  setEntryCard,
   toggleRunbook,
   type Runbook,
+  type RunbookEntry,
 } from "./runbook.ts";
+import {
+  CARD_LINE_MAX,
+  CARD_MAX,
+  CARD_TITLE_MAX,
+  addCard,
+  cardById,
+  cardMatching,
+  cardName,
+  defaultDeck,
+  editCard,
+  isLastCard,
+  migrateDeck,
+  moveCard,
+  parseDeck,
+  removeCard,
+  type HoldingCard,
+  type HoldingDeck,
+} from "./cards.ts";
 import { createScoringPanel } from "./scoring.ts";
 import { createParticipantView } from "../participant/view.ts";
 
@@ -186,13 +211,11 @@ const rail = h("aside", { class: "rail" }, [
   h("p", { class: "mono rail-keys", text: KEYS_HINT }),
 ]);
 
-const panelKind = h("span", { class: "label" });
 const panelSub = h("span", { class: "mono panel-sub" });
 const panelBody = h("div", { class: "panel-body" });
 const primary = primaryControl((c) => {
   const plan = primaryPlan();
-  if (plan.cmd === null) return;
-  issue(plan.cmd, c);
+  plan.fire?.(c);
 });
 
 /**
@@ -250,7 +273,7 @@ const cpLifecycle = h("div", {
 });
 
 const panel = h("main", { class: "panel" }, [
-  h("div", { class: "panel-head" }, [panelKind, panelSub]),
+  h("div", { class: "panel-head" }, [panelSub]),
   panelBody,
   scoring.el,
   panelFoot,
@@ -880,6 +903,108 @@ replace(trayControls, [
 ]);
 
 /* ------------------------------------------------------------------ */
+/* The holding cards                                                   */
+/* ------------------------------------------------------------------ */
+
+/**
+ * The deck: every holding card this event has, in the host's order.
+ *
+ * Loaded before the runbook because the runbook points into it — a holding
+ * step that has never been told which card it shows is anchored to the first
+ * one, which is where the single card the previous build stored ends up.
+ *
+ * Two keys, and the older one is read rather than dropped:
+ *
+ *   quorum.host.cards.v1    the deck. What this build writes.
+ *   quorum.host.holding.v1  `{title, line}`. What the last build wrote, and
+ *                           what a host who set their card up last night has.
+ *
+ * The old key is also kept *up to date* with whatever card is first in the
+ * deck. Nothing here reads it again once the new key exists, and the console
+ * would work perfectly well without writing it. It is written because the
+ * afternoon this ships into is tomorrow: if this build has to be rolled back
+ * at 13:50, the build it rolls back to finds a card where it left one.
+ */
+const CARDS_KEY = "quorum.host.cards.v1";
+const HOLDING_KEY = "quorum.host.holding.v1";
+
+let deck: HoldingDeck = defaultDeck();
+
+/** True when the deck came from the old single-card key, for the note below. */
+let deckMigrated = false;
+
+try {
+  const stored = parseDeck(localStorage.getItem(CARDS_KEY));
+  if (stored !== null) {
+    deck = stored;
+  } else {
+    const legacy = migrateDeck(localStorage.getItem(HOLDING_KEY));
+    if (legacy !== null) {
+      deck = legacy;
+      deckMigrated = true;
+    }
+  }
+} catch {
+  // Storage off, or blocked. One blank card and a working console.
+}
+
+function saveDeck(): void {
+  try {
+    localStorage.setItem(CARDS_KEY, JSON.stringify({ cards: deck }));
+    // The rollback copy. See above.
+    const first = deck[0];
+    localStorage.setItem(
+      HOLDING_KEY,
+      JSON.stringify({ title: first?.title ?? "", line: first?.line ?? "" }),
+    );
+  } catch {
+    // See the runbook: it still works, it just will not survive a reload.
+  }
+}
+
+// Written straight back, so the migration happens once and a console reloaded
+// after it is an ordinary console with a deck.
+if (deckMigrated) saveDeck();
+
+/**
+ * The card a runbook step shows, or `null` when the step points at a card
+ * that is not there any more.
+ *
+ * `null` is a state a host can produce — delete a card that two steps were
+ * using — and it is deliberately not repaired behind their back. A step that
+ * silently started showing different words would be worse than a step that
+ * says, in the runbook and in the pre-flight list, that it needs a card. The
+ * run of show is never broken by it: the step still walks, and what it puts
+ * in front of the room is the standby card below.
+ *
+ * A step with no card id at all is the previous build's stored runbook, and
+ * it reads as the first card. `anchorHoldingCards` writes that id in at
+ * start-up so the implicit reading is only ever a fallback.
+ */
+function cardForEntry(entry: RunbookEntry): HoldingCard | null {
+  if (entry.kind !== "holding") return null;
+  if (entry.card === undefined) return deck[0] ?? null;
+  return cardById(deck, entry.card);
+}
+
+/**
+ * What goes up when there is no card to put up: SHIFT+H before anybody has
+ * written anything, or a step whose card was deleted. Neutral and true.
+ */
+const STANDBY_TITLE = "Back shortly";
+const STANDBY_LINE = "Sit tight — we'll pick this up in a moment.";
+
+function cardTitle(card: HoldingCard | null): string {
+  const t = card?.title.trim() ?? "";
+  return t === "" ? STANDBY_TITLE : t;
+}
+
+function cardLine(card: HoldingCard | null): string {
+  const l = card?.line.trim() ?? "";
+  return l === "" ? STANDBY_LINE : l;
+}
+
+/* ------------------------------------------------------------------ */
 /* The runbook                                                         */
 /* ------------------------------------------------------------------ */
 
@@ -902,6 +1027,26 @@ try {
   // Storage off, or blocked. The default runbook is the shipped run of show.
 }
 
+// Every holding step gets the id of the card it shows written into it. For a
+// runbook stored by the build before this one that is the first card, which
+// is the card the old single-card key migrated into — so a host who wrote
+// "Agentic Security TTX" last night finds their runbook still showing it.
+{
+  const first = deck[0];
+  if (first !== undefined) {
+    const anchored = anchorHoldingCards(runbook, first.id);
+    if (anchored !== runbook) {
+      runbook = anchored;
+      // Written back once, for the same reason the deck is.
+      try {
+        localStorage.setItem(RUNBOOK_KEY, JSON.stringify(runbook));
+      } catch {
+        // Storage off. The anchoring is redone on the next load.
+      }
+    }
+  }
+}
+
 function saveRunbook(): void {
   try {
     localStorage.setItem(RUNBOOK_KEY, JSON.stringify(runbook));
@@ -911,45 +1056,242 @@ function saveRunbook(): void {
   }
 }
 
-const segmentRows = new Map<
-  Segment,
-  { li: HTMLLIElement; button: HTMLButtonElement; tag: HTMLElement }
->();
-for (const seg of SEGMENTS) {
+/* ------------------------------------------------------------------ */
+/* Where the host is in the runbook                                    */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Which *step* the console believes the room is on.
+ *
+ * This did not exist before, and it did not have to: a runbook held each
+ * segment at most once, so "the segment the room is in" and "the step we are
+ * on" were the same fact and the wire carried it. With two holding steps they
+ * come apart \u2014 `segment: "holding"` no longer says whether that is the TTX
+ * before trivia or the coffee break after the arcade, and the space bar has
+ * to know which, or it walks the wrong way.
+ *
+ * So the console keeps a cursor. It moves when the host advances, when they
+ * click a step in the rail, when they press a Show button, and when SHIFT+H
+ * puts a card up. Everything else leaves it alone.
+ *
+ * The wire still wins over it. `currentEntry` checks the cursor against the
+ * segment the room is actually in and re-derives it when they disagree, which
+ * is what happens when a step is deleted underneath it, when a second console
+ * moves the session, or when a reload lands in the middle of the afternoon.
+ * The engine is never asked about any of this: a step id is console
+ * vocabulary and putting one on the wire would be a protocol change for a
+ * feature that does not need one.
+ */
+const AT_KEY = "quorum.host.at.v1";
+
+let atSid: string | null = null;
+let atId: string | null = null;
+
+/** The card the console last put in front of the room, for SHIFT+H. */
+let lastShownCardId: string | null = null;
+
+/**
+ * Picked back up after a reload, and only for the session it was written in.
+ * A console reloaded at 14:45 between two holding steps comes back on the
+ * right one; a console pointed at a different session starts from what the
+ * wire says.
+ */
+function loadAt(sid: string): void {
+  if (atSid === sid) return;
+  atSid = sid;
+  atId = null;
+  try {
+    const raw = localStorage.getItem(AT_KEY);
+    if (raw === null) return;
+    const v: unknown = JSON.parse(raw);
+    if (typeof v !== "object" || v === null) return;
+    const o = v as { sid?: unknown; id?: unknown };
+    if (o.sid !== sid) return;
+    if (typeof o.id === "string") atId = o.id;
+    if (typeof (o as { card?: unknown }).card === "string") {
+      lastShownCardId = (o as { card: string }).card;
+    }
+  } catch {
+    // Storage off. The wire says which segment; that is enough to run on.
+  }
+}
+
+function saveAt(): void {
+  if (atSid === null) return;
+  try {
+    localStorage.setItem(
+      AT_KEY,
+      JSON.stringify({ sid: atSid, id: atId, card: lastShownCardId }),
+    );
+  } catch {
+    // See the runbook: it still works, it just will not survive a reload.
+  }
+}
+
+/**
+ * The step the console is on, checked against the room.
+ *
+ * The cursor is trusted only while it agrees with the segment the wire says
+ * is up. When it does not, the room wins and the first step of that kind is
+ * taken instead \u2014 preferring one that is in the runbook, because a host who
+ * jumped to a segment they had taken out still wants the plan to carry on
+ * from the nearest thing in it.
+ */
+function currentEntry(s: RenderState): RunbookEntry | null {
+  const rail = runbookRail(runbook);
+  const at = atId === null ? undefined : rail.find((e) => e.id === atId);
+  if (at !== undefined && at.kind === s.segment) return at;
+  return (
+    rail.find((e) => e.kind === s.segment && e.included) ??
+    rail.find((e) => e.kind === s.segment) ??
+    null
+  );
+}
+
+/** The step that shows this card, preferring one that is in the runbook. */
+function stepForCard(cardId: string): RunbookEntry | null {
+  const steps = holdingSteps(runbook).filter((e) => e.card === cardId);
+  return steps.find((e) => e.included) ?? steps[0] ?? null;
+}
+
+/** The first holding row in the rail \u2014 where the cursor lands when a card
+ *  that no step owns goes up, so the rail still marks the right kind of row. */
+function firstHoldingStepId(): string | null {
+  return holdingSteps(runbook)[0]?.id ?? null;
+}
+
+/**
+ * Go to a step: send its card if it has one, then switch the room to it.
+ *
+ * The card goes first so the room never sees the previous card's second line
+ * under this one's title \u2014 the same order SHIFT+H has always used. Two
+ * commands and no new ones: `setHolding` has always taken a title and a line.
+ */
+function goToEntry(entry: RunbookEntry, from: Control | null): void {
+  atId = entry.id;
+  if (entry.kind === "holding") {
+    const card = cardForEntry(entry);
+    lastShownCardId = card?.id ?? null;
+    issue({ name: "holding", title: cardTitle(card), line: cardLine(card) }, from);
+  }
+  issue({ name: "segment", kind: entry.kind }, from);
+  saveAt();
+  // Nothing is re-rendered here on purpose. The state that comes back is what
+  // repaints the console, as it was before any of this existed — and a render
+  // against the state we are *leaving* would throw the cursor away: it would
+  // see a holding step against a segment that is still trivia, call the
+  // cursor wrong, and re-derive it to the row the room is on. The next real
+  // state arrives with `segment: "holding"`, the cursor agrees with it, and
+  // the console stays on the step the host actually asked for rather than on
+  // whichever holding step happens to come first.
+}
+
+/**
+ * Put one card up, from a Show button or from SHIFT+H, wherever the host is.
+ *
+ * The cursor follows it onto the step that owns the card, so the rail keeps
+ * marking a row of the kind the room is actually in and the main button keeps
+ * offering what comes after it. That is what the console did before this
+ * change, when there was one holding row for it to land on.
+ */
+function showCard(card: HoldingCard | null, from: Control | null): void {
+  const s = lastState;
+  if (s === null) return;
+  if (s.phase !== "running") {
+    (from ?? primary).flash("nothing is in front of the room yet");
+    return;
+  }
+  lastShownCardId = card?.id ?? null;
+  issue(
+    { name: "holding", title: cardTitle(card), line: cardLine(card) },
+    from ?? primary,
+  );
+  if (s.segment !== "holding") {
+    issue({ name: "segment", kind: "holding" }, from ?? primary);
+  }
+  const step = card === null ? null : stepForCard(card.id);
+  atId = step?.id ?? firstHoldingStepId();
+  saveAt();
+  // See `goToEntry`: the state coming back is the repaint, and a render
+  // against the segment we are leaving would undo the cursor.
+}
+
+interface RailRow {
+  readonly li: HTMLLIElement;
+  readonly button: HTMLButtonElement;
+  readonly mark: HTMLElement;
+  readonly name: HTMLElement;
+  readonly tag: HTMLElement;
+}
+
+/**
+ * One row per *step*, not per segment.
+ *
+ * It used to be per segment, built once at start-up, because a runbook could
+ * hold each segment at most once. A runbook with two holding steps in it has
+ * two rows that are both `holding`, and they are not interchangeable: one is
+ * the TTX and one is the coffee break, and the whole point of naming them is
+ * that the rail reads like the afternoon.
+ *
+ * Keyed by step id and cached, so the rows are still moved rather than
+ * rebuilt — nothing the host is pointing at changes identity underneath them
+ * — and rows for steps that no longer exist are dropped.
+ */
+const railRows = new Map<string, RailRow>();
+
+function railRow(id: string): RailRow {
+  const existing = railRows.get(id);
+  if (existing !== undefined) return existing;
+  const mark = h("span", { class: "seg-mark", text: "○" });
+  const name = h("span", { class: "seg-name" });
   const tag = h("span", { class: "seg-phase mono", attrs: { hidden: true } });
-  const button = h("button", { class: "seg", type: "button" }, [
-    h("span", { class: "seg-mark", text: "○" }),
-    h("span", { class: "seg-name", text: SEGMENT_LABEL[seg] }),
-    SEGMENT_BUILT[seg]
-      ? tag
-      : h("span", { class: "seg-phase mono", text: `P${SEGMENT_PHASE[seg]}` }),
-  ]);
+  const button = h("button", { class: "seg", type: "button" }, [mark, name, tag]);
   handsBackSpace(button);
-  button.addEventListener("click", () => issue({ name: "segment", kind: seg }, null));
+  button.addEventListener("click", () => {
+    const entry = entryById(runbook, id);
+    if (entry === null) return;
+    goToEntry(entry, null);
+  });
   const li = h("li", {}, [button]);
-  railSegments.appendChild(li);
-  segmentRows.set(seg, { li, button, tag });
+  const row: RailRow = { li, button, mark, name, tag };
+  railRows.set(id, row);
+  return row;
 }
 
 /**
  * The rail, in the host's order.
  *
- * Every segment is listed, including the ones taken out of the runbook —
+ * Every step is listed, including the ones taken out of the runbook —
  * marked, and still one click away. Out of the runbook means "not on the
  * space bar", never "not at all": the rail is also the way off the plan when
  * the room runs long, and a console that could not jump to trivia because
  * trivia was not in the plan would be a console that had lost a feature at
- * 2:45pm. The rows are moved rather than rebuilt, so nothing the host is
- * pointing at changes identity underneath them.
+ * 2:45pm.
  */
 function renderRail(): void {
-  for (const entry of runbookRail(runbook)) {
-    const row = segmentRows.get(entry.kind);
-    if (row === undefined) continue;
+  const wanted = runbookRail(runbook);
+  const seen = new Set<string>();
+  for (const entry of wanted) {
+    const row = railRow(entry.id);
+    seen.add(entry.id);
+    // appendChild on a node that is already a child *moves* it, which is how
+    // the order follows the runbook without anything being rebuilt.
     railSegments.appendChild(row.li);
+    setText(row.name, entryName(entry));
+    setAttr(row.button, "aria-label", entryFullName(entry));
     row.button.classList.toggle("is-out", !entry.included);
-    row.tag.hidden = entry.included;
-    setText(row.tag, entry.included ? "" : "out");
+    // A step pointing at a card that is not there says so here as well as in
+    // setup: the rail is where the host looks while the room is waiting.
+    const missing = entry.kind === "holding" && cardForEntry(entry) === null;
+    const tag = missing ? "no card" : entry.included ? "" : "out";
+    row.tag.hidden = tag === "";
+    row.tag.classList.toggle("is-missing", missing);
+    setText(row.tag, tag);
+  }
+  for (const [id, row] of railRows) {
+    if (seen.has(id)) continue;
+    row.li.remove();
+    railRows.delete(id);
   }
 }
 
@@ -1196,6 +1538,7 @@ function preflightRow(extra?: HTMLElement): PreflightRow {
    anyway. If it comes back it should come back as a real check, which needs a
    field on the wire. */
 
+const pfCards = preflightRow();
 const pfQuestions = preflightRow();
 const pfArcade = preflightRow();
 const pfPeople = preflightRow();
@@ -1203,6 +1546,7 @@ const pfPeople = preflightRow();
 const preflight = h("section", { class: "pf" }, [
   h("p", { class: "label", text: "Preflight checklist" }),
   h("ul", { class: "pf-list" }, [
+    pfCards.el,
     pfQuestions.el,
     pfArcade.el,
     pfPeople.el,
@@ -1231,30 +1575,78 @@ const preflight = h("section", { class: "pf" }, [
  * same row twice.
  */
 /**
- * What the console calls a segment.
+ * What the console calls a step.
  *
  * The holding card is the segment an *off-platform* activity is run in — the
  * TTX has no Quorum surface, so for thirty-five minutes the holding card is
- * the TTX. Once it has been given a title, the console calls it by that title
- * instead, so the runbook and the rail read like the actual run of show:
- * `Lobby · Agentic Security TTX · Trivia · Arcade` rather than a generic
- * placeholder sitting where the afternoon's first activity should be.
+ * the TTX. So a holding step is called by the name of the card it shows, and
+ * the runbook and the rail read like the actual run of show:
+ * `Lobby · Agentic Security TTX · Trivia · Arcade · Coffee break · Standings`
+ * rather than the same generic placeholder twice.
  *
  * Console only. The room sees the card itself, which has always carried the
  * title; this is about the host being able to read their own plan.
  */
 const SEGMENT_MAX_NAME = 22;
-function segmentName(seg: Segment): string {
-  if (seg !== "holding") return SEGMENT_LABEL[seg];
-  const given = holdingTitle.value.trim();
-  if (given === "") return SEGMENT_LABEL[seg];
-  return given.length > SEGMENT_MAX_NAME
-    ? `${given.slice(0, SEGMENT_MAX_NAME - 1)}\u2026`
-    : given;
+
+function entryFullName(entry: RunbookEntry): string {
+  if (entry.kind !== "holding") return SEGMENT_LABEL[entry.kind];
+  const card = cardForEntry(entry);
+  // A step whose card was deleted keeps the generic name rather than
+  // borrowing another card's: the missing card is said in its own words, on
+  // the row and in the pre-flight list, and a name that lied would be worse.
+  if (card === null) return SEGMENT_LABEL.holding;
+  return cardName(card);
+}
+
+/** The same name, cut to something a 216px rail can hold. */
+function entryName(entry: RunbookEntry): string {
+  const full = entryFullName(entry);
+  return full.length > SEGMENT_MAX_NAME
+    ? `${full.slice(0, SEGMENT_MAX_NAME - 1)}\u2026`
+    : full;
 }
 
 const runbookRows = h("div", { class: "a-setup-rows" });
 const runbookNote = h("p", { class: "pb-note a-setup-note", attrs: { hidden: true } });
+
+/**
+ * Another holding step.
+ *
+ * A runbook can hold several, each showing a different card, which is what
+ * lets one afternoon read `Lobby \u00b7 Agentic Security TTX \u00b7 Trivia \u00b7 Arcade \u00b7
+ * Coffee break \u00b7 Standings \u00b7 Final`. The new step goes on the end, showing the
+ * first card in the list, and the host moves it and points it at the card
+ * they mean \u2014 a row that appeared in the middle of the list would be a list
+ * that had rearranged itself under them.
+ */
+const runbookAdd = handsBackSpace(
+  h("button", {
+    class: "a-setup-add",
+    type: "button",
+    text: "+ Add a holding step",
+    attrs: {
+      "aria-label": "Add another holding step to the runbook",
+      title: "A second place in the afternoon that shows a holding card",
+    },
+  }),
+) as HTMLButtonElement;
+
+runbookAdd.addEventListener("click", () => {
+  const first = deck[0];
+  if (first === undefined) return;
+  changeRunbook(
+    addHoldingStep(runbook, first.id),
+    `That is as many holding steps as the runbook takes (${HOLDING_STEPS_MAX}). Point one of the ones you have at a different card instead.`,
+  );
+  // The new row is last, and the panel scrolls: bring the host to it and put
+  // the cursor on its card chooser, which is the next thing they want.
+  const added = runbook[runbook.length - 1];
+  if (added !== undefined) {
+    focusRunbookRow({ id: added.id, role: "card" });
+    runbookRows.lastElementChild?.scrollIntoView({ block: "nearest" });
+  }
+});
 
 const runbookSetup = h("section", { class: "a-setup" }, [
   h("p", { class: "label", text: "Runbook" }),
@@ -1263,10 +1655,15 @@ const runbookSetup = h("section", { class: "a-setup" }, [
     text: "Set this before you start. The main button walks these in this order, and it always says which one is next. Anything you take out stays in the rail on the left and is still one click away, so you can go there by hand if the afternoon changes shape.",
   }),
   runbookRows,
+  h("div", { class: "a-setup-addrow" }, [runbookAdd]),
   runbookNote,
   h("p", {
     class: "pb-note",
     text: "Move a row with its arrow buttons, or with Alt+\u2191 and Alt+\u2193 from anywhere in the row \u2014 or drag it. The lobby and the final are fixed: the session opens in one and ends in the other.",
+  }),
+  h("p", {
+    class: "pb-note",
+    text: "A holding step shows one of your holding cards, chosen on the row. Add as many as the afternoon has gaps in it \u2014 the TTX, the coffee break, the five minutes while you reset \u2014 and the main button walks them in order, showing the right card at each.",
   }),
 ]);
 
@@ -1280,22 +1677,37 @@ function noteRunbook(message: string): void {
 
 /** Which control to put the cursor back on once the rows are rebuilt. */
 interface RunbookFocus {
-  readonly kind: Segment;
+  readonly id: string;
   readonly role: string;
 }
 
 function focusRunbookRow(want: RunbookFocus): void {
-  const row = runbookRows.querySelector(`[data-kind="${want.kind}"]`);
-  if (!(row instanceof HTMLElement)) return;
-  const exact = row.querySelector(`button[data-role="${want.role}"]`);
-  if (exact instanceof HTMLButtonElement && !exact.disabled) {
+  const row = runbookRows.querySelector(`[data-id="${want.id}"]`);
+  if (!(row instanceof HTMLElement)) {
+    // The row is gone — the host just deleted the step they were standing on.
+    // The Add button is the nearest thing that is still there, and it beats
+    // losing the cursor to the top of the document.
+    runbookAdd.focus();
+    return;
+  }
+  const exact = row.querySelector(`[data-role="${want.role}"]`);
+  if (exact instanceof HTMLElement && !isDisabled(exact)) {
     exact.focus();
     return;
   }
   // The control it was on is disabled now — it moved to an end. Anything in
   // the same row beats losing the cursor to the top of the document.
-  const any = Array.from(row.querySelectorAll("button")).find((b) => !b.disabled);
-  any?.focus();
+  const any = Array.from(row.querySelectorAll("button, select")).find(
+    (b) => b instanceof HTMLElement && !isDisabled(b),
+  );
+  if (any instanceof HTMLElement) any.focus();
+}
+
+function isDisabled(el: HTMLElement): boolean {
+  return (
+    (el instanceof HTMLButtonElement || el instanceof HTMLSelectElement) &&
+    el.disabled
+  );
 }
 
 function changeRunbook(
@@ -1317,19 +1729,31 @@ function changeRunbook(
   if (lastState) render(lastState);
 }
 
-/** The row being dragged, for the pointer path. */
-let runbookDrag: Segment | null = null;
+/** The row being dragged, for the pointer path. Its step id. */
+let runbookDrag: string | null = null;
 
 const RUNBOOK_FULL =
   "Keep at least one segment \u2014 the runbook has to have something between the lobby and the final.";
 
+/**
+ * One row per step: where it comes in the order, what it is, and the three
+ * things a host can do to it — move it, take it out, and (for a holding step
+ * they added) delete it outright.
+ *
+ * A holding step also carries the one piece of content a step can have: which
+ * card it shows. That is a `select` rather than a pair of cycling arrows
+ * because it has to say which card is chosen *and* what the others are, at a
+ * glance, on a row the host is reading down; and because a native select is
+ * the one widget on this page that is keyboard-operable everywhere without
+ * this file having to reimplement it.
+ */
 function renderRunbookSetup(): void {
-  const included = runbookIncluded(runbook);
+  const included = runbookIncludedEntries(runbook);
   replace(
     runbookRows,
     runbook.map((entry, i) => {
-      const kind = entry.kind;
-      const name = segmentName(kind);
+      const id = entry.id;
+      const name = entryFullName(entry);
       const move = (role: "up" | "down", delta: -1 | 1): HTMLButtonElement => {
         const button = handsBackSpace(
           h("button", {
@@ -1344,7 +1768,7 @@ function renderRunbookSetup(): void {
           }),
         );
         button.addEventListener("click", () =>
-          changeRunbook(moveRunbook(runbook, kind, delta), "", { kind, role }),
+          changeRunbook(moveRunbook(runbook, id, delta), "", { id, role }),
         );
         return button;
       };
@@ -1364,17 +1788,83 @@ function renderRunbookSetup(): void {
       );
       inOut.addEventListener("click", () =>
         changeRunbook(
-          toggleRunbook(runbook, kind),
-          isLastIncludedSegment(runbook, kind) ? RUNBOOK_FULL : "",
-          { kind, role: "inout" },
+          toggleRunbook(runbook, id),
+          isLastIncludedSegment(runbook, id) ? RUNBOOK_FULL : "",
+          { id, role: "inout" },
         ),
       );
+
+      /* ---- which card, for a holding step ---- */
+      const missing = entry.kind === "holding" && cardForEntry(entry) === null;
+      let chooser: HTMLElement | null = null;
+      if (entry.kind === "holding") {
+        const select = h("select", {
+          class: "rb-card",
+          attrs: {
+            "data-role": "card",
+            "aria-label": "Which holding card this step shows",
+          },
+        }) as HTMLSelectElement;
+        for (const card of deck) {
+          const option = h("option", {
+            text: cardName(card),
+            attrs: { value: card.id },
+          }) as HTMLOptionElement;
+          option.selected = card.id === entry.card;
+          select.appendChild(option);
+        }
+        if (missing) {
+          // The step points at a card that is not in the deck any more. The
+          // chooser says so in the one place the host is looking, and it is
+          // selected, so the row does not silently claim a card it is not
+          // showing.
+          const gone = h("option", {
+            text: "\u2014 pick a card \u2014",
+            attrs: { value: "" },
+          }) as HTMLOptionElement;
+          gone.selected = true;
+          select.insertBefore(gone, select.firstChild);
+        }
+        select.addEventListener("change", () => {
+          const pick = select.value;
+          if (pick === "") return;
+          changeRunbook(setEntryCard(runbook, id, pick), "", { id, role: "card" });
+        });
+        chooser = h("div", { class: "rb-card-row" }, [
+          h("span", { class: "label", text: "Card" }),
+          select,
+        ]);
+      }
+
+      /* ---- delete, for a holding step the host added ---- */
+      const acts: HTMLElement[] = [move("up", -1), move("down", 1), inOut];
+      if (isRemovableStep(entry)) {
+        const drop = handsBackSpace(
+          h("button", {
+            class: "a-setup-move rb-drop",
+            type: "button",
+            text: "\u00d7",
+            attrs: {
+              "data-role": "drop",
+              "aria-label": `Delete the step ${name}`,
+              title: `Delete this step. The card itself stays in the list.`,
+            },
+          }),
+        );
+        drop.addEventListener("click", () =>
+          changeRunbook(removeStep(runbook, id), RUNBOOK_FULL, {
+            id,
+            role: "drop",
+          }),
+        );
+        acts.push(drop);
+      }
 
       const row = h(
         "div",
         {
           class: entry.included ? "a-setup-row rb-row" : "a-setup-row rb-row is-out",
-          attrs: { draggable: "true", "data-kind": kind },
+          attrs: { draggable: "true", "data-id": id },
         },
         [
           h("span", {
@@ -1384,16 +1874,21 @@ function renderRunbookSetup(): void {
           }),
           h("span", {
             class: "mono a-setup-pos",
-            text: entry.included ? String(included.indexOf(kind) + 1) : "\u2013",
+            text: entry.included
+              ? String(included.findIndex((e) => e.id === id) + 1)
+              : "\u2013",
           }),
           h("div", { class: "a-setup-main" }, [
             h("span", { class: "a-setup-name", text: name }),
+            chooser,
+            missing
+              ? h("span", {
+                  class: "a-setup-what rb-missing",
+                  text: "The card this step used to show has been deleted. Pick another one, or take the step out \u2014 until you do, this step shows \u201cBack shortly\u201d.",
+                })
+              : null,
           ]),
-          h("div", { class: "a-setup-acts" }, [
-            move("up", -1),
-            move("down", 1),
-            inOut,
-          ]),
+          h("div", { class: "a-setup-acts" }, acts),
         ],
       );
 
@@ -1409,20 +1904,20 @@ function renderRunbookSetup(): void {
             ? (document.activeElement.dataset["role"] ?? "up")
             : "up";
         changeRunbook(
-          moveRunbook(runbook, kind, e.key === "ArrowUp" ? -1 : 1),
+          moveRunbook(runbook, id, e.key === "ArrowUp" ? -1 : 1),
           "",
-          { kind, role },
+          { id, role },
         );
       });
 
       /* ---- the pointer path ---- */
       row.addEventListener("dragstart", (ev) => {
-        runbookDrag = kind;
+        runbookDrag = id;
         row.classList.add("is-dragging");
         const dt = (ev as DragEvent).dataTransfer;
         if (dt) {
           dt.effectAllowed = "move";
-          dt.setData("text/plain", kind);
+          dt.setData("text/plain", id);
         }
       });
       row.addEventListener("dragend", () => {
@@ -1430,7 +1925,7 @@ function renderRunbookSetup(): void {
         row.classList.remove("is-dragging");
       });
       row.addEventListener("dragover", (ev) => {
-        if (runbookDrag === null || runbookDrag === kind) return;
+        if (runbookDrag === null || runbookDrag === id) return;
         ev.preventDefault();
         const dt = (ev as DragEvent).dataTransfer;
         if (dt) dt.dropEffect = "move";
@@ -1442,13 +1937,14 @@ function renderRunbookSetup(): void {
         row.classList.remove("is-over");
         const moved = runbookDrag;
         runbookDrag = null;
-        if (moved === null || moved === kind) return;
+        if (moved === null || moved === id) return;
         changeRunbook(dropRunbook(runbook, moved, i), "");
       });
 
       return row;
     }),
   );
+  runbookAdd.disabled = holdingSteps(runbook).length >= HOLDING_STEPS_MAX;
 }
 
 /** Where the arcade running order sits while the session has not started. */
@@ -1482,182 +1978,329 @@ const bodyLobby = h("section", { class: "pb" }, [
   holdingSetupSlot,
 ]);
 
-const holdingTitle = h("input", {
-  class: "field",
-  type: "text",
-  placeholder: "Agentic Security TTX",
-  attrs: { maxlength: "80", "aria-label": "Holding card title" },
-});
-const holdingLine = h("input", {
-  class: "field",
-  type: "text",
-  placeholder: "Back at 14:20. Prize: the good coffee.",
-  attrs: { maxlength: "140", "aria-label": "Holding card second line" },
-});
+/* ------------------------------------------------------------------ */
+/* The holding cards, written before the room arrives                  */
+/* ------------------------------------------------------------------ */
+
 /**
- * The two fields, as one block that moves between two homes.
+ * The card editor: one row per card, a title and a second line each.
  *
- * The card used to be writable only from the Holding card segment, which is
- * only reachable once the session is running — so the one slide the room
- * spends the most time in front of could not be written until the room was
- * already sitting there. What it says is knowable on Thursday, like the
- * runbook and the arcade's running order, so it is writable on Thursday.
+ * Setup only, like the runbook above it and the arcade's running order below
+ * it, and for the same reason: what the cards say is knowable on Thursday,
+ * and a thing that can be rewritten mid-session is a thing that gets
+ * rewritten by accident. Once the session is running the Holding card
+ * segment lists the cards with a button each, and the rail still jumps to any
+ * of them \u2014 what goes away is the typing, not the reach.
  *
- * One block of fields, moved, rather than two sets that can disagree: the
- * same bargain `placeArcadeSetup` makes, and the reason SHIFT+H picks up
- * words typed during setup without anything having to be copied anywhere.
- *
- * The *buttons* do not move. "Show it to the room" and "Clear the card" stay
- * in the Holding card segment, because writing the card while the room is
- * still arriving must not be able to put anything in front of anybody.
+ * Nothing typed here goes anywhere near the room. It is saved to this
+ * browser on every keystroke and sent to nobody: the only things that put a
+ * card in front of thirty people are the main button walking into a holding
+ * step, a rail jump, a Show button, and SHIFT+H.
  */
-const holdingFields = h("div", { class: "holding-fields" }, [
-  h("label", { class: "field-row" }, [
-    h("span", { class: "label", text: "Title" }),
-    holdingTitle,
-  ]),
-  h("label", { class: "field-row" }, [
-    h("span", { class: "label", text: "Second line" }),
-    holdingLine,
-  ]),
+const cardsRows = h("div", { class: "a-setup-rows" });
+const cardsNote = h("p", { class: "pb-note a-setup-note", attrs: { hidden: true } });
+
+const cardsAdd = handsBackSpace(
+  h("button", {
+    class: "a-setup-add",
+    type: "button",
+    text: "+ Add a card",
+    attrs: { "aria-label": "Add another holding card" },
+  }),
+) as HTMLButtonElement;
+
+const cardsSetup = h("section", { class: "a-setup" }, [
+  h("p", { class: "label", text: "Holding cards" }),
+  h("p", {
+    class: "pb-note",
+    text: "A holding card is what the room looks at while something is happening that Quorum is not running \u2014 the tabletop exercise, a coffee break, the gap while you set the next thing up. Write them now, while nobody is looking. They are kept in this browser like the runbook, so they are still here tomorrow.",
+  }),
+  cardsRows,
+  h("div", { class: "a-setup-addrow" }, [cardsAdd]),
+  cardsNote,
+  h("p", {
+    class: "pb-note",
+    text: "Nothing you type here goes to the room. A card only appears when the main button walks into a step that shows it, when you click it in the rail, when you press Show it to the room, or when you press SHIFT+H \u2014 and none of those does anything until the session has started.",
+  }),
+  h("p", {
+    class: "pb-note",
+    text: "Give each one a name you would recognise in a hurry: the title is both what the room reads and what the runbook and the rail call that step. Something like \u201cAgentic Security TTX\u201d and \u201cWe begin at 14:05 \u2014 grab a coffee\u201d.",
+  }),
 ]);
+holdingSetupSlot.appendChild(cardsSetup);
 
-/** The fields' home inside the Holding card segment, once the session runs. */
-const holdingFieldsSegment = h("div", { class: "holding-slot" }, [holdingFields]);
-/** And their home in the lobby panel, before it does. */
-const holdingFieldsSetup = h("div", { class: "holding-slot" });
+function noteCards(message: string): void {
+  setText(cardsNote, message);
+  cardsNote.hidden = message === "";
+  if (message !== "") cardsNote.scrollIntoView({ block: "nearest" });
+}
 
-/**
- * The card, kept in this browser.
- *
- * The same promise the runbook and the running order make, for the same
- * reason: a host who writes it on Thursday finds it on Friday, and a console
- * reloaded at 14:45 comes back with it still written. Best-effort — storage
- * off means empty fields and a working console, and the placeholders still
- * say what the card is for.
- */
-const HOLDING_KEY = "quorum.host.holding.v1";
-
-function loadHolding(): void {
-  let raw: string | null = null;
-  try {
-    raw = localStorage.getItem(HOLDING_KEY);
-  } catch {
+/** Which control to put the cursor back on once the card rows are rebuilt. */
+function focusCardRow(id: string, role: string): void {
+  const row = cardsRows.querySelector(`[data-card="${id}"]`);
+  if (!(row instanceof HTMLElement)) {
+    cardsAdd.focus();
     return;
   }
-  if (raw === null) return;
-  try {
-    const v: unknown = JSON.parse(raw);
-    if (typeof v !== "object" || v === null) return;
-    const o = v as { title?: unknown; line?: unknown };
-    // Clamped to the same lengths the fields enforce, so a hand-edited or
-    // half-written entry cannot get longer than the card can hold.
-    if (typeof o.title === "string") holdingTitle.value = o.title.slice(0, 80);
-    if (typeof o.line === "string") holdingLine.value = o.line.slice(0, 140);
-  } catch {
-    // Nothing usable stored. Empty is the sensible default: the card only
-    // exists once somebody writes one.
+  const exact = row.querySelector(`[data-role="${role}"]`);
+  if (exact instanceof HTMLElement && !isDisabled(exact)) {
+    exact.focus();
+    return;
   }
+  const any = Array.from(row.querySelectorAll("button, input")).find(
+    (b) => b instanceof HTMLElement && !isDisabled(b),
+  );
+  if (any instanceof HTMLElement) any.focus();
 }
 
-function saveHolding(): void {
-  try {
-    localStorage.setItem(
-      HOLDING_KEY,
-      JSON.stringify({ title: holdingTitle.value, line: holdingLine.value }),
-    );
-  } catch {
-    // See the runbook: it still works, it just will not survive a reload.
+/**
+ * A structural change to the deck \u2014 one that adds, removes or moves a card.
+ * Typing does not come through here: it edits one card in place and leaves
+ * the rows alone, because rebuilding a row the host is typing into is how a
+ * console eats keystrokes.
+ */
+function changeDeck(next: HoldingDeck, refused: string, focus?: [string, string]): void {
+  if (next === deck) {
+    noteCards(refused);
+    if (focus !== undefined) focusCardRow(focus[0], focus[1]);
+    return;
   }
+  deck = next;
+  noteCards("");
+  saveDeck();
+  renderCardsSetup();
+  renderHoldingPanel();
+  renderRunbookSetup();
+  renderRail();
+  if (focus !== undefined) focusCardRow(focus[0], focus[1]);
+  if (lastState) render(lastState);
 }
 
-const holdingApply = control({
-  label: "Show it to the room",
-  className: "ctl-secondary",
-  onFire: (c) =>
-    issue(
-      { name: "holding", title: holdingTitle.value.trim(), line: holdingLine.value.trim() },
-      c,
-    ),
+/** A card's words changed. The rows stay; everything that names them follows. */
+function renamedCard(): void {
+  saveDeck();
+  renderHoldingPanel();
+  renderRunbookSetup();
+  renderRail();
+  if (lastState) render(lastState);
+}
+
+const CARDS_FULL = `That is as many holding cards as one afternoon takes (${CARD_MAX}).`;
+const CARDS_LAST =
+  "Keep at least one card \u2014 SHIFT+H has to have something to put up, and that is the key you reach for when something has gone wrong.";
+
+function renderCardsSetup(): void {
+  replace(
+    cardsRows,
+    deck.map((card, i) => {
+      const id = card.id;
+      const name = cardName(card);
+
+      const title = h("input", {
+        class: "field",
+        type: "text",
+        placeholder: "Agentic Security TTX",
+        value: card.title,
+        attrs: {
+          maxlength: String(CARD_TITLE_MAX),
+          "data-role": "title",
+          "aria-label": `Card ${i + 1} title`,
+        },
+      }) as HTMLInputElement;
+      const line = h("input", {
+        class: "field",
+        type: "text",
+        placeholder: "Back at 14:20. Prize: the good coffee.",
+        value: card.line,
+        attrs: {
+          maxlength: String(CARD_LINE_MAX),
+          "data-role": "line",
+          "aria-label": `Card ${i + 1} second line`,
+        },
+      }) as HTMLInputElement;
+
+      title.addEventListener("input", () => {
+        deck = editCard(deck, id, { title: title.value });
+        renamedCard();
+      });
+      line.addEventListener("input", () => {
+        deck = editCard(deck, id, { line: line.value });
+        renamedCard();
+      });
+      for (const field of [title, line]) {
+        field.addEventListener("keydown", (ev) => {
+          const e = ev as KeyboardEvent;
+          // Escape and Enter both get the cursor out. This matters at 13:59:
+          // a host who left the caret in here would press space at 14:00 and
+          // type a space into a text field instead of starting the session.
+          if (e.key === "Escape") {
+            field.blur();
+            return;
+          }
+          if (e.key !== "Enter") return;
+          e.preventDefault();
+          field.blur();
+        });
+      }
+
+      const move = (role: "up" | "down", delta: -1 | 1): HTMLButtonElement => {
+        const button = handsBackSpace(
+          h("button", {
+            class: "a-setup-move",
+            type: "button",
+            text: delta === -1 ? "\u2191" : "\u2193",
+            disabled: delta === -1 ? i === 0 : i === deck.length - 1,
+            attrs: {
+              "data-role": role,
+              "aria-label": `Move ${name} ${delta === -1 ? "earlier" : "later"}`,
+            },
+          }),
+        );
+        button.addEventListener("click", () =>
+          changeDeck(moveCard(deck, id, delta), "", [id, role]),
+        );
+        return button;
+      };
+
+      const drop = handsBackSpace(
+        h("button", {
+          class: "a-setup-move rb-drop",
+          type: "button",
+          text: "\u00d7",
+          attrs: {
+            "data-role": "drop",
+            "aria-label": `Delete the card ${name}`,
+            title: "Delete this card",
+          },
+        }),
+      );
+      drop.addEventListener("click", () => {
+        const using = holdingSteps(runbook).filter((e) => e.card === id).length;
+        changeDeck(removeCard(deck, id), isLastCard(deck, id) ? CARDS_LAST : "", [
+          id,
+          "drop",
+        ]);
+        // Said after the fact rather than asked before it: the runbook rows
+        // that pointed here now say so themselves, the pre-flight list counts
+        // them, and none of it breaks the run of show.
+        if (using > 0 && deck.every((c) => c.id !== id)) {
+          noteCards(
+            using === 1
+              ? "One runbook step was showing that card and now needs another one. It is marked in the list above."
+              : `${using} runbook steps were showing that card and now need another one. They are marked in the list above.`,
+          );
+        }
+      });
+
+      return h(
+        "div",
+        { class: "a-setup-row hc-edit", attrs: { "data-card": id } },
+        [
+          h("span", { class: "mono a-setup-pos", text: String(i + 1) }),
+          h("div", { class: "a-setup-main" }, [
+            h("label", { class: "field-row" }, [
+              h("span", { class: "label", text: "Title" }),
+              title,
+            ]),
+            h("label", { class: "field-row" }, [
+              h("span", { class: "label", text: "Second line" }),
+              line,
+            ]),
+          ]),
+          h("div", { class: "a-setup-acts" }, [
+            move("up", -1),
+            move("down", 1),
+            drop,
+          ]),
+        ],
+      );
+    }),
+  );
+  cardsAdd.disabled = deck.length >= CARD_MAX;
+}
+
+cardsAdd.addEventListener("click", () => {
+  changeDeck(addCard(deck), CARDS_FULL);
+  const added = deck[deck.length - 1];
+  if (added !== undefined) {
+    focusCardRow(added.id, "title");
+    cardsRows.lastElementChild?.scrollIntoView({ block: "nearest" });
+  }
 });
+
+/* ------------------------------------------------------------------ */
+/* The Holding card segment, once the session is running               */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Every card, with a button each.
+ *
+ * No typing here: the editor is in the lobby panel, where it is used before
+ * anybody is looking. What this panel is for is the other half \u2014 putting one
+ * of them up, now, without having to find it in the rail.
+ */
+const holdingList = h("div", { class: "hc-list" });
+
+/**
+ * The "this one is on screen" marks, so `render` can move them. A dot and the
+ * word, never the dot alone: nothing on this console is carried by colour.
+ */
+const holdingMarks = new Map<string, { mark: HTMLElement; word: HTMLElement }>();
+
 const holdingClear = control({
   label: "Clear the card",
   className: "ctl-secondary",
+  question: "Take the words off the room's screen?",
   onFire: (c) => {
-    holdingTitle.value = "";
-    holdingLine.value = "";
-    saveHolding();
+    lastShownCardId = null;
     issue({ name: "holding", title: "", line: "" }, c);
   },
 });
-/** True while the host is editing, so an inbound state does not eat keystrokes. */
-let holdingDirty = false;
-for (const field of [holdingTitle, holdingLine]) {
-  field.addEventListener("input", () => {
-    holdingDirty = true;
-    saveHolding();
-    // The runbook and the rail call the holding segment by this title, so
-    // they have to follow it as it is typed.
-    if (field === holdingTitle) {
-      renderRunbookSetup();
-      if (lastState) render(lastState);
-    }
-  });
-  field.addEventListener("keydown", (ev) => {
-    const e = ev as KeyboardEvent;
-    // Escape gets the cursor out. This matters at 13:59: a host who left the
-    // caret in here would press space at 14:00 and type a space into a text
-    // field instead of starting the session.
-    if (e.key === "Escape") {
-      field.blur();
-      return;
-    }
-    if (e.key !== "Enter") return;
-    e.preventDefault();
-    saveHolding();
-    // Enter shows the card — but only from the segment that has the button.
-    // During setup there is no room to show it to, and nothing typed here
-    // goes near the Desktop until the host asks for it.
-    if (holdingFields.parentElement === holdingFieldsSegment) {
-      holdingApply.el.querySelector("button")?.click();
-    }
-    // Applied, or saved, so the space bar goes back to the run of show: a
-    // host who left the cursor in this field would otherwise type spaces into
-    // it while the room waited for the next thing to happen.
-    field.blur();
-  });
-}
-const bodyHolding = h("section", { class: "pb" }, [
-  holdingFieldsSegment,
-  h("div", { class: "field-actions" }, [holdingApply.el, holdingClear.el]),
-  h("p", {
-    class: "pb-note",
-    text: "This is the slide the room sits in front of between activities. It goes up the moment you press Show it to the room, and the participant preview on the right is what they see. You can also write it before the session starts, from the lobby panel.",
-  }),
-]);
 
-/**
- * The same two fields, before the room arrives — and the one thing this block
- * has to be absolutely clear about, which is that nothing here is on screen
- * anywhere yet.
- */
-const holdingSetup = h("section", { class: "a-setup" }, [
-  h("p", { class: "label", text: "Holding card" }),
+function renderHoldingPanel(): void {
+  holdingMarks.clear();
+  replace(
+    holdingList,
+    deck.map((card) => {
+      const mark = h("span", {
+        class: "mono hc-now",
+        text: "\u25cf",
+        attrs: { hidden: true },
+      });
+      const word = h("span", {
+        class: "mono hc-onair",
+        text: "on screen",
+        attrs: { hidden: true },
+      });
+      holdingMarks.set(card.id, { mark, word });
+      const show = control({
+        label: "Show it to the room",
+        className: "ctl-secondary",
+        onFire: (c) => showCard(card, c),
+      });
+      return h("div", { class: "hc-row" }, [
+        h("div", { class: "hc-main" }, [
+          h("span", { class: "hc-name" }, [
+            h("span", { class: "hc-title", text: cardName(card) }),
+            mark,
+            word,
+          ]),
+          h("span", { class: "hc-line", text: card.line.trim() || cardLine(card) }),
+        ]),
+        show.el,
+      ]);
+    }),
+  );
+}
+
+const bodyHolding = h("section", { class: "pb" }, [
+  holdingList,
+  h("div", { class: "field-actions hc-actions" }, [holdingClear.el]),
   h("p", {
     class: "pb-note",
-    text: "Write it now, while nobody is looking. It is kept in this browser like the runbook, so it is still here tomorrow.",
-  }),
-  holdingFieldsSetup,
-  h("p", {
-    class: "pb-note",
-    text: "Nothing you type here goes to the room. The card only appears when you press SHIFT+H, or Show it to the room from the Holding card segment, and neither of those does anything until the session has started.",
-  }),
-  h("p", {
-    class: "pb-note",
-    text: "The obvious use is the first two minutes: start the session at 14:00, press SHIFT+H, and the room sits in front of this while the last few people arrive. Something like \u201cAgentic Security TTX\u201d and \u201cWe begin at 14:05 \u2014 grab a coffee\u201d.",
+    text: "This is the slide the room sits in front of between activities. One goes up the moment you press its button, and the participant preview on the right is what they see. The words are written before the session starts, from the lobby panel.",
   }),
 ]);
-holdingSetupSlot.appendChild(holdingSetup);
 
 const standingsRows = h("ol", { class: "h-rows" });
 const standingsNote = h("p", { class: "pb-note" });
@@ -1689,14 +2332,14 @@ const triviaWaiting = h("p", { class: "mono t-waiting", attrs: { hidden: true } 
  * The question set. SPEC: "Questions load per session. Editing a loaded set
  * means re-uploading; there is no in-app editor by design."
  *
- * Errors are line-numbered and listed here rather than flashed in a button,
- * because a button shows one line for three seconds and a rejected CSV has
- * four things wrong with it on four different rows.
+ * Errors are listed here rather than flashed in a button, because a button
+ * shows one line for three seconds and a rejected file has four things wrong
+ * with it in four different questions.
  */
 const triviaUpload = h("input", {
   class: "field t-upload",
   type: "file",
-  attrs: { accept: ".csv,text/csv", "aria-label": "Trivia question CSV" },
+  attrs: { accept: ".json,application/json", "aria-label": "Trivia questions" },
 }) as HTMLInputElement;
 const triviaUploadNote = h("p", { class: "pb-note" });
 const triviaErrors = h("ul", { class: "t-errors", attrs: { hidden: true } });
@@ -1714,7 +2357,7 @@ triviaUpload.addEventListener("change", () => {
         method: "POST",
         // The token travels in a header, never a query string: the whole
         // reason it lives in the URL fragment is to stay out of access logs.
-        headers: { authorization: `Bearer ${hostToken}`, "content-type": "text/csv" },
+        headers: { authorization: `Bearer ${hostToken}`, "content-type": "application/json" },
         body: text,
       }),
     )
@@ -2636,21 +3279,51 @@ const SEGMENT_ADVANCE_LABEL: Readonly<Record<Segment, string>> = {
 };
 
 /**
- * The next segment in the host's runbook, as a button label and a command.
+ * What the primary button says, and what it does when it is pressed.
+ *
+ * It carries a function rather than a command because arriving at a holding
+ * step is two commands — the card, then the segment — and because the
+ * console has a cursor to move as well. One press, one plan, whatever it
+ * takes underneath.
+ */
+interface Plan {
+  readonly label: string;
+  /** `null` is a button with nothing to do, which the label says in words. */
+  readonly fire: ((c: Control) => void) | null;
+}
+
+function cmdPlan(label: string, cmd: HostCommand): Plan {
+  return { label, fire: (c) => issue(cmd, c) };
+}
+
+/**
+ * The next step in the host's runbook, as a button label and a press.
  *
  * This is the one place the run of show is read, and it is read out of the
  * runbook rather than out of a constant — so a host who took trivia out, or
  * put the standings before the arcade, gets a space bar that agrees with the
  * plan they wrote. `null` is the end of the runbook, which the button says in
  * words rather than by doing nothing.
+ *
+ * A holding step is named by the card it shows, so the button reads "Show
+ * Coffee break" rather than "Show the holding card" — which is the whole
+ * reason the cards have names. A step whose card has been deleted keeps the
+ * generic wording: it still walks, and what it puts up is the standby card.
  */
-function advanceFrom(seg: Segment): { label: string; cmd: HostCommand | null } {
-  const next = nextInRunbook(runbook, seg);
-  if (next === null) return { label: "Nothing queued", cmd: null };
+function advanceFrom(from: string | null): Plan {
+  const next = nextEntryAfter(runbook, from);
+  if (next === null) return { label: "Nothing queued", fire: null };
+  const card = next.kind === "holding" ? cardForEntry(next) : null;
+  const named = card !== null && card.title.trim() !== "";
   return {
-    label: SEGMENT_ADVANCE_LABEL[next],
-    cmd: { name: "segment", kind: next },
+    label: named ? `Show ${cardName(card)}` : SEGMENT_ADVANCE_LABEL[next.kind],
+    fire: (c) => goToEntry(next, c),
   };
+}
+
+/** Where the space bar walks from, for a session that is already running. */
+function advanceFromHere(s: RenderState): Plan {
+  return advanceFrom(currentEntry(s)?.id ?? null);
 }
 
 /**
@@ -2658,25 +3331,22 @@ function advanceFrom(seg: Segment): { label: string; cmd: HostCommand | null } {
  * all been played, the next thing in the runbook. The button never says
  * "choose something": the choosing was done before the room arrived.
  */
-function announceNext(): { label: string; cmd: HostCommand | null } {
+function announceNext(s: RenderState): Plan {
   const pick = currentPick();
-  if (pick === null) return advanceFrom("arcade");
-  return {
-    label: `Announce ${ARCADE_ROUND_LABEL[pick]}`,
-    cmd: arcadeRoundCommand(pick),
-  };
+  if (pick === null) return advanceFromHere(s);
+  return cmdPlan(`Announce ${ARCADE_ROUND_LABEL[pick]}`, arcadeRoundCommand(pick));
 }
 
-function primaryPlan(): { label: string; cmd: HostCommand | null } {
+function primaryPlan(): Plan {
   const s = lastState;
-  if (s === null) return { label: "Connecting", cmd: null };
-  if (s.phase === "closed") return { label: "Session closed", cmd: null };
+  if (s === null) return { label: "Connecting", fire: null };
+  if (s.phase === "closed") return { label: "Session closed", fire: null };
   // draft -> lobby -> running is two presses, and the button says which.
   if (s.phase === "draft") {
-    return { label: "Open the lobby", cmd: { name: "open" } };
+    return cmdPlan("Open the lobby", { name: "open" });
   }
   if (s.phase === "lobby") {
-    return { label: "Start the session", cmd: { name: "start" } };
+    return cmdPlan("Start the session", { name: "start" });
   }
   // Inside trivia the primary button walks the question rather than the run of
   // show: open, close, reveal, next. That is the whole activity on the space
@@ -2685,18 +3355,18 @@ function primaryPlan(): { label: string; cmd: HostCommand | null } {
     const t = s.trivia;
     switch (t.phase) {
       case "idle":
-        return {
-          label: `Open ${questionLabel(t)}${suddenDeathArmed ? " — sudden death" : ""}`,
-          cmd: { name: "trivia.open", suddenDeath: suddenDeathArmed },
-        };
+        return cmdPlan(
+          `Open ${questionLabel(t)}${suddenDeathArmed ? " — sudden death" : ""}`,
+          { name: "trivia.open", suddenDeath: suddenDeathArmed },
+        );
       case "open":
-        return { label: "Close the question", cmd: { name: "trivia.close" } };
+        return cmdPlan("Close the question", { name: "trivia.close" });
       case "closed":
-        return { label: "Reveal the answer", cmd: { name: "trivia.reveal" } };
+        return cmdPlan("Reveal the answer", { name: "trivia.reveal" });
       case "revealed":
         return t.index + 1 < t.of
-          ? { label: "Next question", cmd: { name: "trivia.next" } }
-          : advanceFrom("trivia");
+          ? cmdPlan("Next question", { name: "trivia.next" })
+          : advanceFromHere(s);
     }
   }
   // Inside the arcade the primary button walks the round the same way it
@@ -2704,29 +3374,28 @@ function primaryPlan(): { label: string; cmd: HostCommand | null } {
   if (s.segment === "arcade") {
     const a = s.arcade;
     if (a === undefined) {
-      return { label: "Enter the arcade", cmd: { name: "arcade.enter" } };
+      return cmdPlan("Enter the arcade", { name: "arcade.enter" });
     }
     switch (a.phase) {
       case "card":
-        return { label: "Start the round", cmd: { name: "arcade.begin" } };
+        return cmdPlan("Start the round", { name: "arcade.begin" });
       case "running":
-        return { label: "End the round", cmd: { name: "arcade.end" } };
+        return cmdPlan("End the round", { name: "arcade.end" });
       case "idle":
         // A round that has been played and not revealed. Revealing it is what
         // puts the points on the board, so it is never skipped by accident.
         if (a.round !== null) {
-          return {
-            label: `Show the results — ${ARCADE_ROUND_LABEL[a.round]}`,
-            cmd: { name: "arcade.reveal" },
-          };
+          return cmdPlan(`Show the results — ${ARCADE_ROUND_LABEL[a.round]}`, {
+            name: "arcade.reveal",
+          });
         }
-        return announceNext();
+        return announceNext(s);
       case "reveal":
-        return announceNext();
+        return announceNext(s);
     }
   }
 
-  return advanceFrom(s.segment);
+  return advanceFromHere(s);
 }
 
 /* ------------------------------------------------------------------ */
@@ -2736,7 +3405,22 @@ function primaryPlan(): { label: string; cmd: HostCommand | null } {
 function render(s: RenderState): void {
   lastState = s;
   loadPlayed(s.sid);
+  loadAt(s.sid);
   forgetPlayedIfStartingOver(s);
+
+  // Where the console thinks it is, checked against where the room is. The
+  // cursor is the only thing that can tell two holding steps apart, and a
+  // cursor left pointing at a step that has gone, or at a segment the room
+  // has left, would put the space bar on the wrong row.
+  const here = currentEntry(s);
+  if (here !== null && here.id !== atId) {
+    atId = here.id;
+    saveAt();
+  }
+  // Which card is in front of the room, so the Holding panel can mark it and
+  // so SHIFT+H after a reload reaches for the right one.
+  const upNow = cardMatching(deck, s.holding?.title, s.holding?.line);
+  if (upNow !== null) lastShownCardId = upNow.id;
 
   /* status bar */
   setText(elTitle, s.title);
@@ -2754,16 +3438,12 @@ function render(s: RenderState): void {
   // whether the room can see the scoreboard.
   statusBar.classList.toggle("sealed", s.seal === "sealed");
 
-  /* rail */
-  for (const [seg, row] of segmentRows) {
-    const current = s.segment === seg;
+  /* rail — the mark sits on the *step* the console is on, which is the only
+     row that can be right when two of them are holding cards */
+  for (const [id, row] of railRows) {
+    const current = here !== null && here.id === id;
     row.button.classList.toggle("current", current);
-    const mark = row.button.querySelector(".seg-mark");
-    if (mark instanceof HTMLElement) setText(mark, current ? "●" : "○");
-    // The rail follows the holding card's title too, so the run of show reads
-    // the same in both places. Built once at start-up, so it is set here.
-    const nameEl = row.button.querySelector(".seg-name");
-    if (nameEl instanceof HTMLElement) setText(nameEl, segmentName(seg));
+    setText(row.mark, current ? "●" : "○");
     row.button.disabled = s.phase !== "running";
   }
   setText(railCount, `${s.roster.length}`);
@@ -2802,7 +3482,14 @@ function render(s: RenderState): void {
   const bodyKey = s.phase === "draft" ? "lobby" : s.segment;
   const body = bodies[bodyKey] ?? bodyLobby;
   if (panelBody.firstElementChild !== body) replace(panelBody, [body]);
-  setText(panelKind, SEGMENT_LABEL[s.segment].toUpperCase());
+  // The status, and not the segment's name with it.
+  //
+  // The head used to read `LOBBY · not open yet`, and the rail two inches to
+  // the left already read `● Lobby`. The name was the same word twice on one
+  // screen, in every segment — and with holding cards named after the
+  // activity they hold, the two halves had started to disagree about what to
+  // call the same thing. The status half is the part nothing else says.
+  //
   // The phase, not the word "live": "live" is the seal's vocabulary and two
   // meanings in one status bar is one too many.
   setText(panelSub, s.phase === "draft" ? "not open yet" : s.phase);
@@ -2815,17 +3502,19 @@ function render(s: RenderState): void {
     setAttr(bodyLobbyLock, "data-locked", s.joinsLocked ? "yes" : "no");
   }
 
-  if (body === bodyHolding && !holdingDirty) {
-    // Follow the room's card, but only once there *is* one. A session that
-    // has never shown a holding card reports an empty one, and an empty one
-    // must not wipe the words the host wrote during setup and has not shown
-    // yet — that is the whole point of writing it in advance.
-    const wire = s.holding;
-    if ((wire?.title ?? "") !== "" || (wire?.line ?? "") !== "") {
-      holdingTitle.value = wire?.title ?? "";
-      holdingLine.value = wire?.line ?? "";
-      saveHolding();
+  if (body === bodyHolding) {
+    // Which card the room is looking at, said with a dot and a word. Worked
+    // out from the two strings on the wire, because that is all the engine
+    // holds — and a card the host edited after showing it stops matching,
+    // which is honest: those are not the words on the screen any more.
+    for (const [id, pair] of holdingMarks) {
+      const now = upNow !== null && upNow.id === id;
+      pair.mark.hidden = !now;
+      pair.word.hidden = !now;
     }
+    holdingClear.setDisabled(
+      (s.holding?.title ?? "") === "" && (s.holding?.line ?? "") === "",
+    );
   }
 
   if (body === bodyStandings) {
@@ -2877,7 +3566,7 @@ function render(s: RenderState): void {
   /* primary */
   const plan = primaryPlan();
   primary.setLabel(plan.label);
-  primary.setDisabled(plan.cmd === null);
+  primary.setDisabled(plan.fire === null);
   placePrimary();
   // Said by name, because the button saying it is in the other column.
   setText(
@@ -2934,6 +3623,43 @@ function renderPreflight(s: RenderState): void {
   panel.classList.toggle("is-setup", setup);
   if (!setup) return;
 
+  /* The holding steps, and whether each of them has a card to show. This is
+     the one thing on the list the console can be certain about, and it is the
+     one a host can break from the editor above by deleting a card two steps
+     were using. */
+  const steps = holdingSteps(runbook).filter((e) => e.included);
+  const dangling = steps.filter((e) => cardForEntry(e) === null);
+  const blank = steps.filter((e) => {
+    const card = cardForEntry(e);
+    return card !== null && card.title.trim() === "" && card.line.trim() === "";
+  });
+  if (dangling.length > 0) {
+    pfCards.set(
+      "not",
+      dangling.length === 1
+        ? "One step in the runbook shows a card that has been deleted. Pick another card for it on its row, or take the step out. Until you do it shows \u201cBack shortly\u201d."
+        : `${dangling.length} steps in the runbook show a card that has been deleted. Pick another card for each on its row, or take them out. Until you do they show \u201cBack shortly\u201d.`,
+    );
+  } else if (steps.length === 0) {
+    pfCards.set(
+      "ready",
+      "No holding step in the runbook. SHIFT+H still puts a card up whenever you need one.",
+    );
+  } else if (blank.length === steps.length) {
+    pfCards.set(
+      "ask",
+      "Nothing written on the holding card yet. It will show \u201cBack shortly\u201d, which works but is not what the room is there for.",
+    );
+  } else {
+    const names = steps.map((e) => entryFullName(e)).join(", ");
+    pfCards.set(
+      "ready",
+      steps.length === 1
+        ? `Holding card: ${names}.`
+        : `${steps.length} holding steps: ${names}.`,
+    );
+  }
+
   const loaded = s.hostExtras?.trivia?.loaded ?? 0;
   pfQuestions.set(
     loaded > 0 ? "ready" : "not",
@@ -2974,21 +3700,17 @@ function placeArcadeSetup(s: RenderState): void {
 }
 
 /**
- * The holding card's fields, in whichever of their two homes is on screen.
+ * The card editor is a setup block, like the runbook and the arcade's running
+ * order, and it hides itself the same way they do.
  *
- * Before the session starts they are in the lobby panel under the runbook;
- * from the moment it is running they are back in the Holding card segment
- * beside the button that shows the card. One block, moved, so the words typed
- * on Thursday are the same words SHIFT+H reaches for on Friday, and so there
- * is never a second copy to get out of step.
+ * The lobby panel is also what a *running* session shows while the segment is
+ * the lobby, which is why this is a phase test and not a panel test: a host
+ * who walks back to the lobby mid-afternoon must not find the card editor
+ * there, because editing a card at that point is editing something thirty
+ * people may be looking at in a minute.
  */
 function placeHolding(s: RenderState): void {
-  const setup = s.phase === "draft" || s.phase === "lobby";
-  // The lobby panel is also what a *running* session shows while the segment
-  // is the lobby, so this block hides itself the same way the runbook does.
-  holdingSetup.hidden = !setup;
-  const home = setup ? holdingFieldsSetup : holdingFieldsSegment;
-  if (holdingFields.parentElement !== home) home.appendChild(holdingFields);
+  cardsSetup.hidden = !(s.phase === "draft" || s.phase === "lobby");
 }
 
 /**
@@ -3044,16 +3766,20 @@ function renderDriving(s: RenderState): void {
 }
 
 function drivingContext(s: RenderState): string {
-  if (s.phase !== "running") {
-    return `${SEGMENT_LABEL[s.segment].toUpperCase()} · ${s.phase.toUpperCase()}`;
+  if (s.phase === "running") {
+    if (s.segment === "trivia" && s.trivia !== undefined) {
+      return triviaHead.textContent ?? "";
+    }
+    if (s.segment === "arcade" && s.arcade !== undefined) {
+      return arcadeState.textContent ?? "";
+    }
   }
-  if (s.segment === "trivia" && s.trivia !== undefined) {
-    return triviaHead.textContent ?? "";
-  }
-  if (s.segment === "arcade" && s.arcade !== undefined) {
-    return arcadeState.textContent ?? "";
-  }
-  return `${SEGMENT_LABEL[s.segment].toUpperCase()} · ${s.phase.toUpperCase()}`;
+  // Named by the step, not by the segment: a host in driving mode during the
+  // TTX should read AGENTIC SECURITY TTX, which is what the room is looking
+  // at, rather than HOLDING CARD, which is what the console calls it.
+  const here = currentEntry(s);
+  const name = here === null ? SEGMENT_LABEL[s.segment] : entryFullName(here);
+  return `${name.toUpperCase()} · ${s.phase.toUpperCase()}`;
 }
 
 function drivingCounts(s: RenderState): { big: string; sub: string } {
@@ -3390,13 +4116,27 @@ setInterval(() => {
 /* ------------------------------------------------------------------ */
 
 /**
- * The holding card, in one key.
+ * A holding card, in one key — and *which* one, now that there are several.
  *
  * Recovery used to be three actions at the moment a host least wants three:
- * switch to Holding, type a title, type a line, press the button. This is one
- * key, and it reuses whatever the card last said — the words the host wrote
- * in the lobby panel before the room arrived, then whatever the room is
- * looking at now, then something neutral and true if neither exists.
+ * switch to Holding, type a title, type a line, press the button. It is one
+ * key, and with a deck of cards behind it the only new question is which card
+ * the key reaches for. In order:
+ *
+ *   1. **the card for the step the host is standing on.** If the cursor is on
+ *      a holding step, that step's card is by definition the one that belongs
+ *      here. Walking into the coffee break and pressing SHIFT+H has to put
+ *      the coffee break up, not whatever was up before it.
+ *   2. **the one most recently shown.** Anywhere else — mid-trivia, mid-round
+ *      — SHIFT+H is the rescue key, not a navigation key: something has gone
+ *      wrong and the room needs to be looking at something other than this.
+ *      The right answer there is the card they were just on, which is also
+ *      exactly what this key did when there was only one card.
+ *   3. **the first card**, for a console that has shown nothing yet.
+ *   4. **the standby card**, for a deck with nothing written in it at all.
+ *
+ * Step 2 survives a reload: `render` recognises the card the room is looking
+ * at by its two strings and picks the deck back up from there.
  *
  * Shift is deliberate. A bare letter is a key a hand resting on a laptop can
  * find by accident, and this one puts a new slide in front of thirty people.
@@ -3404,9 +4144,6 @@ setInterval(() => {
  * grid, Escape disarms — and it is printed in the rail and in driving mode,
  * because a host will not guess a shortcut.
  */
-const HOLDING_FALLBACK_TITLE = "Back shortly";
-const HOLDING_FALLBACK_LINE = "Sit tight — we'll pick this up in a moment.";
-
 function showHoldingNow(): void {
   const s = lastState;
   if (s === null) return;
@@ -3414,22 +4151,13 @@ function showHoldingNow(): void {
     primary.flash("nothing is in front of the room yet");
     return;
   }
-  const title =
-    holdingTitle.value.trim() ||
-    (s.holding?.title ?? "").trim() ||
-    HOLDING_FALLBACK_TITLE;
-  const line =
-    holdingLine.value.trim() ||
-    (s.holding?.line ?? "").trim() ||
-    HOLDING_FALLBACK_LINE;
-  // The card's words go first, so the room never sees the previous card's
-  // second line under this one's title.
-  holdingTitle.value = title;
-  holdingLine.value = line;
-  holdingDirty = false;
-  saveHolding();
-  issue({ name: "holding", title, line }, primary);
-  if (s.segment !== "holding") issue({ name: "segment", kind: "holding" }, primary);
+  const here = currentEntry(s);
+  const card =
+    (here !== null && here.kind === "holding" ? cardForEntry(here) : null) ??
+    cardById(deck, lastShownCardId) ??
+    deck[0] ??
+    null;
+  showCard(card, primary);
 }
 
 /* ---- driving mode ---- */
@@ -3487,7 +4215,8 @@ document.addEventListener("keydown", (ev) => {
 /* ---- the running order, as the console last had it ---- */
 
 loadSetup();
-loadHolding();
+renderCardsSetup();
+renderHoldingPanel();
 renderArcadeSetup();
 renderRunbookSetup();
 renderRail();
@@ -3533,12 +4262,6 @@ document.addEventListener("keydown", (ev) => {
   // Asking for the grid is asking for the console back.
   setDriving(false);
   scoring.focusFirst();
-});
-
-// The holding fields stop being "dirty" once the host applies or leaves them.
-document.addEventListener("click", (ev) => {
-  const t = ev.target;
-  if (t instanceof HTMLElement && t.closest(".field-actions")) holdingDirty = false;
 });
 
 client.start();

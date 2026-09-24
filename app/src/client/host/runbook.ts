@@ -41,23 +41,73 @@ export const RUNBOOK_MOVABLE: readonly Segment[] = [
   "standings",
 ];
 
+/**
+ * A step in the run of show.
+ *
+ * It used to be a segment kind and an in/out flag, and the kind was also the
+ * key: one row per segment, found by `kind`. That stopped being enough the
+ * moment an afternoon wanted two holding cards in two different places — a
+ * TTX before trivia and a coffee break after the arcade are two steps of the
+ * same kind, and a list keyed by kind cannot hold both.
+ *
+ * So a step now has an `id`, and that is what everything keys on. For the
+ * four segments the product ships with, the id *is* the kind — `"holding"`,
+ * `"trivia"`, `"arcade"`, `"standings"` — which is why a runbook written by
+ * the previous build reads back unchanged: the ids it never wrote are the
+ * values it would have written. Extra holding steps get ids of their own.
+ *
+ * `card` is which holding card this step shows, and it is the only content a
+ * step carries. It is meaningless on the other kinds and is not set on them.
+ * A step pointing at a card that has since been deleted is a real state, and
+ * it is handled in words rather than by breaking the run of show — see
+ * `cardForEntry` in main.ts.
+ */
 export interface RunbookEntry {
   readonly kind: Segment;
   /** Out of the runbook, but still listed so it can be put back. */
   readonly included: boolean;
+  /** Stable, unique in the book. Equal to `kind` for the shipped four. */
+  readonly id: string;
+  /** Holding steps only: which card this one shows. */
+  readonly card?: string;
 }
 
 /** The movable segments only, in the host's order. */
 export type Runbook = readonly RunbookEntry[];
 
+/**
+ * A ceiling on holding steps, so the runbook stays something a host can read
+ * in the rail without scrolling. Eight is more stretches than an afternoon
+ * has, and hitting it is answered in words like every other refusal here.
+ */
+export const HOLDING_STEPS_MAX = 8;
+
 /** Everything in, in the order the product shipped with. */
 export function defaultRunbook(): Runbook {
-  return RUNBOOK_MOVABLE.map((kind) => ({ kind, included: true }));
+  return RUNBOOK_MOVABLE.map((kind) => ({ kind, included: true, id: kind }));
+}
+
+/** The step with this id, lobby and final included, or `null`. */
+export function entryById(
+  book: Runbook,
+  id: string | null | undefined,
+): RunbookEntry | null {
+  if (id === null || id === undefined) return null;
+  return runbookRail(book).find((e) => e.id === id) ?? null;
 }
 
 /** The movable segments that are in, in order. */
 export function runbookIncluded(book: Runbook): readonly Segment[] {
-  return book.filter((e) => e.included).map((e) => e.kind);
+  return runbookIncludedEntries(book).map((e) => e.kind);
+}
+
+/**
+ * The same list as steps rather than as segment names — which is what the
+ * console numbers its rows from, now that "the third thing that happens" and
+ * "the third kind of thing" are not the same question.
+ */
+export function runbookIncludedEntries(book: Runbook): readonly RunbookEntry[] {
+  return book.filter((e) => e.included);
 }
 
 /** What the space bar walks: the lobby, the chosen middle, the final. */
@@ -74,22 +124,26 @@ export function runbookOrder(book: Runbook): readonly Segment[] {
  */
 export function runbookRail(book: Runbook): readonly RunbookEntry[] {
   return [
-    { kind: RUNBOOK_FIRST, included: true },
+    { kind: RUNBOOK_FIRST, included: true, id: RUNBOOK_FIRST },
     ...book,
-    { kind: RUNBOOK_LAST, included: true },
+    { kind: RUNBOOK_LAST, included: true, id: RUNBOOK_LAST },
   ];
 }
 
 /**
- * Move a segment one place up or down. Off either end is a no-op rather than
+ * Move a step one place up or down. Off either end is a no-op rather than
  * a wrap: a list that teleports under a cursor is a list nobody can reorder.
+ *
+ * `id`, not `kind`, since two steps can be the same kind. For the shipped
+ * four they are the same string, which is why every caller and every test
+ * that passed a segment name still says what it meant.
  */
 export function moveRunbook(
   book: Runbook,
-  kind: Segment,
+  id: string,
   delta: -1 | 1,
 ): Runbook {
-  const from = book.findIndex((e) => e.kind === kind);
+  const from = book.findIndex((e) => e.id === id);
   if (from === -1) return book;
   const to = from + delta;
   if (to < 0 || to >= book.length) return book;
@@ -107,8 +161,8 @@ export function moveRunbook(
  * the list as it stands; out-of-range clamps rather than refuses, because a
  * drag that ends two pixels past the last row means "put it last".
  */
-export function dropRunbook(book: Runbook, kind: Segment, to: number): Runbook {
-  const from = book.findIndex((e) => e.kind === kind);
+export function dropRunbook(book: Runbook, id: string, to: number): Runbook {
+  const from = book.findIndex((e) => e.id === id);
   if (from === -1) return book;
   const at = Math.max(0, Math.min(book.length - 1, Math.round(to)));
   if (at === from) return book;
@@ -127,20 +181,101 @@ export function dropRunbook(book: Runbook, kind: Segment, to: number): Runbook {
  * rather than quietly accepting it. Same rule, and the same wording shape, as
  * the arcade's "keep at least one round".
  */
-export function toggleRunbook(book: Runbook, kind: Segment): Runbook {
-  const entry = book.find((e) => e.kind === kind);
+export function toggleRunbook(book: Runbook, id: string): Runbook {
+  const entry = book.find((e) => e.id === id);
   if (entry === undefined) return book;
   if (entry.included && runbookIncluded(book).length <= 1) return book;
-  return book.map((e) =>
-    e.kind === kind ? { kind: e.kind, included: !e.included } : e,
-  );
+  return book.map((e) => (e.id === id ? { ...e, included: !e.included } : e));
 }
 
 /** True when {@link toggleRunbook} would refuse — so the console can say why. */
-export function isLastIncludedSegment(book: Runbook, kind: Segment): boolean {
-  const entry = book.find((e) => e.kind === kind);
+export function isLastIncludedSegment(book: Runbook, id: string): boolean {
+  const entry = book.find((e) => e.id === id);
   return (
     entry !== undefined && entry.included && runbookIncluded(book).length <= 1
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/* Holding steps                                                       */
+/* ------------------------------------------------------------------ */
+
+/** The prefix for the ids of holding steps a host added. Never `"holding"`. */
+const STEP_PREFIX = "step-";
+
+/** An id nothing in the book is using. */
+export function freshStepId(book: Runbook): string {
+  let n = book.length + 1;
+  while (book.some((e) => e.id === `${STEP_PREFIX}${n}`)) n += 1;
+  return `${STEP_PREFIX}${n}`;
+}
+
+/** How many holding steps the book holds, in or out. */
+export function holdingSteps(book: Runbook): readonly RunbookEntry[] {
+  return book.filter((e) => e.kind === "holding");
+}
+
+/**
+ * Another holding step, showing `card`, at the end of the book.
+ *
+ * At the end and not next to the one it was added from: a new row that
+ * appears where the host is looking is a row they can then move, and a new
+ * row that appears in the middle of a list is a list that has rearranged
+ * itself. Refused at {@link HOLDING_STEPS_MAX} by returning the book
+ * unchanged; the caller has the words.
+ */
+export function addHoldingStep(book: Runbook, card: string): Runbook {
+  if (holdingSteps(book).length >= HOLDING_STEPS_MAX) return book;
+  return [
+    ...book,
+    { kind: "holding", included: true, id: freshStepId(book), card },
+  ];
+}
+
+/**
+ * Steps a host added can be deleted outright; the four the product ships with
+ * can only be taken out, which is what the In/Out button is for. So the rail
+ * always lists trivia, the arcade and the standings, whatever else is going
+ * on — a console that could lose a segment permanently is a console that can
+ * be set up wrong on Thursday and cannot be recovered on Friday.
+ */
+export function isRemovableStep(entry: RunbookEntry): boolean {
+  return entry.id.startsWith(STEP_PREFIX);
+}
+
+/** Delete a step a host added. Anything else is a no-op. */
+export function removeStep(book: Runbook, id: string): Runbook {
+  const entry = book.find((e) => e.id === id);
+  if (entry === undefined || !isRemovableStep(entry)) return book;
+  // The same floor the In/Out button keeps: a run of show that is the lobby
+  // and then the final is not a run of show.
+  if (entry.included && runbookIncluded(book).length <= 1) return book;
+  return book.filter((e) => e.id !== id);
+}
+
+/** Point a holding step at a different card. */
+export function setEntryCard(book: Runbook, id: string, card: string): Runbook {
+  return book.map((e) =>
+    e.id === id && e.kind === "holding" ? { ...e, card } : e,
+  );
+}
+
+/**
+ * Give every holding step an explicit card.
+ *
+ * A step with no `card` is what the previous build's stored runbook looks
+ * like, and it has to keep working. Reading it as "the first card" is the
+ * right answer once — it is the card the old single-card key migrated into —
+ * but leaving it implicit means the step would quietly change its words the
+ * first time the host reordered the deck. So the console writes the id in
+ * once, at start-up, and the implicit reading is only ever a fallback.
+ */
+export function anchorHoldingCards(book: Runbook, card: string): Runbook {
+  if (!book.some((e) => e.kind === "holding" && e.card === undefined)) {
+    return book;
+  }
+  return book.map((e) =>
+    e.kind === "holding" && e.card === undefined ? { ...e, card } : e,
   );
 }
 
@@ -154,14 +289,36 @@ export function isLastIncludedSegment(book: Runbook, kind: Segment): boolean {
  * console's cue to say "Nothing queued".
  */
 export function nextInRunbook(book: Runbook, current: Segment): Segment | null {
+  const at = runbookRail(book).find((e) => e.kind === current);
+  if (at === undefined) return runbookOrder(book)[0] ?? null;
+  return nextEntryAfter(book, at.id)?.kind ?? null;
+}
+
+/**
+ * The same walk, by step rather than by segment — which is what the console
+ * actually uses now that two steps can be the same kind.
+ *
+ * Walked over every step in the host's order, not just the included ones, and
+ * then forward to the first one that is in. So a host who jumped to a step
+ * they had taken out gets the next thing in their plan rather than being
+ * stranded, and a host on the last step gets `null`, which is the console's
+ * cue to say "Nothing queued".
+ *
+ * An id the book has never heard of falls back to the front, which is where
+ * `nextInRunbook` has always sent a segment it did not recognise. That is the
+ * state a console lands in when the step it was standing on has just been
+ * deleted underneath it, and the front is the one answer that is never wrong.
+ */
+export function nextEntryAfter(
+  book: Runbook,
+  id: string | null | undefined,
+): RunbookEntry | null {
   const all = runbookRail(book);
-  const order = runbookOrder(book);
-  const at = all.findIndex((e) => e.kind === current);
-  // A segment the runbook has never heard of: fall back to the front.
-  if (at === -1) return order[0] ?? null;
+  const at = id === null || id === undefined ? -1 : all.findIndex((e) => e.id === id);
+  if (at === -1) return all[0] ?? null;
   for (let i = at + 1; i < all.length; i += 1) {
     const entry = all[i];
-    if (entry !== undefined && entry.included) return entry.kind;
+    if (entry !== undefined && entry.included) return entry;
   }
   return null;
 }
@@ -209,18 +366,34 @@ export function parseRunbook(raw: string | null): Runbook | null {
     const kind = e["kind"];
     if (typeof kind !== "string") continue;
     if (!RUNBOOK_MOVABLE.includes(kind as Segment)) continue;
-    if (book.some((b) => b.kind === kind)) continue;
-    book.push({ kind: kind as Segment, included: e["included"] !== false });
+    // No id is what the build before holding cards wrote, and for the four it
+    // shipped with the id it would have written is the kind.
+    const stored = e["id"];
+    const id = typeof stored === "string" && stored !== "" ? stored : kind;
+    // Deduped by id, not by kind: two holding steps are the point.
+    if (book.some((b) => b.id === id)) continue;
+    if (kind === "holding" && holdingSteps(book).length >= HOLDING_STEPS_MAX) {
+      continue;
+    }
+    const card = e["card"];
+    book.push({
+      kind: kind as Segment,
+      included: e["included"] !== false,
+      id,
+      ...(typeof card === "string" && card !== "" ? { card } : {}),
+    });
   }
   // Anything the stored order left out is appended, so a build that adds a
   // segment does not leave it unreachable behind a stale entry in storage.
   for (const kind of RUNBOOK_MOVABLE) {
-    if (!book.some((b) => b.kind === kind)) book.push({ kind, included: true });
+    if (!book.some((b) => b.id === kind)) {
+      book.push({ kind, included: true, id: kind });
+    }
   }
   // An empty runbook is a state the editor refuses to produce; a stored one
   // is corrupt, and the safe reading of corrupt is "everything".
   if (runbookIncluded(book).length === 0) {
-    return book.map((e) => ({ kind: e.kind, included: true }));
+    return book.map((e) => ({ ...e, included: true }));
   }
   return book;
 }

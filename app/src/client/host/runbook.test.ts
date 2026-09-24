@@ -11,22 +11,34 @@ import { describe, it } from "node:test";
 
 import type { Segment } from "../../engine/types.ts";
 import {
+  HOLDING_STEPS_MAX,
   RUNBOOK_MOVABLE,
   TRAY_MAX,
   TRAY_MIN,
+  addHoldingStep,
+  anchorHoldingCards,
   clampTray,
   defaultRunbook,
   dropRunbook,
+  entryById,
+  freshStepId,
+  holdingSteps,
   isLastIncludedSegment,
+  isRemovableStep,
   moveRunbook,
+  nextEntryAfter,
   nextInRunbook,
   parseRunbook,
   parseTrayWidth,
+  removeStep,
   runbookIncluded,
+  runbookIncludedEntries,
   runbookOrder,
   runbookRail,
   runbookSummary,
+  setEntryCard,
   toggleRunbook,
+  type Runbook,
 } from "./runbook.ts";
 
 const LABEL: Readonly<Record<Segment, string>> = {
@@ -229,6 +241,210 @@ describe("the runbook across a refresh", () => {
     const book = parseRunbook(stored);
     assert.ok(book);
     assert.deepEqual(runbookIncluded(book), [...RUNBOOK_MOVABLE]);
+  });
+});
+
+
+/*
+ * An afternoon with two off-platform stretches in it: the TTX before trivia
+ * and the coffee break after the arcade. Both are holding steps, they are not
+ * interchangeable, and the space bar has to tell them apart — which is the
+ * whole reason a step has an id.
+ */
+describe("more than one holding step", () => {
+  function twoHoldings(): Runbook {
+    // Lobby · TTX · Trivia · Arcade · Coffee · Standings · Final
+    let book = setEntryCard(defaultRunbook(), "holding", "card-1");
+    book = addHoldingStep(book, "card-2");
+    book = moveRunbook(book, "step-5", -1);
+    return book;
+  }
+
+  it("holds two steps of the same kind, each with its own card", () => {
+    const book = twoHoldings();
+    assert.deepEqual(
+      book.map((e) => [e.kind, e.id, e.card ?? null]),
+      [
+        ["holding", "holding", "card-1"],
+        ["trivia", "trivia", null],
+        ["arcade", "arcade", null],
+        ["holding", "step-5", "card-2"],
+        ["standings", "standings", null],
+      ],
+    );
+  });
+
+  it("walks both of them, in order, on the space bar", () => {
+    const book = twoHoldings();
+    const walk: string[] = [];
+    let at: string | null = "lobby";
+    for (let i = 0; i < 10; i += 1) {
+      const next = nextEntryAfter(book, at);
+      if (next === null) break;
+      walk.push(next.id);
+      at = next.id;
+    }
+    assert.deepEqual(walk, [
+      "holding",
+      "trivia",
+      "arcade",
+      "step-5",
+      "standings",
+      "final",
+    ]);
+  });
+
+  it("numbers the steps by position, not by kind", () => {
+    const book = twoHoldings();
+    assert.deepEqual(
+      runbookIncludedEntries(book).map((e) => e.id),
+      ["holding", "trivia", "arcade", "step-5", "standings"],
+    );
+  });
+
+  it("takes one holding step out without touching the other", () => {
+    const book = toggleRunbook(twoHoldings(), "step-5");
+    assert.deepEqual(runbookIncluded(book), [
+      "holding",
+      "trivia",
+      "arcade",
+      "standings",
+    ]);
+    assert.equal(nextEntryAfter(book, "arcade")?.id, "standings");
+    // Still in the rail, still one click away.
+    assert.equal(entryById(book, "step-5")?.included, false);
+  });
+
+  it("moves and drops the right one when two rows are the same kind", () => {
+    const moved = moveRunbook(twoHoldings(), "step-5", -1);
+    assert.deepEqual(
+      moved.map((e) => e.id),
+      ["holding", "trivia", "step-5", "arcade", "standings"],
+    );
+    const dropped = dropRunbook(twoHoldings(), "step-5", 0);
+    assert.deepEqual(
+      dropped.map((e) => e.id),
+      ["step-5", "holding", "trivia", "arcade", "standings"],
+    );
+  });
+
+  it("deletes a step the host added, and never one the product ships with", () => {
+    const book = twoHoldings();
+    assert.equal(isRemovableStep(entryById(book, "step-5")!), true);
+    assert.equal(isRemovableStep(entryById(book, "holding")!), false);
+    assert.deepEqual(
+      removeStep(book, "step-5").map((e) => e.id),
+      ["holding", "trivia", "arcade", "standings"],
+    );
+    assert.equal(removeStep(book, "holding"), book);
+  });
+
+  it("keeps at least one step in, even when deleting one", () => {
+    let book = defaultRunbook();
+    book = addHoldingStep(book, "card-2");
+    for (const id of ["holding", "trivia", "arcade", "standings"]) {
+      book = toggleRunbook(book, id);
+    }
+    assert.deepEqual(runbookIncluded(book), ["holding"]);
+    const only = book.find((e) => e.included);
+    assert.equal(only?.id, "step-5");
+    assert.equal(removeStep(book, "step-5"), book);
+  });
+
+  it("gives every added step an id nothing else is using", () => {
+    let book = defaultRunbook();
+    book = addHoldingStep(book, "card-1");
+    book = addHoldingStep(book, "card-1");
+    const ids = book.map((e) => e.id);
+    assert.equal(new Set(ids).size, ids.length);
+    assert.equal(freshStepId(book), "step-7");
+  });
+
+  it("stops at a ceiling rather than a rail nobody can read", () => {
+    let book = defaultRunbook();
+    for (let i = 0; i < HOLDING_STEPS_MAX + 4; i += 1) {
+      book = addHoldingStep(book, "card-1");
+    }
+    assert.equal(holdingSteps(book).length, HOLDING_STEPS_MAX);
+    assert.equal(addHoldingStep(book, "card-1"), book);
+  });
+
+  it("points a step at a different card, and only a holding step", () => {
+    const book = setEntryCard(twoHoldings(), "step-5", "card-3");
+    assert.equal(entryById(book, "step-5")?.card, "card-3");
+    assert.equal(entryById(setEntryCard(book, "trivia", "card-3"), "trivia")?.card, undefined);
+  });
+
+  it("falls back to the front when the step it was on has been deleted", () => {
+    const book = removeStep(twoHoldings(), "step-5");
+    assert.equal(nextEntryAfter(book, "step-5")?.id, "lobby");
+    assert.equal(nextEntryAfter(book, null)?.id, "lobby");
+  });
+});
+
+describe("a runbook stored by the build that had one holding card", () => {
+  it("reads back unchanged, because the ids it never wrote are the kinds", () => {
+    const stored = JSON.stringify([
+      { kind: "holding", included: true },
+      { kind: "trivia", included: true },
+      { kind: "arcade", included: false },
+      { kind: "standings", included: true },
+    ]);
+    const book = parseRunbook(stored);
+    assert.ok(book);
+    assert.deepEqual(
+      book.map((e) => [e.kind, e.id, e.included]),
+      [
+        ["holding", "holding", true],
+        ["trivia", "trivia", true],
+        ["arcade", "arcade", false],
+        ["standings", "standings", true],
+      ],
+    );
+  });
+
+  it("anchors its holding step to the card the old key migrated into", () => {
+    const stored = parseRunbook(
+      JSON.stringify([{ kind: "holding", included: true }]),
+    );
+    assert.ok(stored);
+    const book = anchorHoldingCards(stored, "card-1");
+    assert.equal(entryById(book, "holding")?.card, "card-1");
+    // Idempotent: a second pass changes nothing and does not re-point a step
+    // the host has since pointed somewhere else.
+    assert.equal(anchorHoldingCards(book, "card-9"), book);
+  });
+
+  it("round-trips a book with two holding steps through JSON", () => {
+    let book = setEntryCard(defaultRunbook(), "holding", "card-1");
+    book = addHoldingStep(book, "card-2");
+    assert.deepEqual(parseRunbook(JSON.stringify(book)), book);
+  });
+
+  it("keeps two holding steps apart across a refresh", () => {
+    const book = parseRunbook(
+      JSON.stringify([
+        { kind: "holding", included: true, id: "holding", card: "card-1" },
+        { kind: "holding", included: true, id: "step-5", card: "card-2" },
+      ]),
+    );
+    assert.ok(book);
+    assert.deepEqual(
+      book.map((e) => e.id),
+      ["holding", "step-5", "trivia", "arcade", "standings"],
+    );
+  });
+
+  it("still refuses two rows with the same id", () => {
+    const book = parseRunbook(
+      JSON.stringify([
+        { kind: "holding", included: true, id: "step-5", card: "card-1" },
+        { kind: "holding", included: false, id: "step-5", card: "card-2" },
+      ]),
+    );
+    assert.ok(book);
+    assert.equal(book.filter((e) => e.id === "step-5").length, 1);
+    assert.equal(entryById(book, "step-5")?.card, "card-1");
   });
 });
 

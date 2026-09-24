@@ -137,9 +137,20 @@ describe("what is refused", () => {
     assert.match(errs(text)[0] ?? "", /^Question 2, correct:/);
   });
 
-  it("refuses a number where a letter belongs, and says which letter", () => {
-    assert.match(errs(file({ correct: 2 }))[0] ?? "", /Use the answer's letter, not a number: "C" rather than 2/);
-    assert.match(errs(file({ correct: [2] }))[0] ?? "", /"C" rather than 2/);
+  it("refuses a number where a letter belongs, and refuses to guess which", () => {
+    // The CSV counted from 1 and the engine counts from 0, so a bare 2 is "B"
+    // to the author and "C" to the code. Naming one would be a confident wrong
+    // answer in the one place this format exists to make impossible.
+    const m = errs(file({ correct: 2 }))[0] ?? "";
+    assert.match(m, /not a number/);
+    assert.match(m, /from 1, as the old CSV did, 2 is "B"/);
+    assert.match(m, /from 0 it is "C"/);
+    assert.match(errs(file({ correct: [2] }))[0] ?? "", /from 1, as the old CSV did, 2 is "B"/);
+  });
+
+  it("still refuses a number with no sensible reading either way", () => {
+    const m = errs(file({ correct: 9 }))[0] ?? "";
+    assert.match(m, /Use the answer's letter, not a number\. Write the one you mean\./);
   });
 
   it("refuses a letter past the answers given", () => {
