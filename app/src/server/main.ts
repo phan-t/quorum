@@ -844,6 +844,79 @@ function handleHttp(req: IncomingMessage, res: ServerResponse): void {
     }
   }
 
+  // GET /api/sessions — every session this task knows about, admin key only.
+  //
+  // It exists because `make stage` creates sessions and nothing retired them.
+  // A session is closed from its own console, which needs that session's host
+  // token, and the tokens are printed once and stored hashed — so a session
+  // whose tokens you have lost could not be closed by anybody, and sat there
+  // answering its join code until its TTL. The admin key is the only
+  // credential that outlives a session, which makes it the only one that can
+  // clean up after one.
+  //
+  // No tokens in the response. They are hashed and unrecoverable, and a
+  // listing that handed them back would turn one leaked admin key into every
+  // session's console.
+  if (path === "/api/sessions" && req.method === "GET") {
+    if (!adminOk(req)) return json(res, 401, { error: "unauthorized" });
+    const now = Date.now();
+    return json(res, 200, {
+      sessions: registry.all().map((r) => ({
+        sid: r.state.sid,
+        title: r.state.title,
+        joinCode: r.state.joinCode,
+        phase: r.state.phase,
+        segment: r.state.segment,
+        participants: Object.keys(r.state.participants).length,
+        sockets: r.clients.size,
+        ageMinutes: Math.round((now - r.createdAt) / 60_000),
+      })),
+    });
+  }
+
+  // POST /api/sessions/:sid/close — retire a session, admin key only.
+  //
+  // Refuses one with sockets attached unless `?force=1`. Closing the room you
+  // are standing in, because you pasted the sid above the one you meant, is
+  // the obvious way to misuse this and the only one worth a guard.
+  if (req.method === "POST" && path.startsWith("/api/sessions/")) {
+    const rest = path.slice("/api/sessions/".length);
+    const cut = rest.indexOf("/");
+    if (cut > 0 && rest.slice(cut + 1) === "close") {
+      if (!adminOk(req)) {
+        json(res, 401, { error: "unauthorized" });
+        return;
+      }
+      let sid = rest.slice(0, cut);
+      try {
+        sid = decodeURIComponent(sid);
+      } catch {
+        /* use it as typed; it will simply not match a session */
+      }
+      const runtime = registry.bySessionId(sid);
+      if (!runtime) {
+        json(res, 404, { error: "not_found" });
+        return;
+      }
+      const force = url.searchParams.get("force") === "1";
+      if (runtime.clients.size > 0 && !force) {
+        json(res, 409, {
+          error: "in_use",
+          message: `${runtime.clients.size} connected. Add ?force=1 to close it anyway.`,
+          sockets: runtime.clients.size,
+        });
+        return;
+      }
+      const out = runtime.apply({ type: "close" }, Date.now());
+      if (out.rejection) {
+        json(res, 409, { error: out.rejection.code, message: out.rejection.message });
+        return;
+      }
+      json(res, 200, { sid, phase: runtime.state.phase });
+      return;
+    }
+  }
+
   if (path === "/api/sessions" && req.method === "POST") {
     const auth = req.headers.authorization ?? "";
     const presented = auth.startsWith("Bearer ") ? auth.slice(7) : "";
@@ -1310,6 +1383,20 @@ function arcadeActivityId(runtime: SessionRuntime): string {
   return (
     runtime.state.activities.find((a) => a.kind === "arcade")?.id ?? "arcade"
   );
+}
+
+/**
+ * The admin key, compared the way every other secret here is.
+ *
+ * An unset key refuses everything rather than allowing it, and the comparison
+ * is constant-time: a `!==` on the raw string leaks its length and its
+ * matching prefix through timing.
+ */
+function adminOk(req: IncomingMessage): boolean {
+  const auth = req.headers.authorization ?? "";
+  const presented = auth.startsWith("Bearer ") ? auth.slice(7) : "";
+  if (ADMIN_KEY === "" || presented === "") return false;
+  return tokenMatches(presented, hashToken(ADMIN_KEY));
 }
 
 function commandToEvent(cmd: HostCommand, runtime: SessionRuntime): Event | null {

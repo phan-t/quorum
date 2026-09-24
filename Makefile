@@ -119,6 +119,28 @@ stage: aws-check
 	    --with-decryption --region $(REGION) --query Parameter.Value --output text)" \
 	  EVENT="$(EVENT)" node scripts/stage-event.mjs
 
+## Every session this task knows about. Needs the admin key, which is the only
+## credential that outlives a session: a host token is printed once and stored
+## hashed, so a session whose tokens are lost cannot be closed from its console.
+sessions: aws-check
+	@QUORUM_ADMIN_KEY="$$(aws ssm get-parameter --name /quorum/prod/admin_key \
+	    --with-decryption --region $(REGION) --query Parameter.Value --output text)"; \
+	  curl -fsS "https://$(HOST)/api/sessions" -H "Authorization: Bearer $$QUORUM_ADMIN_KEY" \
+	  | python3 -c 'import json,sys; \
+rows=json.load(sys.stdin)["sessions"]; \
+print("  no sessions") if not rows else None; \
+[print("  %-24s %-8s %-9s %3dp %2ds %5dm  %s" % (r["sid"], r["phase"], r["segment"], r["participants"], r["sockets"], r["ageMinutes"], r["title"][:34])) for r in rows]'
+
+## Retire one. Refuses a session with anyone connected unless FORCE=1.
+close: aws-check
+	@test -n "$(SID)" || { echo "Set SID, e.g. make close SID=ses_abc123"; exit 1; }
+	@QUORUM_ADMIN_KEY="$$(aws ssm get-parameter --name /quorum/prod/admin_key \
+	    --with-decryption --region $(REGION) --query Parameter.Value --output text)"; \
+	  curl -fsS -X POST "https://$(HOST)/api/sessions/$(SID)/close$(if $(FORCE),?force=1,)" \
+	    -H "Authorization: Bearer $$QUORUM_ADMIN_KEY" \
+	  && echo "  closed $(SID)" \
+	  || echo "  refused. Somebody may be connected; add FORCE=1 to close it anyway."
+
 url:
 	@curl -fsS https://$(HOST)/healthz || echo "not answering (parked?)"
 
