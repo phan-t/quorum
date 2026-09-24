@@ -4,18 +4,13 @@ dist/
 .env.*
 !.env.example
 
-# The real question set is content about real people — Round S names a
-# colleague's previous employer, their internal role and what they spent on a
-# home lab — and this repo is public. Only the example is committed. The live
-# file sits here unversioned and unbacked-up, which is the cost of that and is
-# said out loud in config/README.md rather than left to be discovered.
-config/trivia-questions.json
-
-# Event material: run of show, rosters, and the round about a named colleague.
-# Same reason as the question file — this repository is public and these name
-# real people. Kept here so the service and the session that runs on it live in
-# one place; kept out of git so the people in them do not.
-private/
+# One directory per event: its question set, its run of show, its roster. All
+# of it is content about real people — the September 2026 huddle closes on five
+# questions about a named colleague — and this repository is public. Only
+# config/trivia-questions.example.json is committed, as the format's worked
+# example. The events themselves are unversioned and unbacked-up, which is the
+# cost of that, and config/README.md says so rather than leaving it to be found.
+config/events/
 
 # Terraform
 .terraform/

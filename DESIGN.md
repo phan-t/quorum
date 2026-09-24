@@ -136,7 +136,7 @@ showing the last state so the person is never looking at a blank screen.
 | Segment | What it shows |
 | --- | --- |
 | Join | Code field (skipped via link), then nickname — or the roster chips, big, one tap |
-| Lobby | Session title in display type, "you're in" with the nickname, a live count of who is here, and the prize line the host typed |
+| Lobby | Session title in display type, "you're in" with the nickname, and a live count of who is here. A prize line was here too, read from the holding card's second line; that broke when holding cards became plural — the line is the card's, and it followed the room back into the lobby. Restoring it needs a field of its own |
 | Holding | Title, one line, optional countdown, points strip. Nothing to tap. The connected dot pulses slowly |
 | Trivia — open | Question at the top (body, ≤ 3 lines), timer as a bar and a number, four answer tiles |
 | Trivia — locked | The tile you chose, outlined, the other three dimmed. "Locked in." No colour change, no tick, until the reveal |

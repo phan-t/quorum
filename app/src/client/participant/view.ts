@@ -352,9 +352,18 @@ function sceneLobby(): Scene {
       you.hidden = nickname === null;
       if (nickname !== null) setText(nick, nickname);
       setText(title, state.title);
-      const line = state.holding?.line ?? "";
-      setText(prize, line);
-      prize.hidden = line === "";
+      // Deliberately *not* `state.holding.line`, which is what this used to
+      // read. `holding` is the last card the host set, not the card currently
+      // on screen — the engine only clears it on a restart — so once any card
+      // had been shown, its second line followed the room back into the lobby.
+      // With one card, typed in the lobby before anything ran, the two were
+      // the same thing and this worked. With named cards it meant the lobby
+      // announced "By Abhijeet Lokhande" under the session title.
+      //
+      // A card's second line belongs to that card. The prize line DESIGN.md
+      // describes here needs a field of its own; until it has one, the lobby
+      // says nothing rather than something that belongs to another screen.
+      prize.hidden = true;
       setText(count, String(state.roster.length));
       // Names, as text, clipped by the layout rather than by a slice: the
       // phone must not scroll, and "+7 more" is more honest than a cut.
