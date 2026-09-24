@@ -26,6 +26,7 @@ import {
 import {
   DeleteCommand,
   DynamoDBDocumentClient,
+  GetCommand,
   PutCommand,
   QueryCommand,
   ScanCommand,
@@ -33,8 +34,10 @@ import {
 
 import type { Event, SessionState } from "../../engine/types.ts";
 import {
+  checkPromoSize,
   codePk,
   eventSortKey,
+  promoPk,
   sessionPk,
   SNAPSHOT_VERSION,
   ttlAt,
@@ -159,6 +162,32 @@ export class DynamoStore implements SessionStore {
     });
   }
 
+  async putPromo(sid: string, html: string, at: number): Promise<void> {
+    checkPromoSize(html);
+    await this.put({
+      PK: promoPk(sid),
+      SK: "PROMO",
+      html,
+      // Denormalised so the size of the one item here that could approach
+      // DynamoDB's 400KB ceiling is visible in the table without downloading
+      // the page to measure it.
+      chars: html.length,
+      at,
+      ttl: ttlAt(at),
+    });
+  }
+
+  async getPromo(sid: string): Promise<string | null> {
+    const out = await this.doc.send(
+      new GetCommand({
+        TableName: this.table,
+        Key: { PK: promoPk(sid), SK: "PROMO" },
+      }),
+    );
+    const html = (out.Item as Item | undefined)?.["html"];
+    return typeof html === "string" ? html : null;
+  }
+
   async appendEvent(sid: string, record: StoredEvent): Promise<void> {
     await this.put({
       PK: sessionPk(sid),
@@ -219,6 +248,14 @@ export class DynamoStore implements SessionStore {
         new QueryCommand({
           TableName: this.table,
           KeyConditionExpression: "PK = :pk",
+          // No filter, and none needed: the promo card lives in its own
+          // partition (`promoPk`) precisely so this read never sees it. The
+          // first attempt kept it here and excluded it with
+          // `FilterExpression: "SK <> :promo"`, which DynamoDB rejects outright
+          // — a filter may not name a key attribute — and which therefore broke
+          // every recovery and every export, for every session, card or no
+          // card. The suite did not catch it because the suite runs on the
+          // memory store.
           ExpressionAttributeValues: { ":pk": sessionPk(sid) },
           ...(start ? { ExclusiveStartKey: start } : {}),
         }),

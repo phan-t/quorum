@@ -152,6 +152,70 @@ body {
   image-rendering: pixelated;
 }
 
+/*
+ * The promo card, framed beside the join details.
+ *
+ * White, because it is somebody's poster and it brings its own background; the
+ * radius and the inset ring are what stop it reading as a hole in the screen.
+ */
+.s-promo {
+  /* 38vw is 730px on the 1920 the Desktop is actually run at, which clears the
+     ~700px a poster is typically laid out for; below that a card starts
+     reflowing into a column nobody designed. */
+  flex: 0 1 38vw;
+  align-self: stretch;
+  max-height: 100%;
+  border: 0;
+  border-radius: 12px;
+  background: #f6f5f3;
+  box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.18);
+}
+.s-promo[hidden] {
+  display: none;
+}
+
+/*
+ * With a card beside them, all three have to fit one screen without
+ * scrolling — the Desktop's body is `overflow: hidden`, so anything that does
+ * not fit is not clipped politely, it is simply gone. So the join column and
+ * the QR both give ground rather than the card being squeezed into a strip:
+ * the join URL is the one thing in here somebody has to be able to read from
+ * the back of the room, and the QR stops being scannable long before it stops
+ * being visible.
+ */
+.s-lobby[data-promo="yes"] {
+  gap: 2.5vw;
+}
+.s-lobby[data-promo="yes"] .s-lobby-left {
+  flex: 1 1 26vw;
+  gap: 1.4vh;
+}
+.s-lobby[data-promo="yes"] .s-title {
+  font-size: clamp(40px, 3.6vw, 76px);
+}
+.s-lobby[data-promo="yes"] .s-join-url {
+  font-size: clamp(28px, 1.9vw, 38px);
+}
+.s-lobby[data-promo="yes"] .s-count {
+  font-size: clamp(40px, 3.4vw, 72px);
+}
+/* Fewer names, not smaller ones: 32px at 1080p is the floor everywhere here. */
+.s-lobby[data-promo="yes"] .s-names {
+  max-height: 18vh;
+}
+.s-lobby[data-promo="yes"] .s-qr-wrap {
+  padding: 12px;
+}
+/*
+ * Scaled by whole pixels as far as the browser will allow — `pixelated` keeps
+ * the module edges hard, which is the property a phone camera needs and the
+ * one a smooth downscale destroys.
+ */
+.s-lobby[data-promo="yes"] .s-qr {
+  width: min(22vw, 34vh);
+  height: auto;
+}
+
 /* --------------------------------------------------------- standings -- */
 
 .s-rows {

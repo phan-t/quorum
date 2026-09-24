@@ -21,11 +21,20 @@ So the example is the thing that ships, and the events stay on the machine.
 ```
 config/events/2026-09-25-sa-apj-huddle/
   trivia-questions.json     the set uploaded to the session
+  promo-card.html           the poster the Desktop shows in the lobby, if there is one
   run-of-show.md            timings, who does what, what to say
   quorum-setup.md           the commands, run on the morning
   round-s.md                the round about one person, and where each fact came from
   roster.md
 ```
+
+`promo-card.html` is the one file in here the service *does* read, by being
+uploaded to it — one self-contained page, everything inline, at most 300,000
+characters. The Desktop frames it beside the join link while the room arrives.
+It is optional: an event without one stages exactly as it did before. See
+[docs/event-config.md](../docs/event-config.md#the-promo-card), which is also
+where the two things worth knowing before writing one are written down — the
+frame runs no scripts and loads no webfonts, on purpose.
 
 Nothing reads this directory. The service takes its questions over HTTP, not
 from disk — these files are what a *host* opens, kept next to the service they
@@ -56,9 +65,9 @@ git -C /tmp/tb show 3fa324e:config/trivia-questions.json
 make stage EVENT=2026-09-25-sa-apj-huddle
 ```
 
-One command: creates the session, loads the questions, stages the console's
-holding cards and running order, prints the tokens. See
-[docs/event-config.md](../docs/event-config.md).
+One command: creates the session, loads the questions, uploads the promo card
+if there is one, stages the console's holding cards and running order, prints
+the tokens. See [docs/event-config.md](../docs/event-config.md).
 
 ## Uploading one thing by hand
 
@@ -73,3 +82,14 @@ in [docs/question-bank.md](../docs/question-bank.md). The short version: name
 the correct answer by its **letter**, and every key is either one the importer
 knows or an error — a misspelled `timelimitSec` is refused rather than silently
 defaulted.
+
+The promo card goes up the same way, as `text/html`:
+
+```bash
+curl -s -X POST "$QUORUM_URL/api/sessions/$SID/content/promo" \
+  -H "Authorization: Bearer $HOST_TOKEN" -H 'content-type: text/html' \
+  --data-binary @config/events/<event>/promo-card.html
+```
+
+This is the command to reach for when staging warns that the card did not go
+up. Re-running `make stage` is not — that creates a second session.

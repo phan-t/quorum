@@ -19,6 +19,26 @@ export const SNAPSHOT_VERSION = 1;
 export const RETENTION_MS = 90 * 24 * 60 * 60 * 1000;
 
 /**
+ * A ceiling on the promo card, held by both stores.
+ *
+ * A DynamoDB item cannot exceed 400KB, and a card is a whole self-contained
+ * page with its images inlined — the only thing written here big enough to
+ * reach that limit. A card refused at the door costs the room a poster; a card
+ * whose size is only discovered by DynamoDB costs the write, and reports it as
+ * a ValidationException that names none of this.
+ */
+export const MAX_PROMO_CHARS = 300_000;
+
+/** Both stores refuse an oversized card the same way, in the same words. */
+export function checkPromoSize(html: string): void {
+  if (html.length > MAX_PROMO_CHARS) {
+    throw new Error(
+      `promo card is ${html.length} characters; the limit is ${MAX_PROMO_CHARS}`,
+    );
+  }
+}
+
+/**
  * `SESSION#<sid>` / `META`.
  *
  * The token hashes are the reason this item is not just a slice of the
@@ -98,6 +118,23 @@ export interface SessionStore {
 
   putMeta(meta: SessionMeta): Promise<void>;
   putSnapshot(sid: string, state: SessionState, at: number): Promise<void>;
+
+  /**
+   * `SESSION#<sid>` / `PROMO` — the event's promo card, a whole HTML page.
+   *
+   * Its own row, beside `META` and `SNAPSHOT`, and deliberately absent from
+   * {@link LoadedSession}. It is content served *beside* a session and never
+   * part of one: no event produces it, the reducer has never heard of it, and
+   * it is in neither the snapshot nor the event log — both of which are
+   * replayed on recovery and broadcast to every socket, and neither of which
+   * should be carrying a quarter-megabyte poster to do it.
+   *
+   * Callers cap the text before it gets here; the stores check again, because
+   * the limit belongs to the item this writes.
+   */
+  putPromo(sid: string, html: string, at: number): Promise<void>;
+  /** Null for a session with no card, and for a session that does not exist. */
+  getPromo(sid: string): Promise<string | null>;
   appendEvent(sid: string, record: StoredEvent): Promise<void>;
   putParticipant(sid: string, participant: StoredParticipant): Promise<void>;
 
@@ -116,6 +153,22 @@ export interface SessionStore {
 /** Sort key for an event. Zero-padded so lexical order is numeric order. */
 export function eventSortKey(seq: number): string {
   return `EVENT#${String(seq).padStart(10, "0")}`;
+}
+
+/**
+ * The promo card's own partition.
+ *
+ * Not `SESSION#<sid>` with a `PROMO` sort key, which is where it started. A
+ * Query cannot exclude it — DynamoDB refuses a `FilterExpression` naming a key
+ * attribute, `ValidationException: Filter Expression can only contain
+ * non-primary key attributes` — so the only ways to keep a quarter-megabyte
+ * poster out of every recovery and every export were to drag it across the
+ * wire and discard it, or to put it somewhere the partition read never looks.
+ * This is the second. The read is a `GetCommand` by exact key either way, so
+ * it costs nothing.
+ */
+export function promoPk(sid: string): string {
+  return `${sessionPk(sid)}#PROMO`;
 }
 
 export function sessionPk(sid: string): string {

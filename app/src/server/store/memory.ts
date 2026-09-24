@@ -13,6 +13,7 @@
 
 import type { SessionState } from "../../engine/types.ts";
 import {
+  checkPromoSize,
   type LoadedSession,
   type SessionMeta,
   type SessionStore,
@@ -25,6 +26,8 @@ interface Row {
   snapshot: { seq: number; state: SessionState } | null;
   events: Map<number, StoredEvent>;
   participants: Map<string, StoredParticipant>;
+  /** The promo card. Not in `LoadedSession`: it is never replayed. */
+  promo: string | null;
 }
 
 const copy = <T>(v: T): T => structuredClone(v);
@@ -49,7 +52,13 @@ export class MemoryStore implements SessionStore {
   private row(sid: string): Row {
     let r = this.rows.get(sid);
     if (!r) {
-      r = { meta: null, snapshot: null, events: new Map(), participants: new Map() };
+      r = {
+        meta: null,
+        snapshot: null,
+        events: new Map(),
+        participants: new Map(),
+        promo: null,
+      };
       this.rows.set(sid, r);
     }
     return r;
@@ -67,6 +76,18 @@ export class MemoryStore implements SessionStore {
   async putSnapshot(sid: string, state: SessionState, _at: number): Promise<void> {
     this.guard();
     this.row(sid).snapshot = { seq: state.seq, state: copy(state) };
+  }
+
+  async putPromo(sid: string, html: string, _at: number): Promise<void> {
+    this.guard();
+    checkPromoSize(html);
+    this.row(sid).promo = html;
+  }
+
+  async getPromo(sid: string): Promise<string | null> {
+    // Deliberately not through `row()`: asking for a card must not conjure a
+    // row for a session id nobody has ever created.
+    return this.rows.get(sid)?.promo ?? null;
   }
 
   async appendEvent(sid: string, record: StoredEvent): Promise<void> {

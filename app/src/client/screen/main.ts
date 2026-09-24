@@ -212,6 +212,73 @@ function sceneLobby(): Scene {
     }
   }
 
+  // The event's promo card, when the event staged one. The frame is given no
+  // capability at all: a bare `sandbox` is the empty allow-list — no scripts,
+  // no same-origin, no forms, no popups, no top-level navigation. The page is
+  // the host's own, but the Desktop is the surface being screen-shared, and
+  // there is no reason an embedded poster should be able to do anything but
+  // draw itself. If a card ever needs its own scripts to render, the narrowest
+  // fix is `sandbox="allow-scripts"` and nothing else — never alongside
+  // `allow-same-origin`, which together hand the page the Desktop's origin and
+  // undo the whole attribute.
+  //
+  // No `loading="lazy"`. It would buy nothing — the frame is given a src only
+  // once there is a card and it is about to be the second thing on the screen,
+  // never below a fold — and it would make the load conditional on the
+  // element's box, which is exactly the thing that is in flux here: the frame
+  // is revealed and given its src in the same task, so at the moment the load
+  // is queued it is still laid out as `hidden`. A lazy frame that decides it
+  // is nowhere near the viewport does not error and does not log. It just
+  // stays an empty white panel on a shared screen.
+  const promo = h("iframe", {
+    class: "s-promo",
+    title: "Event promo card",
+    attrs: { sandbox: "" },
+  });
+  promo.hidden = true;
+
+  /**
+   * Show the frame only once the session is known to have a card.
+   *
+   * A HEAD probe rather than showing it and hiding on the iframe's `error`
+   * event, because that event does not fire for this: a 404 with a body is a
+   * successful load as far as the element is concerned, so the frame would
+   * fire `load` and render `{"error":"not_found"}` on a wall in front of the
+   * room. HEAD costs one request and answers the actual question.
+   */
+  let settled: string | null = null;
+  let asking = false;
+  function offerPromo(sid: string): void {
+    if (sid === "" || sid === settled || asking) return;
+    asking = true;
+    const src = `/api/sessions/${encodeURIComponent(sid)}/promo`;
+    void fetch(src, { method: "HEAD" })
+      .then((res) => {
+        // A 404 is the definitive answer — this event staged no card — and it
+        // is never asked again. Anything else is left unsettled on purpose, so
+        // the next state frame asks once more: a blip while the lobby is up
+        // must not be the thing that decides, for the whole afternoon, that
+        // there is no poster.
+        if (res.status === 404) {
+          settled = sid;
+          return;
+        }
+        if (!res.ok) return;
+        settled = sid;
+        promo.hidden = false;
+        // The layout only shrinks the join details and the QR once there is a
+        // third thing to make room for.
+        setAttr(node, "data-promo", "yes");
+        promo.src = src;
+      })
+      // No card, no network, no server yet: the lobby is the lobby it has
+      // always been. Nothing on this screen is allowed to fail visibly.
+      .catch(() => {})
+      .finally(() => {
+        asking = false;
+      });
+  }
+
   const node = h("section", { class: "s-stage s-lobby" }, [
     h("div", { class: "s-lobby-left" }, [
       h("p", { class: "s-kicker label", text: "Join" }),
@@ -224,11 +291,13 @@ function sceneLobby(): Scene {
       names,
     ]),
     qrWrap,
+    promo,
   ]);
 
   return {
     node,
     update(state) {
+      offerPromo(state.sid);
       showJoin(joinUrl(state.joinCode));
       setText(title, state.title);
       setText(count, String(state.roster.length));

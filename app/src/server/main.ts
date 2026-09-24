@@ -27,7 +27,8 @@ import {
 import { hashToken, newId, newJoinCode, tokenMatches } from "./tokens.ts";
 import { AWAY_AFTER_MS } from "./views.ts";
 import { Persister } from "./persist.ts";
-import { openStore } from "./store/index.ts";
+import { describe as describeError, openStore } from "./store/index.ts";
+import { MAX_PROMO_CHARS } from "./store/types.ts";
 import type { StoredEvent } from "./store/types.ts";
 import { recoverSessions, rehydrate } from "./recovery.ts";
 import { recruitmentRound } from "../arcade/recruitment.ts";
@@ -40,6 +41,29 @@ import { formatErrors, importTriviaJson } from "../trivia/import.ts";
  * far below anything that would trouble a DynamoDB item.
  */
 const MAX_SETUP_CHARS = 64_000;
+
+/**
+ * What the embedded promo card is allowed to do, which is as close to nothing
+ * as a page can be and still draw itself.
+ *
+ * `connect-src 'none'` is the one that matters. The card is a file a host
+ * dropped in a directory, and the Desktop it renders inside is the surface
+ * being screen-shared — nothing in it should be able to tell anybody that a
+ * particular room is looking at it, or fetch anything that would say so in a
+ * log. `frame-ancestors 'self'` keeps it framed by the Desktop and nowhere
+ * else, and the `nosniff` that goes out beside it stops a card that turns out
+ * not to be HTML from being run as whatever a browser would rather guess.
+ *
+ * A card that names webfonts does not get them under this and falls back to
+ * its local stack. That is the intended trade, not an oversight.
+ */
+const PROMO_CSP =
+  "default-src 'self' data: blob:; " +
+  "script-src 'unsafe-inline' 'self'; " +
+  "style-src 'unsafe-inline' 'self'; " +
+  "img-src 'self' data: blob:; " +
+  "connect-src 'none'; " +
+  "frame-ancestors 'self'";
 import {
   eventsJsonl,
   mergeEventLogs,
@@ -300,6 +324,102 @@ async function loadTriviaQuestions(
   return json(res, 200, { activityId: activity, questions: result.questions.length });
 }
 
+/**
+ * The promo card for one session: a whole self-contained HTML page, staged
+ * with the event and shown beside the join details in the Desktop's lobby.
+ *
+ * Stored beside the session rather than in it. Nothing about it is engine
+ * state — no event produces it, the reducer never sees it, and it is in
+ * neither the snapshot nor the event log, both of which are replayed on
+ * recovery and broadcast to every socket. It is the trivia set's storage
+ * problem, several hundred times larger and never replayed.
+ */
+async function loadPromoCard(
+  res: ServerResponse,
+  sid: string,
+  presented: string,
+  req: IncomingMessage,
+): Promise<void> {
+  const runtime = registry.bySessionId(sid);
+  // Unknown session and wrong token answer the same way, as they do for the
+  // trivia upload: a 404 that only appears for a real sid is a session-id
+  // oracle.
+  if (
+    !runtime ||
+    presented === "" ||
+    !tokenMatches(presented, runtime.secrets.hostTokenHash)
+  ) {
+    return json(res, 401, { error: "unauthorized" });
+  }
+
+  // Named rather than sniffed. A card posted as JSON is somebody's mistake,
+  // and the only alternative to saying so is storing it and finding out on the
+  // wall.
+  const declared = (req.headers["content-type"] ?? "").split(";")[0]?.trim() ?? "";
+  if (declared.toLowerCase() !== "text/html") {
+    return json(res, 415, { error: "expected_html" });
+  }
+
+  let html: string;
+  try {
+    html = await readText(req);
+  } catch {
+    return json(res, 413, { error: "too_large" });
+  }
+  // Refused, not truncated. The staged console setup is capped by slicing
+  // because a clipped JSON blob fails to parse and the console falls back to
+  // its own defaults; half a page of HTML renders perfectly happily, and a
+  // poster missing its bottom third on a shared screen is worse than no poster.
+  if (html.length > MAX_PROMO_CHARS) {
+    return json(res, 413, {
+      error: "too_large",
+      chars: html.length,
+      limit: MAX_PROMO_CHARS,
+    });
+  }
+  if (html.trim() === "") return json(res, 400, { error: "empty" });
+
+  try {
+    await store.putPromo(sid, html, Date.now());
+  } catch (err) {
+    // Said out loud, unlike the persist path, which degrades quietly on
+    // purpose. That one is protecting a game in progress from a storage
+    // outage; this is a host uploading a file the day before and waiting to be
+    // told whether it landed.
+    return json(res, 503, { error: "store_unavailable", message: describeError(err) });
+  }
+  return json(res, 200, { chars: html.length });
+}
+
+/**
+ * The promo card, served to whoever asks for it. No token, on purpose.
+ *
+ * The Desktop embeds this in an iframe and an iframe cannot carry an
+ * Authorization header. That is acceptable here and nowhere else in this file
+ * because of what the card is: a promotional poster that the room is about to
+ * look at on a shared screen. The only thing an unauthenticated reader gets is
+ * a thing that is seconds away from being projected — no scores, no roster, no
+ * names. It still takes an unguessable session id to ask, and a session with
+ * no card answers exactly as an unknown session does, so this is not a
+ * session-id oracle either.
+ */
+async function servePromoCard(res: ServerResponse, sid: string): Promise<void> {
+  let html: string | null = null;
+  try {
+    html = await store.getPromo(sid);
+  } catch {
+    // A store that will not answer is indistinguishable, from the lobby's
+    // point of view, from an event that staged no card: either way there is
+    // nothing to frame, and the lobby hides the frame rather than showing a box.
+    html = null;
+  }
+  if (html === null) return json(res, 404, { error: "not_found" });
+  return send(res, 200, "text/html; charset=utf-8", html, {
+    "x-content-type-options": "nosniff",
+    "content-security-policy": PROMO_CSP,
+  });
+}
+
 function send(
   res: ServerResponse,
   code: number,
@@ -403,6 +523,43 @@ function handleHttp(req: IncomingMessage, res: ServerResponse): void {
       send(res, 200, "application/json; charset=utf-8", runtime.setup ?? "null", {
         "cache-control": "no-store",
       });
+      return;
+    }
+  }
+
+  // GET /api/sessions/:sid/promo — the promo card. Deliberately no token; see
+  // `servePromoCard`. HEAD is answered too, because that is how the Desktop
+  // asks whether there is a card to frame at all.
+  if (
+    (req.method === "GET" || req.method === "HEAD") &&
+    path.startsWith("/api/sessions/")
+  ) {
+    const rest = path.slice("/api/sessions/".length);
+    const cut = rest.indexOf("/");
+    if (cut > 0 && rest.slice(cut + 1) === "promo") {
+      let sid = rest.slice(0, cut);
+      try {
+        sid = decodeURIComponent(sid);
+      } catch {
+        /* use it as typed; it will simply not match a session */
+      }
+      void servePromoCard(res, sid);
+      return;
+    }
+  }
+
+  // POST /api/sessions/:sid/content/promo — the promo card, host token only.
+  if (req.method === "POST" && path.startsWith("/api/sessions/")) {
+    const rest = path.slice("/api/sessions/".length);
+    const cut = rest.indexOf("/");
+    if (cut > 0 && rest.slice(cut + 1) === "content/promo") {
+      let sid = rest.slice(0, cut);
+      try {
+        sid = decodeURIComponent(sid);
+      } catch {
+        /* use it as typed; it will simply not match a session */
+      }
+      void loadPromoCard(res, sid, bearer(req), req);
       return;
     }
   }

@@ -101,12 +101,65 @@ if (!loaded.ok) {
   process.exit(1);
 }
 
-/* 3 — what you cannot get back */
+/* 3 — the promo card, if this event has one.
+ *
+ * Optional and non-fatal, both deliberately. Optional because an event without
+ * a poster stages exactly as it did before this existed. Non-fatal because of
+ * where in the run it sits: the session is already created and its questions
+ * are already loaded, so failing here would leave the operator with a staged
+ * session and a script that exited 1 — and the obvious response to that,
+ * re-running staging, creates a *second* session with different tokens and a
+ * different join code. So it warns, prints the one command that fixes it, and
+ * lets the rest of the run finish.
+ */
+const named = typeof session.promo === "string";
+const promoFile =
+  session.promo === false ? null : named ? session.promo : "promo-card.html";
+const promoRaw = promoFile === null ? null : read(promoFile);
+let promoLine = "";
+
+if (promoFile !== null && promoRaw === null && named) {
+  // Silent when it is just the default that is absent — that is the ordinary
+  // case. Loud when session.json named a file, because somebody meant it.
+  process.stderr.write(
+    `\n  No config/events/${event}/${promoFile} — staging without a promo card.\n`,
+  );
+}
+
+if (promoRaw !== null) {
+  let up;
+  try {
+    up = await post(
+      `/api/sessions/${encodeURIComponent(sid)}/content/promo`,
+      promoRaw,
+      hostToken,
+      "text/html",
+    );
+  } catch (err) {
+    up = { ok: false, status: 0, body: null, text: err.message };
+  }
+  if (up.ok) {
+    promoLine = `  promo card ${promoFile}, ${up.body?.chars ?? promoRaw.length} characters\n`;
+  } else {
+    process.stderr.write(
+      `\n  The promo card was not uploaded (${up.status}): ${up.text}\n` +
+        `  The session and its questions are staged. Do NOT re-run staging —\n` +
+        `  that creates a second session. Retry just this upload:\n\n` +
+        `    curl -X POST "$QUORUM_URL/api/sessions/${sid}/content/promo" \\\n` +
+        `      -H "Authorization: Bearer $HOST_TOKEN" \\\n` +
+        `      -H 'content-type: text/html' \\\n` +
+        `      --data-binary @config/events/${event}/${promoFile}\n`,
+    );
+  }
+}
+
+/* 4 — what you cannot get back */
 const line = "─".repeat(72);
 process.stdout.write(
   `\n${line}\n` +
     `  ${title}\n` +
     `  ${loaded.body.questions} questions loaded\n` +
+    promoLine +
     `${line}\n\n` +
     `  Console    ${url}/host#${hostToken}\n` +
     `  Desktop    ${url}/screen#${screenToken}\n` +

@@ -8,9 +8,9 @@ awscreds
 make stage EVENT=2026-09-25-sa-apj-huddle
 ```
 
-That creates the session, loads its questions, stages the console's setup onto
-it, and prints the four things there is no endpoint to return. Nothing else has
-to happen before 2:00pm.
+That creates the session, loads its questions, puts up the promo card if the
+event has one, stages the console's setup onto it, and prints the four things
+there is no endpoint to return. Nothing else has to happen before 2:00pm.
 
 ---
 
@@ -20,6 +20,7 @@ to happen before 2:00pm.
 config/events/2026-09-25-sa-apj-huddle/
   session.json            title, and the console's setup
   trivia-questions.json   the question set
+  promo-card.html         optional: the poster shown in the Desktop's lobby
   run-of-show.md          for the host to read; nothing parses it
   roster.md
 ```
@@ -34,6 +35,7 @@ content about the people in the room and this repository is public. See
 {
   "title": "SA APJ Team Huddle",
   "questions": "trivia-questions.json",
+  "promo": "promo-card.html",
   "console": {
     "cards": { "cards": [{ "id": "card-1", "title": "…", "line": "…" }] },
     "runbook": [{ "kind": "holding", "included": true, "id": "holding", "card": "card-1" }],
@@ -42,8 +44,63 @@ content about the people in the room and this repository is public. See
 }
 ```
 
-`title` and `questions` are the server's. Everything under `console` is the
-console's, and the server never looks inside it.
+`title`, `questions` and `promo` are the server's. Everything under `console`
+is the console's, and the server never looks inside it.
+
+`promo` can be left out — it defaults to `promo-card.html`, and an event with
+no such file stages exactly as it did before promo cards existed. Set it to
+`false` to skip the upload for an event that has the file but does not want it.
+
+---
+
+## The promo card
+
+A self-contained HTML page: the event's poster, shown in the Desktop's lobby
+beside the join link and the QR while the room arrives. One file, everything
+inline, no more than 300,000 characters.
+
+It goes up **last**, after the session and its questions, and it is the one
+step of staging that is allowed to fail. If it does, staging says so, prints
+the `curl` that retries it, and finishes — because by then the session exists
+and re-running staging would create a *second* one, with a different join code
+and different tokens. A poster is not worth that.
+
+It is not session state. It never enters `SessionState`, the snapshot or the
+event log — all three are replayed on restart and broadcast to every socket,
+and none of them should be carrying a quarter of a megabyte of markup. It is a
+store row of its own, beside `META`, read by one endpoint and nothing else.
+
+### It is served without a token
+
+`GET /api/sessions/:sid/promo` takes no Authorization header, alone among the
+session's endpoints. The Desktop embeds it in an `<iframe>`, and an iframe
+cannot carry one.
+
+That is acceptable because of what a promo card *is*: a poster the room is
+about to look at on a shared screen. Whoever fetches it learns something that
+is seconds from being projected, and nothing else — no scores, no roster, no
+names. Asking still takes the session id, which is not guessable, and a session
+with no card answers exactly as an unknown session does, so it is not a way to
+find out which ids are real.
+
+Do not put anything in a promo card that the session's tokens are protecting.
+
+### What the card can do, which is nothing
+
+It is framed with a bare `sandbox` attribute — the empty allow-list: no
+scripts, no same-origin, no forms, no popups — and served under a
+Content-Security-Policy with `connect-src 'none'` and `frame-ancestors 'self'`.
+The Desktop is the surface being screen-shared, and an embedded poster has no
+business being able to tell anyone which room is looking at it.
+
+Two consequences worth knowing before you write a card:
+
+- **Webfonts do not load.** Name local fallbacks in every font stack.
+- **Scripts do not run.** A card that needs them can be framed with
+  `sandbox="allow-scripts"` and nothing else, but that is a change to the
+  Desktop, not to the card, and `allow-scripts` must never be paired with
+  `allow-same-origin` — together they hand the page the Desktop's own origin
+  and the sandbox stops meaning anything.
 
 ---
 
@@ -103,7 +160,8 @@ corrupt stored value is.
 
 ## What is not in here yet
 
-`session.json` covers the title, the questions and the console's setup. It does
+`session.json` covers the title, the questions, the promo card and the
+console's setup. It does
 not yet carry the practice flag, per-question timer overrides, or the arcade's
 timings as anything but the console's own `timings` object. Those are all
 server-side or engine-side state and each needs its own decision about whether
