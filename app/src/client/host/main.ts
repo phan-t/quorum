@@ -604,17 +604,33 @@ const unsealControl = control({
  * The engine refuses to change it while a question or a round is live, so the
  * flag can never decide after the fact whether what the room just did counted.
  */
-const practiceControl = control({
-  label: "Practice: off",
-  className: "ctl-secondary ctl-practice",
-  title:
-    "Games run normally and nobody scores. Use it for the first run of a game the room has not played before.",
-  question: () =>
-    (lastState?.practice ?? false)
-      ? "Start scoring again?"
-      : "Run the next game without scoring it?",
-  onFire: (c) => issue({ name: "practice", on: !(lastState?.practice ?? false) }, c),
-});
+function practiceToggle(): Control {
+  return control({
+    label: "Practice: off",
+    className: "ctl-secondary ctl-practice",
+    title:
+      "The game runs normally and nobody scores. Use it for the first run of a game the room has not played before — then turn it off and run the same game for real.",
+    question: () =>
+      (lastState?.practice ?? false)
+        ? "Score the next game?"
+        : "Run this game without scoring it?",
+    onFire: (c) => issue({ name: "practice", on: !(lastState?.practice ?? false) }, c),
+  });
+}
+
+/**
+ * One flag, two buttons, on the two panels it applies to.
+ *
+ * It lived in the control panel first, which is where a session-wide switch
+ * belongs and is the wrong place for this one: the moment a host decides a
+ * game is a practice run is the moment they are looking at that game, about to
+ * start it. So the button is on the game, beside the controls that run it, and
+ * the control panel no longer carries it at all — a third copy of one flag is
+ * a way to be unsure which of them you last pressed.
+ */
+const arcadePractice = practiceToggle();
+const triviaPractice = practiceToggle();
+const practiceControls = [arcadePractice, triviaPractice];
 
 const closeControl = control({
   label: "Close session",
@@ -924,10 +940,6 @@ replace(trayControls, [
   h("section", { class: "cp-group" }, [
     h("p", { class: "label", text: "Scoreboard" }),
     h("div", { class: "cp-row" }, [sealControl.el, unsealControl.el]),
-  ]),
-  h("section", { class: "cp-group" }, [
-    h("p", { class: "label", text: "Games" }),
-    h("div", { class: "cp-row" }, [practiceControl.el]),
   ]),
   h("section", { class: "cp-group" }, [
     h("p", { class: "label", text: "Shortcuts" }),
@@ -2452,12 +2464,15 @@ const suddenDeath = control({
   },
 });
 
+const triviaActions = h("div", { class: "field-actions" }, [triviaPractice.el]);
+
 const triviaLoad = h("div", { class: "t-load" }, [
   h("label", { class: "label", text: "Question set" }),
   triviaSet,
 ]);
 
 const bodyTrivia = h("section", { class: "pb pb-trivia" }, [
+  triviaActions,
   triviaHead,
   triviaRound,
   triviaQuestion,
@@ -3099,6 +3114,7 @@ const bodyArcade = h("section", { class: "pb pb-arcade" }, [
   // panel as the round goes on is a control the host cannot press at the
   // moment they need it — which on this bridge is eighteen times.
   h("div", { class: "field-actions" }, [
+    arcadePractice.el,
     arcadeEnd.el,
     arcadeNext.el,
     arcadeNextStep.el,
@@ -3148,10 +3164,18 @@ function renderArcade(s: RenderState): void {
   // A round that has been revealed is a round that has been played: revealing
   // is what puts the points on the board. That is what moves the running
   // order on, and what ends a deviation.
+  //
+  // Unless it was practice, when revealing puts nothing on the board — the
+  // sentence above is the whole reason, and in practice it is false. A
+  // practice round that counted as played left the room having learned the
+  // game and the console refusing to offer it again, which is the opposite of
+  // the point. The engine will not let practice change while a round is live,
+  // so the flag at the reveal is the flag the round was played under.
   if (
     a !== undefined &&
     a.phase === "reveal" &&
     a.round !== null &&
+    !s.practice &&
     isPlayable(a.round)
   ) {
     arcadePlayed.add(a.round);
@@ -3616,8 +3640,16 @@ function render(s: RenderState): void {
   /* always-there controls */
   lockControl.setLabel(s.joinsLocked ? "Unlock joining" : "Lock joining");
   lockControl.el.classList.toggle("on", s.joinsLocked);
-  practiceControl.setLabel(`Practice: ${s.practice ? "on" : "off"}`);
-  practiceControl.el.classList.toggle("on", s.practice);
+  for (const c of practiceControls) {
+    c.setLabel(`Practice: ${s.practice ? "on" : "off"}`);
+    c.el.classList.toggle("on", s.practice);
+    // The engine refuses to change it under a live question or round, so the
+    // button says so by being unpressable rather than by being refused.
+    c.setDisabled(
+      (s.trivia !== undefined && s.trivia.phase !== "idle" && s.trivia.phase !== "revealed") ||
+        (s.arcade !== undefined && (s.arcade.phase === "card" || s.arcade.phase === "running")),
+    );
+  }
   sealControl.setLabel(
     s.seal === "live" ? "Hide the scoreboard" : "Reveal the winners, 5 to 1",
   );
@@ -4397,7 +4429,8 @@ renderRail();
 bindSpace(primary);
 bindEscape(() => [
   lockControl,
-  practiceControl,
+  arcadePractice,
+  triviaPractice,
   sealControl,
   unsealControl,
   reopenControl,
