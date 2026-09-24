@@ -114,12 +114,27 @@ export function createParticipantView(
     class: "p-banner",
     attrs: { hidden: true, role: "status", "aria-live": "polite" },
   });
+  /**
+   * Practice, said to the player.
+   *
+   * Not the banner above, which the socket owns for connection state. This is
+   * always in the tree and hidden when it does not apply, because a player who
+   * thinks a round counted and learns afterwards that it did not has been
+   * misled by the screen, and the fix for that is a word on the screen rather
+   * than a promise the host makes out loud once.
+   */
+  const practice = h("p", {
+    class: "p-practice label",
+    attrs: { hidden: true, role: "status", "aria-live": "polite" },
+    text: "Practice — this one does not count",
+  });
   const stage = h("main", { class: "p-stage" });
   // A group, so the `aria-label` below is honoured: the visual is a row of
   // swatches and numbers, and the label is the sentence they add up to.
   const strip = h("div", { class: "p-strip mono", role: "group" });
   const root = h("div", { class: opts.compact ? "p-root compact" : "p-root" }, [
     banner,
+    practice,
     stage,
     strip,
   ]);
@@ -241,6 +256,7 @@ export function createParticipantView(
     update(state, nickname) {
       if (state === null) return;
       last = state;
+      practice.hidden = !state.practice;
       // The optimistic tap lives exactly as long as its question. The server's
       // answer supersedes it; so does the next question.
       if (

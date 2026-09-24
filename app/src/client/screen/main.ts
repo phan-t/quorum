@@ -96,7 +96,19 @@ const banner = h("div", {
 });
 const stage = h("div", { class: "s-root" });
 const toastBar = h("div", { class: "s-toast", attrs: { hidden: true } });
-replace(app, [banner, stage, toastBar]);
+/**
+ * Practice, said to the whole room at once.
+ *
+ * This is the surface everyone is looking at, so it is the surface that has to
+ * carry it. A round that turns out afterwards not to have counted is a worse
+ * outcome than a round nobody took seriously.
+ */
+const practiceBar = h("div", {
+  class: "s-practice",
+  attrs: { hidden: true, role: "status" },
+  text: "PRACTICE — nothing is being scored",
+});
+replace(app, [banner, practiceBar, stage, toastBar]);
 if (mock) document.body.appendChild(mockBadge());
 
 interface Scene {
@@ -113,6 +125,7 @@ let client: QuorumClient | null = null;
 const serverNow = (): number => client?.now() ?? Date.now();
 
 function render(state: RenderState): void {
+  practiceBar.hidden = !state.practice;
   const next = resolveView(state);
   if (next !== kind) {
     scene?.stop?.();

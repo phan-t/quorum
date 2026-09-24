@@ -1519,6 +1519,15 @@ body {
   font-variant-numeric: tabular-nums;
 }
 
+/* On, and saying so. The console's other toggles use `.on` the same way; this
+   one matters more than most, because the cost of forgetting it is a round the
+   room played for nothing. */
+.ctl-practice.on {
+  background: var(--sealed);
+  border-color: var(--sealed);
+  color: #2a2205;
+}
+
 /* ---- arcade --------------------------------------------------------- */
 
 .pb-arcade {

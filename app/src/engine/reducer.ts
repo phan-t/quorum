@@ -147,6 +147,7 @@ export function newSession(input: NewSessionInput): SessionState {
     phase: "draft",
     segment: "lobby",
     seal: "live",
+    practice: false,
     activities: input.activities,
     tiebreakOrder: input.tiebreakOrder ?? input.activities.map((a) => a.id),
     participants: {},
@@ -192,6 +193,11 @@ function withActivityTotals(
   activityId: ActivityId,
   totals: Readonly<Record<ParticipantId, number>>,
 ): SessionState["scores"] {
+  // Practice: the round happened, the round's own totals stand, and the board
+  // does not move. Gated here rather than at the two call sites because here
+  // is the only way an activity's totals become a score, and a third activity
+  // added later gets the behaviour without anyone remembering to ask for it.
+  if (state.practice) return state.scores;
   const bucket: Record<ParticipantId, RawScore> = {
     ...(state.scores[activityId] ?? {}),
   };
@@ -629,6 +635,9 @@ export function reduce(
           phase: "lobby",
           segment: "lobby",
           seal: "live",
+          // A restart is the room starting again, and leaving practice on
+          // through one would be a silent reason the next game scored nothing.
+          practice: false,
           // Participants, nicknames, join-order numbers and kick decisions all
           // survive untouched. A kick is a decision about a person, not a
           // score, and un-kicking somebody as a side effect of wiping the
@@ -664,6 +673,43 @@ export function reduce(
         },
         [BROADCAST_STATE, ...BROADCAST_STANDINGS, PERSIST],
       );
+    }
+
+    case "setPractice": {
+      // Read when totals are banked, not when they are earned, so flipping it
+      // mid-round would decide retrospectively whether what the room just did
+      // counted. Refuse, and say which thing is in the way.
+      if (
+        state.trivia &&
+        state.trivia.phase !== "idle" &&
+        state.trivia.phase !== "revealed"
+      ) {
+        return unchanged(
+          reject(
+            "host",
+            "wrong_question_phase",
+            "A question is open. Reveal it before changing practice.",
+          ),
+        );
+      }
+      if (
+        state.arcade &&
+        (state.arcade.phase === "card" || state.arcade.phase === "running")
+      ) {
+        return unchanged(
+          reject(
+            "host",
+            "wrong_round_phase",
+            "A round is in play. Finish it before changing practice.",
+          ),
+        );
+      }
+      if (state.practice === event.on) return unchanged();
+      return applied({ ...state, practice: event.on }, [
+        BROADCAST_STATE,
+        ...BROADCAST_STANDINGS,
+        PERSIST,
+      ]);
     }
 
     case "setSegment": {

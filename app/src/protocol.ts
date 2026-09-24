@@ -157,6 +157,11 @@ export type HostCommand =
   | { name: "segment"; kind: Segment }
   | { name: "holding"; title: string; line: string }
   | { name: "seal"; state: Seal }
+  /**
+   * Practice on or off. A boolean rather than a toggle, so two consoles that
+   * both press it do not cancel each other out.
+   */
+  | { name: "practice"; on: boolean }
   | { name: "lobby.lock"; locked: boolean }
   | { name: "participant.kick"; pid: ParticipantId }
   | { name: "participant.release"; pid: ParticipantId }
@@ -760,6 +765,15 @@ export interface RenderState {
   readonly phase: SessionPhase;
   readonly segment: Segment;
   readonly seal: Seal;
+  /**
+   * Practice: the games run and nothing they score reaches the board.
+   *
+   * On the wire to *everyone*, not just the host. A room that thinks a round
+   * counted and finds later that it did not has been lied to by omission, and
+   * the fix is not a briefing — it is a word on the screen they are already
+   * looking at.
+   */
+  readonly practice: boolean;
   readonly holding: { title: string; line: string } | null;
   readonly roster: readonly RosterEntry[];
   readonly joinsLocked: boolean;
@@ -1035,6 +1049,8 @@ function parseHostCommand(v: unknown): HostCommand | null {
       const st = c["state"];
       return SEALS.includes(st as Seal) ? { name: "seal", state: st as Seal } : null;
     }
+    case "practice":
+      return typeof c["on"] === "boolean" ? { name: "practice", on: c["on"] } : null;
     case "lobby.lock":
       return typeof c["locked"] === "boolean"
         ? { name: "lobby.lock", locked: c["locked"] }

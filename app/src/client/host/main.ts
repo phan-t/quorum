@@ -587,6 +587,35 @@ const unsealControl = control({
   onFire: (c) => issue({ name: "seal", state: "live" }, c),
 });
 
+/**
+ * Practice: run a game for real, and score nobody.
+ *
+ * The room is meeting most of these games for the first time, and the first
+ * run of one is spent learning the rule that ends it — a tap during APPLY
+ * drains you; one of the two panes is invented. That is a lesson worth having
+ * and a terrible thing to be scored on, so a round can be run once to learn it
+ * and once for keeps.
+ *
+ * It is a toggle rather than a per-round setting because the host is holding
+ * the room's attention, not a settings screen: "practice is on" is one fact to
+ * keep in your head, and the Desktop and every phone say it out loud so it is
+ * not only in the host's head.
+ *
+ * The engine refuses to change it while a question or a round is live, so the
+ * flag can never decide after the fact whether what the room just did counted.
+ */
+const practiceControl = control({
+  label: "Practice: off",
+  className: "ctl-secondary ctl-practice",
+  title:
+    "Games run normally and nobody scores. Use it for the first run of a game the room has not played before.",
+  question: () =>
+    (lastState?.practice ?? false)
+      ? "Start scoring again?"
+      : "Run the next game without scoring it?",
+  onFire: (c) => issue({ name: "practice", on: !(lastState?.practice ?? false) }, c),
+});
+
 const closeControl = control({
   label: "Close session",
   className: "ctl-danger",
@@ -895,6 +924,10 @@ replace(trayControls, [
   h("section", { class: "cp-group" }, [
     h("p", { class: "label", text: "Scoreboard" }),
     h("div", { class: "cp-row" }, [sealControl.el, unsealControl.el]),
+  ]),
+  h("section", { class: "cp-group" }, [
+    h("p", { class: "label", text: "Games" }),
+    h("div", { class: "cp-row" }, [practiceControl.el]),
   ]),
   h("section", { class: "cp-group" }, [
     h("p", { class: "label", text: "Shortcuts" }),
@@ -3451,6 +3484,8 @@ function render(s: RenderState): void {
   /* always-there controls */
   lockControl.setLabel(s.joinsLocked ? "Unlock joining" : "Lock joining");
   lockControl.el.classList.toggle("on", s.joinsLocked);
+  practiceControl.setLabel(`Practice: ${s.practice ? "on" : "off"}`);
+  practiceControl.el.classList.toggle("on", s.practice);
   sealControl.setLabel(
     s.seal === "live" ? "Hide the scoreboard" : "Reveal the winners, 5 to 1",
   );
@@ -4230,6 +4265,7 @@ renderRail();
 bindSpace(primary);
 bindEscape(() => [
   lockControl,
+  practiceControl,
   sealControl,
   unsealControl,
   reopenControl,

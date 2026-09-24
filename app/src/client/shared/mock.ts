@@ -435,6 +435,7 @@ class MockSession {
   phase: SessionPhase = "draft";
   segment: Segment = "lobby";
   seal: Seal = "live";
+  practice = false;
   holding: { title: string; line: string } | null = null;
   joinsLocked = false;
   seq = 0;
@@ -1226,6 +1227,7 @@ class MockSession {
       phase: this.phase,
       segment: this.segment,
       seal: this.seal,
+      practice: this.practice,
       holding: this.holding,
       roster: this.roster(),
       joinsLocked: this.joinsLocked,

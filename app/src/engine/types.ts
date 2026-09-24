@@ -228,6 +228,26 @@ export interface SessionState {
   readonly phase: SessionPhase;
   readonly segment: Segment;
   readonly seal: Seal;
+  /**
+   * Practice: the games run, and nothing they score reaches the board.
+   *
+   * SPEC assumes a room that knows the rules. A room meeting Red Light, Green
+   * Light for the first time does not, and the first run of a game is spent
+   * learning that a tap during APPLY drains you — which is a lesson worth
+   * having and a terrible thing to be scored on. So a round can be run once
+   * for real, in the sense that everything happens, and once for keeps.
+   *
+   * It gates exactly one thing: {@link withActivityTotals}, the single funnel
+   * both trivia and the arcade use to move an activity's totals onto the
+   * board. The activity still computes its totals and still shows them on the
+   * reveal — "this is what you would have scored" is the whole point of a
+   * practice run — and `scores`, and therefore standings, do not move.
+   *
+   * Deliberately *not* gated: `setScore` and `setStatus`. Those are the host
+   * typing a number in, for the TTX and for bench credit, and a host who does
+   * that during a practice round meant it.
+   */
+  readonly practice: boolean;
   readonly activities: readonly Activity[];
   /** Activity ids in tiebreak precedence order. */
   readonly tiebreakOrder: readonly ActivityId[];
@@ -852,6 +872,13 @@ export type Event =
    * still standing, or scores gone with the seal still hiding them.
    */
   | { type: "restartSession" }
+  /**
+   * Turn practice on or off. Refused while a question or a round is live,
+   * because the flag is read when totals are banked rather than when they are
+   * earned: flipping it mid-round would decide, retrospectively, whether the
+   * thing the room just did counted.
+   */
+  | { type: "setPractice"; on: boolean }
   | { type: "setSegment"; segment: Segment }
   | { type: "setSeal"; seal: Seal }
   | { type: "setHolding"; holding: HoldingCard | null }

@@ -793,6 +793,7 @@ export function renderStateFor(
     phase: state.phase,
     segment: state.segment,
     seal: state.seal,
+    practice: state.practice,
     holding: state.holding,
     roster,
     joinsLocked: state.joinsLocked,

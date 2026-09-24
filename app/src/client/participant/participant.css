@@ -179,6 +179,25 @@ body.phone #app {
   display: none;
 }
 
+/* Practice. The same dark-on-gold pair as the banner above, which is already
+   the product's "this is not the normal state" colour and already carries its
+   contrast in both themes. It sits below the banner rather than replacing it:
+   the banner is the socket's, and a practice round during a reconnect must not
+   silently drop one of the two messages. */
+.p-practice {
+  flex: none;
+  background: var(--sealed);
+  color: #2a2205;
+  font-size: 11px;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  padding: 5px 12px;
+  text-align: center;
+}
+.p-practice[hidden] {
+  display: none;
+}
+
 .p-stage {
   flex: 1;
   min-height: 0;

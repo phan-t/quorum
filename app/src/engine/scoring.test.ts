@@ -89,6 +89,7 @@ function build(b: Build): SessionState {
     phase: "running",
     segment: "standings",
     seal: "live",
+  practice: false,
     activities,
     tiebreakOrder: b.tiebreakOrder ?? activities.map((a) => a.id),
     participants,

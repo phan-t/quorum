@@ -337,6 +337,25 @@ body {
 .s-toast[hidden] {
   display: none;
 }
+
+/* Practice, on the surface the whole room is looking at. Bigger than the
+   phone's because it is read from across a video call, and at the top because
+   the bottom of this screen is where the scores live and this is a statement
+   about them. */
+.s-practice {
+  flex: none;
+  background: var(--sealed);
+  color: #2a2205;
+  font-family: var(--mono);
+  font-size: 1.6vh;
+  font-weight: 600;
+  letter-spacing: 0.22em;
+  padding: 1vh 5vw;
+  text-align: center;
+}
+.s-practice[hidden] {
+  display: none;
+}
 .s-toast[data-kind="spot"] {
   border-top-color: var(--spot);
 }
