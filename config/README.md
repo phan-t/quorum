@@ -28,13 +28,19 @@ That is the accepted trade for keeping real people out of a public repository,
 but it is worth knowing before the morning of an event rather than during one.
 Copy the file somewhere before you rely on it.
 
-For the 25 September 2026 huddle the last committed copy is in the private
-team-building repository's history, before it was removed on 24 Sep 2026:
+The set that ran the 25 September 2026 huddle is recoverable from the archive
+of the activity library, taken before that repository was deleted:
 
 ```bash
-cd ~/Developer/HashiCorp/team-building
-git show 3fa324e:config/trivia-questions.json > ~/Developer/HashiCorp/quorum/config/trivia-questions.json
+git clone ../private/team-building-archive.bundle /tmp/tb
+git -C /tmp/tb show 3fa324e:config/trivia-questions.json > config/trivia-questions.json
 ```
+
+That bundle is itself in `private/`, so it is not backed up either. It is one
+1.5 MB file and the point of it is to be copied somewhere else. `private/`
+carries its own README saying so; if you are reading this from a clone and
+there is no `private/` directory, that is working as intended — it holds
+material about real people and never leaves the machine it was made on.
 
 ## Using it
 

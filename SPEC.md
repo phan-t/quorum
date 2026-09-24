@@ -16,8 +16,8 @@ them.
 
 Every seam is a name match done by a person under time pressure. The roster has
 to be identical in Kahoot, on the arcade board and in the CSV, and the
-the roster notes say so in
-bold because it fails every time: someone joins Kahoot as `asdf`, the scorekeeper
+facilitation notes said so in bold because it failed every time: someone joins
+Kahoot as `asdf`, the scorekeeper
 spends the three-minute break doing detective work, and a score goes in the
 wrong row. The arcade needs a second person watching chat and typing names. The
 seal-and-reveal — the best idea in the scoring design — is a spreadsheet the
@@ -297,8 +297,8 @@ A correct answer scores `round(base × (1 − (t ÷ T) ÷ 2))` where `t` is the
 response time and `T` the time limit, so a correct answer at the buzzer is
 worth half of an instant one, never less. Wrong or no answer: 0. A streak bonus
 of `100 × min(n − 1, 5)` is added for the n-th consecutive correct answer,
-matching Kahoot's shape closely enough that the facilitator guide's "streaks
-and speed bonuses stay on" still means what it meant. Response time is measured
+matching Kahoot's shape closely enough that the old facilitator guidance —
+"streaks and speed bonuses stay on" — still means what it meant. Response time is measured
 on the server and corrected for the connection's measured latency, capped at
 250 ms — someone in Bengaluru on hotel Wi-Fi should not lose a speed race to
 someone in Sydney on fibre. [ARCHITECTURE.md](ARCHITECTURE.md#clocks-and-fairness)

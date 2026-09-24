@@ -317,7 +317,9 @@ not show up in a bot run.
 The activity library holds two kinds of thing, and they end up in different
 places. Worth deciding once rather than at each phase.
 
-**Content moves here. Guides do not.**
+**Content moves here. Guides do not.** *Settled 24 Sep 2026: the library was
+folded in wholesale rather than kept alongside. The last two rows did not
+survive contact with that — see the note below the table.*
 
 | | Today | After |
 | --- | --- | --- |
@@ -325,6 +327,16 @@ places. Worth deciding once rather than at each phase.
 | Arcade items | A `ROUNDS` array inside a host-driven HTML page | Ships here as structured round content |
 | Facilitator guides | Activity READMEs | **Stay in the library.** They are about running a session with humans, which is true whatever software is underneath |
 | The existing HTML boards and Kahoot import | Activity folders | **Stay, as the fallback.** Retire them only after this service has run a real session without incident |
+
+> **What actually happened.** The library was deleted on 24 Sep 2026, before
+> the first real session rather than after it, so the last two rows read
+> optimistically now. The guides did not "stay in the library" — there was no
+> library left to stay in, and what was worth keeping became
+> [`docs/running-an-event.md`](docs/running-an-event.md) and
+> [`docs/question-bank.md`](docs/question-bank.md). The HTML boards and the
+> Kahoot import went with it, so the documented fallback is gone: if this
+> service does not start, there is no second way to run the session. That was
+> a deliberate call by the host, not an oversight.
 
 The forcing reason is that this repo is public and the library is private: a
 public build cannot pull launch content out of a private repo without awkward

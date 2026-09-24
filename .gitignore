@@ -11,6 +11,12 @@ dist/
 # is actually versioned; a copy here would be an unbacked-up second truth.
 config/trivia-questions.json
 
+# Event material: run of show, rosters, and the round about a named colleague.
+# Same reason as the question file — this repository is public and these name
+# real people. Kept here so the service and the session that runs on it live in
+# one place; kept out of git so the people in them do not.
+private/
+
 # Terraform
 .terraform/
 *.tfstate

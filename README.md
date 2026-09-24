@@ -53,12 +53,15 @@ minutes of watching left was the failure this had to design out.
 
 ## Where this came from
 
-The activities Quorum automates, and the scoring rules it implements, live in
-[phan-t/team-building](https://github.com/phan-t/team-building) (private) — the trivia
-question bank, the arcade rounds, the facilitation notes and
-[the scoring rules](SCORING.md),
-the normalisation rule this service exists to make automatic.
+The activities Quorum automates were worked out first as a private activity
+library: a trivia question bank, the arcade rounds, facilitation notes, and a
+normalisation rule for scoring activities that count in different units. Those
+sessions ran on a Kahoot, a host-driven browser board and a spreadsheet, and
+Quorum was built to replace the seams between them rather than the material.
 
-That repo is the activity library and runs sessions today on Kahoot, a
-host-driven browser board and a spreadsheet. Quorum replaces the seams between
-them, not the material.
+That library was folded into this repository in September 2026, once the
+service had taken over everything the seams were for. What survived is
+[the question bank](docs/question-bank.md),
+[how to run a session](docs/running-an-event.md) and
+[the scoring rules](SCORING.md). What did not survive was the half of it that
+existed to hold three unrelated tools together.

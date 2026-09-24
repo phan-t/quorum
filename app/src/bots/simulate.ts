@@ -353,7 +353,7 @@ function runSession(n: number, seed: number): RunOutput {
   /* -- activity 1: the TTX, scored by hand ---------------------------- */
 
   run.send(
-    { type: "setHolding", holding: { title: "Agentic Security TTX", line: "Ade has the room. Back here at 2:40." } },
+    { type: "setHolding", holding: { title: "Security tabletop", line: "The facilitator has the room. Back here at 2:40." } },
     "setHolding TTX",
   );
   run.send({ type: "setSegment", segment: "holding" }, "segment holding");
