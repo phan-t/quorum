@@ -162,6 +162,21 @@ export type HostCommand =
    * both press it do not cancel each other out.
    */
   | { name: "practice"; on: boolean }
+  /* ---- the send-off (a segment, not an activity) ---- */
+  /**
+   * One step through the send-off: the montage to the first message, one
+   * message to the next, the last message to the closing card, and off the
+   * end. The engine's `sendoffNext` event, which is the same walk read
+   * forwards.
+   *
+   * Skipping a kudo is two of these in one press — see the console. There is
+   * deliberately no `sendoff.skip`: the engine holds no such event, and a
+   * command that means "two steps" is a thing the wire should not have to
+   * express when "one step" already composes.
+   */
+  | { name: "sendoff.next" }
+  /** Back one step, for an overshoot. The engine's `sendoffBack`. */
+  | { name: "sendoff.back" }
   | { name: "lobby.lock"; locked: boolean }
   | { name: "participant.kick"; pid: ParticipantId }
   | { name: "participant.release"; pid: ParticipantId }
@@ -1042,8 +1057,11 @@ function parseHostCommand(v: unknown): HostCommand | null {
   const str = (k: string): string | null =>
     typeof c[k] === "string" ? (c[k] as string) : null;
 
+  // `sendoff` belongs here for the same reason every other segment does: this
+  // list is what a `segment` frame is checked against, and a segment missing
+  // from it is a segment the console cannot reach at all.
   const SEGMENTS: readonly Segment[] = [
-    "lobby", "holding", "trivia", "arcade", "standings", "final",
+    "lobby", "holding", "sendoff", "trivia", "arcade", "standings", "final",
   ];
   const SEALS: readonly Seal[] = ["live", "sealed", "revealed"];
 
@@ -1083,6 +1101,10 @@ function parseHostCommand(v: unknown): HostCommand | null {
     }
     case "practice":
       return typeof c["on"] === "boolean" ? { name: "practice", on: c["on"] } : null;
+    case "sendoff.next":
+      return { name: "sendoff.next" };
+    case "sendoff.back":
+      return { name: "sendoff.back" };
     case "lobby.lock":
       return typeof c["locked"] === "boolean"
         ? { name: "lobby.lock", locked: c["locked"] }

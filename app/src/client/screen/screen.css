@@ -157,21 +157,53 @@ body {
  *
  * White, because it is somebody's poster and it brings its own background; the
  * radius and the inset ring are what stop it reading as a hole in the screen.
+ *
+ * The slot is sized by the card's shape rather than by a slice of the window.
+ * It used to be `flex: 0 1 38vw` — 730px at 1920, chosen to clear the ~700px
+ * a poster lays out at — and that is a width with no relationship to the
+ * height available, so on a 1512 x 772 window the card got a 575 x 695 box and
+ * lost its bottom third. A poster is height-bound in a landscape row, so the
+ * slot takes the row's full height and `aspect-ratio` gives it the width that
+ * belongs to it: 390px at 695 tall, with the ~185px of slack going back to
+ * the join details, which is the column somebody has to read a code off.
+ *
+ * `max-width` is the other end of it: on a short, wide window the aspect
+ * would otherwise be satisfied by a sliver, and the card stops being worth
+ * showing before it stops being visible.
  */
-.s-promo {
-  /* 38vw is 730px on the 1920 the Desktop is actually run at, which clears the
-     ~700px a poster is typically laid out for; below that a card starts
-     reflowing into a column nobody designed. */
-  flex: 0 1 38vw;
+.s-promo-wrap {
   align-self: stretch;
-  max-height: 100%;
-  border: 0;
+  flex: 0 0 auto;
+  aspect-ratio: 732 / 1303;
+  max-width: 38vw;
+  /* The frame is scaled with `zoom`, so its box is already the scaled one and
+     any slack — a card that is not this one's shape — is centred here rather
+     than translated there. */
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
   border-radius: 12px;
   background: #f6f5f3;
   box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.18);
 }
-.s-promo[hidden] {
+.s-promo-wrap[hidden] {
   display: none;
+}
+
+/*
+ * The frame is the card's own viewport — 732 x 1303, the logical size stated
+ * in main.ts — and the `zoom` that fits it into the slot is set there, from
+ * the slot's measured box. Fixed pixels rather than a percentage on purpose:
+ * a percentage would reflow the poster into whatever box the lobby had left,
+ * and the whole point is that it is laid out at the size it was written for.
+ */
+.s-promo {
+  flex: none;
+  width: 732px;
+  height: 1303px;
+  border: 0;
+  background: #f6f5f3;
 }
 
 /*
@@ -1186,4 +1218,171 @@ body {
   grid-column: 2;
   color: var(--muted);
   font-size: 20px;
+}
+
+/* ------------------------------------------------------------ send-off -- */
+
+/*
+ * The send-off: a montage, then the messages, then the closing card.
+ *
+ * Three decisions worth stating, because each is an exception to a rule this
+ * stylesheet otherwise keeps:
+ *
+ * 1. **The photos cross-fade, and nothing else on this surface moves.** The
+ *    file's opening rule is that a smooth slide becomes a smear at 15fps —
+ *    which is true of something travelling across the frame and not of two
+ *    stills dissolving in place. A cut between photographs, at this moment,
+ *    reads as a fault in the share. The fade is 900ms of opacity on a static
+ *    image and it is the only transition on the Desktop.
+ * 2. **`prefers-reduced-motion` turns it into a cut.** The rule below wins
+ *    over the blanket 0.001ms in tokens.css on specificity, so the cut has to
+ *    be said again here rather than inherited. The transitions are the
+ *    decoration; the messages are the content.
+ * 3. **No text sits on a photograph.** The name, the closing line and the
+ *    kudos are all on --ground, in a band under the montage, because contrast
+ *    over a photograph is not a number anybody can measure and this is the
+ *    surface with the worst rendering path in the product.
+ *
+ * Contrast, dark (the Desktop has no light theme — index.html pins
+ * color-scheme: dark):
+ *   --ink   #f6f5f3 on --ground #0a0a0f  18.24:1   the message, the line
+ *   --muted #8b8a9c on --ground #0a0a0f   5.84:1   the kicker, the counter
+ *   --nomad-ink #06d092 on --ground       9.82:1   who wrote it
+ */
+
+.s-sendoff {
+  gap: 0;
+  padding: 0;
+  justify-content: stretch;
+}
+
+.s-montage {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  background: var(--ground);
+  overflow: hidden;
+}
+.s-montage[hidden] {
+  display: none;
+}
+
+.s-photo {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  opacity: 0;
+  /* The one exception to `* { transition: none }` at the top of this file. */
+  transition: opacity 900ms linear !important;
+}
+.s-photo.is-on {
+  opacity: 1;
+}
+@media (prefers-reduced-motion: reduce) {
+  .s-photo {
+    transition: none !important;
+  }
+}
+
+/* The band the words live in. It is the whole screen during the messages and
+   a strip under the photos during a montage, which is the same box either
+   way — only what is above it changes. */
+.s-sendoff-card {
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 1.6vh;
+  padding: 4vh 5vw;
+  background: var(--ground);
+}
+.s-sendoff[data-phase="kudos"] .s-sendoff-card,
+.s-sendoff[data-phase="done"] .s-sendoff-card,
+.s-sendoff[data-phase="none"] .s-sendoff-card {
+  flex: 1;
+  min-height: 0;
+  padding: 5vh 5vw; /* the safe margin, once the photos are gone */
+}
+/* Under a montage the words are a caption, so the band is given a top rule
+   rather than being allowed to blend into a dark photograph — and a ceiling,
+   which is load-bearing rather than cosmetic: the fit in main.ts sizes the
+   line to the box it is given, and a band free to grow with its content is a
+   box that can never overflow, so a two-word closing line would be set at the
+   top of the range and leave the photographs a strip. */
+.s-sendoff[data-phase="opening"] .s-sendoff-card,
+.s-sendoff[data-phase="closing"] .s-sendoff-card {
+  max-height: 45%;
+  border-top: 1px solid var(--line);
+}
+
+.s-sendoff .s-kicker {
+  flex: none;
+}
+
+/*
+ * One message, at whatever size that message wants.
+ *
+ * `--kudo-size` is set per message in main.ts: the size falls off as the
+ * square root of the length so the *area* stays roughly constant, which is
+ * what lets a 34-word kudo and a 145-word one both fill the screen. The
+ * measure is capped in `ch`, so it holds at ~34 characters a line whatever
+ * the size works out to be — a 100px line running the full 1920 is a line
+ * the eye loses its place in.
+ */
+.s-kudo {
+  margin: 0;
+  /* The box the fit measures against: whatever the card has left once the
+     name, the attribution and the counter have taken theirs. `min-height: 0`
+     is what lets a flex item be smaller than its content, and `overflow:
+     hidden` is the net — the fit means it should never be needed. */
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: hidden;
+  line-height: 1.18;
+  /* The measure. Wider than prose wants because the alternative is a smaller
+     size: at 46 characters the longest of the real messages lands near 39px
+     on a 1080p tab, and at 34 it lands near 30. */
+  max-width: 46ch;
+  text-wrap: pretty;
+}
+.s-kudo[hidden] {
+  display: none;
+}
+/* The closing line goes through the same fit as a kudo — one sentence simply
+   comes out at the top of the range. The "nothing staged" line does not: it
+   is a notice rather than the content, and a fault set in 110px type is a
+   fault the whole room reads first. */
+.s-sendoff[data-phase="none"] .s-kudo {
+  font-size: clamp(32px, 2.6vw, 56px);
+  color: var(--muted);
+}
+
+/* Who wrote it, in the arcade's green — the one hue on this surface that is
+   already "a person", and 9.82:1 on --ground. Not a quotation mark: the
+   message is somebody's words and the attribution is the product's. */
+.s-kudo-from {
+  margin: 0;
+  flex: none;
+  font-size: clamp(24px, 2vw, 40px);
+  font-weight: 600;
+  color: var(--nomad-ink);
+}
+.s-kudo-from::before {
+  content: "— ";
+}
+.s-kudo-from[hidden] {
+  display: none;
+}
+
+.s-kudo-count {
+  margin: 0;
+  flex: none;
+  font-size: clamp(20px, 1.4vw, 28px);
+  letter-spacing: 0.18em;
+  color: var(--muted);
+}
+.s-kudo-count[hidden] {
+  display: none;
 }

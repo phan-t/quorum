@@ -39,7 +39,28 @@ export const RUNBOOK_MOVABLE: readonly Segment[] = [
   "trivia",
   "arcade",
   "standings",
+  "sendoff",
 ];
+
+/**
+ * Steps that start *out* of the running order.
+ *
+ * Only the send-off, and the reason is the content: the other four surfaces
+ * draw something sensible for any session, and a send-off draws what is in
+ * that event's `sendoff.json`. An event that staged none and walked into the
+ * step would put an empty frame in front of the room, at the one moment in an
+ * afternoon that cannot be recovered with a shrug.
+ *
+ * So it is listed in the rail — discoverable, one click from being in — and
+ * the host switches it on for the event that has one. This is the same
+ * bargain the note makes when it says the send-off is runbook-modular: an
+ * event that does not need one drops the step. It starts dropped.
+ */
+const RUNBOOK_OUT_BY_DEFAULT: readonly Segment[] = ["sendoff"];
+
+function includedByDefault(kind: Segment): boolean {
+  return !RUNBOOK_OUT_BY_DEFAULT.includes(kind);
+}
 
 /**
  * A step in the run of show.
@@ -82,9 +103,16 @@ export type Runbook = readonly RunbookEntry[];
  */
 export const HOLDING_STEPS_MAX = 8;
 
-/** Everything in, in the order the product shipped with. */
+/**
+ * The order the product shipped with: everything in, except the steps
+ * {@link RUNBOOK_OUT_BY_DEFAULT} names.
+ */
 export function defaultRunbook(): Runbook {
-  return RUNBOOK_MOVABLE.map((kind) => ({ kind, included: true, id: kind }));
+  return RUNBOOK_MOVABLE.map((kind) => ({
+    kind,
+    included: includedByDefault(kind),
+    id: kind,
+  }));
 }
 
 /** The step with this id, lobby and final included, or `null`. */
@@ -387,7 +415,7 @@ export function parseRunbook(raw: string | null): Runbook | null {
   // segment does not leave it unreachable behind a stale entry in storage.
   for (const kind of RUNBOOK_MOVABLE) {
     if (!book.some((b) => b.id === kind)) {
-      book.push({ kind, included: true, id: kind });
+      book.push({ kind, included: includedByDefault(kind), id: kind });
     }
   }
   // An empty runbook is a state the editor refuses to produce; a stored one

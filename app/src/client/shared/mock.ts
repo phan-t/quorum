@@ -70,6 +70,7 @@ import type {
   ScoreRow,
   ServerMessage,
   Role,
+  SendoffView,
   StandingRow,
   TriviaMine,
   TriviaPodiumRow,
@@ -85,6 +86,7 @@ import type {
   GlassWave,
   QuestionPhase,
   Seal,
+  SendoffPhase,
   ScoreStatus,
   Segment,
   SessionPhase,
@@ -309,6 +311,129 @@ interface MockGlassPlay {
 
 type MockPlay = MockRecruitPlay | MockPlanPlay | MockGlassPlay;
 
+/* ---- the send-off ---------------------------------------------------- */
+
+/*
+ * A staged send-off, so the segment can actually be driven without a backend.
+ *
+ * The practice toggle shipped unverifiable because this file had no case for
+ * its command: the frame fell off the end of the switch, was acked as
+ * applied, and changed nothing. Everything the send-off needs is here for
+ * that reason — the walk, the projection, and content with the shape of the
+ * real thing.
+ *
+ * **The photos are `data:` URIs.** The real ones are keys resolved against
+ * `/api/sessions/<sid>/assets/<key>`, which is a server this page does not
+ * have, and a montage that can only ever 404 is a montage nobody can look at.
+ * The Desktop passes a `data:` key through untouched for exactly this. One
+ * key in the opening list is a plain filename that will 404 on purpose, so
+ * the run that shows the montage working also shows it stepping over a photo
+ * that is not there.
+ */
+function mockPhoto(bg: string, fg: string, caption: string): string {
+  const svg =
+    `<svg xmlns='http://www.w3.org/2000/svg' width='1200' height='800'>` +
+    `<rect width='1200' height='800' fill='${bg}'/>` +
+    `<circle cx='940' cy='190' r='90' fill='${fg}' opacity='0.5'/>` +
+    `<text x='60' y='720' font-family='sans-serif' font-size='64' fill='${fg}'>${caption}</text>` +
+    `</svg>`;
+  return `data:image/svg+xml,${encodeURIComponent(svg)}`;
+}
+
+/**
+ * The montage's track: half a second of silence, on a loop.
+ *
+ * Generated rather than named, for the reason the photos are `data:` URIs —
+ * there is no asset endpoint on this page — and *silent* rather than a tone
+ * because the scripted mock loops all afternoon on somebody's second monitor.
+ * What it is for is the part of the music that can go wrong without making a
+ * sound: the Desktop arms audio on the first gesture it receives, and a track
+ * that never loads cannot tell you whether the arming worked. This one plays,
+ * so `paused`, `volume` and the fade-out before the first message are all
+ * things a verification pass can actually look at.
+ */
+function mockSilentTrack(): string {
+  const rate = 8_000;
+  const samples = rate / 2;
+  const bytes = new Uint8Array(44 + samples);
+  const view = new DataView(bytes.buffer);
+  const ascii = (at: number, text: string): void => {
+    for (let i = 0; i < text.length; i += 1) view.setUint8(at + i, text.charCodeAt(i));
+  };
+  ascii(0, "RIFF");
+  view.setUint32(4, 36 + samples, true);
+  ascii(8, "WAVEfmt ");
+  view.setUint32(16, 16, true); // PCM header length
+  view.setUint16(20, 1, true); // PCM
+  view.setUint16(22, 1, true); // mono
+  view.setUint32(24, rate, true);
+  view.setUint32(28, rate, true); // byte rate
+  view.setUint16(32, 1, true); // block align
+  view.setUint16(34, 8, true); // bits per sample
+  ascii(36, "data");
+  view.setUint32(40, samples, true);
+  // 8-bit PCM is unsigned: silence is 0x80, not zero.
+  bytes.fill(0x80, 44);
+  let binary = "";
+  for (const b of bytes) binary += String.fromCharCode(b);
+  return `data:audio/wav;base64,${btoa(binary)}`;
+}
+
+interface MockSendoff {
+  name: string;
+  subtitle: string | null;
+  opening: { photos: string[]; seconds: number; music: string | null };
+  kudos: { from: string; message: string }[];
+  closing: { photos: string[]; line: string | null };
+}
+
+/**
+ * Lengths matter here and are not padding: the real set runs 34 to 145 words,
+ * and a mock whose messages are all one line cannot show whether the type
+ * fits them. The third one is the joke that does not survive being read out
+ * at a farewell — it is here so the Skip control has something to be for.
+ */
+const MOCK_SENDOFF: MockSendoff = {
+  name: "Abhijeet Lokhande",
+  subtitle: "Last day 30 September 2026",
+  opening: {
+    photos: [
+      mockPhoto("#1d3b53", "#f6f5f3", "Sydney offsite, 2024"),
+      "no-such-photo.jpg",
+      mockPhoto("#3b1d4f", "#f6f5f3", "The whiteboard"),
+      mockPhoto("#153d31", "#f6f5f3", "Team dinner, Singapore"),
+    ],
+    seconds: 40,
+    music: mockSilentTrack(),
+  },
+  kudos: [
+    {
+      from: "Priya Raghunathan",
+      message:
+        "You were the first person to reply to me when I joined, and you have been the first person to reply every time since. I have watched you take a customer call at ten at night because somebody needed it, and then write the follow-up the same evening so nobody had to chase it. The team runs the way it does because you set it up that way, and the rest of us just kept doing it.",
+    },
+    {
+      from: "Koutarou Yamada",
+      message:
+        "Thank you for the whiteboard session that finally made the Vault deployment make sense to me. I still have the photo of it.",
+    },
+    {
+      from: "Anonymous",
+      message:
+        "Whoever gets your desk is inheriting the good monitor and a drawer of expired protein bars. Rest in peace to the guy who kept moving my mouse settings.",
+    },
+    {
+      from: "Sam Whitfield",
+      message:
+        "I have worked with you on four accounts now and I have never once seen you take the easy version of an answer. The Canberra escalation is the one I will keep telling people about: you got on a plane, sat in the room for two days, and came back with a plan the customer wrote half of themselves. That is the part people miss about what you do — you do not just solve it, you leave the customer able to solve the next one. You also never let any of us present anything half-finished, which was annoying at the time and is the reason our decks are the ones that get reused. Whatever you are doing next, they have no idea what they have just picked up. Thank you for all of it, and for the coffee order you somehow remembered for three years.",
+    },
+  ],
+  closing: {
+    photos: [mockPhoto("#4f2a1d", "#f6f5f3", "Last day")],
+    line: "Thank you, Abhijeet. Don't be a stranger.",
+  },
+};
+
 /** SPEC.md: each step crossed banks 5, and wave 1 banks +3 per step. */
 const GLASS_STEP_BANK = 5;
 const GLASS_BLIND_BONUS = 3;
@@ -457,6 +582,12 @@ class MockSession {
   triviaStreaks: Record<string, number> = {};
 
 
+  /* ---- the send-off ---- */
+  /** Loaded the way the engine loads it: at start-up, before anybody arrives. */
+  sendoff: MockSendoff | null = MOCK_SENDOFF;
+  sendoffPhase: SendoffPhase = MOCK_SENDOFF.opening.photos.length > 0 ? "opening" : "kudos";
+  sendoffAt = 0;
+
   /* ---- arcade ---- */
   arcadeOn = false;
   arcadeNumbers: Record<string, number> = {};
@@ -512,6 +643,13 @@ class MockSession {
       p.raw = {};
       p.status = {};
     }
+
+    // The send-off's content stays loaded and the walk goes back to the
+    // start — the reducer's `restartSession`, which says the same thing about
+    // re-uploading not being the point of a restart.
+    this.sendoffPhase =
+      this.sendoff !== null && this.sendoff.opening.photos.length > 0 ? "opening" : "kudos";
+    this.sendoffAt = 0;
 
     this.at = 0;
     this.questionPhase = "idle";
@@ -820,6 +958,9 @@ class MockSession {
     this.phase = "draft";
     this.segment = "lobby";
     this.seal = "live";
+    this.sendoffPhase =
+      this.sendoff !== null && this.sendoff.opening.photos.length > 0 ? "opening" : "kudos";
+    this.sendoffAt = 0;
     this.holding = null;
     this.joinsLocked = false;
     this.spots = [];
@@ -1209,6 +1350,103 @@ class MockSession {
     });
   }
 
+  /**
+   * One step through the send-off, forwards or back.
+   *
+   * The engine's `stepSendoff`, implemented a second time on purpose — the
+   * mock is a stand-in for the server and must not borrow the reducer to
+   * agree with it. False when the step falls off an end, which is the engine
+   * acking a command it understood and did nothing about.
+   *
+   * Stepping back out of `done` lands on the last real thing rather than on
+   * `closing` unconditionally, so correcting an overshoot cannot put an empty
+   * frame in front of the room.
+   */
+  stepSendoff(dir: 1 | -1): boolean {
+    const so = this.sendoff;
+    if (so === null) return false;
+    const kudos = so.kudos.length;
+    const hasOpening = so.opening.photos.length > 0;
+    const hasClosing =
+      so.closing.photos.length > 0 || (so.closing.line ?? "") !== "";
+    const at = (phase: SendoffPhase, index: number): boolean => {
+      this.sendoffPhase = phase;
+      this.sendoffAt = index;
+      return true;
+    };
+
+    if (dir === 1) {
+      if (this.sendoffPhase === "opening") {
+        return kudos > 0 ? at("kudos", 0) : hasClosing ? at("closing", 0) : at("done", 0);
+      }
+      if (this.sendoffPhase === "kudos") {
+        if (this.sendoffAt + 1 < kudos) return at("kudos", this.sendoffAt + 1);
+        return hasClosing ? at("closing", 0) : at("done", 0);
+      }
+      if (this.sendoffPhase === "closing") return at("done", 0);
+      return false;
+    }
+
+    if (this.sendoffPhase === "done") {
+      if (hasClosing) return at("closing", 0);
+      if (kudos > 0) return at("kudos", kudos - 1);
+      return hasOpening ? at("opening", 0) : false;
+    }
+    if (this.sendoffPhase === "closing") {
+      if (kudos > 0) return at("kudos", kudos - 1);
+      return hasOpening ? at("opening", 0) : false;
+    }
+    if (this.sendoffPhase === "kudos") {
+      if (this.sendoffAt > 0) return at("kudos", this.sendoffAt - 1);
+      return hasOpening ? at("opening", 0) : false;
+    }
+    return false;
+  }
+
+  /**
+   * The send-off, projected for one surface.
+   *
+   * `next` for the host and for nobody else. Implemented here rather than
+   * imported from views.ts for the reason the rest of this file is: if the
+   * mock copied the projection, the one thing it could never catch is the
+   * projection putting the *next* message on the Desktop.
+   */
+  sendoffView(role: Role): SendoffView | undefined {
+    const so = this.sendoff;
+    // On the wire whenever one is loaded, not only inside the segment — which
+    // is what views.ts does. The surfaces decide what to draw from `segment`.
+    if (so === null) return undefined;
+    const phase = this.sendoffPhase;
+    const kudo = phase === "kudos" ? (so.kudos[this.sendoffAt] ?? null) : null;
+    const photos =
+      phase === "opening"
+        ? so.opening.photos
+        : phase === "closing"
+          ? so.closing.photos
+          : [];
+    const view: SendoffView = {
+      name: so.name,
+      subtitle: so.subtitle,
+      phase,
+      index: phase === "kudos" ? this.sendoffAt + 1 : 0,
+      total: so.kudos.length,
+      kudo: kudo === null ? null : { from: kudo.from, message: kudo.message },
+      photos,
+      seconds: so.opening.seconds,
+      // Only the montage's, and only while the montage is up: a music key on
+      // a message frame is a track that would start under somebody reading.
+      music: phase === "opening" ? so.opening.music : null,
+      line: phase === "closing" || phase === "done" ? so.closing.line : null,
+    };
+    if (role !== "host") return view;
+    const after =
+      phase === "kudos" ? (so.kudos[this.sendoffAt + 1] ?? null) : (so.kudos[0] ?? null);
+    return {
+      ...view,
+      next: after === null ? null : { from: after.from, message: after.message },
+    };
+  }
+
   activities(): ActivitySummary[] {
     return ACTIVITIES.map((a) => ({ ...a, spotsLeft: this.spotsLeft(a.id) }));
   }
@@ -1236,10 +1474,12 @@ class MockSession {
 
     const trivia = this.triviaView(role);
     const arcade = this.arcadeView(role);
+    const sendoff = this.sendoffView(role);
     const withTrivia = {
       ...base,
       ...(trivia ? { trivia } : {}),
       ...(arcade ? { arcade } : {}),
+      ...(sendoff ? { sendoff } : {}),
     };
 
     if (role === "host") {
@@ -1628,6 +1868,22 @@ class MockHub {
         }
         if (s.practice === cmd.on) return noop();
         s.practice = cmd.on;
+        break;
+      // The send-off, one step at a time in either direction. Refused with the
+      // engine's words when nothing is loaded, and acked as "understood, did
+      // nothing" at either end of the walk — which is what the console reads
+      // to leave Back unpressable in the montage.
+      case "sendoff.next":
+        if (s.sendoff === null) {
+          return reject("wrong_phase", "No send-off is loaded.");
+        }
+        if (!s.stepSendoff(1)) return noop();
+        break;
+      case "sendoff.back":
+        if (s.sendoff === null) {
+          return reject("wrong_phase", "No send-off is loaded.");
+        }
+        if (!s.stepSendoff(-1)) return noop();
         break;
       case "participant.kick": {
         const i = s.participants.findIndex((p) => p.pid === cmd.pid);
@@ -3116,9 +3372,33 @@ class MockHub {
       this.#broadcastState();
     });
 
+    /**
+     * The send-off, walked the way a host walks it.
+     *
+     * Here because the Desktop is the surface this segment is mostly about
+     * and the Desktop cannot be driven from the console in mock mode — each
+     * page carries its own hub, so `?mock=1` is the only way to watch the
+     * montage cross-fade, the music arm, and the messages step. The pacing is
+     * demo pacing: the montage is cut short at twenty seconds rather than the
+     * forty the file asks for — long enough for one cross-fade at the dwell
+     * that forty seconds over three photos works out to — and a message holds
+     * five seconds instead of however long it takes to read one out.
+     */
+    this.#at(250, () => {
+      this.session.segment = "sendoff";
+      this.#broadcastState();
+    });
+    for (let i = 0; i < 7; i += 1) {
+      this.#at(270 + i * 5, () => {
+        if (this.session.segment !== "sendoff") return;
+        this.session.stepSendoff(1);
+        this.#broadcastState();
+      });
+    }
+
     // Long enough for the big screen's final reveal to actually finish: four
     // four-second dwells, then the hold on the empty first slot.
-    this.#at(284, () => {
+    this.#at(312, () => {
       this.#clearArcadeTimers();
       this.session.reset();
       this.#directorStarted = false;

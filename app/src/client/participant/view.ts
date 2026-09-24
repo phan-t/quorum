@@ -341,41 +341,91 @@ function sceneWaiting(): Scene {
 }
 
 /**
- * The send-off, on a phone.
+ * The send-off, on the player's own screen.
  *
- * The same message the room is looking at, in text, and not a shrunken copy of
- * the Desktop. Somebody whose screen-share has frozen is still reading along,
- * which at this point in a session matters more than it does anywhere else.
+ * The same message the room is looking at, as text, and not a shrunken copy
+ * of the Desktop: no photos, no montage, nothing to tap. Somebody whose
+ * screen-share has frozen is still reading along, which at this point in a
+ * session matters more than it does anywhere else — and the person being
+ * celebrated is not made to watch the room watch a second copy of themselves.
  *
- * Nothing to tap. The points strip stays: the competition is usually not
- * settled yet when this runs, and taking the scoreboard away mid-send-off
- * reads as the session having ended.
+ * The points strip stays. The competition is usually not settled yet when
+ * this runs, and taking the scoreboard away mid-send-off reads as the session
+ * having ended.
+ *
+ * A kudo runs to 145 words, so the type is fitted the way the Desktop's is —
+ * by the square root of the length, holding the area roughly constant — and
+ * the message is the one box allowed to scroll if a short window still cannot
+ * hold it. Reading is the only thing happening on this screen; the no-scroll
+ * rule is about play.
  */
 function sceneSendoff(): Scene {
   const who = h("p", { class: "label so-for" });
   const message = h("p", { class: "so-message" });
   const from = h("p", { class: "so-from" });
-  const node = h("section", { class: "v v-sendoff" }, [who, message, from]);
+  const note = h("p", { class: "v-note so-note" });
+  const node = h("section", { class: "v v-sendoff" }, [who, note, message, from]);
   return {
     node,
     update(state) {
       const so = state.sendoff;
-      if (!so) return;
-      setText(who, so.name);
+      if (!so) {
+        // The host walked into the step and this event staged no send-off.
+        // Said in words rather than left blank, the same as the Desktop.
+        setText(who, "Send-off");
+        setText(note, "Nothing staged for this event.");
+        note.hidden = false;
+        message.hidden = true;
+        from.hidden = true;
+        return;
+      }
+      setText(who, so.subtitle === null ? so.name : `${so.name} · ${so.subtitle}`);
+      node.dataset["phase"] = so.phase;
+
       const k = so.kudo;
       if (k !== null) {
         setText(message, k.message);
         setText(from, k.from);
         message.hidden = false;
         from.hidden = false;
+        message.style.setProperty("--so-size", kudoSize(k.message));
+        // Which one of how many, so a phone that lost the share still knows
+        // where the room is. Quiet: it is not the content.
+        setText(note, `${so.index} of ${so.total}`);
+        note.hidden = false;
         return;
       }
+
       from.hidden = true;
       const line = so.phase === "closing" || so.phase === "done" ? so.line : null;
       setText(message, line ?? "");
-      message.hidden = line === null;
+      message.hidden = line === null || line === "";
+      message.style.removeProperty("--so-size");
+      // The montage has no words of its own on this screen, so it says what
+      // is happening rather than showing an empty panel for forty seconds.
+      setText(
+        note,
+        so.phase === "opening"
+          ? "Photos, on the shared screen."
+          : so.phase === "closing"
+            ? "Photos, on the shared screen."
+            : "",
+      );
+      note.hidden = note.textContent === "";
     },
   };
+}
+
+/**
+ * The size for one message: constant *area*, not constant type.
+ *
+ * The same fit the Desktop uses, in a range this screen can hold — a browser
+ * window beside a video call, or a phone in a pocket at the back of a room.
+ */
+function kudoSize(text: string): string {
+  const n = Math.max(1, text.length);
+  const px = 420 / Math.sqrt(n);
+  return `clamp(17px, ${px.toFixed(1)}px, 26px)`;
 }
 
 function sceneLobby(): Scene {

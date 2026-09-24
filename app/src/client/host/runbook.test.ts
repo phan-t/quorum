@@ -63,6 +63,25 @@ describe("the runbook", () => {
     ]);
   });
 
+  /*
+   * The send-off is in the rail and out of the order, which is the one step
+   * that starts that way. It draws an event's own `sendoff.json` and there is
+   * no sensible frame for an event that staged none, so it is switched on for
+   * the afternoon that has one rather than walked into by every other.
+   */
+  it("lists the send-off, and leaves it out of the running order", () => {
+    const book = defaultRunbook();
+    assert.equal(entryById(book, "sendoff")?.included, false);
+    assert.ok(!runbookIncluded(book).includes("sendoff"));
+    assert.deepEqual(runbookIncluded(toggleRunbook(book, "sendoff")), [
+      "holding",
+      "trivia",
+      "arcade",
+      "standings",
+      "sendoff",
+    ]);
+  });
+
   it("keeps the lobby first and the final last whatever the host does", () => {
     let book = defaultRunbook();
     book = moveRunbook(book, "standings", -1);
@@ -85,7 +104,7 @@ describe("the runbook", () => {
   it("refuses to move off either end rather than wrapping", () => {
     const book = defaultRunbook();
     assert.equal(moveRunbook(book, "holding", -1), book);
-    assert.equal(moveRunbook(book, "standings", 1), book);
+    assert.equal(moveRunbook(book, "sendoff", 1), book);
   });
 
   it("drops a segment at a position, for the pointer path", () => {
@@ -106,9 +125,10 @@ describe("the runbook", () => {
   it("takes a segment out and puts it back", () => {
     const out = toggleRunbook(defaultRunbook(), "arcade");
     assert.deepEqual(runbookIncluded(out), ["holding", "trivia", "standings"]);
-    assert.deepEqual(runbookIncluded(toggleRunbook(out, "arcade")), [
-      ...RUNBOOK_MOVABLE,
-    ]);
+    assert.deepEqual(
+      runbookIncluded(toggleRunbook(out, "arcade")),
+      runbookIncluded(defaultRunbook()),
+    );
   });
 
   it("refuses to take the last segment out, and says which one that is", () => {
@@ -137,6 +157,7 @@ describe("the runbook", () => {
         ["trivia", false],
         ["arcade", true],
         ["standings", true],
+        ["sendoff", false],
         ["final", true],
       ],
     );
@@ -213,8 +234,10 @@ describe("the runbook across a refresh", () => {
     assert.ok(book);
     assert.deepEqual(
       book.map((e) => e.kind),
-      ["trivia", "holding", "arcade", "standings"],
+      ["trivia", "holding", "arcade", "standings", "sendoff"],
     );
+    // Appended the way the default has it: in the rail, out of the order.
+    assert.equal(book.find((e) => e.kind === "sendoff")?.included, false);
   });
 
   it("drops entries that are not segments, and duplicates", () => {
@@ -230,7 +253,7 @@ describe("the runbook across a refresh", () => {
     assert.ok(book);
     assert.deepEqual(
       book.map((e) => e.kind),
-      ["trivia", "holding", "arcade", "standings"],
+      ["trivia", "holding", "arcade", "standings", "sendoff"],
     );
     assert.equal(book[0]?.included, true);
   });
@@ -255,9 +278,12 @@ describe("the runbook across a refresh", () => {
 describe("more than one holding step", () => {
   function twoHoldings(): Runbook {
     // Lobby · TTX · Trivia · Arcade · Coffee · Standings · Final
+    // A new step lands last, which is now behind the send-off as well as the
+    // standings, so it walks up two places rather than one.
     let book = setEntryCard(defaultRunbook(), "holding", "card-1");
     book = addHoldingStep(book, "card-2");
-    book = moveRunbook(book, "step-5", -1);
+    book = moveRunbook(book, "step-6", -1);
+    book = moveRunbook(book, "step-6", -1);
     return book;
   }
 
@@ -269,8 +295,9 @@ describe("more than one holding step", () => {
         ["holding", "holding", "card-1"],
         ["trivia", "trivia", null],
         ["arcade", "arcade", null],
-        ["holding", "step-5", "card-2"],
+        ["holding", "step-6", "card-2"],
         ["standings", "standings", null],
+        ["sendoff", "sendoff", null],
       ],
     );
   });
@@ -289,7 +316,7 @@ describe("more than one holding step", () => {
       "holding",
       "trivia",
       "arcade",
-      "step-5",
+      "step-6",
       "standings",
       "final",
     ]);
@@ -299,12 +326,12 @@ describe("more than one holding step", () => {
     const book = twoHoldings();
     assert.deepEqual(
       runbookIncludedEntries(book).map((e) => e.id),
-      ["holding", "trivia", "arcade", "step-5", "standings"],
+      ["holding", "trivia", "arcade", "step-6", "standings"],
     );
   });
 
   it("takes one holding step out without touching the other", () => {
-    const book = toggleRunbook(twoHoldings(), "step-5");
+    const book = toggleRunbook(twoHoldings(), "step-6");
     assert.deepEqual(runbookIncluded(book), [
       "holding",
       "trivia",
@@ -313,29 +340,29 @@ describe("more than one holding step", () => {
     ]);
     assert.equal(nextEntryAfter(book, "arcade")?.id, "standings");
     // Still in the rail, still one click away.
-    assert.equal(entryById(book, "step-5")?.included, false);
+    assert.equal(entryById(book, "step-6")?.included, false);
   });
 
   it("moves and drops the right one when two rows are the same kind", () => {
-    const moved = moveRunbook(twoHoldings(), "step-5", -1);
+    const moved = moveRunbook(twoHoldings(), "step-6", -1);
     assert.deepEqual(
       moved.map((e) => e.id),
-      ["holding", "trivia", "step-5", "arcade", "standings"],
+      ["holding", "trivia", "step-6", "arcade", "standings", "sendoff"],
     );
-    const dropped = dropRunbook(twoHoldings(), "step-5", 0);
+    const dropped = dropRunbook(twoHoldings(), "step-6", 0);
     assert.deepEqual(
       dropped.map((e) => e.id),
-      ["step-5", "holding", "trivia", "arcade", "standings"],
+      ["step-6", "holding", "trivia", "arcade", "standings", "sendoff"],
     );
   });
 
   it("deletes a step the host added, and never one the product ships with", () => {
     const book = twoHoldings();
-    assert.equal(isRemovableStep(entryById(book, "step-5")!), true);
+    assert.equal(isRemovableStep(entryById(book, "step-6")!), true);
     assert.equal(isRemovableStep(entryById(book, "holding")!), false);
     assert.deepEqual(
-      removeStep(book, "step-5").map((e) => e.id),
-      ["holding", "trivia", "arcade", "standings"],
+      removeStep(book, "step-6").map((e) => e.id),
+      ["holding", "trivia", "arcade", "standings", "sendoff"],
     );
     assert.equal(removeStep(book, "holding"), book);
   });
@@ -348,8 +375,8 @@ describe("more than one holding step", () => {
     }
     assert.deepEqual(runbookIncluded(book), ["holding"]);
     const only = book.find((e) => e.included);
-    assert.equal(only?.id, "step-5");
-    assert.equal(removeStep(book, "step-5"), book);
+    assert.equal(only?.id, "step-6");
+    assert.equal(removeStep(book, "step-6"), book);
   });
 
   it("gives every added step an id nothing else is using", () => {
@@ -358,7 +385,7 @@ describe("more than one holding step", () => {
     book = addHoldingStep(book, "card-1");
     const ids = book.map((e) => e.id);
     assert.equal(new Set(ids).size, ids.length);
-    assert.equal(freshStepId(book), "step-7");
+    assert.equal(freshStepId(book), "step-8");
   });
 
   it("stops at a ceiling rather than a rail nobody can read", () => {
@@ -371,14 +398,14 @@ describe("more than one holding step", () => {
   });
 
   it("points a step at a different card, and only a holding step", () => {
-    const book = setEntryCard(twoHoldings(), "step-5", "card-3");
-    assert.equal(entryById(book, "step-5")?.card, "card-3");
+    const book = setEntryCard(twoHoldings(), "step-6", "card-3");
+    assert.equal(entryById(book, "step-6")?.card, "card-3");
     assert.equal(entryById(setEntryCard(book, "trivia", "card-3"), "trivia")?.card, undefined);
   });
 
   it("falls back to the front when the step it was on has been deleted", () => {
-    const book = removeStep(twoHoldings(), "step-5");
-    assert.equal(nextEntryAfter(book, "step-5")?.id, "lobby");
+    const book = removeStep(twoHoldings(), "step-6");
+    assert.equal(nextEntryAfter(book, "step-6")?.id, "lobby");
     assert.equal(nextEntryAfter(book, null)?.id, "lobby");
   });
 });
@@ -400,6 +427,9 @@ describe("a runbook stored by the build that had one holding card", () => {
         ["trivia", "trivia", true],
         ["arcade", "arcade", false],
         ["standings", "standings", true],
+        // Appended by this build, out of the order: a runbook written before
+        // the send-off existed must not gain a step the host never chose.
+        ["sendoff", "sendoff", false],
       ],
     );
   });
@@ -432,7 +462,7 @@ describe("a runbook stored by the build that had one holding card", () => {
     assert.ok(book);
     assert.deepEqual(
       book.map((e) => e.id),
-      ["holding", "step-5", "trivia", "arcade", "standings"],
+      ["holding", "step-5", "trivia", "arcade", "standings", "sendoff"],
     );
   });
 

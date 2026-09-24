@@ -1341,6 +1341,10 @@ function commandToEvent(cmd: HostCommand, runtime: SessionRuntime): Event | null
       return { type: "setSeal", seal: cmd.state };
     case "practice":
       return { type: "setPractice", on: cmd.on };
+    case "sendoff.next":
+      return { type: "sendoffNext" };
+    case "sendoff.back":
+      return { type: "sendoffBack" };
     case "lobby.lock":
       return { type: "setJoinsLocked", locked: cmd.locked };
     case "participant.kick":

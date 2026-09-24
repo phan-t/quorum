@@ -736,10 +736,29 @@ body {
   display: none;
 }
 
-/* Sized to its contents, not to the panel: a cell a third of the screen wide
-   is a cell the host's eye has to travel across on every one of thirty rows. */
+/*
+ * The grid fills its frame, and the slack goes to Name.
+ *
+ * It used to be `width: auto` — sized to its contents — which was right about
+ * the numeric columns and wrong about the table: measured on a 1512px window
+ * the table came to 713px inside an 801px frame, so there were 88 dead pixels
+ * to the right of Rank and a Name column truncating at 150.
+ *
+ * `width: 100%` alone is not the fix. A table given a width distributes the
+ * slack *proportionally* across every column, which widens # and Spot and
+ * Rank for no reason — they hold two or three characters and they are read
+ * down, so every pixel they gain is a pixel between the eye and the number.
+ * A cell at `width: 100%` takes all the remaining space instead, so the pair
+ * of rules below puts the slack in exactly one column by construction. Name
+ * goes 150 -> 294 at 1512 and every other column stays where it was: # 30,
+ * activities 104, Spot 52, Total 60, Rank 52.
+ *
+ * Names are also the right column to give it to. They are the one thing in
+ * the grid that gets truncated on a real roster, and a nickname is how the
+ * host finds the row they were asked about.
+ */
 .sc-grid {
-  width: auto;
+  width: 100%;
   border-collapse: collapse;
   font-size: 13px;
 }
@@ -762,10 +781,14 @@ body {
   color: var(--muted);
   white-space: nowrap;
 }
+/* The column that absorbs whatever the frame has spare — see `.sc-grid`. The
+   cap that used to be here is gone with the reason for it: the column is
+   bounded by the table's own width now, not by its longest nickname, and a
+   name too long for the space it gets is ellipsised by `.sc-name`. */
 .sc-th-name,
 .sc-cell-name {
   min-width: 150px;
-  max-width: 200px;
+  width: 100%;
 }
 /* An activity column was as wide as its *title* — "Agentic Security TTX" set
    a 182px column over a 110px cell — and three of those pushed the table past
@@ -817,9 +840,6 @@ body {
 .sc-num {
   color: var(--dim);
   font-size: 11px;
-}
-.sc-cell-name {
-  max-width: 180px;
 }
 .sc-name {
   display: block;
@@ -1557,6 +1577,106 @@ body {
    itself gold and set a label colour on an element that holds no label, so it
    did nothing it looked like it was doing. One toggle, one rule, and it is the
    one every other toggle on this console already uses. */
+
+/* ---- the send-off --------------------------------------------------- */
+
+/*
+ * The panel is one thing with a border around it: the message the room has
+ * not seen yet.
+ *
+ * It is set at 16px rather than at the console's 13px body, which is the only
+ * place on this console that a *paragraph* is above body size. The reason is
+ * what it is for: a host reads it while the room is reading the one before,
+ * decides in a couple of seconds whether it survives being read out at a
+ * farewell, and does that without looking like they are studying the screen.
+ * A 145-word kudo at 13px is a wall the eye has to work at. 16 is the panel
+ * heading step of the scale, so nothing new was invented for it.
+ *
+ * Contrast, both themes:
+ *   --ink   on --panel-2   15.31:1 dark · 17.44:1 light   the message
+ *   --muted on --panel-2    4.94:1 dark ·  4.83:1 light   the eyebrow, the position
+ *   --sealed (--vault-ink) on --panel-2  11.29:1 dark · 4.50:1 light  the rule
+ * The rule down the left is gold — the console's colour for "the room cannot
+ * see this", the same one the seal uses — and it is decoration: the eyebrow
+ * says it in words, because nothing here may be carried by colour alone.
+ */
+
+.pb-sendoff {
+  gap: 10px;
+}
+
+.so-where {
+  font-size: 13px;
+  letter-spacing: 0.14em;
+  color: var(--muted);
+}
+
+.so-next {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px 12px;
+  border-radius: 6px;
+  border-left: 3px solid var(--sealed);
+  background: var(--panel-2);
+  /* `.panel-body` is 340px and scrolls. Everything else in this panel — the
+     position line, the two buttons, the hint — comes to about 110, so this is
+     what is left: the box takes the rest and the *panel* never scrolls, which
+     is what keeps Back and Skip where the host last saw them. A kudo longer
+     than even the 13px step below can hold gets a scrollbar of its own. */
+  max-height: 228px;
+  overflow-y: auto;
+}
+.so-next.is-empty {
+  border-left-color: var(--line);
+}
+
+.so-next-label {
+  font-size: 11px;
+}
+
+.so-next-from {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--ink);
+}
+.so-next-from[hidden] {
+  display: none;
+}
+
+/*
+ * 16px, and 13 for the long ones.
+ *
+ * The console's body is 13 and this is the one paragraph on it set larger,
+ * because the host reads it in the gap between two sentences and decides. But
+ * the real set runs to 145 words, and a message the host has to *scroll* to
+ * finish is a message they will not finish — so past about 420 characters it
+ * steps down to the body size, where the whole of it fits the frame at once.
+ * Two sizes, both on the console's five-step scale.
+ */
+.so-next.is-long .so-next-text {
+  font-size: 13px;
+}
+.so-next-text {
+  margin: 0;
+  font-size: 16px;
+  line-height: 1.45;
+  color: var(--ink);
+  /* The measure a paragraph is read at, not the width of the panel. */
+  max-width: 62ch;
+  text-wrap: pretty;
+  white-space: pre-wrap;
+}
+.so-next-text[hidden] {
+  display: none;
+}
+
+/* Skip is a secondary button and stays one: it is not destructive — nothing
+   is lost and Back brings the message straight back — and a red button in
+   this panel would read as an emergency at the one moment in the afternoon
+   that is not one. Its inline confirm names who wrote it, which is the part
+   that stops a mis-press. */
 
 /* ---- arcade --------------------------------------------------------- */
 

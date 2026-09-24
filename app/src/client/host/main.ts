@@ -16,6 +16,7 @@ import type {
   HostCommand,
   RenderState,
   RosterEntry,
+  SendoffView,
   TriviaView,
 } from "../../protocol.ts";
 import { initTheme, themeToggle } from "../shared/theme.ts";
@@ -2409,6 +2410,159 @@ const bodyPending = h("section", { class: "pb" }, [
   h("p", { class: "pb-note pb-warn" }),
 ]);
 
+/* ---- the send-off --------------------------------------------------- */
+
+/*
+ * The console's half of the send-off, and the only part of it that is not a
+ * mirror of what the room can already see.
+ *
+ * The panel exists for one affordance: the **next** kudo, before the room has
+ * it. `SendoffView.next` is populated for the host role and for nobody else —
+ * the Desktop is not told, and there is a test on the wire that says so.
+ * Kudos are written by people who did not know the room they would be read
+ * into, and one of them will be a joke that does not survive being read out
+ * at a farewell. A host who can read ahead skips it and nobody in the room
+ * ever learns there was something to skip; a host who cannot is finding out
+ * at the same moment as the person it is about.
+ *
+ * Everything else here is position: which phase, which message of how many,
+ * and a Back for an overshoot. The advance is the space bar, as it is in
+ * every other segment.
+ */
+const sendoffWhere = h("p", { class: "mono t-head-line so-where" });
+const sendoffNextFrom = h("p", { class: "so-next-from" });
+const sendoffNextText = h("p", { class: "so-next-text" });
+const sendoffNextLabel = h("p", { class: "label so-next-label" });
+const sendoffNext = h("section", { class: "so-next" }, [
+  sendoffNextLabel,
+  sendoffNextFrom,
+  sendoffNextText,
+]);
+const sendoffNote = h("p", { class: "pb-note so-hint" });
+
+const sendoffBackControl = control({
+  label: "Back",
+  className: "ctl-secondary",
+  title:
+    "One step back — the previous message, or out of the messages into the montage. For an overshoot.",
+  onFire: (c) => issue({ name: "sendoff.back" }, c),
+});
+
+/**
+ * Skip the next message, without the room seeing it.
+ *
+ * Two `sendoff.next` frames in one press, sent in the same tick. The engine
+ * walks one step at a time and this change deliberately does not give it a
+ * second way to move — a skip is not a different kind of step, it is two of
+ * them — so the room's Desktop does briefly hold the skipped frame between
+ * the two broadcasts. In practice that is the round trip of one frame, tens
+ * of milliseconds, on a share running at fifteen frames a second.
+ *
+ * Two-step, and the question names who wrote it. Skipping is silent by
+ * design: nothing on any surface says it happened, so nothing would tell a
+ * host who pressed it by accident that a message has just gone unread.
+ */
+const sendoffSkipControl = control({
+  label: "Skip the next one",
+  className: "ctl-secondary ctl-skip",
+  title:
+    "Advances twice, so the message above is never put in front of the room. Nobody sees that anything was skipped.",
+  question: () => {
+    const from = lastState?.sendoff?.next?.from ?? "";
+    return from === "" ? "Skip it, unread?" : `Skip ${from}'s message, unread?`;
+  },
+  onFire: (c) => {
+    issue({ name: "sendoff.next" }, c);
+    issue({ name: "sendoff.next" }, null);
+  },
+});
+
+const bodySendoff = h("section", { class: "pb pb-sendoff" }, [
+  sendoffWhere,
+  sendoffNext,
+  h("div", { class: "field-actions" }, [
+    sendoffBackControl.el,
+    sendoffSkipControl.el,
+  ]),
+  sendoffNote,
+]);
+
+function renderSendoff(s: RenderState): void {
+  const so = s.sendoff;
+  if (so === undefined) {
+    setText(sendoffWhere, "No send-off staged");
+    sendoffNext.hidden = true;
+    sendoffBackControl.setDisabled(true);
+    sendoffSkipControl.setDisabled(true);
+    setText(
+      sendoffNote,
+      "This event has no sendoff.json, so the room is looking at a card that says so. Stage one and reload, or take the step out of the run of show.",
+    );
+    return;
+  }
+
+  // Where the room is. The count is the thing a host is asked out loud —
+  // "how many more?" — so it is said in the same words the Desktop uses.
+  setText(
+    sendoffWhere,
+    so.phase === "kudos"
+      ? `Message ${so.index} of ${so.total}`
+      : so.phase === "opening"
+        ? `Opening montage · ${so.total} ${so.total === 1 ? "message" : "messages"} to come`
+        : so.phase === "closing"
+          ? "Closing card"
+          : "Finished",
+  );
+
+  // The next message, and only where there is a next: `next` is the first
+  // kudo again once the messages are behind the room, which is true and not
+  // useful — a closing card with "up next: message one" under it is a console
+  // inviting the host to read the whole set a second time.
+  const ahead = so.phase === "opening" || so.phase === "kudos" ? (so.next ?? null) : null;
+  sendoffNext.hidden = false;
+  if (ahead !== null) {
+    setText(
+      sendoffNextLabel,
+      so.phase === "opening" ? "First message — nobody has seen this" : "Next — the room has not seen this",
+    );
+    setText(sendoffNextFrom, ahead.from);
+    setText(sendoffNextText, ahead.message);
+    sendoffNextFrom.hidden = false;
+    sendoffNextText.hidden = false;
+    sendoffNext.classList.remove("is-empty");
+    // The long ones step down to the console's body size rather than being
+    // scrolled — see `.so-next-text`. A message the host has to scroll to
+    // finish is a message they do not finish, and the whole affordance is
+    // reading the thing before the room does.
+    sendoffNext.classList.toggle("is-long", ahead.message.length > 420);
+  } else {
+    setText(
+      sendoffNextLabel,
+      so.phase === "done" ? "Nothing after this" : "Nothing more to read ahead",
+    );
+    sendoffNextFrom.hidden = true;
+    sendoffNextText.hidden = true;
+    sendoffNext.classList.add("is-empty");
+  }
+
+  // Back out of the montage is the one step the engine has nowhere to take.
+  sendoffBackControl.setDisabled(so.phase === "opening");
+  if (so.phase === "opening") sendoffBackControl.disarm();
+  sendoffSkipControl.setDisabled(ahead === null);
+  if (ahead === null) sendoffSkipControl.disarm();
+
+  setText(
+    sendoffNote,
+    so.phase === "opening"
+      ? "Space shows the first message. Music only plays if the Desktop tab has had a click or a keypress in it — click it once before you start, and check somebody in the room can hear it."
+      : so.phase === "kudos"
+        ? "Space shows the next one. Read ahead here; Skip advances past one without putting it on the screen."
+        : so.phase === "closing"
+          ? "Space finishes the send-off and leaves this frame up."
+          : "The send-off is finished. Space moves on to the next step in the run of show.",
+  );
+}
+
 /* ---- trivia ---- */
 
 /**
@@ -3471,6 +3625,7 @@ const bodies: Record<string, HTMLElement> = {
   final: bodyStandings,
   trivia: bodyTrivia,
   arcade: bodyArcade,
+  sendoff: bodySendoff,
 };
 
 /* ------------------------------------------------------------------ */
@@ -3587,6 +3742,37 @@ function primaryPlan(): Plan {
         return t.index + 1 < t.of
           ? cmdPlan("Next question", { name: "trivia.next" })
           : advanceFromHere(s);
+    }
+  }
+  // Inside the send-off the primary button walks the send-off: the montage,
+  // then one message at a time, then the closing card. Same key as every
+  // other segment, which is the decision the design note calls the most
+  // important one in it — an auto-advancing montage walks past the message
+  // that makes the room go quiet, with the person it is about sitting there
+  // watching it happen.
+  if (s.segment === "sendoff") {
+    const so = s.sendoff;
+    // No send-off staged. The space bar goes back to walking the runbook
+    // rather than pressing a button that can only be refused.
+    if (so === undefined) return advanceFromHere(s);
+    switch (so.phase) {
+      case "opening":
+        return cmdPlan(
+          so.total > 0 ? "Show the first message" : "Finish the send-off",
+          { name: "sendoff.next" },
+        );
+      case "kudos":
+        return cmdPlan(
+          so.index < so.total
+            ? `Next message — ${so.index + 1} of ${so.total}`
+            : "End the messages",
+          { name: "sendoff.next" },
+        );
+      case "closing":
+        return cmdPlan("Finish the send-off", { name: "sendoff.next" });
+      case "done":
+        // A resting frame, and the run of show carries on from here.
+        return advanceFromHere(s);
     }
   }
   // Inside the arcade the primary button walks the round the same way it
@@ -3760,6 +3946,8 @@ function render(s: RenderState): void {
     );
     standingsNote.classList.toggle("pb-warn", s.seal === "sealed");
   }
+
+  if (body === bodySendoff) renderSendoff(s);
 
   if (body === bodyTrivia) renderTrivia(s);
 
@@ -4181,7 +4369,15 @@ function renderTrivia(s: RenderState): void {
  * people screen-share by accident.
  */
 function roomView(s: RenderState): RenderState {
-  const { hostExtras: _hostExtras, own: _own, trivia, arcade, ...rest } = s;
+  const { hostExtras: _hostExtras, own: _own, trivia, arcade, sendoff, ...rest } = s;
+  // The send-off's `next` is the host's alone — the whole point of the panel
+  // — and the preview is a picture of a phone. Removed rather than blanked,
+  // so the preview is fed the shape a participant actually gets.
+  let roomSendoff: SendoffView | undefined;
+  if (sendoff !== undefined) {
+    const { next: _next, ...shared } = sendoff;
+    roomSendoff = shared;
+  }
   // Fields are *removed*, not set to undefined, so the preview is fed the
   // same shape a participant is: their copy has no `correct` key at all
   // before the reveal, and a preview that carried one would be a participant
@@ -4261,6 +4457,7 @@ function roomView(s: RenderState): RenderState {
     ...rest,
     ...(roomTrivia !== undefined ? { trivia: roomTrivia } : {}),
     ...(roomArcade !== undefined ? { arcade: roomArcade } : {}),
+    ...(roomSendoff !== undefined ? { sendoff: roomSendoff } : {}),
     standings: s.seal === "sealed" ? [] : s.standings,
   };
 }
@@ -4455,6 +4652,8 @@ renderRail();
 
 bindSpace(primary);
 bindEscape(() => [
+  sendoffBackControl,
+  sendoffSkipControl,
   lockControl,
   arcadePractice,
   triviaPractice,

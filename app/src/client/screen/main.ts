@@ -165,56 +165,441 @@ function build(k: ViewKind): Scene {
 /* Scenes                                                              */
 /* ------------------------------------------------------------------ */
 
+/* ------------------------------------------------------------------ */
+/* The send-off                                                        */
+/* ------------------------------------------------------------------ */
+
+/**
+ * A photo or the music track, as a URL on this origin.
+ *
+ * The send-off file carries filenames — keys — and the bytes live in the
+ * session's own asset rows, served over HTTP the way the promo card is. A
+ * `data:` key is passed through untouched: that is how the mock stands in for
+ * an endpoint, and it is the only other shape allowed here. An `http:` key
+ * would make a send-off file able to point the screen everybody is watching
+ * at somebody else's server, which is not a thing a list of filenames should
+ * be able to do.
+ */
+function assetUrl(sid: string, key: string): string {
+  if (key.startsWith("data:")) return key;
+  return `/api/sessions/${encodeURIComponent(sid)}/assets/${encodeURIComponent(key)}`;
+}
+
+/**
+ * Alternative text for a photo, out of its filename.
+ *
+ * It is all there is: the file carries keys and no captions, and a montage of
+ * images with no description at all is nothing whatsoever to a screen reader
+ * at the one moment in the session that is entirely about a person. A
+ * filename is what somebody called the photo, so `the-whiteboard.jpg` reads
+ * as "Photo: the whiteboard", which is worse than a caption and much better
+ * than silence.
+ */
+function photoAlt(key: string): string {
+  // A `data:` key is the mock's, and there is no filename in it to read.
+  if (key.startsWith("data:")) return "Photo";
+  const stem = (key.split("/").pop() ?? key).replace(/\.[a-z0-9]+$/i, "");
+  const words = stem.replace(/[-_]+/g, " ").trim();
+  return words === "" ? "Photo" : `Photo: ${words}`;
+}
+
+/* ---- music ---------------------------------------------------------- */
+
+/**
+ * Audio, armed by the first gesture this tab receives.
+ *
+ * A browser will not start audio without a user gesture, and the gesture has
+ * to happen *in this tab*: the host pressing play on the console is a gesture
+ * in a different document and buys this one nothing. So the Desktop arms on
+ * the first click or key it gets — which the host makes anyway when they open
+ * it and put it on the screen share — and the preflight row in the runbook is
+ * what proves it armed, because nothing on screen can.
+ *
+ * If it never arms, every call below is a no-op and the montage runs silent.
+ * That is the required failure: `play()` rejecting is not an error worth
+ * throwing on the surface the whole room is looking at.
+ */
+let audioArmed = false;
+let armWaiting: (() => void) | null = null;
+
+function armAudio(): void {
+  if (audioArmed) return;
+  audioArmed = true;
+  const waiting = armWaiting;
+  armWaiting = null;
+  waiting?.();
+}
+
+addEventListener("pointerdown", armAudio, { passive: true });
+addEventListener("click", armAudio, { passive: true });
+addEventListener("keydown", armAudio, { passive: true });
+
+const MUSIC_VOLUME = 0.55;
+const MUSIC_FADE_MS = 1_600;
+
+let musicEl: HTMLAudioElement | null = null;
+let musicKey: string | null = null;
+let musicRamp: ReturnType<typeof setInterval> | null = null;
+
+function rampVolume(el: HTMLAudioElement, to: number, ms: number, done?: () => void): void {
+  if (musicRamp !== null) clearInterval(musicRamp);
+  const from = el.volume;
+  const started = Date.now();
+  const STEP_MS = 50;
+  musicRamp = setInterval(() => {
+    const t = Math.min(1, (Date.now() - started) / ms);
+    // Clamped: a volume outside 0..1 throws, and a fade is not worth an
+    // exception on this surface.
+    el.volume = Math.max(0, Math.min(1, from + (to - from) * t));
+    if (t < 1) return;
+    if (musicRamp !== null) clearInterval(musicRamp);
+    musicRamp = null;
+    done?.();
+  }, STEP_MS);
+}
+
+/** Start the montage's track, or wait for the gesture that allows it. */
+function startMusic(url: string, key: string): void {
+  if (musicKey === key) return;
+  stopMusic();
+  const el = new Audio(url);
+  el.loop = true;
+  el.volume = 0;
+  musicEl = el;
+  musicKey = key;
+  const begin = (): void => {
+    // A newer frame may have moved on while we waited for the gesture.
+    if (musicEl !== el) return;
+    void el
+      .play()
+      .then(() => {
+        if (musicEl === el) rampVolume(el, MUSIC_VOLUME, MUSIC_FADE_MS);
+      })
+      // Autoplay refused, the file missing, the endpoint not there yet: the
+      // send-off runs without music and says nothing about it.
+      .catch(() => {});
+  };
+  if (audioArmed) begin();
+  else armWaiting = begin;
+}
+
+/**
+ * Fade out and stop — which is what happens when the montage ends.
+ *
+ * The messages are read aloud over silence. Music under somebody reading is
+ * the failure the note spends three paragraphs on, so the track goes before
+ * the first kudo rather than under it.
+ */
+function fadeOutMusic(): void {
+  const el = musicEl;
+  if (el === null) return;
+  musicEl = null;
+  musicKey = null;
+  armWaiting = null;
+  rampVolume(el, 0, MUSIC_FADE_MS, () => {
+    el.pause();
+  });
+}
+
+/** Cut it. For leaving the segment, where a fade would outlive the scene. */
+function stopMusic(): void {
+  if (musicRamp !== null) clearInterval(musicRamp);
+  musicRamp = null;
+  armWaiting = null;
+  const el = musicEl;
+  musicEl = null;
+  musicKey = null;
+  if (el === null) return;
+  el.pause();
+  el.removeAttribute("src");
+}
+
+/* ---- the scene ------------------------------------------------------ */
+
+/** The range the message is fitted within — see `fitMessage`. */
+const KUDO_MIN_PX = 24;
+const KUDO_MAX_PX = 112;
+
+/** The shortest a photo may hold, however many there are. */
+const PHOTO_MIN_MS = 2_500;
+/** The closing photos have no `seconds` of their own; they hold this long. */
+const PHOTO_CLOSING_MS = 6_000;
+
+interface MontagePhoto {
+  readonly key: string;
+  readonly url: string;
+  readonly alt: string;
+  /** null while it is still loading. */
+  ok: boolean | null;
+}
+
 /**
  * The send-off.
  *
- * One message at a time, filling the screen. Not a wall of tiles: this is read
- * across a video call at whatever size the worst connection in the room is
- * receiving, and a grid of fifteen messages is a grid nobody reads.
+ * Four frames, and the host walks between them: a montage with music, the
+ * messages one at a time, the closing photos and line, and a resting frame
+ * that is not a blank one.
  *
- * The type steps down as the message gets longer rather than overflowing or
- * shrinking to nothing — kudos are not a fixed size, and the longest here is
- * four times the shortest.
+ * **The montage degrades to the title card.** Every photo is preloaded and
+ * only joins the rotation once it has decoded, so a key whose asset row is
+ * not there yet — the endpoint is being built as this is written — leaves the
+ * name and the date on the screen rather than a broken-image glyph in front
+ * of the room. All of them missing is the send-off the note describes as
+ * still being the thing: a list of messages.
+ *
+ * **The type fits the message rather than stepping through bands.** The real
+ * kudos run 34 to 145 words, and three bands mean a 219-character message and
+ * a 221-character one are visibly different sizes for no reason anybody can
+ * see. The size falls off as the square root of the length, which is what
+ * keeps the *area* the text covers roughly constant — so every message fills
+ * the screen and none of them overflows it. Clamped at both ends: 32px is
+ * DESIGN.md's floor for a 1080p tab seen as an 800px tile.
  */
 function sceneSendoff(): Scene {
+  const photoA = h("img", { class: "s-photo", attrs: { alt: "", decoding: "async" } });
+  const photoB = h("img", { class: "s-photo", attrs: { alt: "", decoding: "async" } });
+  const montage = h("div", { class: "s-montage", attrs: { hidden: true } }, [
+    photoA,
+    photoB,
+  ]);
   const kicker = h("p", { class: "s-kicker label" });
   const message = h("p", { class: "s-kudo" });
   const from = h("p", { class: "s-kudo-from" });
   const counter = h("p", { class: "mono s-kudo-count" });
-  const node = h("section", { class: "s-stage s-sendoff" }, [
-    kicker,
-    message,
-    from,
-    counter,
-  ]);
+  const card = h("div", { class: "s-sendoff-card" }, [kicker, message, from, counter]);
+  const node = h("section", { class: "s-stage s-sendoff" }, [montage, card]);
+
+  let photos: MontagePhoto[] = [];
+  let shown = -1;
+  let front = 0;
+  let timer: ReturnType<typeof setTimeout> | null = null;
+  /** What the running montage is for, so a photo that decodes late can join. */
+  let runPhase = "";
+  let runSeconds = 0;
+  /** Phase and photo list, so a broadcast does not restart the montage. */
+  let signature = "";
+
+  const layers = [photoA, photoB];
+
+  function clearTimer(): void {
+    if (timer !== null) clearTimeout(timer);
+    timer = null;
+  }
+
+  function dwellMs(phase: string, seconds: number, count: number): number {
+    if (phase === "closing") return PHOTO_CLOSING_MS;
+    const total = seconds > 0 ? seconds * 1_000 : PHOTO_CLOSING_MS * count;
+    return Math.max(PHOTO_MIN_MS, Math.round(total / Math.max(1, count)));
+  }
+
+  /** The next photo that actually loaded, after `from`. Null when none has. */
+  function nextLoaded(after: number): number | null {
+    for (let i = 1; i <= photos.length; i += 1) {
+      const at = (after + i) % photos.length;
+      if (photos[at]?.ok === true) return at;
+    }
+    return null;
+  }
+
+  /**
+   * Queue the next photo.
+   *
+   * Called after every swap *and* whenever another photo finishes decoding,
+   * which is the case that matters: the first photo to arrive is shown alone
+   * and there is nothing to cross-fade to yet, so without the second call a
+   * montage whose photos land a few milliseconds apart would stop on the
+   * first one and stay there for the whole opening.
+   */
+  function schedule(): void {
+    clearTimer();
+    const ready = photos.filter((p) => p.ok === true).length;
+    if (ready < 2 || shown === -1) return;
+    timer = setTimeout(() => {
+      timer = null;
+      const following = nextLoaded(shown);
+      if (following !== null) show(following);
+    }, dwellMs(runPhase, runSeconds, ready));
+  }
+
+  function show(at: number): void {
+    const photo = photos[at];
+    if (photo === undefined) return;
+    const next = layers[1 - front];
+    if (next === undefined) return;
+    next.src = photo.url;
+    next.alt = photo.alt;
+    // Two layers, one on top of the other: the incoming one fades up over the
+    // outgoing one, so there is never a gap with nothing in it. Under
+    // `prefers-reduced-motion` the stylesheet drops the transition and this
+    // same swap is a cut.
+    layers[front]?.classList.remove("is-on");
+    next.classList.add("is-on");
+    front = 1 - front;
+    shown = at;
+    montage.hidden = false;
+    schedule();
+  }
+
+  function startMontage(sid: string, keys: readonly string[], phase: string, seconds: number): void {
+    clearTimer();
+    shown = -1;
+    front = 0;
+    runPhase = phase;
+    runSeconds = seconds;
+    for (const layer of layers) {
+      layer.classList.remove("is-on");
+      layer.removeAttribute("src");
+      layer.alt = "";
+    }
+    photos = keys.map((key) => ({
+      key,
+      url: assetUrl(sid, key),
+      alt: photoAlt(key),
+      ok: null,
+    }));
+    montage.hidden = true;
+    if (photos.length === 0) return;
+    for (const photo of photos) {
+      // Preloaded rather than pointed at: an `<img>` given a 404 draws the
+      // browser's broken-image glyph, and this is the surface where that
+      // would happen in front of everybody. Only what decodes is ever shown.
+      const probe = new Image();
+      probe.onload = () => {
+        photo.ok = true;
+        // A photo that belongs to a montage this scene has since left is a
+        // photo with nowhere to go.
+        if (!photos.includes(photo)) return;
+        if (shown === -1) {
+          const first = nextLoaded(-1);
+          if (first !== null) show(first);
+        } else if (timer === null) {
+          // The second photo to arrive is what turns a still into a montage.
+          schedule();
+        }
+      };
+      probe.onerror = () => {
+        photo.ok = false;
+      };
+      probe.src = photo.url;
+    }
+  }
+
+  /**
+   * Set the message at the largest size that still fits its box.
+   *
+   * Measured, not estimated. The first pass at this stepped the type through
+   * three bands by character count and the second computed a size from the
+   * square root of the length — both are guesses about how many lines a
+   * particular message will take at a particular width, and both overflowed
+   * the moment the window was not the shape they were tuned for. The box is
+   * the only thing that knows: eight halvings of the range settle it to under
+   * a pixel, they cost eight layouts of one paragraph, and they happen once
+   * per message rather than per frame.
+   *
+   * The floor is 24px rather than DESIGN.md's 32: 32 is the floor for the
+   * 1080p tab this is designed for, where the longest of the real messages
+   * lands near 39px and never reaches it. A smaller window is somebody
+   * checking the Desktop on a laptop, and a message that is slightly too small
+   * there is better than one with its last line cut off.
+   */
+  function fitMessage(): void {
+    if (message.hidden) return;
+    let lo = KUDO_MIN_PX;
+    let hi = KUDO_MAX_PX;
+    for (let i = 0; i < 8; i += 1) {
+      const mid = (lo + hi) / 2;
+      message.style.fontSize = `${mid.toFixed(1)}px`;
+      if (message.scrollHeight <= message.clientHeight) lo = mid;
+      else hi = mid;
+    }
+    message.style.fontSize = `${Math.floor(lo)}px`;
+  }
+
+  // The Desktop is resized once, while it is being set up and put on the
+  // share, and never after that — but that once is the moment the fit would
+  // otherwise be wrong for the rest of the afternoon.
+  const refit = new ResizeObserver(() => fitMessage());
+  refit.observe(card);
+
+  function stopMontage(): void {
+    clearTimer();
+    photos = [];
+    shown = -1;
+    montage.hidden = true;
+    for (const layer of layers) {
+      layer.classList.remove("is-on");
+      layer.removeAttribute("src");
+      layer.alt = "";
+    }
+  }
+
   return {
     node,
     update(state) {
       const so = state.sendoff;
-      if (!so) return;
+      if (!so) {
+        // The segment is up and the event staged no send-off. Not a blank
+        // screen: a blank screen in front of the room is a bug the host
+        // cannot diagnose from where they are standing.
+        node.dataset["phase"] = "none";
+        setText(kicker, "Send-off");
+        setText(message, "Nothing staged for this event.");
+        message.hidden = false;
+        from.hidden = true;
+        counter.hidden = true;
+        signature = "";
+        stopMontage();
+        fadeOutMusic();
+        // Not fitted: a notice is not the content, and this one is the only
+        // line on the Desktop that should not fill the screen. Clearing the
+        // inline size hands it back to the stylesheet.
+        message.style.fontSize = "";
+        return;
+      }
+
+      node.dataset["phase"] = so.phase;
       setText(kicker, so.subtitle === null ? so.name : `${so.name} · ${so.subtitle}`);
+
+      /* ---- the montage ---- */
+      const sig = `${so.phase}|${so.photos.join("|")}`;
+      if (sig !== signature) {
+        signature = sig;
+        if (so.photos.length > 0) startMontage(state.sid, so.photos, so.phase, so.seconds);
+        else stopMontage();
+      }
+
+      /* ---- the music ---- */
+      // `music` is non-null only during the montage — the wire sees to that —
+      // so this both starts it and, on the first message, ends it.
+      if (so.music !== null) startMusic(assetUrl(state.sid, so.music), so.music);
+      else fadeOutMusic();
+
+      /* ---- the words ---- */
       const k = so.kudo;
-      message.hidden = k === null;
-      from.hidden = k === null;
       if (k !== null) {
         setText(message, k.message);
         setText(from, k.from);
-        // Three steps, by length. A 34-word message and a 145-word one cannot
-        // share a size without one of them being wrong.
-        const n = k.message.length;
-        node.dataset["len"] = n < 220 ? "short" : n < 520 ? "medium" : "long";
-      }
-      const closing = so.phase === "closing" || so.phase === "done";
-      if (closing && so.line !== null) {
         message.hidden = false;
-        setText(message, so.line);
-        node.dataset["len"] = "short";
+        from.hidden = false;
+      } else {
+        from.hidden = true;
+        const line = so.phase === "closing" || so.phase === "done" ? so.line : null;
+        setText(message, line ?? "");
+        message.hidden = line === null || line === "";
       }
+      fitMessage();
+
       setText(counter, so.phase === "kudos" ? `${so.index} of ${so.total}` : "");
       counter.hidden = so.phase !== "kudos";
     },
+    stop() {
+      stopMontage();
+      stopMusic();
+      refit.disconnect();
+    },
   };
 }
+
 
 function sceneCard(kicker: string, line: string): Scene {
   const title = h("h1", { class: "display s-title" });
@@ -288,7 +673,91 @@ function sceneLobby(): Scene {
     title: "Event promo card",
     attrs: { sandbox: "" },
   });
-  promo.hidden = true;
+  /**
+   * The card, whole, at whatever size the lobby can give it.
+   *
+   * A promo card is a poster: the one staged for this event lays out at
+   * 700 x 1267 with 16px of body padding each side and 18px top and bottom,
+   * so 732 x 1303 of content, and it is *tall*. The lobby's slot on a 1512px
+   * window is 575 x 695. A frame that is 575 wide needs 1041 of height to
+   * draw that poster, gets 695, and loses the bottom third — which on this
+   * surface is a poster with its call to action cut off, in front of the
+   * room, and no error anywhere.
+   *
+   * So the frame is given the card's own logical viewport and scaled to fit
+   * the slot, which is the same trick the console's phone preview uses: the
+   * page inside is laid out at the size it was designed for and the whole of
+   * it is shrunk, rather than the page being reflowed into a box it was never
+   * written for.
+   *
+   * The size cannot be measured. `sandbox=""` with no `allow-same-origin`
+   * means the parent cannot read the frame's `scrollHeight`, and a card with
+   * no scripts in it cannot post its own size out — both of which are the
+   * sandbox doing its job. It is not weakened to get a number: this is the
+   * surface being screen-shared, and an embedded poster has no business
+   * holding the Desktop's origin. 732 x 1303 is the card's logical size, and
+   * a card that is a different shape is letterboxed inside the slot rather
+   * than clipped by it.
+   */
+  const PROMO_W = 732;
+  const PROMO_H = 1303;
+  const promoWrap = h("div", { class: "s-promo-wrap" }, [promo]);
+  promoWrap.hidden = true;
+
+  /**
+   * `zoom`, not `transform: scale()`.
+   *
+   * Measured, because the obvious one is silently wrong: a `sandbox=""` frame
+   * is an opaque origin, which makes it an out-of-process frame, and Chrome
+   * renders a scaled one as a blank rectangle — the card loads (154KB on the
+   * wire, `load` fires) and nothing is painted. On the Desktop that is a white
+   * panel on a shared screen with no error anywhere, which is worse than the
+   * clipping it was meant to fix. `zoom` scales the frame's layout instead of
+   * its raster, the frame paints, and the box the flexbox centres is the
+   * scaled one — so the letterboxing is the wrapper's job and there is no
+   * translate to keep in step.
+   *
+   * A browser without `zoom` gets the frame at the slot's own size, which is
+   * the behaviour that shipped before this: reflowed, and clipped if the card
+   * is taller than the slot. No worse than it was, and it is Chrome that puts
+   * this on a wall.
+   */
+  const canZoom = typeof CSS !== "undefined" && CSS.supports("zoom", "0.5");
+  let promoSrc: string | null = null;
+  let promoZoom = "";
+  let repaintTimer: ReturnType<typeof setTimeout> | null = null;
+
+  function fitPromo(): void {
+    const box = promoWrap.getBoundingClientRect();
+    if (box.width < 1 || box.height < 1) return;
+    if (!canZoom) {
+      promo.style.width = "100%";
+      promo.style.height = "100%";
+      return;
+    }
+    const scale = Math.min(box.width / PROMO_W, box.height / PROMO_H).toFixed(4);
+    if (scale === promoZoom) return;
+    promoZoom = scale;
+    promo.style.zoom = scale;
+    // A frame whose box changes *after* it has loaded stops painting, the
+    // same way one sized in the same task as its `src` never starts — so a
+    // resized Desktop reloads the card rather than showing a white panel.
+    // Debounced, because a window drag is a hundred resize events and this
+    // costs a request; and it only happens while somebody is setting the
+    // screen up, never mid-show.
+    if (promoSrc === null) return;
+    if (repaintTimer !== null) clearTimeout(repaintTimer);
+    repaintTimer = setTimeout(() => {
+      repaintTimer = null;
+      if (promoSrc !== null) promo.src = promoSrc;
+    }, 250);
+  }
+
+  // The slot changes with the window, and the Desktop is run at 1080p as well
+  // as on a laptop. One observer covers both, and the load is caught too: the
+  // frame is revealed and given its src in the same task, before layout.
+  new ResizeObserver(() => fitPromo()).observe(promoWrap);
+  promo.addEventListener("load", fitPromo);
 
   /**
    * Show the frame only once the session is known to have a card.
@@ -318,10 +787,16 @@ function sceneLobby(): Scene {
         }
         if (!res.ok) return;
         settled = sid;
-        promo.hidden = false;
+        promoWrap.hidden = false;
         // The layout only shrinks the join details and the QR once there is a
         // third thing to make room for.
         setAttr(node, "data-promo", "yes");
+        // Sized *before* it is pointed at anything. A frame whose box changes
+        // in the same task as its `src` lands in a state Chrome does not
+        // repaint out of — the card loads and the panel stays blank white —
+        // and the slot is measurable as soon as the wrapper is visible.
+        fitPromo();
+        promoSrc = src;
         promo.src = src;
       })
       // No card, no network, no server yet: the lobby is the lobby it has
@@ -344,7 +819,7 @@ function sceneLobby(): Scene {
       names,
     ]),
     qrWrap,
-    promo,
+    promoWrap,
   ]);
 
   return {

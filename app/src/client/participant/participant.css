@@ -349,6 +349,74 @@ body.phone #app {
   50% { opacity: 0.35; }
 }
 
+/* send-off */
+
+/*
+ * The same kudo the room is reading, on the player's own screen.
+ *
+ * No photos: the note is explicit that the montage is the Desktop's and that
+ * a second copy of it here is worse than nothing. Nothing to tap either, so
+ * the only thing this layout has to do is hold a message of any length and
+ * stay readable.
+ *
+ * `--so-size` is set per message in view.ts (constant area, so a 34-word kudo
+ * and a 145-word one both fill the panel), and the message is the one box on
+ * this page allowed to scroll — reading is all that is happening here.
+ *
+ * Contrast, both themes, on --ground:
+ *   --ink       #f6f5f3 / #0c0c0e   18.13:1 dark · 19.54:1 light   the message
+ *   --muted     #8b8a9c / #656a76    5.84:1 dark ·  5.42:1 light   who it is for, the count
+ *   --nomad-ink #06d092 / #007e5a    9.82:1 dark ·  5.08:1 light   who wrote it
+ */
+.v-sendoff {
+  justify-content: flex-start;
+  gap: 10px;
+}
+.so-for {
+  flex: none;
+}
+.so-note {
+  flex: none;
+  font-size: 13px;
+  font-family: var(--mono);
+  letter-spacing: 0.12em;
+}
+.so-note[hidden] {
+  display: none;
+}
+.so-message {
+  margin: 0;
+  /* Sized to the message, not to the panel: the attribution belongs directly
+     under the words, and a laptop window beside a video call is wide and
+     shallow, so a paragraph told to fill it leaves the name stranded at the
+     bottom of an empty page. It still gives way — `0 1 auto` with a scroll —
+     when the window is too shallow to hold the longest one. */
+  flex: 0 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  font-size: var(--so-size, 18px);
+  line-height: 1.45;
+  max-width: 60ch;
+  text-wrap: pretty;
+  color: var(--ink);
+}
+.so-message[hidden] {
+  display: none;
+}
+.so-from {
+  margin: 0;
+  flex: none;
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--nomad-ink);
+}
+.so-from::before {
+  content: "— ";
+}
+.so-from[hidden] {
+  display: none;
+}
+
 /* standings */
 .v-standings .rows {
   list-style: none;
