@@ -2410,7 +2410,7 @@ body.driving .cols {
 /*
  * The two that cannot be undone, walled off rather than merely relocated.
  *
- * Close session and Start the session over… used to sit in the panel foot in
+ * Close session and Reset session used to sit in the panel foot in
  * the same grey as Lock joining, eight pixels from Open trivia (space). They
  * have their own bordered block now, their own heading, and the danger colour
  * on the edge and on both buttons — three ways of saying "not like the
@@ -2434,7 +2434,16 @@ body.driving .cols {
 .cp-danger-label {
   color: var(--danger);
 }
+/* Sized exactly like `.cp .ctl-button`, because it sits directly under Close
+   session and two danger buttons of different widths read as two different
+   kinds of thing. `.rs-arm` is not a `.ctl-button` — it carries the arming
+   state — so it has to be told the same geometry rather than inheriting it. */
 .cp-danger .rs-arm {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  text-align: center;
   white-space: normal;
   line-height: 1.3;
 }

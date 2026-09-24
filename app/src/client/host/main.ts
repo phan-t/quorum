@@ -611,7 +611,7 @@ const reopenControl = control({
  * focus on purpose, which puts a destructive button under the space bar's
  * nose. So this is not a {@link control} at all. It is:
  *
- *   1. press **Start the session over…**, which only opens a panel;
+ *   1. press **Reset session**, which only opens a panel;
  *   2. **type the word** into a field — the console will not accept anything
  *      else, and a field is the one widget on this page that a stray keypress
  *      cannot turn into an action;
@@ -646,7 +646,7 @@ const restartArm = handsBackSpace(
   h("button", {
     class: "rs-arm",
     type: "button",
-    text: "Start the session over…",
+    text: "Reset session",
     attrs: { "aria-expanded": "false", "aria-controls": "restart-panel" },
   }),
 ) as HTMLButtonElement;
@@ -681,7 +681,7 @@ const restartPanel = h(
   "section",
   { class: "rs-panel", attrs: { id: "restart-panel", hidden: true } },
   [
-    h("p", { class: "label rs-label", text: "Start the session over" }),
+    h("p", { class: "label rs-label", text: "Reset session" }),
     h("p", {
       class: "rs-loses",
       text: "This wipes every score, every Spot Award, and everything the arcade has done. It cannot be undone.",
@@ -720,7 +720,7 @@ function setRestartArmed(on: boolean): void {
   restartPanel.hidden = !on;
   setAttr(restartArm, "aria-expanded", on ? "true" : "false");
   restartArm.classList.toggle("is-armed", on);
-  setText(restartArm, on ? "Never mind" : "Start the session over…");
+  setText(restartArm, on ? "Never mind" : "Reset session");
   // Emptied on the way in as well as on the way out: a field that still holds
   // the word from last time would turn the button on before anybody typed.
   restartField.value = "";
@@ -799,7 +799,7 @@ function fireRestart(): void {
  *
  * The two that cannot be undone are not merely moved, they are walled off —
  * their own bordered block, in the danger colour, under a heading that says
- * so. Close session and Start the session over… must not read as the same
+ * so. Close session and Reset session must not read as the same
  * kind of thing as Lock joining, and next to each other in a wrapping row of
  * grey buttons is exactly how they read before.
  *
