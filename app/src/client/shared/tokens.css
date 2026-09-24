@@ -175,11 +175,35 @@
   --on-fill-light: #f6f5f3;
   --on-fill-dark: #0a0a0f;
 
-  /* type */
-  --display: "IBM Plex Sans Condensed", "IBM Plex Sans", ui-sans-serif,
-    system-ui, sans-serif;
-  --body: "IBM Plex Sans", ui-sans-serif, system-ui, sans-serif;
-  --mono: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace;
+  /* Type — the Helios stacks, which are the system fonts.
+     https://helios.hashicorp.design/foundations/typography
+     
+     HashiCorp's *product* answer is deliberately not a webfont. Helios states
+     the reason: system fonts "are stable, support internationalization, and
+     improve performance by reducing resource load". Vault's and Terraform's
+     UIs render whatever the OS provides, which is why the sign-in page here —
+     rebuilt by measuring a live Vault cluster — already came out on the system
+     stack rather than on IBM Plex.
+     
+     Gilmer and Metro Sans are the marketing brand, licensed, and desktop
+     licences do not generally grant webfont rights. They are not used here.
+     
+     The internationalisation clause is not abstract for this team: people type
+     their own nicknames from Australia, India, Japan and Singapore, and a
+     nickname-folding bug over こうた and प्रिया has already been fixed once in
+     this codebase. System fonts render those natively; IBM Plex barely covers
+     them. */
+  --display: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont,
+    "Segoe UI", Helvetica, Arial, sans-serif;
+  --body: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont,
+    "Segoe UI", Helvetica, Arial, sans-serif;
+  --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+
+  /* Helios' scale, for anything sized from here on:
+     display 30 / 24 / 18 / 16 / 13 · body 16 / 14 / 13 · code 16 / 14 / 13
+     weights 400 regular · 500 medium · 600 semibold · 700 bold
+     body 14 is the default. The arcade keeps its own display sizes — that
+     staging is the product's personality, not its chrome. */
 
   /* Arcade inks — DESIGN.md's recast palette, drawn as *text*. The four
      product hues stay the four product hues as fills; these are the readable

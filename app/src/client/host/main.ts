@@ -146,9 +146,9 @@ const elTheme = themeToggle();
  * Both are gone from here and neither is lost. The warning is in the tab
  * title, which is the one place it does any work — the screen-share picker
  * lists tab titles, and a title is legible while the console is behind
- * another window, which a bar inside it is not. The join code is set in 34px
- * type in the lobby panel beside the join link, which is where a host reads
- * it off. What is left is what the bar is for: whose session, who is in it,
+ * another window, which a bar inside it is not. The join code is in the lobby
+ * panel beside the join link, with a copy button on each, which is where a
+ * host gets at it. What is left is what the bar is for: whose session, who is in it,
  * what phase it is in, and whether the room can see the scores.
  */
 const statusBar = h("header", { class: "statusbar" }, [
@@ -189,7 +189,6 @@ const rail = h("aside", { class: "rail" }, [
 const panelKind = h("span", { class: "label" });
 const panelSub = h("span", { class: "mono panel-sub" });
 const panelBody = h("div", { class: "panel-body" });
-const footLeft = h("div", { class: "foot-left" });
 const primary = primaryControl((c) => {
   const plan = primaryPlan();
   if (plan.cmd === null) return;
@@ -204,8 +203,20 @@ const primary = primaryControl((c) => {
  */
 const scoring = createScoringPanel({ issue: (cmd, from) => issue(cmd, from) });
 
-/** The primary button's home. Driving mode borrows the button and gives it back. */
-const panelFoot = h("div", { class: "panel-foot" }, [footLeft, primary.el]);
+/**
+ * The primary button's home, and now the only thing in it.
+ *
+ * The foot used to carry Lock joining, the seal, Reopen, Close session and
+ * the wipe's arm button alongside it — five things pressed once or never,
+ * wrapping onto a second row, in the same 8px gap as the one button pressed
+ * every thirty seconds. They have moved to the control panel in the tray
+ * (see `controlPanel` below), so the foot is one full-width button and
+ * nothing else: same place, same key, impossible to miss and impossible to
+ * mistake for its neighbour, because it has none.
+ *
+ * Driving mode borrows the button and gives it back.
+ */
+const panelFoot = h("div", { class: "panel-foot" }, [primary.el]);
 
 const panel = h("main", { class: "panel" }, [
   h("div", { class: "panel-head" }, [panelKind, panelSub]),
@@ -226,11 +237,43 @@ const previewBox = h("div", { class: "tray-preview" }, [
   h("p", { class: "label", text: "Participant preview" }),
   previewFrame,
 ]);
+/**
+ * The control panel: everything the host presses once, or never.
+ *
+ * Filled in further down, once the controls it holds have been built. It sits
+ * under the participant preview because that is the half of the console the
+ * eye is not using to run the show — the panel foot is for the one button
+ * pressed constantly, and the tray is for the rest.
+ *
+ * It scrolls rather than pushing anything off the bottom of the tray. The
+ * splitter takes the column down to 216px and the panel has to stay usable
+ * there, so nothing in it is laid out in fixed columns: the rows wrap, the
+ * buttons wrap their labels, and the whole block gives way to a scrollbar
+ * before it gives way to a control the host cannot reach.
+ */
+const trayControls = h("section", {
+  class: "cp",
+  attrs: { "aria-label": "Session controls" },
+});
+
+/**
+ * Everything in the tray below the preview, in one scrolling region.
+ *
+ * The preview stays pinned — it is the thing the host looks at to see what
+ * the room sees, and a preview that scrolls away is not a preview. Under it,
+ * the control panel and the Recent list share whatever the column has left,
+ * and when they cannot both fit the region scrolls rather than squeezing one
+ * of them to nothing. On a short window that means the Recent list is the
+ * part you scroll to, which is the right way round: it is a log.
+ */
 const tray = h("aside", { class: "tray" }, [
   previewBox,
-  h("div", { class: "tray-toasts" }, [
-    h("p", { class: "label", text: "Recent" }),
-    toastList,
+  h("div", { class: "tray-body" }, [
+    trayControls,
+    h("div", { class: "tray-toasts" }, [
+      h("p", { class: "label", text: "Recent" }),
+      toastList,
+    ]),
   ]),
 ]);
 
@@ -313,8 +356,10 @@ function applyTray(): void {
  *
  * runbook.ts clamps to 216-560px, which is about the preview; this is about
  * everything else. The rail is 300px and the splitter is 6, and the activity
- * panel needs 620 to keep the scoring grid's ~700px table close to fitting
- * and the foot's four controls on one row. On a 1512px window that leaves the
+ * panel needs 620 to keep the scoring grid's ~700px table close to fitting.
+ * (It used to also have to hold the foot's four secondary controls on one
+ * row; those are in the tray now, and the grid is what the number is for.)
+ * On a 1512px window that leaves the
  * full 560; on a 1280px laptop it leaves 354, and 354 is the honest answer
  * there — the pixels are not available, and a splitter that let the host drag
  * past them would be a splitter that broke the grid.
@@ -518,13 +563,9 @@ const reopenControl = control({
   onFire: (c) => issue({ name: "session.reopen" }, c),
 });
 
-replace(footLeft, [
-  lockControl.el,
-  sealControl.el,
-  unsealControl.el,
-  reopenControl.el,
-  closeControl.el,
-]);
+// These five are assembled into the control panel below, once the wipe's arm
+// button exists, because the wipe belongs in the same block as Close session
+// and nowhere near Lock joining.
 
 /* ------------------------------------------------------------------ */
 /* Starting the session over                                           */
@@ -656,6 +697,9 @@ function setRestartArmed(on: boolean): void {
   if (restartTimer !== null) clearTimeout(restartTimer);
   restartTimer = null;
   if (on) {
+    // The control panel scrolls when the tray is narrow, and a panel that
+    // opened below the fold is a panel the host thinks did nothing.
+    restartPanel.scrollIntoView({ block: "nearest" });
     restartField.focus();
     restartTimer = setTimeout(() => setRestartArmed(false), RESTART_DISARM_MS);
   } else {
@@ -690,11 +734,107 @@ function fireRestart(): void {
   setRestartArmed(false);
 }
 
-// The arm button lives with the other footer controls; the panel it opens is
-// a row of its own directly above them, so it pushes nothing sideways and the
-// host reads it where they are already looking.
-footLeft.appendChild(restartArm);
-panel.insertBefore(restartPanel, panelFoot);
+/* ------------------------------------------------------------------ */
+/* The control panel                                                   */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Everything pressed once, or never, in one place — and not the place the
+ * host's hand lives.
+ *
+ * The panel foot had grown to five buttons and the primary, which put Close
+ * session 8px from Open trivia (space) in the same grey, in the row the host
+ * reaches for every thirty seconds. Those five are here now, under the
+ * participant preview, grouped by what they are rather than by when they were
+ * added:
+ *
+ *   Session     lock and unlock joining, close, reopen, and the wipe
+ *   Scoreboard  hide it, show it again, run the 5-to-1 reveal
+ *   Shortcuts   the three keys, as buttons, each labelled with its key
+ *
+ * The keys are unchanged and every one of them still works from everywhere it
+ * worked before; the rail still prints the whole list. These buttons are a
+ * second path to three of them, and the key on the face of each is the point:
+ * a host who presses "Driving mode SHIFT+D" twice has learned SHIFT+D.
+ *
+ * The two that cannot be undone are not merely moved, they are walled off —
+ * their own bordered block, in the danger colour, under a heading that says
+ * so. Close session and Start the session over… must not read as the same
+ * kind of thing as Lock joining, and next to each other in a wrapping row of
+ * grey buttons is exactly how they read before.
+ *
+ * The wipe's three-act guard moves intact: arm, type the word, press a button
+ * that is disabled until it matches. Nothing here makes it reachable by the
+ * space bar — `spaceVerdict` blurs any focused button that is not an inline
+ * confirm's Yes or No and fires the primary instead, and the field swallows
+ * the key outright. That is a property of the keydown decision, not of where
+ * the buttons are mounted, so moving them cannot weaken it.
+ */
+
+/** One shortcut, as a button that teaches its key. */
+function shortcutButton(
+  name: string,
+  keys: string,
+  onPress: () => void,
+): HTMLButtonElement {
+  const button = handsBackSpace(
+    h(
+      "button",
+      {
+        class: "cp-key",
+        type: "button",
+        attrs: { "aria-label": `${name} (${keys})` },
+      },
+      [
+        h("span", { class: "cp-key-name", text: name }),
+        // The key is on the face of the button, not in a tooltip: a tooltip is
+        // a shortcut nobody learns. Hidden from the accessibility tree because
+        // the button's own label already says it, once.
+        h("span", {
+          class: "mono cp-key-cap",
+          text: keys,
+          attrs: { "aria-hidden": "true" },
+        }),
+      ],
+    ),
+  ) as HTMLButtonElement;
+  button.addEventListener("click", onPress);
+  return button;
+}
+
+const cpHolding = shortcutButton("Holding card", "SHIFT+H", () =>
+  showHoldingNow(),
+);
+const cpDriving = shortcutButton("Driving mode", "SHIFT+D", () =>
+  setDriving(!driving),
+);
+const cpGrid = shortcutButton("Scoring grid", "G", () => {
+  // Same two steps the key takes: the grid is on the console, and driving
+  // mode is the console put away.
+  setDriving(false);
+  scoring.focusFirst();
+});
+setAttr(cpDriving, "aria-pressed", "false");
+
+replace(trayControls, [
+  h("section", { class: "cp-group" }, [
+    h("p", { class: "label", text: "Session" }),
+    h("div", { class: "cp-row" }, [lockControl.el, reopenControl.el]),
+    h("div", { class: "cp-danger" }, [
+      h("p", { class: "label cp-danger-label", text: "Cannot be undone" }),
+      h("div", { class: "cp-row" }, [closeControl.el, restartArm]),
+      restartPanel,
+    ]),
+  ]),
+  h("section", { class: "cp-group" }, [
+    h("p", { class: "label", text: "Scoreboard" }),
+    h("div", { class: "cp-row" }, [sealControl.el, unsealControl.el]),
+  ]),
+  h("section", { class: "cp-group" }, [
+    h("p", { class: "label", text: "Shortcuts" }),
+    h("div", { class: "cp-row cp-row-keys" }, [cpHolding, cpDriving, cpGrid]),
+  ]),
+]);
 
 /* ------------------------------------------------------------------ */
 /* The runbook                                                         */
@@ -832,10 +972,123 @@ const roster = keyedList<RosterEntry>(
 /* Panel bodies — built once, so the holding fields keep what is typed  */
 /* ------------------------------------------------------------------ */
 
+/**
+ * The join code and the join link, both at reading size, both copyable.
+ *
+ * The code used to be set in 34px with 0.26em of tracking, and that was right
+ * once: it was a four-letter word ("RAFT survives a bad microphone") read
+ * aloud to a room off a shared screen, and tracking is what makes four
+ * shouted letters legible. It is not that any more. It is a 28-character
+ * `hvs.` token that goes into the meeting chat by copy and paste, and at that
+ * length 0.26em of tracking is actively worse: it spreads the token past the
+ * panel and it breaks it into a field of characters with no word shape left
+ * to check against. So it sits at the link's 14px with no tracking, and the
+ * host stops having to read it at all.
+ *
+ * Both stay on screen. The link is what goes into the chat; the sign-in page
+ * asks for the code specifically, so somebody who has the link still needs
+ * it, and somebody who has lost the chat message still needs the link.
+ */
 const bodyLobbyCode = h("span", { class: "mono join-code" });
 const bodyLobbyUrl = h("span", { class: "mono join-url" });
 const bodyLobbyCount = h("span", { class: "mono big-num" });
 const bodyLobbyLock = h("span", { class: "mono lock-state" });
+
+/**
+ * Copy, and three ways to fail out loud rather than silently.
+ *
+ * `navigator.clipboard` needs a secure context. Localhost is one and the
+ * deployment is one, but a console opened over plain http on a LAN address is
+ * not, and the host finds that out at 14:00 with thirty people waiting. So:
+ * the async clipboard, then the old `execCommand` path, and if neither
+ * works the button says "Select it, then ⌘C" and selects the text for
+ * them. The word they wanted is on screen either way.
+ */
+function copyText(text: string): Promise<boolean> {
+  const legacy = (): boolean => {
+    try {
+      const box = h("textarea", {
+        attrs: {
+          "aria-hidden": "true",
+          style: "position:fixed;top:0;left:0;opacity:0;pointer-events:none",
+        },
+      }) as HTMLTextAreaElement;
+      box.value = text;
+      document.body.appendChild(box);
+      box.select();
+      const ok = document.execCommand("copy");
+      box.remove();
+      return ok;
+    } catch {
+      return false;
+    }
+  };
+  try {
+    const api = navigator.clipboard;
+    if (api !== undefined && typeof api.writeText === "function") {
+      return api.writeText(text).then(
+        () => true,
+        () => legacy(),
+      );
+    }
+  } catch {
+    // Reading the property can itself throw in a locked-down browser.
+  }
+  return Promise.resolve(legacy());
+}
+
+/** Select the thing on screen, so ⌘C still works when nothing else does. */
+function selectElement(el: HTMLElement): void {
+  try {
+    const range = document.createRange();
+    range.selectNodeContents(el);
+    const sel = window.getSelection();
+    sel?.removeAllRanges();
+    sel?.addRange(range);
+  } catch {
+    // Nothing to do; the button already said what to press.
+  }
+}
+
+const COPY_SAID_MS = 2_500;
+
+function copyButton(what: string, source: HTMLElement): HTMLButtonElement {
+  const button = handsBackSpace(
+    h("button", {
+      class: "copy-btn",
+      type: "button",
+      text: "Copy",
+      attrs: { "aria-label": `Copy the ${what}` },
+    }),
+  ) as HTMLButtonElement;
+  let timer: ReturnType<typeof setTimeout> | null = null;
+  const say = (word: string, ok: boolean): void => {
+    setText(button, word);
+    button.classList.toggle("is-done", ok);
+    if (timer !== null) clearTimeout(timer);
+    timer = setTimeout(() => {
+      timer = null;
+      setText(button, "Copy");
+      button.classList.remove("is-done");
+    }, COPY_SAID_MS);
+  };
+  button.addEventListener("click", () => {
+    const text = source.textContent ?? "";
+    if (text === "" || text.includes("——")) {
+      say("Not connected", false);
+      return;
+    }
+    void copyText(text).then((ok) => {
+      if (!ok) selectElement(source);
+      say(ok ? "Copied" : "Select it, then ⌘C", ok);
+    });
+  });
+  return button;
+}
+
+const copyCode = copyButton("code", bodyLobbyCode);
+const copyUrl = copyButton("link", bodyLobbyUrl);
+
 /* ---- pre-flight ---------------------------------------------------- */
 
 /**
@@ -1136,10 +1389,12 @@ const bodyLobby = h("section", { class: "pb" }, [
   h("div", { class: "kv" }, [
     h("span", { class: "label", text: "Join code" }),
     bodyLobbyCode,
+    copyCode,
   ]),
   h("div", { class: "kv" }, [
     h("span", { class: "label", text: "Join link" }),
     bodyLobbyUrl,
+    copyUrl,
   ]),
   h("div", { class: "kv" }, [
     h("span", { class: "label", text: "Joined" }),
@@ -2943,6 +3198,11 @@ function setDriving(on: boolean): void {
   // off-screen is a half-armed wipe nobody can see to cancel.
   setRestartArmed(false);
   document.body.classList.toggle("driving", on);
+  // The control panel's own copy of the toggle. Off-screen while driving mode
+  // is on — the tray is hidden with the rest of the console — but it has to be
+  // right the moment the host comes back to it.
+  setAttr(cpDriving, "aria-pressed", on ? "true" : "false");
+  cpDriving.classList.toggle("on", on);
   drivingView.hidden = !on;
   const home = on ? dvPrimary : panelFoot;
   if (primary.el.parentElement !== home) home.appendChild(primary.el);

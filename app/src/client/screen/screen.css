@@ -180,6 +180,20 @@ body {
 }
 .s-name-big {
   font-size: clamp(40px, 4.2vw, 88px);
+  /*
+   * The same leading the phone's `.row .name` needs, and for the same reason:
+   * this is one line of whatever somebody typed, inside a box that clips
+   * (`overflow: hidden`, which is here for the ellipsis and takes the vertical
+   * with it), set in `.display` — whose `line-height: 0.94` makes a line box
+   * shorter than the face's ascent plus descent.
+   *
+   * On the trivia podium that cut 6px off 🎉, and at the standings' 80px it
+   * cut the tilde of ễ and the dot under ị in Nguyễn Thị Hương, the top matra
+   * of प्रिया, and the tail of any g or j. 1.15 clears all of them and is
+   * still tighter than the 1.18em the face asks for. こうた was never clipped;
+   * Japanese sits inside the em box.
+   */
+  line-height: 1.15;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -284,7 +298,23 @@ body {
 }
 .s-winner-name {
   margin: 0;
-  font-size: clamp(80px, 11vw, 200px);
+  /*
+   * The one place the display face's extra width overflowed a real box.
+   *
+   * Nicknames are up to 24 characters. At 11vw / 200px a 16-character name —
+   * Nguyễn Thị Hương — measures 1283px of the 1296px inside the 5% safe
+   * margin at 1440, where the condensed webfont set the same string 7.4%
+   * narrower: 13px of headroom left, against about 100px before. 10.2vw / 186px is that same 7.4%
+   * back off, so the name renders at the width it always did and the break-even
+   * nickname length is the one this screen was tuned with. 186px is still
+   * inside DESIGN.md's 120–200px display band.
+   *
+   * `overflow-wrap: anywhere` is the floor under the case the size cannot fix:
+   * a 24-character nickname with no space in it. It used to leave the safe
+   * margin and get cut off by `body { overflow: hidden }`; now it breaks.
+   */
+  font-size: clamp(74px, 10.2vw, 186px);
+  overflow-wrap: anywhere;
 }
 .s-winner-total {
   margin: 0;

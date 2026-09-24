@@ -7,23 +7,46 @@
  *
  * ---- The type scale --------------------------------------------------
  *
- * Dense is not the same as flat. Everything used to sit between 10px and
- * 15px, which meant a section heading shouted as loudly as the question the
- * host was about to read out, and the eye had nowhere to land. Six steps,
- * and each one has a job:
+ * Dense is not the same as flat, and Helios is not a licence to flatten it.
+ * The hierarchy this console was given is unchanged in shape — the same steps
+ * doing the same jobs — but every step from 13px up now lands on a number the
+ * Helios scale publishes, because the type tokens are now the Helios system
+ * stacks and 15px, 17px, 22px and 34px are not sizes that scale has:
+ *
+ *   display 30 / 24 / 18 / 16 / 13 · body 16 / 14 / 13 · code 16 / 14 / 13
+ *   weights 400 regular · 500 medium · 600 semibold · 700 bold, body 14
  *
  *   10px  mono, tracked   column heads, keycaps, per-cell buttons — chrome
  *                         the eye skips until it is looking for it
  *   11px  mono, tracked   SECTION LABELS and hints. Quiet on purpose: a
  *                         label names a region, it is not the content
- *   12–13px               notes, meta, the scoring grid's own rows
- *   14px                  the body. Buttons, roster, run of show, answers
- *   15px  mono, tracked   the panel head — which segment is up
- *   17px                  the line the host acts on: what the round is,
+ *   12px                  the scoring grid's own cells, and the dense meta
+ *                         lines that sit beside them
+ *   13px                  notes, descriptions, secondary buttons
+ *   14px                  the body. Roster, run of show, answers, the join
+ *                         code and the join link
+ *   16px  (was 15)        the panel head, the session title, the round card
+ *   18px  (was 17)        the line the host acts on: what the round is,
  *                         which round is next, the primary button
- *   22px                  the one thing in front of the room: the question
- *   34px                  the join code, which a room of thirty reads off a
- *                         shared screen
+ *   24px  (was 22)        the one thing in front of the room: the question
+ *   30px  (was 40)        the gate, the only full-page heading here
+ *
+ * 10, 11 and 12 sit below Helios' 13px floor and stay there deliberately.
+ * They are not prose: they are a terminal's chrome — tracked mono keycaps,
+ * column heads, and a 22px scoring row that thirty people have to fit into
+ * above the fold. Lifting those to 13 is a scoring grid that no longer fits a
+ * 1280px window, which is a worse failure at 2:45pm than a small column head.
+ * Everything a host reads as a sentence is 13px or larger.
+ *
+ * Two sizes are outside the scale on purpose, and tokens.css already states
+ * the exception: driving mode's count is 56px because it is read from arm's
+ * length with nothing else on the screen, and the arcade keeps its own
+ * display sizes.
+ *
+ * The join code has come off this list entirely. It was 34px with 0.26em of
+ * tracking because it was once a four-letter word read aloud to a room; it is
+ * a 28-character token that gets pasted into a chat window, so it is 14px
+ * beside the link, untracked, with a copy button. See `.join-code`.
  *
  * Nothing here changes a colour. Every pair below was re-measured against
  * the tokens as they stand, and the figures are recorded beside the rule.
@@ -51,7 +74,8 @@ body {
 .rail .label,
 .panel .label,
 .tray-preview > .label,
-.tray-toasts > .label {
+.tray-toasts > .label,
+.cp .label {
   font-size: 11px;
 }
 
@@ -79,9 +103,11 @@ body {
 /* The DO NOT SHARE chip and the join code have both left this bar — see the
    note on `statusBar` in main.ts. The tab title still carries the warning,
    which is where the screen-share picker reads it from, and the join code is
-   34px in the lobby panel. What is left leads with whose session it is. */
+   in the lobby panel with a copy button on it. What is left leads with whose
+   session it is. 16px, Helios display 16, up from a 15 that is not on the
+   scale; --ink on --panel is 16.80:1 dark and 18.72:1 light. */
 .sb-title {
-  font-size: 15px;
+  font-size: 16px;
   font-weight: 600;
 }
 .sb-counts,
@@ -364,7 +390,7 @@ body {
    size and the tracking do the work. Placed after the 11px label rule above,
    which it has to beat at equal specificity. */
 .panel-head .label {
-  font-size: 15px;
+  font-size: 16px;
   letter-spacing: 0.16em;
 }
 .panel-sub {
@@ -467,17 +493,73 @@ body {
   flex: none;
   font-size: 11px;
 }
-.join-code {
-  font-size: 34px;
-  font-weight: 600;
-  letter-spacing: 0.26em;
-}
+/*
+ * The join code and the join link, at one size, both copyable.
+ *
+ * 34px and 0.26em of tracking was the right answer to a different question:
+ * the code used to be a four-letter word a host read aloud off a shared
+ * screen, and tracking is what makes four shouted letters legible. The code
+ * is now a 28-character `hvs.` token that is pasted into the meeting chat,
+ * and at that length the tracking spread it past the panel and took away the
+ * word shape that made it checkable at a glance. So: the link's 14px, no
+ * tracking, and a copy button on each, which is the thing a host actually
+ * wanted from this row.
+ *
+ * --ink on --ground is 18.13:1 dark, 19.54:1 light; --muted 5.84:1 and
+ * 5.38:1. Both unchanged — only the size moved, and at 14px both clear the
+ * 4.5:1 floor comfortably. 600 on the code keeps it the heavier of the pair
+ * without making it a different size from the link.
+ *
+ * `user-select: all` so that one click takes the whole token, for the browser
+ * where the clipboard API is not available and the button says so.
+ */
+.join-code,
 .join-url {
   font-size: 14px;
+  min-width: 0;
+  overflow-wrap: anywhere;
+  user-select: all;
+}
+.join-code {
+  font-weight: 600;
+  letter-spacing: 0;
+}
+.join-url {
   color: var(--muted);
 }
+
+/*
+ * Copy, on both rows. The link is what goes into the meeting chat; the
+ * sign-in page asks for the code specifically, so a host needs both and
+ * neither should have to be retyped off a screen.
+ *
+ * --ink on --panel-2 is 15.31:1 dark, 17.44:1 light. The copied state takes
+ * --hit: #06d092 on #1d1d28 is 8.30:1 dark, #007e5a on #f1f2f3 is 4.53:1
+ * light. The border is non-text and wants 3:1; --line is decoration and the
+ * label carries the meaning either way.
+ */
+.copy-btn {
+  flex: none;
+  align-self: center;
+  background: var(--panel-2);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  padding: 3px 8px;
+  font-family: var(--mono);
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  color: var(--ink);
+  white-space: nowrap;
+}
+.copy-btn:hover {
+  border-color: var(--muted);
+}
+.copy-btn.is-done {
+  color: var(--hit);
+  border-color: var(--hit);
+}
 .big-num {
-  font-size: 22px;
+  font-size: 24px;
   font-weight: 600;
 }
 .lock-state {
@@ -769,7 +851,7 @@ body {
 }
 .sc-pts-bench::after {
   content: " B";
-  font-size: 9px;
+  font-size: 10px;
   letter-spacing: 0.12em;
 }
 .sc-cell[data-status="bench"] {
@@ -963,6 +1045,16 @@ body {
    primary button rather than in a hole in the middle of the console, and the
    button is in the same place in every segment — which is the whole promise
    the space bar is making. */
+/*
+ * One button, the full width of the foot.
+ *
+ * This row used to carry Lock joining, the seal, Show the scoreboard again,
+ * Reopen, Close session and the wipe's arm button alongside the primary — six
+ * things in an 8px gap, wrapping onto a second row at 1280px, with Close
+ * session sitting beside Open trivia (space) in the same grey. They are all in
+ * the tray's control panel now. What is left is the thing pressed every thirty
+ * seconds, alone, with nothing next to it to press by mistake.
+ */
 .panel-foot {
   flex: none;
   margin-top: auto;
@@ -972,10 +1064,12 @@ body {
   padding-top: 10px;
   border-top: 1px solid var(--line);
 }
-.foot-left {
-  display: flex;
-  gap: 8px;
-  flex-wrap: wrap;
+.panel-foot .ctl-primary {
+  flex: 1;
+  margin-left: 0;
+}
+.panel-foot .ctl-primary .ctl-button {
+  width: 100%;
 }
 
 /* ---------------------------------------------------------- controls -- */
@@ -1011,6 +1105,19 @@ body {
   color: var(--sealed);
   border-color: color-mix(in srgb, var(--sealed) 45%, var(--line));
 }
+/* A disabled control has to look disabled. `.ctl-button:disabled` above is
+   the same specificity as these two and loses on source order, so Close
+   session stayed red while the session was already closed and Reveal the
+   winners stayed gold after they had been revealed — a button the host reads
+   as pressable, presses, and gets nothing from. Said twice, colour and
+   cursor, and --muted rather than --dim because the label is still a
+   sentence: 4.94:1 dark and 4.83:1 light on --panel-2. */
+.ctl-danger .ctl-button:disabled,
+.ctl-seal .ctl-button:disabled {
+  color: var(--muted);
+  border-color: var(--line);
+  cursor: default;
+}
 .ctl.on .ctl-button {
   background: var(--sealed);
   color: #2a2205;
@@ -1021,10 +1128,11 @@ body {
 .ctl-primary {
   margin-left: auto;
 }
-/* 17px against the secondary buttons' 13px, so the one button that matters is
-   the one button that reads as bigger rather than merely greener. min-width
-   stays 260px: the foot has three secondary controls beside it and at 1280
-   there is no room to widen it without wrapping them onto a second row.
+/* 18px — Helios display 18, up from a 17 that is not on the scale — against
+   the secondary buttons' 13px, so the one button that matters is the one
+   button that reads as bigger rather than merely greener. It now takes the
+   whole foot; min-width 260px is what is left of the old bargain and is the
+   floor for driving mode's copy, which does not stretch.
    #062a20 on --nomad #06d092 is 7.68:1, theme-independent — --nomad is a
    brand fill and does not move between light and dark. */
 .ctl-primary .ctl-button {
@@ -1032,7 +1140,7 @@ body {
   border-color: var(--nomad);
   color: #062a20;
   font-weight: 600;
-  font-size: 17px;
+  font-size: 18px;
   padding: 12px 22px;
   min-width: 260px;
   justify-content: center;
@@ -1150,9 +1258,31 @@ body {
   transform: scale(var(--pv-scale));
   transform-origin: top left;
 }
-.tray-toasts {
-  flex: 1;
+/*
+ * Below the preview: the control panel and the Recent list, in one scrolling
+ * region.
+ *
+ * The preview is pinned, because a preview that scrolls away is not a
+ * preview. Everything else shares what the column has left and scrolls when
+ * it does not fit — which on a 1280 x 800 window with the tray dragged wide
+ * it does not, because a wider tray is a taller preview. Scrolling is the
+ * only answer that keeps every control reachable without giving the tray a
+ * minimum height that would fight the splitter.
+ */
+.tray-preview {
+  flex: none;
+}
+.tray-body {
+  flex: 1 1 0;
   min-height: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+.tray-toasts {
+  flex: 1 1 auto;
+  min-height: 84px;
   display: flex;
   flex-direction: column;
   gap: 6px;
@@ -1175,7 +1305,7 @@ body {
   background: var(--panel);
   border-left: 2px solid var(--line);
   border-radius: 3px;
-  font-size: 12px;
+  font-size: 13px;
 }
 .toast-spot {
   border-left-color: var(--spot);
@@ -1194,8 +1324,10 @@ body {
   max-width: 560px;
   padding: 48px 24px;
 }
+/* Helios display 30. The gate is a full page with one sentence on it; 40px
+   was off the scale and bought nothing a 30 does not. */
 .gate h1 {
-  font-size: 40px;
+  font-size: 30px;
   margin: 8px 0 12px;
 }
 .gate-note {
@@ -1241,7 +1373,7 @@ body {
   display: none;
 }
 .t-round-card.is-card {
-  font-size: 15px;
+  font-size: 16px;
   padding: 7px 12px;
   border-radius: 6px;
   border-left: 3px solid var(--trivia);
@@ -1251,10 +1383,11 @@ body {
 }
 
 /* The one thing in front of the room, and the one thing the host says out
-   loud. 22px against a 14px panel. --ink: 16.80:1 dark, 18.72:1 light. */
+   loud. Helios display 24 against a 14px panel, up from a 22 that is not on
+   the scale. --ink: 16.80:1 dark, 18.72:1 light. */
 .t-q {
   margin: 0;
-  font-size: 22px;
+  font-size: 24px;
   line-height: 1.25;
 }
 
@@ -1337,9 +1470,11 @@ body {
   color: var(--hit);
 }
 
+/* 13px, Helios' floor: this is a list of names the host reads to decide
+   whether to wait or close, which makes it a sentence rather than chrome. */
 .t-waiting {
   margin: 0;
-  font-size: 12px;
+  font-size: 13px;
   color: var(--dim);
 }
 .t-waiting[hidden],
@@ -1427,7 +1562,7 @@ body {
 /* --muted is the readable muted; --dim never carries text that has to be
    read, and this line has to be read. */
 .a-pick-what {
-  font-size: 12px;
+  font-size: 13px;
   line-height: 1.35;
   color: var(--muted);
   font-weight: 400;
@@ -1484,7 +1619,7 @@ body {
    Inherits --ink: 16.80:1 dark, 18.72:1 light on --ground. */
 .a-item {
   margin: 0;
-  font-size: 17px;
+  font-size: 18px;
   line-height: 1.35;
 }
 .a-note {
@@ -1761,7 +1896,7 @@ body {
 }
 
 .a-setup-pos {
-  font-size: 15px;
+  font-size: 16px;
   font-weight: 600;
   color: var(--ink);
   text-align: center;
@@ -1781,7 +1916,7 @@ body {
   font-size: 14px;
 }
 .a-setup-what {
-  font-size: 12px;
+  font-size: 13px;
   line-height: 1.35;
   color: var(--muted);
 }
@@ -1879,7 +2014,7 @@ body {
    agree with the button. --ink: 16.80:1 dark, 18.72:1 light. */
 .a-upnext {
   margin: 0;
-  font-size: 17px;
+  font-size: 18px;
   color: var(--ink);
 }
 .a-upnext[hidden] {
@@ -1949,7 +2084,7 @@ body.driving .cols {
 }
 .dv-context {
   margin: 0;
-  font-size: 15px;
+  font-size: 16px;
   letter-spacing: 0.16em;
   color: var(--muted);
 }
@@ -1986,7 +2121,7 @@ body.driving .cols {
   margin-left: 0;
 }
 .driving-view .ctl-primary .ctl-button {
-  font-size: 22px;
+  font-size: 24px;
   padding: 16px 32px;
   min-width: 420px;
 }
@@ -2118,4 +2253,201 @@ body.driving .cols {
 }
 .rs-cancel:hover {
   border-color: var(--muted);
+}
+
+/* ------------------------------------------------- the control panel -- */
+
+/*
+ * Everything the host presses once, or never.
+ *
+ * It lives in the tray under the participant preview, because the panel foot
+ * is for the one button pressed constantly and this is the opposite of that.
+ * Three groups: the session, the scoreboard, and the three keys as buttons.
+ *
+ * It has to stay usable at the splitter's narrowest. 216px of tray is 192px
+ * of content, so nothing in here is laid out in columns that can run out:
+ * rows wrap, buttons wrap their own labels rather than overflowing, the
+ * inline confirm puts its question on a line above its Yes and No, and the
+ * whole block scrolls before anything in it goes out of reach. A control off
+ * the bottom of the tray is a control that does not exist — so the tray is
+ * given no minimum that would fight the splitter, and the panel adapts
+ * instead.
+ *
+ * Contrast, measured on the surfaces these actually sit on, dark then light:
+ *
+ *   --muted  on --ground   the group labels                 5.84  5.38
+ *   --ink    on --panel-2  .ctl-button, .cp-key            15.31 17.44
+ *   --muted  on --panel-2  .cp-key-cap, the keycap          4.94  4.83
+ *   --danger on --ground   .cp-danger-label, its own edge   5.34  5.06
+ *   --danger on --panel-2  Close session, .rs-arm           4.51  4.52
+ *   --sealed on --panel-2  .ctl-seal's label               11.29  4.50
+ *   --sealed on --ground   .ctl-question while armed       13.36  4.90
+ */
+
+.cp {
+  /* Its natural height. `.tray-body` around it is what scrolls. */
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+/* A `<p class="label">` carries the UA's 1em block margins, which at 11px is
+   22px of nothing per group — 88px of a 683px column, spent on air between a
+   heading and the button under it. */
+.cp .label {
+  margin: 0;
+}
+
+.cp-group {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.cp-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+/* A control takes half the row when two fit and the whole row when they do
+   not. 9rem is the width below which two of these stop being readable side by
+   side, which at 13px is the point the labels start wrapping anyway. */
+.cp-row > .ctl,
+.cp-row > button {
+  flex: 1 1 9rem;
+  min-width: 0;
+}
+/* The shortcut buttons carry a name and a keycap, so they need more before
+   they are worth putting two on a line. */
+.cp-row-keys > button {
+  flex: 1 1 9rem;
+}
+
+/* The inline confirm, in a 192px column: the question goes above Yes and No
+   rather than pushing them out of the tray. */
+.cp .ctl {
+  flex-wrap: wrap;
+}
+.cp .ctl-question {
+  flex: 1 1 100%;
+}
+.cp .ctl-yes,
+.cp .ctl-no {
+  flex: 1 1 4rem;
+}
+
+.cp .ctl-button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  text-align: center;
+  /* Two lines of button beats a button with its last word cut off. */
+  white-space: normal;
+  line-height: 1.3;
+}
+
+/* Refusals are inline and three seconds long, and in this column they wrap
+   rather than reaching for the 340px they get in the panel. */
+.cp .ctl-flash {
+  max-width: 100%;
+  overflow-wrap: break-word;
+}
+
+/*
+ * The two that cannot be undone, walled off rather than merely relocated.
+ *
+ * Close session and Start the session over… used to sit in the panel foot in
+ * the same grey as Lock joining, eight pixels from Open trivia (space). They
+ * have their own bordered block now, their own heading, and the danger colour
+ * on the edge and on both buttons — three ways of saying "not like the
+ * others", none of them colour alone.
+ *
+ * The wipe's guard is unchanged: arm, type the word, press a button that is
+ * disabled until it matches. Moving it cannot put it on the space bar —
+ * `spaceVerdict()` blurs any focused button that is not an inline confirm's
+ * Yes or No and fires the primary instead, and a text field swallows the key
+ * outright. That is a property of the keydown decision, not of the markup.
+ */
+.cp-danger {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 2px;
+  padding: 8px;
+  border: 1px solid var(--danger);
+  border-radius: 6px;
+}
+.cp-danger-label {
+  color: var(--danger);
+}
+.cp-danger .rs-arm {
+  white-space: normal;
+  line-height: 1.3;
+}
+/* The wipe's panel opens inside the block that already warned about it, so it
+   does not need a second red box drawn around the first. */
+.cp-danger .rs-panel {
+  padding: 8px 0 0;
+  background: none;
+  border: 0;
+  border-top: 1px solid var(--danger);
+  border-radius: 0;
+}
+.cp-danger .rs-field {
+  flex: 1 1 100%;
+  width: auto;
+  min-width: 0;
+}
+.cp-danger .rs-go,
+.cp-danger .rs-cancel {
+  flex: 1 1 8rem;
+  white-space: normal;
+  line-height: 1.3;
+}
+
+/*
+ * A shortcut as a button, with its key on its face.
+ *
+ * The keys are unchanged and every one still works from everywhere it worked
+ * before; the whole list is still printed at the foot of the rail and again
+ * in driving mode. These are an added path, and the keycap is the point — a
+ * host who presses "Driving mode SHIFT+D" twice has learned SHIFT+D, which a
+ * tooltip never taught anybody.
+ */
+.cp-key {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  background: var(--panel-2);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  padding: 6px 10px;
+  color: var(--ink);
+  font-size: 13px;
+  text-align: left;
+  line-height: 1.3;
+}
+.cp-key:hover {
+  border-color: var(--muted);
+}
+/* Driving mode is the one of the three that is a state rather than an act, so
+   it says which state it is in — and says it with an edge and aria-pressed,
+   not with colour alone. */
+.cp-key.on {
+  border-color: var(--nomad);
+}
+.cp-key-name {
+  min-width: 0;
+}
+.cp-key-cap {
+  flex: none;
+  font-size: 10px;
+  letter-spacing: 0.1em;
+  color: var(--muted);
+  border: 1px solid var(--line);
+  border-radius: 3px;
+  padding: 1px 4px;
 }
