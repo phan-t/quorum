@@ -130,7 +130,7 @@ if (hostToken === "") {
       h("h1", { class: "display", text: "This console needs its token" }),
       h("p", {
         class: "gate-note",
-        text: "Open it as /host#<host token>. Everything after the # stays in this browser, so the token never reaches a server log. Add ?mock=1 to drive a fake session instead.",
+        text: "Open it as /host#<host token>. Everything after the # stays in this browser, so the token never reaches a server log.",
       }),
     ]),
   ]);
@@ -357,7 +357,7 @@ const trayGrip = h("div", {
     "aria-label": "Preview column width",
     "aria-valuemin": String(TRAY_MIN),
     "aria-valuemax": String(TRAY_MAX),
-    title: "Drag to resize the preview \u2014 or focus it and use \u2190 \u2192",
+    title: "Drag to resize the preview, or focus it and use ← →",
   },
 });
 
@@ -606,7 +606,7 @@ function practiceToggle(): Control {
     label: "Practice: off",
     className: "ctl-secondary ctl-practice",
     title:
-      "The game runs normally and nobody scores. Use it for the first run of a game the room has not played before — then turn it off and run the same game for real.",
+      "The game runs normally and nobody scores. Use it for a first run, then turn it off and play it for real.",
     question: () =>
       (lastState?.practice ?? false)
         ? "Score the next game?"
@@ -655,7 +655,7 @@ const reopenControl = control({
   className: "ctl-secondary",
   question: "Carry on where you left off, scores and all?",
   title:
-    "Puts the session back to running with every score intact. The segment and the scoreboard stay where the close left them; move them with the rail and the scoreboard button.",
+    "Puts the session back to running with every score intact. The segment and scoreboard stay where the close left them.",
   onFire: (c) => issue({ name: "session.reopen" }, c),
 });
 
@@ -1653,7 +1653,6 @@ const preflight = h("section", { class: "pf" }, [
   ]),
   h("p", {
     class: "pb-note",
-    text: "None of this stops you starting. It is what the console can see from where it sits — the projector it cannot, so that one is yours to look at.",
   }),
 ]);
 
@@ -1752,18 +1751,18 @@ const runbookSetup = h("section", { class: "a-setup" }, [
   h("p", { class: "label", text: "Runbook" }),
   h("p", {
     class: "pb-note",
-    text: "Set this before you start. The main button walks these in this order, and it always says which one is next. Anything you take out stays in the rail on the left and is still one click away, so you can go there by hand if the afternoon changes shape.",
+    text: "Set this before you start. The main button follows this order and always says what is next. Anything you take out stays in the rail, one click away.",
   }),
   runbookRows,
   h("div", { class: "a-setup-addrow" }, [runbookAdd]),
   runbookNote,
   h("p", {
     class: "pb-note",
-    text: "Move a row with its arrow buttons, or with Alt+\u2191 and Alt+\u2193 from anywhere in the row \u2014 or drag it. The lobby and the final are fixed: the session opens in one and ends in the other.",
+    text: "Move a row with its arrows, with Alt+↑ and Alt+↓, or by dragging. Lobby and Final are fixed.",
   }),
   h("p", {
     class: "pb-note",
-    text: "A holding step shows one of your holding cards, chosen on the row. Add as many as the afternoon has gaps in it \u2014 the TTX, the coffee break, the five minutes while you reset \u2014 and the main button walks them in order, showing the right card at each.",
+    text: "A holding step shows one of your cards, picked on the row. Add one for each gap in the afternoon. The main button walks them in order.",
   }),
 ]);
 
@@ -1984,7 +1983,7 @@ function renderRunbookSetup(): void {
             missing
               ? h("span", {
                   class: "a-setup-what rb-missing",
-                  text: "The card this step used to show has been deleted. Pick another one, or take the step out \u2014 until you do, this step shows \u201cBack shortly\u201d.",
+                  text: "The card this step showed was deleted. Pick another, or take the step out. Until then it shows \"Back shortly\".",
                 })
               : null,
           ]),
@@ -2113,18 +2112,18 @@ const cardsSetup = h("section", { class: "a-setup" }, [
   h("p", { class: "label", text: "Holding cards" }),
   h("p", {
     class: "pb-note",
-    text: "A holding card is what the room looks at while something is happening that Quorum is not running \u2014 the tabletop exercise, a coffee break, the gap while you set the next thing up. Write them now, while nobody is looking. They are kept in this browser like the runbook, so they are still here tomorrow.",
+    text: "What the room looks at between activities: the TTX, a coffee break, a gap while you set up. Write them now. They stay in this browser.",
   }),
   cardsRows,
   h("div", { class: "a-setup-addrow" }, [cardsAdd]),
   cardsNote,
   h("p", {
     class: "pb-note",
-    text: "Nothing you type here goes to the room. A card only appears when the main button walks into a step that shows it, when you click it in the rail, when you press Show it to the room, or when you press SHIFT+H \u2014 and none of those does anything until the session has started.",
+    text: "Nothing here reaches the room until you show it. A card goes up when the main button walks into its step, when you click it in the rail, when you press Show it to the room, or with SHIFT+H.",
   }),
   h("p", {
     class: "pb-note",
-    text: "Give each one a name you would recognise in a hurry: the title is both what the room reads and what the runbook and the rail call that step. Something like \u201cAgentic Security TTX\u201d and \u201cWe begin at 14:05 \u2014 grab a coffee\u201d.",
+    text: "Name it something you would recognise in a hurry. The title is what the room reads and what the rail calls the step.",
   }),
 ]);
 holdingSetupSlot.appendChild(cardsSetup);
@@ -2398,7 +2397,7 @@ const bodyHolding = h("section", { class: "pb" }, [
   h("div", { class: "field-actions hc-actions" }, [holdingClear.el]),
   h("p", {
     class: "pb-note",
-    text: "This is the slide the room sits in front of between activities. One goes up the moment you press its button, and the participant preview on the right is what they see. The words are written before the session starts, from the lobby panel.",
+    text: "The slide the room sits in front of between activities. It goes up when you press its button. The preview on the right is what they see.",
   }),
 ]);
 
@@ -2444,7 +2443,7 @@ const sendoffBackControl = control({
   label: "Back",
   className: "ctl-secondary",
   title:
-    "One step back — the previous message, or out of the messages into the montage. For an overshoot.",
+    "One step back: the previous message, or out of the messages into the montage. For an overshoot.",
   onFire: (c) => issue({ name: "sendoff.back" }, c),
 });
 
@@ -2817,7 +2816,7 @@ const arcadePlanCfg = h("div", { class: "a-cfg" }, [
   ]),
   h("p", {
     class: "pb-note",
-    text: "At 120 taps about half the room finishes. The light changes on its own every 2–6 seconds, and the Desktop shows everyone a warning just before it turns.",
+    text: "At 120 taps about half the room finishes. The light changes every 2 to 6 seconds, and the Desktop warns just before it turns.",
   }),
 ]);
 
@@ -2869,7 +2868,7 @@ const arcadeGlassCfg = h("div", { class: "a-cfg" }, [
   ]),
   h("p", {
     class: "pb-note",
-    text: "Six steps, two panes to choose from at each. The room crosses in three groups, split by player number, and each step ends on its own clock. The two buttons below are for cutting one short.",
+    text: "Six steps, two panes at each. The room crosses in three groups by player number, and each step runs on its own clock. The buttons below cut one short.",
   }),
 ]);
 
@@ -3113,7 +3112,7 @@ const arcadeSetup = h("section", { class: "a-setup" }, [
   h("p", { class: "label", text: "Arcade running order" }),
   h("p", {
     class: "pb-note",
-    text: "Set this before you start. Once the session is running, the main button announces these rounds in this order \u2014 it always says which one is next.",
+    text: "Set this before you start. Once the session is running, the main button announces these rounds in order.",
   }),
   arcadeSetupRows,
   arcadeSetupNote,
@@ -3228,7 +3227,7 @@ const arcadeAltToggle = handsBackSpace(
 const arcadeAlt = h("div", { class: "a-alt", attrs: { hidden: true } }, [
   h("p", {
     class: "pb-note",
-    text: "Pick a round here to run it next instead of the one in the order \u2014 to skip ahead, or to run one again. The order picks up again afterwards.",
+    text: "Pick a round here to run it next instead of the one in the order. Use it to skip ahead or to run one again.",
   }),
   arcadePicker,
 ]);
@@ -3265,14 +3264,14 @@ const arcadeNextStep = control({
   label: "Close the step",
   className: "ctl-secondary",
   title:
-    "The Glass Bridge only. Ends the step everyone is on: anyone who has not picked is out, the broken pane is shown, and the next step opens. The step clock does this on its own.",
+    "The Glass Bridge only. Ends the current step: anyone who has not picked is out, the broken pane shows, the next step opens. The clock does this anyway.",
   onFire: (c) => issue({ name: "arcade.nextStep" }, c),
 });
 const arcadeNextWave = control({
   label: "Send the next wave",
   className: "ctl-secondary",
   title:
-    "The Glass Bridge only. Ends this group's step and sends the next group of players onto the bridge. Use it when everyone still going in this group is out.",
+    "The Glass Bridge only. Ends this group's step and sends the next group onto the bridge. Use it when everyone still going is out.",
   onFire: (c) => issue({ name: "arcade.nextWave" }, c),
 });
 
@@ -3299,7 +3298,7 @@ const bodyArcade = h("section", { class: "pb pb-arcade" }, [
   ]),
   h("p", {
     class: "label",
-    text: "Backing — players who are out pick someone to root for",
+    text: "Backing: players who are out pick someone to root for",
   }),
   arcadeBacking,
 ]);
