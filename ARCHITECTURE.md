@@ -100,7 +100,20 @@ thousand items and under a megabyte.
 | `SESSION#<sid>` | `SCORE#<activityId>#<pid>` | raw, status (`played`/`bench`/`unset`), publishedAt |
 | `SESSION#<sid>` | `SPOT#<seq>` | pid, activityId, reason, at |
 | `SESSION#<sid>` | `CONTENT#<activityId>` | the parsed trivia set or arcade config for this session |
+| `SESSION#<sid>#PROMO` | `PROMO` | the event's promo card, one HTML page, chars, at |
+| `SESSION#<sid>#ASSET` | `ASSET#<key>` | one send-off photo or the music file: bytes (Binary), contentType, size, at |
 | `CODE#<joinCode>` | `ACTIVE` | sid — exists only while the session is joinable |
+
+**The promo card and the send-off assets are in partitions of their own**, and
+that is load-bearing rather than tidy. Both are content served *beside* a
+session and never part of one, and both are large — a card is a quarter of a
+megabyte and forty-three photos are seven. Keeping them under `SESSION#<sid>`
+would mean the recovery query dragging all of it back to discard it, and the
+obvious fix, `FilterExpression: "SK <> :promo"`, is one DynamoDB refuses
+outright: a filter may not name a key attribute. That was shipped once and
+broke every `loadSession` and every `loadRecoverable`; see the commit that
+moved the card. A separate partition needs no filter, and the read is a
+`GetCommand` by exact key either way.
 
 GSI: none. Join codes are looked up by their own PK; everything else is a
 query on `SESSION#<sid>`. The `SNAPSHOT` item is the fast path for restart;

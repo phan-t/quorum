@@ -13,10 +13,15 @@
 
 import type { SessionState } from "../../engine/types.ts";
 import {
+  assetKeyProblem,
+  checkAssetKey,
+  checkAssetSize,
   checkPromoSize,
+  type AssetSummary,
   type LoadedSession,
   type SessionMeta,
   type SessionStore,
+  type StoredAsset,
   type StoredEvent,
   type StoredParticipant,
 } from "./types.ts";
@@ -28,6 +33,8 @@ interface Row {
   participants: Map<string, StoredParticipant>;
   /** The promo card. Not in `LoadedSession`: it is never replayed. */
   promo: string | null;
+  /** Send-off assets by key. Not in `LoadedSession`, for the same reason. */
+  assets: Map<string, StoredAsset>;
 }
 
 const copy = <T>(v: T): T => structuredClone(v);
@@ -58,6 +65,7 @@ export class MemoryStore implements SessionStore {
         events: new Map(),
         participants: new Map(),
         promo: null,
+        assets: new Map(),
       };
       this.rows.set(sid, r);
     }
@@ -88,6 +96,48 @@ export class MemoryStore implements SessionStore {
     // Deliberately not through `row()`: asking for a card must not conjure a
     // row for a session id nobody has ever created.
     return this.rows.get(sid)?.promo ?? null;
+  }
+
+  async putAsset(
+    sid: string,
+    key: string,
+    bytes: Uint8Array,
+    contentType: string,
+    at: number,
+  ): Promise<void> {
+    this.guard();
+    checkAssetKey(key);
+    checkAssetSize(key, bytes);
+    // Copied, like everything else here. The caller owns the buffer it handed
+    // over and is free to reuse it; a store that kept the reference would
+    // serve whatever the next upload happened to put in it.
+    this.row(sid).assets.set(key, {
+      key,
+      contentType,
+      bytes: bytes.slice(),
+      at,
+    });
+  }
+
+  async getAsset(sid: string, key: string): Promise<StoredAsset | null> {
+    if (assetKeyProblem(key) !== null) return null;
+    // Deliberately not through `row()`, as with the card: asking for an asset
+    // must not conjure a row for a session id nobody has ever created.
+    const stored = this.rows.get(sid)?.assets.get(key);
+    return stored ? { ...stored, bytes: stored.bytes.slice() } : null;
+  }
+
+  async listAssets(sid: string): Promise<readonly AssetSummary[]> {
+    const assets = this.rows.get(sid)?.assets;
+    if (!assets) return [];
+    return [...assets.values()]
+      .map((a) => ({
+        key: a.key,
+        contentType: a.contentType,
+        size: a.bytes.byteLength,
+        at: a.at,
+      }))
+      .sort((x, y) => (x.key < y.key ? -1 : x.key > y.key ? 1 : 0));
   }
 
   async appendEvent(sid: string, record: StoredEvent): Promise<void> {

@@ -34,6 +34,11 @@ import {
 
 import type { Event, SessionState } from "../../engine/types.ts";
 import {
+  assetKeyProblem,
+  assetPk,
+  assetSortKey,
+  checkAssetKey,
+  checkAssetSize,
   checkPromoSize,
   codePk,
   eventSortKey,
@@ -41,9 +46,11 @@ import {
   sessionPk,
   SNAPSHOT_VERSION,
   ttlAt,
+  type AssetSummary,
   type LoadedSession,
   type SessionMeta,
   type SessionStore,
+  type StoredAsset,
   type StoredEvent,
   type StoredParticipant,
 } from "./types.ts";
@@ -188,6 +195,93 @@ export class DynamoStore implements SessionStore {
     return typeof html === "string" ? html : null;
   }
 
+  async putAsset(
+    sid: string,
+    key: string,
+    bytes: Uint8Array,
+    contentType: string,
+    at: number,
+  ): Promise<void> {
+    checkAssetKey(key);
+    checkAssetSize(key, bytes);
+    await this.put({
+      PK: assetPk(sid),
+      SK: assetSortKey(key),
+      assetKey: key,
+      contentType,
+      // A `Uint8Array` through `lib-dynamodb` marshals to a `B` attribute.
+      // Base64 in an `S` would be a third larger for nothing — see
+      // MAX_ASSET_BYTES.
+      bytes,
+      // Denormalised so the size of a montage is readable off the table
+      // without downloading it to measure.
+      size: bytes.byteLength,
+      at,
+      ttl: ttlAt(at),
+    });
+  }
+
+  async getAsset(sid: string, key: string): Promise<StoredAsset | null> {
+    if (assetKeyProblem(key) !== null) return null;
+    const out = await this.doc.send(
+      new GetCommand({
+        TableName: this.table,
+        Key: { PK: assetPk(sid), SK: assetSortKey(key) },
+      }),
+    );
+    const item = out.Item as Item | undefined;
+    if (!item) return null;
+    const bytes = item["bytes"];
+    if (!(bytes instanceof Uint8Array)) return null;
+    return {
+      key: str(item["assetKey"], key),
+      contentType: str(item["contentType"], "application/octet-stream"),
+      bytes,
+      at: num(item["at"]),
+    };
+  }
+
+  async listAssets(sid: string): Promise<readonly AssetSummary[]> {
+    const summaries: AssetSummary[] = [];
+    let start: Record<string, unknown> | undefined;
+    do {
+      const out: {
+        Items?: Item[] | undefined;
+        LastEvaluatedKey?: Record<string, unknown> | undefined;
+      } = await this.doc.send(
+        new QueryCommand({
+          TableName: this.table,
+          KeyConditionExpression: "PK = :pk",
+          ExpressionAttributeValues: { ":pk": assetPk(sid) },
+          // Everything but the bytes. `size` is a reserved word and the others
+          // are aliased beside it rather than half the list being bare, which
+          // is the version somebody later adds a reserved word to.
+          ProjectionExpression: "#k, #ct, #sz, #at",
+          ExpressionAttributeNames: {
+            "#k": "assetKey",
+            "#ct": "contentType",
+            "#sz": "size",
+            "#at": "at",
+          },
+          ...(start ? { ExclusiveStartKey: start } : {}),
+        }),
+      );
+      for (const i of out.Items ?? []) {
+        const key = str(i["assetKey"]);
+        if (key === "") continue;
+        summaries.push({
+          key,
+          contentType: str(i["contentType"], "application/octet-stream"),
+          size: num(i["size"]),
+          at: num(i["at"]),
+        });
+      }
+      start = out.LastEvaluatedKey;
+    } while (start);
+    summaries.sort((a, b) => (a.key < b.key ? -1 : a.key > b.key ? 1 : 0));
+    return summaries;
+  }
+
   async appendEvent(sid: string, record: StoredEvent): Promise<void> {
     await this.put({
       PK: sessionPk(sid),
@@ -248,8 +342,9 @@ export class DynamoStore implements SessionStore {
         new QueryCommand({
           TableName: this.table,
           KeyConditionExpression: "PK = :pk",
-          // No filter, and none needed: the promo card lives in its own
-          // partition (`promoPk`) precisely so this read never sees it. The
+          // No filter, and none needed: the promo card and the send-off
+          // assets live in their own partitions (`promoPk`, `assetPk`)
+          // precisely so this read never sees them. The
           // first attempt kept it here and excluded it with
           // `FilterExpression: "SK <> :promo"`, which DynamoDB rejects outright
           // — a filter may not name a key attribute — and which therefore broke

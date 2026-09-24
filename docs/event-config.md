@@ -9,8 +9,9 @@ make stage EVENT=2026-09-25-sa-apj-huddle
 ```
 
 That creates the session, loads its questions, puts up the promo card if the
-event has one, stages the console's setup onto it, and prints the four things
-there is no endpoint to return. Nothing else has to happen before 2:00pm.
+event has one, uploads the send-off and its photos if the event has those,
+stages the console's setup onto it, and prints the four things there is no
+endpoint to return. Nothing else has to happen before 2:00pm.
 
 ---
 
@@ -21,6 +22,9 @@ config/events/2026-09-25-sa-apj-huddle/
   session.json            title, and the console's setup
   trivia-questions.json   the question set
   promo-card.html         optional: the poster shown in the Desktop's lobby
+  sendoff.json            optional: the send-off's messages and photo names
+  photos/                 the photos sendoff.json names
+  send-off.mp3            optional: the track for the opening montage
   run-of-show.md          for the host to read; nothing parses it
   roster.md
 ```
@@ -36,6 +40,7 @@ content about the people in the room and this repository is public. See
   "title": "SA APJ Team Huddle",
   "questions": "trivia-questions.json",
   "promo": "promo-card.html",
+  "sendoff": "sendoff.json",
   "console": {
     "cards": { "cards": [{ "id": "card-1", "title": "…", "line": "…" }] },
     "runbook": [{ "kind": "holding", "included": true, "id": "holding", "card": "card-1" }],
@@ -44,12 +49,14 @@ content about the people in the room and this repository is public. See
 }
 ```
 
-`title`, `questions` and `promo` are the server's. Everything under `console`
-is the console's, and the server never looks inside it.
+`title`, `questions`, `promo` and `sendoff` are the server's. Everything under
+`console` is the console's, and the server never looks inside it.
 
 `promo` can be left out — it defaults to `promo-card.html`, and an event with
 no such file stages exactly as it did before promo cards existed. Set it to
 `false` to skip the upload for an event that has the file but does not want it.
+
+`sendoff` works the same way, defaulting to `sendoff.json`.
 
 ---
 
@@ -101,6 +108,121 @@ Two consequences worth knowing before you write a card:
   Desktop, not to the card, and `allow-scripts` must never be paired with
   `allow-same-origin` — together they hand the page the Desktop's own origin
   and the sandbox stops meaning anything.
+
+---
+
+## The send-off
+
+`sendoff.json` names the person, carries the messages, and lists the photos by
+**filename**. The photos themselves are separate files in the event directory,
+and staging uploads each one after the JSON. See
+[`docs/sendoff.md`](sendoff.md) for what the segment is and why it is shaped
+this way; this section is about the files and what staging does with them.
+
+```json
+{
+  "for": {
+    "name": "Alex Rivera",
+    "subtitle": "Last day 30 September 2026"
+  },
+  "opening": {
+    "photos": ["photos/p01.jpg", "photos/p02.jpg"],
+    "music": "send-off.mp3",
+    "seconds": 40
+  },
+  "kudos": [
+    { "from": "Sam", "message": "Thank you for every review you left on my terrible first PRs." }
+  ],
+  "closing": {
+    "photos": ["photos/p43.jpg"],
+    "line": "See you around."
+  }
+}
+```
+
+`for` and `kudos` are required — a send-off is about somebody, and the messages
+are the thing. `opening` and `closing` are optional, and a send-off with no
+photos and no music is a list of messages, which is still the thing.
+
+| | |
+| --- | --- |
+| `for.name` | ≤ 80 characters. |
+| `for.subtitle` | Optional, ≤ 120 characters. |
+| `opening.photos` | Filenames relative to the event directory, ≤ 200 of them, no repeats within one montage. Must end in `.jpg`, `.jpeg`, `.png`, `.webp`, `.gif` or `.avif`. |
+| `opening.music` | Optional. `.mp3`, `.m4a`, `.aac`, `.ogg`, `.oga`, `.wav` or `.flac`. Only plays under the opening montage, so a track with no opening photos is an error. |
+| `opening.seconds` | 5–300, default 40. How long the montage runs before the host advances. |
+| `kudos[].from`, `kudos[].message` | Both required. ≤ 80 and ≤ 2,000 characters. |
+| `closing.photos`, `closing.line` | Both optional. The line is ≤ 280 characters. |
+
+**Unknown keys are errors**, exactly as in the question file. A `"music"` at
+the top level instead of inside `opening` is somebody who believes they set a
+track, and a montage that runs in silence is discovered in front of the room.
+
+**The whole file is rejected or none of it is.** Errors come back addressed —
+`Kudo 4, message: …`, `opening.photos: Photo 19: …` — so what gets fixed is the
+line rather than the guess.
+
+### The photos
+
+Every photo must be **300,000 bytes or less**, because it is stored as one
+DynamoDB row and an item stops at 400KB. That is a ceiling, not a target:
+downscale to about 1200px wide as JPEG, which lands nearer 150KB and is more
+resolution than a shared video call carries anyway.
+
+Downscale **before staging**, on your own machine. The service never sees the
+original, and a 12MB photo straight off a phone becomes a failed upload rather
+than a montage frame.
+
+```bash
+mkdir -p photos
+for f in originals/*.jpg; do
+  sips -Z 1200 -s format jpeg -s formatOptions 70 "$f" --out "photos/$(basename "$f")"
+done
+```
+
+### What staging does
+
+After the session, the questions and the promo card, staging uploads
+`sendoff.json` and then every file it names — the photos and the music — one
+request each. It reports progress, because forty-three photos is the slowest
+part of staging by a wide margin.
+
+Like the promo card, it is **optional and non-fatal**: an event with no
+`sendoff.json` stages exactly as it did before, and a failure here prints what
+went wrong and the `curl` that fixes it rather than exiting. By that point the
+session exists, and re-running staging would create a second one.
+
+A photo that failed can be re-uploaded on its own:
+
+```bash
+curl -X POST "$QUORUM_URL/api/sessions/$SID/assets/photos%2Fp19.jpg" \
+  -H "Authorization: Bearer $HOST_TOKEN" -H 'content-type: image/jpeg' \
+  --data-binary @config/events/<event>/photos/p19.jpg
+```
+
+### The photos are served without a token
+
+`GET /api/sessions/:sid/assets/<key>` takes no Authorization header, for the
+promo card's reason twice over: these are `<img>` and `<audio>` sources and
+neither element can carry one, and what they carry is a montage the room is
+about to watch on a shared screen. No scores, no roster, no names. It still
+takes the session id, which is not guessable, and a key that was never uploaded
+answers exactly as an unknown session does.
+
+They are served with `nosniff` and a year-long immutable `cache-control`. The
+bytes under a key never change — a new staging run is a new session id — and a
+montage that re-fetches forty photos on every frame is a montage that stutters
+over the conference wifi rather than on the laptop it was tested on.
+
+**Do not put a photo in here that the session's tokens are protecting.**
+
+### None of it is session state
+
+The messages and the photo *keys* are engine state, and they are small. The
+photo *bytes* are not: they live in store rows of their own, in their own
+partition, read by one endpoint and nothing else. A snapshot is replayed on
+restart and broadcast to every socket, and seven megabytes of JPEG has no
+business in either.
 
 ---
 
@@ -160,8 +282,8 @@ corrupt stored value is.
 
 ## What is not in here yet
 
-`session.json` covers the title, the questions, the promo card and the
-console's setup. It does
+`session.json` covers the title, the questions, the promo card, the send-off
+and the console's setup. It does
 not yet carry the practice flag, per-question timer overrides, or the arcade's
 timings as anything but the console's own `timings` object. Those are all
 server-side or engine-side state and each needs its own decision about whether

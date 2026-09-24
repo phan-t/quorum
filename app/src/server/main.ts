@@ -28,12 +28,17 @@ import { hashToken, newId, newJoinCode, tokenMatches } from "./tokens.ts";
 import { AWAY_AFTER_MS } from "./views.ts";
 import { Persister } from "./persist.ts";
 import { describe as describeError, openStore } from "./store/index.ts";
-import { MAX_PROMO_CHARS } from "./store/types.ts";
+import { assetKeyProblem, MAX_ASSET_BYTES, MAX_PROMO_CHARS } from "./store/types.ts";
 import type { StoredEvent } from "./store/types.ts";
 import { recoverSessions, rehydrate } from "./recovery.ts";
 import { recruitmentRound } from "../arcade/recruitment.ts";
 import { glassBridgeRound } from "../arcade/glass-bridge.ts";
 import { formatErrors, importTriviaJson } from "../trivia/import.ts";
+import {
+  formatErrors as formatSendoffErrors,
+  importSendoffJson,
+  sendoffAssetKeys,
+} from "../sendoff/import.ts";
 
 /**
  * A ceiling on the staged console setup, which the server stores without
@@ -176,6 +181,25 @@ async function readText(req: IncomingMessage): Promise<string> {
     chunks.push(chunk as Buffer);
   }
   return Buffer.concat(chunks).toString("utf8");
+}
+
+/**
+ * The body as bytes, refused past `limit`.
+ *
+ * Its own reader rather than `readText` plus an encode: a JPEG is not UTF-8,
+ * and decoding one to a string and back replaces every byte the decoder did
+ * not recognise with U+FFFD. The photo would upload, store and serve at
+ * roughly the right size, and render as a broken image.
+ */
+async function readBytes(req: IncomingMessage, limit: number): Promise<Buffer> {
+  const chunks: Buffer[] = [];
+  let size = 0;
+  for await (const chunk of req) {
+    size += (chunk as Buffer).length;
+    if (size > limit) throw new Error("body too large");
+    chunks.push(chunk as Buffer);
+  }
+  return Buffer.concat(chunks);
 }
 
 async function readBody(req: IncomingMessage): Promise<unknown> {
@@ -420,6 +444,183 @@ async function servePromoCard(res: ServerResponse, sid: string): Promise<void> {
   });
 }
 
+/**
+ * The send-off's content for one session: who it is for, the messages, and the
+ * *keys* of the photos and the music. Never the bytes — those go to the asset
+ * endpoints below, one request each.
+ *
+ * Validated all-or-nothing with errors addressed by position, exactly as the
+ * question set is and for a stronger reason: a send-off is read to a room once,
+ * in front of the person it is about, and a montage with a hole in it is
+ * discovered live. See `src/sendoff/import.ts`.
+ */
+async function loadSendoffContent(
+  res: ServerResponse,
+  sid: string,
+  presented: string,
+  req: IncomingMessage,
+): Promise<void> {
+  const runtime = registry.bySessionId(sid);
+  // Unknown session and wrong token answer the same way, as everywhere else
+  // here: a 404 that only appears for a real sid is a session-id oracle.
+  if (
+    !runtime ||
+    presented === "" ||
+    !tokenMatches(presented, runtime.secrets.hostTokenHash)
+  ) {
+    return json(res, 401, { error: "unauthorized" });
+  }
+
+  // Named rather than sniffed, as the promo card is. A send-off posted as
+  // `text/html` is somebody's staging script pointed at the wrong endpoint,
+  // and the importer's "This is not valid JSON" would be a confusing way to
+  // find that out.
+  const declared = (req.headers["content-type"] ?? "").split(";")[0]?.trim() ?? "";
+  if (declared.toLowerCase() !== "application/json") {
+    return json(res, 415, { error: "expected_json" });
+  }
+
+  let text: string;
+  try {
+    text = await readText(req);
+  } catch {
+    return json(res, 413, { error: "too_large" });
+  }
+
+  const result = importSendoffJson(text);
+  if (!result.ok) {
+    return json(res, 400, {
+      error: "invalid_sendoff",
+      // Addressed by message and by section, in the file's own order, so the
+      // host fixes the file rather than guessing which entry was disliked.
+      errors: formatSendoffErrors(result.errors),
+      detail: result.errors,
+    });
+  }
+
+  const out = runtime.apply({ type: "loadSendoff", content: result.content }, Date.now());
+  if (out.rejection) {
+    return json(res, 409, {
+      error: out.rejection.code,
+      message: out.rejection.message,
+    });
+  }
+  // The key list goes back so staging knows exactly what to upload next, and
+  // so a host running this by hand is told what the file is about to need
+  // rather than finding out one missing photo at a time.
+  const assets = sendoffAssetKeys(result.content);
+  return json(res, 200, {
+    kudos: result.content.kudos.length,
+    photos: result.content.opening.photos.length + result.content.closing.photos.length,
+    music: result.content.opening.music,
+    assets,
+  });
+}
+
+/**
+ * One send-off asset — a photo, or the music file — by key, host token only.
+ *
+ * Raw bytes with the content type the request declares. Uploaded one at a
+ * time because that is what a store row is, and because forty-three requests
+ * that can each be retried on their own beats one request that has to succeed
+ * whole at 3:40pm.
+ */
+async function putSessionAsset(
+  res: ServerResponse,
+  sid: string,
+  key: string,
+  presented: string,
+  req: IncomingMessage,
+): Promise<void> {
+  const runtime = registry.bySessionId(sid);
+  if (
+    !runtime ||
+    presented === "" ||
+    !tokenMatches(presented, runtime.secrets.hostTokenHash)
+  ) {
+    return json(res, 401, { error: "unauthorized" });
+  }
+
+  const problem = assetKeyProblem(key);
+  if (problem !== null) return json(res, 400, { error: "bad_key", message: problem });
+
+  let bytes: Buffer;
+  try {
+    bytes = await readBytes(req, MAX_ASSET_BYTES);
+  } catch {
+    // Refused, not truncated, for the promo card's reason turned up a notch: a
+    // JPEG missing its last third does not render as two thirds of a photo, it
+    // renders as a grey band, and nobody notices until the montage runs.
+    return json(res, 413, { error: "too_large", limit: MAX_ASSET_BYTES });
+  }
+  if (bytes.length === 0) return json(res, 400, { error: "empty" });
+
+  // What the uploader said it is, kept verbatim. The server does not sniff —
+  // it serves this back beside `nosniff`, so the declared type is the only
+  // thing that ever decides how the bytes are read.
+  const declared = (req.headers["content-type"] ?? "").split(";")[0]?.trim() ?? "";
+  const contentType = declared === "" ? "application/octet-stream" : declared.toLowerCase();
+
+  try {
+    await store.putAsset(sid, key, bytes, contentType, Date.now());
+  } catch (err) {
+    // Said out loud, like the promo card and unlike the persist path: this is
+    // somebody staging the day before, waiting to be told whether it landed.
+    return json(res, 503, { error: "store_unavailable", message: describeError(err) });
+  }
+  return json(res, 200, { key, bytes: bytes.length, contentType });
+}
+
+/**
+ * A send-off asset, served to whoever asks. No token, on purpose.
+ *
+ * The same reasoning as the promo card, and it applies twice over. These are
+ * `<img>` and `<audio>` sources and neither element can carry an Authorization
+ * header; and what they carry is a montage the room is about to watch on a
+ * shared screen. No scores, no roster, no names — and it still takes an
+ * unguessable session id to ask, with a missing key answering exactly as an
+ * unknown session does.
+ *
+ * `cache-control` is long and `immutable` because the bytes under a key never
+ * change: an upload with the same key is a new staging run for a new session.
+ * A montage that re-fetches forty photos on every frame is a montage that
+ * stutters, and it stutters over the conference wifi rather than on the
+ * laptop that was tested.
+ */
+async function serveSessionAsset(res: ServerResponse, sid: string, key: string): Promise<void> {
+  if (assetKeyProblem(key) !== null) return json(res, 404, { error: "not_found" });
+  let asset: Awaited<ReturnType<typeof store.getAsset>> = null;
+  try {
+    asset = await store.getAsset(sid, key);
+  } catch {
+    // A store that will not answer is indistinguishable, from the montage's
+    // point of view, from a photo that was never uploaded.
+    asset = null;
+  }
+  if (asset === null) return json(res, 404, { error: "not_found" });
+  return sendBytes(res, 200, asset.contentType, asset.bytes, {
+    "x-content-type-options": "nosniff",
+    "cache-control": "public, max-age=31536000, immutable",
+  });
+}
+
+/** `send`, for a body that is bytes. See `readBytes` for why they stay bytes. */
+function sendBytes(
+  res: ServerResponse,
+  code: number,
+  contentType: string,
+  body: Uint8Array,
+  extra: Record<string, string> = {},
+): void {
+  res.writeHead(code, {
+    "content-type": contentType,
+    "content-length": body.byteLength,
+    "cache-control": "no-store",
+    ...extra,
+  });
+  res.end(body);
+}
+
 function send(
   res: ServerResponse,
   code: number,
@@ -544,6 +745,69 @@ function handleHttp(req: IncomingMessage, res: ServerResponse): void {
         /* use it as typed; it will simply not match a session */
       }
       void servePromoCard(res, sid);
+      return;
+    }
+  }
+
+  // GET /api/sessions/:sid/assets/<key> — a send-off photo or the music file.
+  // Deliberately no token; see `serveSessionAsset`.
+  //
+  // The key is the whole tail, decoded once, because a key contains a slash
+  // (`photos/p01.jpg`) and both spellings reach here: staging percent-encodes
+  // it into one segment, and a src built by hand does not. Decoding the tail
+  // reads both the same, and `assetKeyProblem` is what stops a decoded `..`
+  // from meaning anything — though there is nothing to traverse to, since the
+  // key is a DynamoDB sort key and never touches a filesystem.
+  if (req.method === "GET" && path.startsWith("/api/sessions/")) {
+    const rest = path.slice("/api/sessions/".length);
+    const cut = rest.indexOf("/");
+    if (cut > 0 && rest.slice(cut + 1).startsWith("assets/")) {
+      let sid = rest.slice(0, cut);
+      let key = rest.slice(cut + 1 + "assets/".length);
+      try {
+        sid = decodeURIComponent(sid);
+        key = decodeURIComponent(key);
+      } catch {
+        // A stray `%` is a malformed URL, not a crash. Used as typed, it will
+        // simply not match anything.
+      }
+      void serveSessionAsset(res, sid, key);
+      return;
+    }
+  }
+
+  // POST /api/sessions/:sid/assets/<key> — one photo or the music file, host
+  // token only.
+  if (req.method === "POST" && path.startsWith("/api/sessions/")) {
+    const rest = path.slice("/api/sessions/".length);
+    const cut = rest.indexOf("/");
+    if (cut > 0 && rest.slice(cut + 1).startsWith("assets/")) {
+      let sid = rest.slice(0, cut);
+      let key = rest.slice(cut + 1 + "assets/".length);
+      try {
+        sid = decodeURIComponent(sid);
+        key = decodeURIComponent(key);
+      } catch {
+        /* use it as typed; it will simply not be a usable key */
+      }
+      void putSessionAsset(res, sid, key, bearer(req), req);
+      return;
+    }
+  }
+
+  // POST /api/sessions/:sid/content/sendoff — the send-off file, host token
+  // only. Keys, not bytes; the photos follow one request each.
+  if (req.method === "POST" && path.startsWith("/api/sessions/")) {
+    const rest = path.slice("/api/sessions/".length);
+    const cut = rest.indexOf("/");
+    if (cut > 0 && rest.slice(cut + 1) === "content/sendoff") {
+      let sid = rest.slice(0, cut);
+      try {
+        sid = decodeURIComponent(sid);
+      } catch {
+        /* use it as typed; it will simply not match a session */
+      }
+      void loadSendoffContent(res, sid, bearer(req), req);
       return;
     }
   }

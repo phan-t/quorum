@@ -39,6 +39,92 @@ export function checkPromoSize(html: string): void {
 }
 
 /**
+ * A ceiling on one send-off asset, held by both stores.
+ *
+ * 300,000 bytes, the same number as the promo card and for the same reason: a
+ * DynamoDB item cannot exceed 400KB including its keys and attribute names,
+ * and a photo is the only other thing written here big enough to approach it.
+ * The headroom is not slack — it is what leaves room for the key, the content
+ * type and the overhead of the item itself.
+ *
+ * The bytes are stored as DynamoDB **Binary**, not base64 in a string. Base64
+ * inflates by a third, which would turn a 290KB photo into a 387KB attribute
+ * and put a perfectly ordinary montage frame over the item limit.
+ *
+ * Staging downscales to about 1200px wide, which lands around 150KB — half of
+ * this — so a photo that trips the limit is a photo that skipped the resize,
+ * and being told so at staging is the entire point.
+ */
+export const MAX_ASSET_BYTES = 300_000;
+
+/** Both stores refuse an oversized asset the same way, in the same words. */
+export function checkAssetSize(key: string, bytes: Uint8Array): void {
+  if (bytes.byteLength > MAX_ASSET_BYTES) {
+    throw new Error(
+      `asset ${key} is ${bytes.byteLength} bytes; the limit is ${MAX_ASSET_BYTES}`,
+    );
+  }
+}
+
+/** The longest an asset key may be. Well past `photos/` plus a filename. */
+export const MAX_ASSET_KEY_CHARS = 200;
+
+/**
+ * Why a key is unusable, or null if it is fine.
+ *
+ * A key is a relative path under the event directory — `photos/p01.jpg` — and
+ * it arrives twice: once inside a send-off file, and once as the tail of a URL
+ * that staging and the Desktop both build. Both entry points run this, because
+ * a key that passes the importer and fails the route is a montage with a hole
+ * in it, and a key that reaches the filesystem side of staging with a `..` in
+ * it is worse than that.
+ */
+export function assetKeyProblem(key: string): string | null {
+  if (key === "") return "The key is blank.";
+  if ([...key].length > MAX_ASSET_KEY_CHARS) {
+    return `${[...key].length} characters; the limit is ${MAX_ASSET_KEY_CHARS}.`;
+  }
+  // Control characters would be a header-splitting attempt or a corrupt file,
+  // and neither is a filename anybody typed.
+  if (/[\u0000-\u001f\u007f]/.test(key)) return "The key has a control character in it.";
+  if (key.includes("\\")) return "Use forward slashes, not backslashes.";
+  if (key.startsWith("/")) return "The key is a path inside the event directory, so it cannot start with \"/\".";
+  if (key.split("/").some((part) => part === "" || part === "." || part === "..")) {
+    return "The key has an empty or relative path segment in it.";
+  }
+  return null;
+}
+
+/** Both stores refuse an unusable key the same way, in the same words. */
+export function checkAssetKey(key: string): void {
+  const problem = assetKeyProblem(key);
+  if (problem !== null) throw new Error(`asset key ${JSON.stringify(key)}: ${problem}`);
+}
+
+/**
+ * `SESSION#<sid>#ASSET` / `ASSET#<key>` — one photo, or the music file.
+ *
+ * `bytes` is what was uploaded, unchanged. `contentType` is what the uploader
+ * declared: the server does not sniff it and does not correct it, because the
+ * only thing it would be sniffing for is the thing it is about to serve with
+ * `nosniff` anyway.
+ */
+export interface StoredAsset {
+  readonly key: string;
+  readonly contentType: string;
+  readonly bytes: Uint8Array;
+  readonly at: number;
+}
+
+/** One asset without its bytes: what a listing can afford to return. */
+export interface AssetSummary {
+  readonly key: string;
+  readonly contentType: string;
+  readonly size: number;
+  readonly at: number;
+}
+
+/**
  * `SESSION#<sid>` / `META`.
  *
  * The token hashes are the reason this item is not just a slice of the
@@ -135,6 +221,36 @@ export interface SessionStore {
   putPromo(sid: string, html: string, at: number): Promise<void>;
   /** Null for a session with no card, and for a session that does not exist. */
   getPromo(sid: string): Promise<string | null>;
+
+  /**
+   * `SESSION#<sid>#ASSET` / `ASSET#<key>` — one send-off photo, or the music.
+   *
+   * Many per session, keyed by the filename the send-off file names, and
+   * absent from {@link LoadedSession} for exactly the promo card's reason:
+   * these are bytes served *beside* a session, never part of one. Forty-three
+   * photos is seven megabytes, and the snapshot is replayed on recovery and
+   * broadcast to every socket.
+   *
+   * Callers cap the size before it gets here; the stores check again, because
+   * the limit belongs to the item this writes.
+   */
+  putAsset(
+    sid: string,
+    key: string,
+    bytes: Uint8Array,
+    contentType: string,
+    at: number,
+  ): Promise<void>;
+  /** Null for an unknown key, and for a session that does not exist. */
+  getAsset(sid: string, key: string): Promise<StoredAsset | null>;
+  /**
+   * Every asset key this session holds, without the bytes.
+   *
+   * Sizes and types only: staging asks what already landed so a re-run does
+   * not re-upload seven megabytes, and pulling the bytes back to answer that
+   * question would cost exactly what it is trying to save.
+   */
+  listAssets(sid: string): Promise<readonly AssetSummary[]>;
   appendEvent(sid: string, record: StoredEvent): Promise<void>;
   putParticipant(sid: string, participant: StoredParticipant): Promise<void>;
 
@@ -169,6 +285,24 @@ export function eventSortKey(seq: number): string {
  */
 export function promoPk(sid: string): string {
   return `${sessionPk(sid)}#PROMO`;
+}
+
+/**
+ * The send-off assets' own partition, for the reason `promoPk` explains.
+ *
+ * All of a session's assets share one partition rather than taking one each,
+ * so a listing is a single Query. They are still nowhere near the session's
+ * own partition, which is the whole point: `loadSession` and `loadRecoverable`
+ * read `sessionPk` and can therefore never drag seven megabytes of JPEG back
+ * to discard it, and there is no `FilterExpression` for DynamoDB to refuse.
+ */
+export function assetPk(sid: string): string {
+  return `${sessionPk(sid)}#ASSET`;
+}
+
+/** Sort key for one asset. */
+export function assetSortKey(key: string): string {
+  return `ASSET#${key}`;
 }
 
 export function sessionPk(sid: string): string {
