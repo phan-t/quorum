@@ -216,7 +216,38 @@ const scoring = createScoringPanel({ issue: (cmd, from) => issue(cmd, from) });
  *
  * Driving mode borrows the button and gives it back.
  */
-const panelFoot = h("div", { class: "panel-foot" }, [primary.el]);
+/**
+ * What stands in the foot before the show starts.
+ *
+ * "Start the session" is a lifecycle step, not a step of the run of show, and
+ * it belongs beside Lock joining and Close session rather than inside the
+ * button the host presses every thirty seconds. So it is there — and it is
+ * *this* button, moved, exactly the way driving mode borrows it below. Moved
+ * rather than copied: two Start buttons would be two copies of the most
+ * important string in the product, and one of them would be the one the host
+ * presses while the other is the one a refusal lands in.
+ *
+ * Which leaves the foot with nothing in it until the session is running, and
+ * a foot with nothing in it is a host wondering whether the console is
+ * broken. So it says where the button went and, by name, what the space bar
+ * is about to press. See `placePrimary`.
+ */
+const footNote = h("p", { class: "pb-note foot-note", attrs: { hidden: true } });
+
+const panelFoot = h("div", { class: "panel-foot" }, [primary.el, footNote]);
+
+/**
+ * The primary button's other home: the top of the control panel's Session
+ * group, for as long as the next thing to press is a lifecycle step — Open
+ * the lobby, then Start the session.
+ *
+ * Empty and hidden the rest of the time. A bordered gap where a button used
+ * to be reads as a console that has lost something.
+ */
+const cpLifecycle = h("div", {
+  class: "cp-lifecycle",
+  attrs: { hidden: true },
+});
 
 const panel = h("main", { class: "panel" }, [
   h("div", { class: "panel-head" }, [panelKind, panelSub]),
@@ -748,9 +779,18 @@ function fireRestart(): void {
  * participant preview, grouped by what they are rather than by when they were
  * added:
  *
- *   Session     lock and unlock joining, close, reopen, and the wipe
+ *   Session     start it, lock and unlock joining, close, reopen, the wipe
  *   Scoreboard  hide it, show it again, run the 5-to-1 reveal
  *   Shortcuts   the three keys, as buttons, each labelled with its key
+ *
+ * The lifecycle row at the top of Session is the primary button itself,
+ * borrowed while the next thing to press is Open the lobby or Start the
+ * session — the host asked for Start to sit with the other lifecycle
+ * controls, and the run of show is not a lifecycle. It is the same element,
+ * so there is one Start button, it still carries "(space)", and the space bar
+ * still finds it: `bindSpace` holds the {@link Control}, not the place it
+ * happens to be mounted. Nothing about `spaceVerdict` changes, so nothing
+ * about the wipe being off the space bar changes either.
  *
  * The keys are unchanged and every one of them still works from everywhere it
  * worked before; the rail still prints the whole list. These buttons are a
@@ -819,6 +859,9 @@ setAttr(cpDriving, "aria-pressed", "false");
 replace(trayControls, [
   h("section", { class: "cp-group" }, [
     h("p", { class: "label", text: "Session" }),
+    // Open the lobby, then Start the session: the primary button itself,
+    // borrowed until the session is running. See `placePrimary`.
+    cpLifecycle,
     h("div", { class: "cp-row" }, [lockControl.el, reopenControl.el]),
     h("div", { class: "cp-danger" }, [
       h("p", { class: "label cp-danger-label", text: "Cannot be undone" }),
@@ -1385,6 +1428,9 @@ function renderRunbookSetup(): void {
 /** Where the arcade running order sits while the session has not started. */
 const lobbySetupSlot = h("div", { class: "lobby-setup" });
 
+/** And where the holding card is written, for the same stretch of time. */
+const holdingSetupSlot = h("div", { class: "lobby-setup" });
+
 const bodyLobby = h("section", { class: "pb" }, [
   h("div", { class: "kv" }, [
     h("span", { class: "label", text: "Join code" }),
@@ -1407,6 +1453,7 @@ const bodyLobby = h("section", { class: "pb" }, [
   preflight,
   runbookSetup,
   lobbySetupSlot,
+  holdingSetupSlot,
 ]);
 
 const holdingTitle = h("input", {
@@ -1421,6 +1468,83 @@ const holdingLine = h("input", {
   placeholder: "Back at 14:20. Prize: the good coffee.",
   attrs: { maxlength: "140", "aria-label": "Holding card second line" },
 });
+/**
+ * The two fields, as one block that moves between two homes.
+ *
+ * The card used to be writable only from the Holding card segment, which is
+ * only reachable once the session is running — so the one slide the room
+ * spends the most time in front of could not be written until the room was
+ * already sitting there. What it says is knowable on Thursday, like the
+ * runbook and the arcade's running order, so it is writable on Thursday.
+ *
+ * One block of fields, moved, rather than two sets that can disagree: the
+ * same bargain `placeArcadeSetup` makes, and the reason SHIFT+H picks up
+ * words typed during setup without anything having to be copied anywhere.
+ *
+ * The *buttons* do not move. "Show it to the room" and "Clear the card" stay
+ * in the Holding card segment, because writing the card while the room is
+ * still arriving must not be able to put anything in front of anybody.
+ */
+const holdingFields = h("div", { class: "holding-fields" }, [
+  h("label", { class: "field-row" }, [
+    h("span", { class: "label", text: "Title" }),
+    holdingTitle,
+  ]),
+  h("label", { class: "field-row" }, [
+    h("span", { class: "label", text: "Second line" }),
+    holdingLine,
+  ]),
+]);
+
+/** The fields' home inside the Holding card segment, once the session runs. */
+const holdingFieldsSegment = h("div", { class: "holding-slot" }, [holdingFields]);
+/** And their home in the lobby panel, before it does. */
+const holdingFieldsSetup = h("div", { class: "holding-slot" });
+
+/**
+ * The card, kept in this browser.
+ *
+ * The same promise the runbook and the running order make, for the same
+ * reason: a host who writes it on Thursday finds it on Friday, and a console
+ * reloaded at 14:45 comes back with it still written. Best-effort — storage
+ * off means empty fields and a working console, and the placeholders still
+ * say what the card is for.
+ */
+const HOLDING_KEY = "quorum.host.holding.v1";
+
+function loadHolding(): void {
+  let raw: string | null = null;
+  try {
+    raw = localStorage.getItem(HOLDING_KEY);
+  } catch {
+    return;
+  }
+  if (raw === null) return;
+  try {
+    const v: unknown = JSON.parse(raw);
+    if (typeof v !== "object" || v === null) return;
+    const o = v as { title?: unknown; line?: unknown };
+    // Clamped to the same lengths the fields enforce, so a hand-edited or
+    // half-written entry cannot get longer than the card can hold.
+    if (typeof o.title === "string") holdingTitle.value = o.title.slice(0, 80);
+    if (typeof o.line === "string") holdingLine.value = o.line.slice(0, 140);
+  } catch {
+    // Nothing usable stored. Empty is the sensible default: the card only
+    // exists once somebody writes one.
+  }
+}
+
+function saveHolding(): void {
+  try {
+    localStorage.setItem(
+      HOLDING_KEY,
+      JSON.stringify({ title: holdingTitle.value, line: holdingLine.value }),
+    );
+  } catch {
+    // See the runbook: it still works, it just will not survive a reload.
+  }
+}
+
 const holdingApply = control({
   label: "Show it to the room",
   className: "ctl-secondary",
@@ -1436,6 +1560,7 @@ const holdingClear = control({
   onFire: (c) => {
     holdingTitle.value = "";
     holdingLine.value = "";
+    saveHolding();
     issue({ name: "holding", title: "", line: "" }, c);
   },
 });
@@ -1444,31 +1569,63 @@ let holdingDirty = false;
 for (const field of [holdingTitle, holdingLine]) {
   field.addEventListener("input", () => {
     holdingDirty = true;
+    saveHolding();
   });
   field.addEventListener("keydown", (ev) => {
-    if ((ev as KeyboardEvent).key !== "Enter") return;
-    holdingApply.el.querySelector("button")?.click();
-    // Applied, so the space bar goes back to the run of show: a host who
-    // left the cursor in this field would otherwise type spaces into it
-    // while the room waited for the next thing to happen.
+    const e = ev as KeyboardEvent;
+    // Escape gets the cursor out. This matters at 13:59: a host who left the
+    // caret in here would press space at 14:00 and type a space into a text
+    // field instead of starting the session.
+    if (e.key === "Escape") {
+      field.blur();
+      return;
+    }
+    if (e.key !== "Enter") return;
+    e.preventDefault();
+    saveHolding();
+    // Enter shows the card — but only from the segment that has the button.
+    // During setup there is no room to show it to, and nothing typed here
+    // goes near the Desktop until the host asks for it.
+    if (holdingFields.parentElement === holdingFieldsSegment) {
+      holdingApply.el.querySelector("button")?.click();
+    }
+    // Applied, or saved, so the space bar goes back to the run of show: a
+    // host who left the cursor in this field would otherwise type spaces into
+    // it while the room waited for the next thing to happen.
     field.blur();
   });
 }
 const bodyHolding = h("section", { class: "pb" }, [
-  h("label", { class: "field-row" }, [
-    h("span", { class: "label", text: "Title" }),
-    holdingTitle,
-  ]),
-  h("label", { class: "field-row" }, [
-    h("span", { class: "label", text: "Second line" }),
-    holdingLine,
-  ]),
+  holdingFieldsSegment,
   h("div", { class: "field-actions" }, [holdingApply.el, holdingClear.el]),
   h("p", {
     class: "pb-note",
-    text: "This is the slide the room sits in front of between activities. It goes up the moment you press Show it to the room, and the participant preview on the right is what they see.",
+    text: "This is the slide the room sits in front of between activities. It goes up the moment you press Show it to the room, and the participant preview on the right is what they see. You can also write it before the session starts, from the lobby panel.",
   }),
 ]);
+
+/**
+ * The same two fields, before the room arrives — and the one thing this block
+ * has to be absolutely clear about, which is that nothing here is on screen
+ * anywhere yet.
+ */
+const holdingSetup = h("section", { class: "a-setup" }, [
+  h("p", { class: "label", text: "Holding card" }),
+  h("p", {
+    class: "pb-note",
+    text: "Write it now, while nobody is looking. It is kept in this browser like the runbook, so it is still here tomorrow.",
+  }),
+  holdingFieldsSetup,
+  h("p", {
+    class: "pb-note",
+    text: "Nothing you type here goes to the room. The card only appears when you press SHIFT+H, or Show it to the room from the Holding card segment, and neither of those does anything until the session has started.",
+  }),
+  h("p", {
+    class: "pb-note",
+    text: "The obvious use is the first two minutes: start the session at 14:00, press SHIFT+H, and the room sits in front of this while the last few people arrive. Something like \u201cAgentic Security TTX\u201d and \u201cWe begin at 14:05 \u2014 grab a coffee\u201d.",
+  }),
+]);
+holdingSetupSlot.appendChild(holdingSetup);
 
 const standingsRows = h("ol", { class: "h-rows" });
 const standingsNote = h("p", { class: "pb-note" });
@@ -2623,8 +2780,16 @@ function render(s: RenderState): void {
   }
 
   if (body === bodyHolding && !holdingDirty) {
-    holdingTitle.value = s.holding?.title ?? "";
-    holdingLine.value = s.holding?.line ?? "";
+    // Follow the room's card, but only once there *is* one. A session that
+    // has never shown a holding card reports an empty one, and an empty one
+    // must not wipe the words the host wrote during setup and has not shown
+    // yet — that is the whole point of writing it in advance.
+    const wire = s.holding;
+    if ((wire?.title ?? "") !== "" || (wire?.line ?? "") !== "") {
+      holdingTitle.value = wire?.title ?? "";
+      holdingLine.value = wire?.line ?? "";
+      saveHolding();
+    }
   }
 
   if (body === bodyStandings) {
@@ -2671,11 +2836,18 @@ function render(s: RenderState): void {
   /* pre-flight, and where the running order sits */
   renderPreflight(s);
   placeArcadeSetup(s);
+  placeHolding(s);
 
   /* primary */
   const plan = primaryPlan();
   primary.setLabel(plan.label);
   primary.setDisabled(plan.cmd === null);
+  placePrimary();
+  // Said by name, because the button saying it is in the other column.
+  setText(
+    footNote,
+    `Not started yet. Space presses \u201c${plan.label}\u201d \u2014 it is the green button at the top of Session controls, on the right.`,
+  );
 
   /* preview — what the room sees, not what the console sees */
   preview.update(roomView(s), null);
@@ -2771,6 +2943,59 @@ function placeArcadeSetup(s: RenderState): void {
   const home =
     s.phase === "draft" || s.phase === "lobby" ? lobbySetupSlot : arcadeAlt;
   if (arcadeSetup.parentElement !== home) home.appendChild(arcadeSetup);
+}
+
+/**
+ * The holding card's fields, in whichever of their two homes is on screen.
+ *
+ * Before the session starts they are in the lobby panel under the runbook;
+ * from the moment it is running they are back in the Holding card segment
+ * beside the button that shows the card. One block, moved, so the words typed
+ * on Thursday are the same words SHIFT+H reaches for on Friday, and so there
+ * is never a second copy to get out of step.
+ */
+function placeHolding(s: RenderState): void {
+  const setup = s.phase === "draft" || s.phase === "lobby";
+  // The lobby panel is also what a *running* session shows while the segment
+  // is the lobby, so this block hides itself the same way the runbook does.
+  holdingSetup.hidden = !setup;
+  const home = setup ? holdingFieldsSetup : holdingFieldsSegment;
+  if (holdingFields.parentElement !== home) home.appendChild(holdingFields);
+}
+
+/**
+ * Where the one primary button is mounted right now.
+ *
+ * Three homes and one button, in priority order:
+ *
+ *   driving mode    the whole console is put away, so it goes with the host
+ *   draft / lobby   the control panel's Session group: the next thing to
+ *                   press is Open the lobby, then Start the session, and
+ *                   both are lifecycle rather than run of show
+ *   running         the panel foot, where the run of show is driven from
+ *
+ * Moved, never copied, for the reason driving mode gives: two copies of the
+ * most important string in the product is one copy that can be wrong, and a
+ * refusal has to land in the button the host is looking at. The space bar is
+ * unaffected — `bindSpace` holds the {@link Control}, not its parent — so
+ * space still starts the session from anywhere on the page, and `spaceVerdict`
+ * is untouched, which is what keeps the wipe off the space bar.
+ */
+function placePrimary(): void {
+  const phase = lastState?.phase;
+  const home = driving
+    ? dvPrimary
+    : phase === "draft" || phase === "lobby"
+      ? cpLifecycle
+      : panelFoot;
+  if (primary.el.parentElement !== home) {
+    home.appendChild(primary.el);
+    // The button just moved out from under the cursor; space must still work.
+    releaseFocus();
+  }
+  const borrowed = primary.el.parentElement === cpLifecycle;
+  cpLifecycle.hidden = !borrowed;
+  footNote.hidden = !borrowed;
 }
 
 /**
@@ -3141,8 +3366,9 @@ setInterval(() => {
  *
  * Recovery used to be three actions at the moment a host least wants three:
  * switch to Holding, type a title, type a line, press the button. This is one
- * key, and it reuses whatever the card last said — falling back to something
- * neutral and true if it has never been set.
+ * key, and it reuses whatever the card last said — the words the host wrote
+ * in the lobby panel before the room arrived, then whatever the room is
+ * looking at now, then something neutral and true if neither exists.
  *
  * Shift is deliberate. A bare letter is a key a hand resting on a laptop can
  * find by accident, and this one puts a new slide in front of thirty people.
@@ -3173,6 +3399,7 @@ function showHoldingNow(): void {
   holdingTitle.value = title;
   holdingLine.value = line;
   holdingDirty = false;
+  saveHolding();
   issue({ name: "holding", title, line }, primary);
   if (s.segment !== "holding") issue({ name: "segment", kind: "holding" }, primary);
 }
@@ -3204,9 +3431,8 @@ function setDriving(on: boolean): void {
   setAttr(cpDriving, "aria-pressed", on ? "true" : "false");
   cpDriving.classList.toggle("on", on);
   drivingView.hidden = !on;
-  const home = on ? dvPrimary : panelFoot;
-  if (primary.el.parentElement !== home) home.appendChild(primary.el);
-  // The button just moved out from under the cursor; space must still work.
+  placePrimary();
+  // The button may have moved out from under the cursor; space must still work.
   releaseFocus();
   if (lastState) render(lastState);
 }
@@ -3233,6 +3459,7 @@ document.addEventListener("keydown", (ev) => {
 /* ---- the running order, as the console last had it ---- */
 
 loadSetup();
+loadHolding();
 renderArcadeSetup();
 renderRunbookSetup();
 renderRail();

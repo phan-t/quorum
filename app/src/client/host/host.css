@@ -1071,6 +1071,17 @@ body {
 .panel-foot .ctl-primary .ctl-button {
   width: 100%;
 }
+/* Before the session starts the primary button is borrowed by the control
+   panel's Session group, and this line stands in its place: where it went,
+   and what the space bar is about to press, by name. The panel draws no
+   background of its own, so this is --muted on --ground: 5.84:1 dark,
+   5.42:1 light. */
+.panel-foot .foot-note {
+  flex: 1;
+}
+.foot-note[hidden] {
+  display: none;
+}
 
 /* ---------------------------------------------------------- controls -- */
 
@@ -1856,6 +1867,16 @@ body {
   display: contents;
 }
 
+/* The holding card's two fields are one block with two homes — the lobby
+   panel before the session starts, the Holding card segment once it is
+   running. Both wrappers are transparent so the rows lay out as direct
+   children of whichever block they are in, and moving them cannot change how
+   they look. See `placeHolding`. */
+.holding-fields,
+.holding-slot {
+  display: contents;
+}
+
 .a-setup {
   display: flex;
   flex-direction: column;
@@ -2282,6 +2303,9 @@ body.driving .cols {
  *   --danger on --panel-2  Close session, .rs-arm           4.51  4.52
  *   --sealed on --panel-2  .ctl-seal's label               11.29  4.50
  *   --sealed on --ground   .ctl-question while armed       13.36  4.90
+ *   #062a20  on --nomad    the borrowed primary button       7.68  7.68
+ *
+ * The last one does not move between themes: --nomad is a brand fill.
  */
 
 .cp {
@@ -2302,6 +2326,34 @@ body.driving .cols {
   display: flex;
   flex-direction: column;
   gap: 6px;
+}
+
+/*
+ * The primary button, borrowed by the Session group until the session is
+ * running — Open the lobby, then Start the session. The same element, so the
+ * same colours (#062a20 on --nomad, 7.68:1 in both themes, because --nomad is
+ * a brand fill and does not move); only the size is the tray's. The panel
+ * foot's 18px and 260px floor do not fit a 216px column, and a button whose
+ * label is cut off is a button the host cannot read.
+ *
+ * Hidden, not empty, the rest of the time: an 0-height flex row would still
+ * spend the group's 6px gap on nothing.
+ */
+.cp-lifecycle {
+  display: flex;
+}
+.cp-lifecycle[hidden] {
+  display: none;
+}
+.cp-lifecycle .ctl-primary {
+  flex: 1 1 auto;
+  margin-left: 0;
+  min-width: 0;
+}
+.cp-lifecycle .ctl-primary .ctl-button {
+  min-width: 0;
+  font-size: 15px;
+  padding: 10px 12px;
 }
 
 .cp-row {
