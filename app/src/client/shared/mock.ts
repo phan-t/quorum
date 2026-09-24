@@ -38,14 +38,15 @@
  * the first run rather than in front of thirty people.
  *
  * The scripted session runs the whole of Phase 2 scoring, the whole of Phase
- * 3 trivia and the two built rounds of the Phase 4 arcade, so every surface
+ * 3 trivia and the built rounds of the Phase 4 arcade, so every surface
  * can be watched without a backend: a judged activity out of 20 with its
  * facilitator on bench, then four real questions with bots tapping at
  * plausible speeds — including a round card, a multi-answer question, a
- * two-answer question and a sudden death — then Recruitment and Plan / Apply
- * with the light turning, bots being drained into the Lounge and backing the
- * runners still on the Floor, two Spot Awards with reasons, and finally the
- * seal and the reveal.
+ * two-answer question and a sudden death — then Recruitment, Plan / Apply
+ * with the light turning, Unseal with tins cracking, Tug of Raft with the
+ * heartbeat at the real 100 bpm, and the Glass Bridge, with bots being
+ * drained into the Lounge and backing the runners still on the Floor, two
+ * Spot Awards with reasons, and finally the seal and the reveal.
  *
  * The arithmetic here is SCORING.md's and SPEC.md's, implemented a second
  * time on purpose — the mock is a stand-in for the server and must not borrow
@@ -61,7 +62,12 @@ import type {
   ArcadeGlassView,
   ArcadeMine,
   ArcadeMineGlass,
+  ArcadeMineTug,
+  ArcadeMineUnseal,
   ArcadeRecruitmentView,
+  ArcadeTugView,
+  ArcadeUnsealShape,
+  ArcadeUnsealView,
   ArcadeView,
   ClientMessage,
   HostCommand,
@@ -90,10 +96,13 @@ import type {
   ScoreStatus,
   Segment,
   SessionPhase,
+  UnsealItem,
+  UnsealShape,
   WaveSeconds,
 } from "../../engine/types.ts";
 import { RECRUITMENT_ITEMS } from "../../arcade/recruitment.ts";
 import { GLASS_BRIDGE_STEPS } from "../../arcade/glass-bridge.ts";
+import { UNSEAL_ITEMS } from "../../arcade/unseal.ts";
 import type { Transport, TransportFactory, TransportHandlers } from "./transport.ts";
 
 export interface MockConfig {
@@ -316,7 +325,66 @@ interface MockGlassPlay {
   crossOrder: string[];
 }
 
-type MockPlay = MockRecruitPlay | MockPlanPlay | MockGlassPlay;
+/**
+ * Unseal, mocked.
+ *
+ * The split between `tins` and `key` is written again rather than borrowed,
+ * for the reason the bridge's is: that split is the whole of the round's
+ * security — a projection handed a whole `UnsealItem` is one object spread
+ * away from putting the word on the phone of the person trying to work it
+ * out — and a mock that imported the split could never catch the server
+ * failing to make it. The *content* is imported, because content is not a
+ * rule and a second copy of nine words is how one of them silently rots.
+ */
+interface MockUnsealPlay {
+  kind: "unseal";
+  /** Showable, and only ever to the one phone holding it. */
+  tins: { shape: UnsealShape; cue: string; length: number }[];
+  /** **The answer.** Index-aligned with `tins`. Host and reveal only. */
+  key: { answer: string; note: string }[];
+  seconds: number;
+  /** Which tin each player holds, as an index. Never projected. */
+  pick: Record<string, number>;
+  /** Letters tapped, per player. The count, never the letters. */
+  progress: Record<string, number>;
+  docs: Record<string, true>;
+  unsealedMs: Record<string, number>;
+  unsealOrder: string[];
+}
+
+/**
+ * Tug of Raft, mocked.
+ *
+ * The heartbeat is stored as the server stores it — a start instant and a
+ * beat length — and never as a running counter, because that is the thing
+ * this round gets wrong if anybody gets it wrong. Elections are derived from
+ * `lastBeat` rather than stored, again as the server does: a stored
+ * `electionUntil` would be a second fact for a frame to disagree with.
+ */
+interface MockTugPlay {
+  kind: "tug_of_raft";
+  pulls: number;
+  pullSeconds: number;
+  /** 60 000 / bpm. Beat n of the pull is pullStartedAt + n * beatMs. */
+  beatMs: number;
+  pull: number;
+  seed: number;
+  sides: Record<string, 0 | 1>;
+  pullStartedAt: number;
+  pullEndsAt: number;
+  onBeats: Record<string, number>;
+  /** The last beat each player hit. −1 until they hit one. */
+  lastBeat: Record<string, number>;
+  creditedAt: Record<string, number>;
+  wins: [number, number];
+}
+
+type MockPlay =
+  | MockRecruitPlay
+  | MockPlanPlay
+  | MockUnsealPlay
+  | MockTugPlay
+  | MockGlassPlay;
 
 /* ---- the send-off ---------------------------------------------------- */
 
@@ -514,6 +582,234 @@ function mockSplitBoard(steps: readonly GlassStep[]): {
       notes: [s.panes[0].note, s.panes[1].note],
     })),
   };
+}
+
+/* ---- Unseal ---------------------------------------------------------- */
+
+/** SPEC.md: "Unsealing scores by shape: 10 / 20 / 35 / 50." */
+const UNSEAL_SCORES: Readonly<Record<UnsealShape, number>> = {
+  circle: 10,
+  triangle: 20,
+  star: 35,
+  umbrella: 50,
+};
+/** The picker's order. ○ △ ☆ ☂ */
+const UNSEAL_ORDER: readonly UnsealShape[] = [
+  "circle",
+  "triangle",
+  "star",
+  "umbrella",
+];
+/** "A crack drains you: banked 2 per correct letter up to the crack." */
+const UNSEAL_LETTER_BANK = 2;
+/** "…with +10 for the fastest in each shape." */
+const UNSEAL_FASTEST = 10;
+
+function mockUnsealLetters(text: string): string[] {
+  return [...text.toUpperCase()].filter((c) => /\p{L}/u.test(c));
+}
+
+/** The half that may be shown, and the half that may not. Written twice. */
+function mockSplitTins(items: readonly UnsealItem[]): {
+  tins: { shape: UnsealShape; cue: string; length: number }[];
+  key: { answer: string; note: string }[];
+} {
+  return {
+    tins: items.map((i) => ({
+      shape: i.shape,
+      cue: i.cue,
+      length: mockUnsealLetters(i.answer).length,
+    })),
+    key: items.map((i) => ({ answer: i.answer, note: i.note })),
+  };
+}
+
+/** A tier with more than one word hands them out by arcade player number. */
+function mockTinIndexFor(
+  play: MockUnsealPlay,
+  shape: UnsealShape,
+  playerNumber: number,
+): number {
+  const of: number[] = [];
+  play.tins.forEach((t, i) => {
+    if (t.shape === shape) of.push(i);
+  });
+  if (of.length === 0) return -1;
+  const n = playerNumber < 1 ? 1 : playerNumber;
+  return of[(n - 1) % of.length] ?? -1;
+}
+
+/**
+ * One player's Floor points, excluding the fastest bonus.
+ *
+ * The letters bank *towards* the shape score rather than on top of it, which
+ * is what makes SPEC.md's Floor max 60 (50 + 10) rather than more. **Read the
+ * docs** halves the lot, rounding down.
+ */
+function mockUnsealPoints(play: MockUnsealPlay, pid: string): number {
+  const at = play.pick[pid];
+  if (at === undefined) return 0;
+  const tin = play.tins[at];
+  if (!tin) return 0;
+  const score = UNSEAL_SCORES[tin.shape];
+  const progress = play.progress[pid] ?? 0;
+  const raw =
+    progress >= tin.length
+      ? score
+      : Math.min(progress * UNSEAL_LETTER_BANK, score);
+  return play.docs[pid] ? Math.floor(raw / 2) : raw;
+}
+
+/**
+ * The fastest unsealing in each shape.
+ *
+ * A player who read the docs cannot be the fastest in their shape: the button
+ * buys every letter, so leaving them eligible would hand the speed prize to
+ * whoever mashed it hardest.
+ */
+function mockFastestUnseal(
+  play: MockUnsealPlay,
+): Record<UnsealShape, string | null> {
+  const best: Record<UnsealShape, string | null> = {
+    circle: null,
+    triangle: null,
+    star: null,
+    umbrella: null,
+  };
+  const bestMs: Record<UnsealShape, number> = {
+    circle: Infinity,
+    triangle: Infinity,
+    star: Infinity,
+    umbrella: Infinity,
+  };
+  for (const pid of play.unsealOrder) {
+    if (play.docs[pid]) continue;
+    const at = play.pick[pid];
+    const tin = at === undefined ? undefined : play.tins[at];
+    if (!tin) continue;
+    const ms = play.unsealedMs[pid] ?? Infinity;
+    if (ms < bestMs[tin.shape]) {
+      best[tin.shape] = pid;
+      bestMs[tin.shape] = ms;
+    }
+  }
+  return best;
+}
+
+/* ---- Tug of Raft ------------------------------------------------------ */
+
+/** SPEC.md: 100 bpm, three pulls of 25 seconds, 10 to the winners, +5 a leader. */
+const TUG_TOLERANCE = 0.2;
+const TUG_MISSES = 3;
+const TUG_ELECTION_MS = 2_000;
+const TUG_PULL_WIN = 10;
+const TUG_LEADER_BONUS = 5;
+
+/** mulberry32, written again: this is arithmetic on a seed, not randomness. */
+function mockSeeded(seed: number): () => number {
+  let a = seed >>> 0;
+  return () => {
+    a = (a + 0x6d2b79f5) | 0;
+    let t = Math.imul(a ^ (a >>> 15), 1 | a);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+/**
+ * Deal the sides: shuffle, then deal alternately.
+ *
+ * Alternate dealing rather than a coin flip per player, because a coin flip
+ * gives a 3-against-17 rope often enough to matter in a room of twenty, and a
+ * tug of war with one side outnumbered five to one is not a game.
+ */
+function mockTugSides(pids: readonly string[], seed: number): Record<string, 0 | 1> {
+  const order = [...pids];
+  const rand = mockSeeded(seed);
+  for (let i = order.length - 1; i > 0; i -= 1) {
+    const j = Math.floor(rand() * (i + 1));
+    const a = order[i]!;
+    const b = order[j]!;
+    order[i] = b;
+    order[j] = a;
+  }
+  const sides: Record<string, 0 | 1> = {};
+  order.forEach((pid, i) => {
+    sides[pid] = (i % 2) as 0 | 1;
+  });
+  return sides;
+}
+
+/** A side for somebody who was not in the room when the pull was dealt. */
+function mockLateSide(seed: number, pid: string): 0 | 1 {
+  let h = (seed ^ 0x9e3779b9) >>> 0;
+  for (let i = 0; i < pid.length; i += 1) {
+    h = Math.imul(h ^ pid.charCodeAt(i), 0x01000193) >>> 0;
+  }
+  return (h & 1) as 0 | 1;
+}
+
+interface MockBeat {
+  beat: number;
+  onBeat: boolean;
+  inElection: boolean;
+  lastBeat: number;
+}
+
+/**
+ * Judge one tap against the beat grid, and walk forward through however many
+ * elections a long silence produced.
+ *
+ * Elections are derived and never stored, exactly as the server derives them:
+ * a node is timed out from the instant of its third consecutively missed
+ * beat, for two seconds, and the only thing the state has to remember is the
+ * last beat the player actually hit.
+ */
+function mockResolveBeat(play: MockTugPlay, lastBeat: number, at: number): MockBeat {
+  const beat = Math.round((at - play.pullStartedAt) / play.beatMs);
+  const offset = Math.abs(at - (play.pullStartedAt + beat * play.beatMs));
+  const onBeat = offset <= play.beatMs * TUG_TOLERANCE;
+  let last = lastBeat;
+  for (;;) {
+    if (beat - last - 1 < TUG_MISSES) {
+      return { beat, onBeat, inElection: false, lastBeat: last };
+    }
+    const from = play.pullStartedAt + (last + TUG_MISSES) * play.beatMs;
+    const to = from + TUG_ELECTION_MS;
+    if (at < to) return { beat, onBeat, inElection: true, lastBeat: last };
+    last = Math.ceil((to - play.pullStartedAt) / play.beatMs) - 1;
+  }
+}
+
+/** On-beat taps per side. The rope is the difference. */
+function mockPullTotals(play: MockTugPlay): [number, number] {
+  let a = 0;
+  let b = 0;
+  for (const [pid, side] of Object.entries(play.sides)) {
+    const n = play.onBeats[pid] ?? 0;
+    if (side === 0) a += n;
+    else b += n;
+  }
+  return [a, b];
+}
+
+/** Nobody leads a side that never tapped, and a tie goes to whoever got there first. */
+function mockTugLeader(play: MockTugPlay, side: 0 | 1): string | null {
+  let best: string | null = null;
+  let bestBeats = 0;
+  let bestAt = Infinity;
+  for (const pid of Object.keys(play.sides).sort()) {
+    if (play.sides[pid] !== side) continue;
+    const beats = play.onBeats[pid] ?? 0;
+    if (beats <= 0) continue;
+    const at = play.creditedAt[pid] ?? Infinity;
+    if (beats > bestBeats || (beats === bestBeats && at < bestAt)) {
+      best = pid;
+      bestBeats = beats;
+      bestAt = at;
+    }
+  }
+  return best;
 }
 
 /** SPEC.md: 2–6 seconds, drawn at the boundary because the engine is pure. */
@@ -802,6 +1098,109 @@ class MockSession {
       return { ...base, recruitment };
     }
 
+    if (play?.kind === "unseal") {
+      // The projection this round lives or dies on, written a second time.
+      //
+      // The rules, from SPEC.md and the round's own design, none of them read
+      // off views.ts:
+      //
+      // - the **words** reach nobody but the host until the reveal. Not the
+      //   big screen either: it is in the room with the people still tapping.
+      // - the **cues** are not on any public view at all. A cue is the word
+      //   with the order taken off, and nine of them on a shared screen is
+      //   somebody else's tin solved out loud.
+      // - `pick` is not projected. A shape is a word length, and naming who
+      //   picked what is a hint nobody agreed to give.
+      // - the counts and the four scores *are* public. The score is the bet,
+      //   stated in advance, and the counts are the round's theatre.
+      const fastest = mockFastestUnseal(play);
+      const has = new Set(play.tins.map((t) => t.shape));
+      const shapes: ArcadeUnsealShape[] = UNSEAL_ORDER.map((shape) => {
+        let picked = 0;
+        let opened = 0;
+        for (const [pid, at] of Object.entries(play.pick)) {
+          const tin = play.tins[at];
+          if (!tin || tin.shape !== shape) continue;
+          picked += 1;
+          if ((play.progress[pid] ?? 0) >= tin.length) opened += 1;
+        }
+        const best = fastest[shape];
+        return {
+          shape,
+          available: has.has(shape),
+          score: UNSEAL_SCORES[shape],
+          picked,
+          unsealed: opened,
+          ...(privileged && best !== null
+            ? { fastest: this.arcadeNumber(best) }
+            : {}),
+        };
+      });
+      const unseal: ArcadeUnsealView = {
+        shapes,
+        picked: shapes.reduce((n, sh) => n + sh.picked, 0),
+        unsealed: shapes.reduce((n, sh) => n + sh.unsealed, 0),
+        ...(privileged
+          ? { unsealOrder: play.unsealOrder.map((pid) => this.arcadeNumber(pid)) }
+          : {}),
+        ...(host
+          ? {
+              progress: { ...play.progress },
+              docs: Object.keys(play.docs).map((pid) => this.arcadeNumber(pid)),
+            }
+          : {}),
+        ...(host || revealed
+          ? {
+              recap: play.tins.map((tin, i) => ({
+                shape: tin.shape,
+                cue: tin.cue,
+                answer: play.key[i]?.answer ?? "",
+                note: play.key[i]?.note ?? "",
+              })),
+            }
+          : {}),
+      };
+      return { ...base, unseal };
+    }
+
+    if (play?.kind === "tug_of_raft") {
+      // Nothing here is a secret — nobody drains and there is nothing to know
+      // — so the projection's job is a different one: every surface has to
+      // count the same beats. The beat travels as a grid against the server's
+      // clock, never as a tempo, because a surface that started its own
+      // interval on whichever frame it received would drift away from the
+      // grid the taps are judged against within a single pull.
+      const [ta, tb] = mockPullTotals(play);
+      const leaders = [mockTugLeader(play, 0), mockTugLeader(play, 1)] as const;
+      const tug: ArcadeTugView = {
+        pull: play.pull,
+        pulls: play.pulls,
+        pullSeconds: play.pullSeconds,
+        beatMs: play.beatMs,
+        toleranceMs: play.beatMs * TUG_TOLERANCE,
+        missesToElection: TUG_MISSES,
+        electionMs: TUG_ELECTION_MS,
+        // Omitted, never zeroed, while the round card is up: a zero would
+        // start the heartbeat in 1970 and put every node in an election.
+        ...(this.arcadePhase === "running"
+          ? { pullStartedAt: play.pullStartedAt, pullEndsAt: play.pullEndsAt }
+          : {}),
+        totals: [ta, tb],
+        wins: play.wins,
+        ...(privileged
+          ? {
+              sides: { ...play.sides },
+              leaders: [
+                leaders[0] === null ? null : this.arcadeNumber(leaders[0]),
+                leaders[1] === null ? null : this.arcadeNumber(leaders[1]),
+              ],
+              ...(host ? { onBeats: { ...play.onBeats } } : {}),
+            }
+          : {}),
+      };
+      return { ...base, tug };
+    }
+
     if (play?.kind === "glass_bridge") {
       // THE projection of this mock, and the one worth writing twice.
       //
@@ -931,7 +1330,47 @@ class MockSession {
             },
           }
         : {}),
+      ...(play?.kind === "unseal" ? { unseal: this.unsealMine(play, pid) } : {}),
+      ...(play?.kind === "tug_of_raft"
+        ? {
+            tug: {
+              side: play.sides[pid] ?? 0,
+              onBeats: play.onBeats[pid] ?? 0,
+              lastBeat: play.lastBeat[pid] ?? -1,
+            } satisfies ArcadeMineTug,
+          }
+        : {}),
       ...(play?.kind === "glass_bridge" ? { glass: this.glassMine(play, pid) } : {}),
+    };
+  }
+
+  /**
+   * One phone's own tin: the only way a cue ever leaves this mock.
+   *
+   * There is no public view of the tins at all, because publishing the list
+   * would say which word sits behind each shape — and "pick your shape before
+   * you know the word" is the entire round. `solved` is the prefix they have
+   * already tapped, theirs because they tapped it, and never one letter more.
+   */
+  unsealMine(play: MockUnsealPlay, pid: string): ArcadeMineUnseal {
+    const at = play.pick[pid];
+    const tin = at === undefined ? undefined : play.tins[at];
+    const answer = at === undefined ? undefined : play.key[at];
+    const progress = play.progress[pid] ?? 0;
+    // The tin is handed over at the pick and opened when the Floor opens.
+    const open = this.arcadePhase === "running" || this.arcadePhase === "reveal";
+    return {
+      shape: tin?.shape ?? null,
+      cue: tin && open ? tin.cue : null,
+      length: tin?.length ?? 0,
+      progress,
+      solved:
+        answer && open
+          ? mockUnsealLetters(answer.answer).slice(0, progress).join("")
+          : "",
+      docs: play.docs[pid] === true,
+      unsealed: tin !== undefined && progress >= tin.length,
+      cracked: this.arcadeStanding[pid] === "drained",
     };
   }
 
@@ -1654,6 +2093,24 @@ class MockHub {
       case "arcade.step":
         this.#arcadeStep(conn, msg.cid, msg.round, msg.step, msg.choice);
         return;
+      case "arcade.shape":
+        this.#arcadeUnseal(conn, msg.cid, msg.round, {
+          kind: "shape",
+          shape: msg.shape,
+        });
+        return;
+      case "arcade.letter":
+        this.#arcadeUnseal(conn, msg.cid, msg.round, {
+          kind: "letter",
+          letter: msg.letter,
+        });
+        return;
+      case "arcade.docs":
+        this.#arcadeUnseal(conn, msg.cid, msg.round, { kind: "docs" });
+        return;
+      case "arcade.beat":
+        this.#arcadeBeat(conn, msg.cid, msg.round);
+        return;
       case "arcade.back":
         this.#arcadeBack(conn, msg.cid, msg.pid);
         return;
@@ -2072,6 +2529,19 @@ class MockHub {
         this.#broadcastState();
         return;
       }
+      case "arcade.nextPull": {
+        const play = s.arcadePlay;
+        if (s.arcadePhase !== "running" || play?.kind !== "tug_of_raft") {
+          return reject("wrong_round_phase", "No rope round is running.");
+        }
+        if (play.pull + 1 >= play.pulls) {
+          return reject("wrong_round_phase", "That was the last pull. End the round.");
+        }
+        this.#nextPull(play);
+        this.#send(conn, { t: "ack", cid, applied: true });
+        this.#broadcastState();
+        return;
+      }
       case "arcade.nextWave": {
         const play = s.arcadePlay;
         if (s.arcadePhase !== "running" || play?.kind !== "glass_bridge") {
@@ -2331,6 +2801,54 @@ class MockHub {
       };
       return;
     }
+    if (cmd.kind === "unseal") {
+      // The word is separated from the letters once, here, and never put back
+      // together outside the reveal. The content comes from src/arcade/.
+      const { tins, key } = mockSplitTins(UNSEAL_ITEMS);
+      s.arcadePlay = {
+        kind: "unseal",
+        tins,
+        key,
+        seconds: cmd.seconds,
+        // Nobody holds a tin yet: the picker runs against the round card, and
+        // the tin does not open until the Floor does.
+        pick: {},
+        progress: {},
+        docs: {},
+        unsealedMs: {},
+        unsealOrder: [],
+      };
+      return;
+    }
+    if (cmd.kind === "tug_of_raft") {
+      // The seed is drawn here rather than arriving on the command, exactly
+      // as a light duration is: a seed the console chose is a console that
+      // can deal itself the sides.
+      const seed = Math.floor(Math.random() * 0x1_0000_0000);
+      s.arcadePlay = {
+        kind: "tug_of_raft",
+        pulls: cmd.pulls,
+        pullSeconds: cmd.pullSeconds,
+        beatMs: 60_000 / cmd.bpm,
+        pull: 0,
+        seed,
+        // Dealt from the roster in the room now, so the round card can show
+        // the two clusters. A latecomer gets a side on their first tap.
+        sides: mockTugSides(
+          s.participants.map((p) => p.pid),
+          seed,
+        ),
+        // The heartbeat starts at `beginPlay`, not here.
+        pullStartedAt: 0,
+        pullEndsAt: 0,
+        onBeats: {},
+        lastBeat: {},
+        creditedAt: {},
+        wins: [0, 0],
+      };
+      return;
+    }
+    if (cmd.kind !== "plan_apply") return;
     s.arcadePlay = {
       kind: "plan_apply",
       light: "plan",
@@ -2366,6 +2884,21 @@ class MockHub {
       s.arcadeEndsAt = play.stepEndsAt + this.#glassRemainingMs(play, 1, 0);
       this.#armStepTimer();
       this.#botsStep();
+    } else if (play.kind === "unseal") {
+      // The tins open. Whoever picked against the round card is holding one;
+      // whoever did not may still pick, and has lost the seconds it takes.
+      s.arcadeEndsAt = now + play.seconds * 1000;
+      this.#botsUnseal();
+    } else if (play.kind === "tug_of_raft") {
+      // The heartbeat starts here, and beat 0 is this instant: every beat
+      // index in the pull is counted from it.
+      play.pull = 0;
+      play.pullStartedAt = now;
+      play.pullEndsAt = now + play.pullSeconds * 1000;
+      s.arcadeEndsAt =
+        play.pullEndsAt + Math.max(0, play.pulls - 1) * play.pullSeconds * 1000;
+      this.#armPullTimer();
+      this.#startBotBeats();
     } else {
       play.light = "plan";
       play.lightChangedAt = now;
@@ -2437,7 +2970,10 @@ class MockHub {
     // timer owns Recruitment's: eighteen deadlines accumulate eighteen lots
     // of lag, and a Floor timer at the nominal instant would land on top of
     // wave 3's last step — the six-second one.
+    // The same for Tug of Raft, whose three pulls are three deadlines and
+    // whose ending the pull timer owns.
     if (s.arcadePlay?.kind === "glass_bridge") return;
+    if (s.arcadePlay?.kind === "tug_of_raft") return;
     const at = s.arcadeEndsAt;
     this.#floorTimer = setTimeout(
       () => {
@@ -2602,6 +3138,83 @@ class MockHub {
     return true;
   }
 
+  /* ---- Tug of Raft ---- */
+
+  #pullTimer: ReturnType<typeof setTimeout> | null = null;
+  #botBeatTimer: ReturnType<typeof setInterval> | null = null;
+
+  #armPullTimer(): void {
+    const s = this.session;
+    const play = s.arcadePlay;
+    if (this.#pullTimer !== null) clearTimeout(this.#pullTimer);
+    this.#pullTimer = null;
+    if (s.arcadePhase !== "running" || play?.kind !== "tug_of_raft") return;
+    const at = play.pullEndsAt;
+    const pull = play.pull;
+    this.#pullTimer = setTimeout(
+      () => {
+        this.#pullTimer = null;
+        const p = s.arcadePlay;
+        if (s.arcadePhase !== "running" || p?.kind !== "tug_of_raft") return;
+        if (p.pull !== pull || p.pullEndsAt !== at) return;
+        if (p.pull + 1 < p.pulls) this.#nextPull(p);
+        else this.#endRound();
+        this.#broadcastState();
+      },
+      Math.max(0, at - this.#now()),
+    );
+  }
+
+  /**
+   * Settle the open pull.
+   *
+   * A draw pays nobody the 10 — the rope is where it started — but both
+   * leaders are still paid, because SPEC.md pays the leader "win or lose" and
+   * a draw is neither. It matters more than it sounds: a pull where nobody
+   * taps is 0–0, and paying both sides for that would be the round rewarding
+   * the room for ignoring it.
+   */
+  #closePull(play: MockTugPlay): void {
+    const s = this.session;
+    const [a, b] = mockPullTotals(play);
+    const winner: 0 | 1 | null = a > b ? 0 : b > a ? 1 : null;
+    if (winner !== null) {
+      for (const [pid, side] of Object.entries(play.sides)) {
+        if (side === winner) s.bank(pid, TUG_PULL_WIN);
+      }
+      play.wins[winner] += 1;
+    }
+    for (const side of [0, 1] as const) {
+      const leader = mockTugLeader(play, side);
+      if (leader !== null) s.bank(leader, TUG_LEADER_BONUS);
+    }
+  }
+
+  /** Close this pull and deal the next one, with new sides and a new beat. */
+  #nextPull(play: MockTugPlay): void {
+    const s = this.session;
+    this.#closePull(play);
+    const now = this.#now();
+    play.pull += 1;
+    play.seed = Math.floor(Math.random() * 0x1_0000_0000);
+    // Reshuffled, so nobody is stuck on a losing side.
+    play.sides = mockTugSides(
+      s.participants.map((p) => p.pid),
+      play.seed,
+    );
+    play.pullStartedAt = now;
+    play.pullEndsAt = now + play.pullSeconds * 1000;
+    // Every one of these is per pull: a new heartbeat, a new rope, and a
+    // leader who has to earn it again.
+    play.onBeats = {};
+    play.lastBeat = {};
+    play.creditedAt = {};
+    s.arcadeEndsAt =
+      play.pullEndsAt +
+      Math.max(0, play.pulls - play.pull - 1) * play.pullSeconds * 1000;
+    this.#armPullTimer();
+  }
+
   #nextItem(): void {
     const play = this.session.arcadePlay;
     if (play?.kind !== "recruitment") return;
@@ -2627,6 +3240,31 @@ class MockHub {
     // round's end closes it — which is also what happens when the host ends
     // a round early with a wave still on the bridge.
     if (play?.kind === "glass_bridge") this.#closeGlassStep(play);
+    // The last pull has nothing after it to settle it, so the round's end
+    // does — which is also what happens when the host ends a pull early.
+    if (play?.kind === "tug_of_raft") this.#closePull(play);
+    if (play?.kind === "unseal") {
+      // The +10s, paid here because this is when they are known: SPEC.md's
+      // "+10 for the fastest in each shape".
+      for (const pid of Object.values(mockFastestUnseal(play))) {
+        if (pid !== null) s.bank(pid, UNSEAL_FASTEST);
+      }
+      // The Lounge, at 5 and 8 rather than Plan / Apply's 10 and 15. The
+      // cheapest completion on this Floor is a circle tin at 10, so a perfect
+      // Lounge of 15 would beat somebody who actually unsealed one — and
+      // SPEC.md's tuning rule is that crossing the line always wins. The
+      // better of the two, never their sum.
+      const fastest = new Set(
+        Object.values(mockFastestUnseal(play)).filter((x) => x !== null),
+      );
+      for (const [pid, seat] of Object.entries(s.arcadeLounge)) {
+        const backing = seat.backing;
+        if (backing === null) continue;
+        if (s.arcadeStanding[backing] !== "floor") continue;
+        if (fastest.has(backing)) s.bank(pid, 8);
+        else if (play.unsealOrder.includes(backing)) s.bank(pid, 5);
+      }
+    }
     if (play?.kind === "plan_apply" || play?.kind === "glass_bridge") {
       // The Lounge pays the better of the two and **never their sum**.
       // SPEC.md is explicit that the rule must not change between rounds, and
@@ -2663,6 +3301,7 @@ class MockHub {
       this.#itemTimer,
       this.#floorTimer,
       this.#stepTimer,
+      this.#pullTimer,
     ]) {
       if (t !== null) clearTimeout(t);
     }
@@ -2670,8 +3309,11 @@ class MockHub {
     this.#itemTimer = null;
     this.#floorTimer = null;
     this.#stepTimer = null;
+    this.#pullTimer = null;
     if (this.#botTapTimer !== null) clearInterval(this.#botTapTimer);
     this.#botTapTimer = null;
+    if (this.#botBeatTimer !== null) clearInterval(this.#botBeatTimer);
+    this.#botBeatTimer = null;
   }
 
   /* ---- arcade: client frames ---- */
@@ -2777,6 +3419,189 @@ class MockHub {
       s.bank(pid, 10 + ([15, 10, 5][play.finishOrder.length] ?? 0));
       play.finishOrder.push(pid);
     }
+  }
+
+  /* ---- Unseal, at the boundary ---- */
+
+  /**
+   * The three Unseal frames: the shape pick, one letter, and Read the docs.
+   *
+   * One method, because the three share the whole of their guard. The reply
+   * to every one of them is addressed rather than broadcast where it can be:
+   * a letter tapped is one phone's business and thirty phones being told
+   * about it is thirty repaints under thirty thumbs.
+   */
+  #arcadeUnseal(
+    conn: MockConn,
+    cid: string,
+    round: number,
+    what:
+      | { kind: "shape"; shape: UnsealShape }
+      | { kind: "letter"; letter: string }
+      | { kind: "docs" },
+  ): void {
+    const s = this.session;
+    const pid = conn.pid;
+    const refuse = (code: string, message: string): void => {
+      this.#send(conn, { t: "refusedCmd", cid, code, message });
+    };
+    if (conn.role !== "participant" || pid === null) {
+      return refuse("forbidden", "Only a participant plays the arcade.");
+    }
+    if (!s.arcadeOn) return refuse("not_in_arcade", "The arcade is not open.");
+    if (round !== s.arcadeRoundIndex) {
+      return refuse("wrong_round_phase", "That round has moved on.");
+    }
+    const play = s.arcadePlay;
+    if (play?.kind !== "unseal") {
+      return refuse("wrong_round_phase", "There is no tin.");
+    }
+    if (s.arcadeStanding[pid] === "drained") {
+      return refuse("not_on_the_floor", "The tin has cracked. Back a player.");
+    }
+
+    if (what.kind === "shape") {
+      // Picking runs against the round card *and* after the Floor opens, for
+      // somebody who joined late — but the choice is final once their tin is
+      // open, because the shape is a bet made before the word is known.
+      if (s.arcadePhase !== "card" && s.arcadePhase !== "running") {
+        return refuse("wrong_round_phase", "There is no tin to choose.");
+      }
+      if (s.arcadePhase === "running" && pid in play.pick) {
+        return refuse("already_picked", "You are holding that tin.");
+      }
+      const at = mockTinIndexFor(play, what.shape, s.arcadeNumber(pid));
+      if (at === -1) return refuse("invalid_choice", "There is no tin of that shape.");
+      play.pick[pid] = at;
+      this.#send(conn, { t: "ack", cid, applied: true });
+      // The four tiles filling up is the round card's whole animation, and it
+      // is a count: the big screen never learns who picked what.
+      this.#broadcastState();
+      return;
+    }
+
+    if (s.arcadePhase !== "running") {
+      return refuse("wrong_round_phase", "There is nothing to unseal.");
+    }
+    if (s.arcadeEndsAt !== null && this.#now() >= s.arcadeEndsAt) {
+      return refuse("floor_locked", "The Floor is closed.");
+    }
+    const at = play.pick[pid];
+    const tin = at === undefined ? undefined : play.tins[at];
+    const answer = at === undefined ? undefined : play.key[at];
+    if (!tin || !answer) return refuse("no_shape_picked", "Choose a shape first.");
+    const word = mockUnsealLetters(answer.answer);
+    const progress = play.progress[pid] ?? 0;
+    // Already open: a stray frame is not a crack.
+    if (progress >= word.length) {
+      this.#send(conn, { t: "ack", cid, applied: false });
+      return;
+    }
+
+    let correct: boolean;
+    if (what.kind === "docs") {
+      // The letter is *committed*, not merely shown. Press it again and it
+      // buys the next one too: in the show the cheat works completely, and
+      // what it costs is half the round.
+      correct = true;
+      play.docs[pid] = true;
+    } else {
+      const tapped = mockUnsealLetters(what.letter)[0];
+      if (tapped === undefined) return refuse("invalid_letter", "That is not a letter.");
+      // A letter that is not on their own tiles is a malformed frame, not a
+      // wrong guess, and draining somebody for a bad frame would be the game
+      // punishing a phone.
+      if (!mockUnsealLetters(tin.cue).includes(tapped)) {
+        return refuse("invalid_letter", "That letter is not on your tin.");
+      }
+      correct = tapped === word[progress];
+    }
+
+    if (!correct) {
+      // "The tin has cracked." Everything banked stays banked: 2 a letter.
+      s.arcadeBanked[pid] = mockUnsealPoints(play, pid);
+      s.drain(pid, this.#now());
+      this.#send(conn, { t: "ack", cid, applied: true });
+      // A drain moves the dormitory grid, which is the whole room's surface.
+      this.#broadcastState();
+      return;
+    }
+
+    play.progress[pid] = progress + 1;
+    if (progress + 1 >= word.length && !play.unsealOrder.includes(pid)) {
+      // Measured from the Floor opening, the same instant for everybody:
+      // dithering over the picker comes out of your own time.
+      play.unsealedMs[pid] = Math.max(0, this.#now() - (s.arcadeStartedAt ?? this.#now()));
+      play.unsealOrder.push(pid);
+    }
+    // Assigned rather than added: reading the docs at letter nine has to be
+    // able to halve what letters one to eight were worth.
+    s.arcadeBanked[pid] = mockUnsealPoints(play, pid);
+    this.#send(conn, { t: "ack", cid, applied: true });
+    // Reading the docs looks identical from outside, because it is one more
+    // letter. "Nobody will know."
+    this.#sendStateTo((c) => c.role !== "participant" || c.pid === pid);
+  }
+
+  /* ---- Tug of Raft, at the boundary ---- */
+
+  /**
+   * One tap at the rope.
+   *
+   * The frame carries no instant and this is where the beat is judged, off
+   * the mock server's own clock and its own grid — which is the whole reason
+   * the round works over a video call. A tap is credited once per beat: a
+   * drum roll on one beat is one pull, or the round would be the tap race the
+   * heartbeat exists to prevent.
+   */
+  #arcadeBeat(conn: MockConn, cid: string, round: number): void {
+    const s = this.session;
+    const pid = conn.pid;
+    const refuse = (code: string, message: string): void => {
+      this.#send(conn, { t: "refusedCmd", cid, code, message });
+    };
+    if (conn.role !== "participant" || pid === null) {
+      return refuse("forbidden", "Only a participant plays the arcade.");
+    }
+    if (!s.arcadeOn) return refuse("not_in_arcade", "The arcade is not open.");
+    if (round !== s.arcadeRoundIndex) {
+      return refuse("wrong_round_phase", "That round has moved on.");
+    }
+    const play = s.arcadePlay;
+    if (s.arcadePhase !== "running" || play?.kind !== "tug_of_raft") {
+      return refuse("wrong_round_phase", "There is no rope.");
+    }
+    // No drained check, and that is not an omission: nobody drains here.
+    const at = this.#now();
+    if (at >= play.pullEndsAt) return refuse("floor_locked", "The pull is over.");
+    this.#send(conn, { t: "ack", cid, applied: true });
+    if (this.#recordBeat(pid, at)) {
+      this.#sendStateTo((c) => c.role !== "participant" || c.pid === pid);
+    }
+  }
+
+  /** Judge and credit one tap. True when anything moved. */
+  #recordBeat(pid: string, at: number): boolean {
+    const s = this.session;
+    const play = s.arcadePlay;
+    if (play?.kind !== "tug_of_raft") return false;
+    if (at < play.pullStartedAt) return false;
+    // Somebody who was not in the room when the sides were dealt gets one
+    // now, rather than being told to watch.
+    if (play.sides[pid] === undefined) {
+      play.sides[pid] = mockLateSide(play.seed, pid);
+    }
+    const was = play.lastBeat[pid] ?? -1;
+    const judged = mockResolveBeat(play, was, at);
+    const credited = !judged.inElection && judged.onBeat && judged.beat > was;
+    const last = credited ? judged.beat : judged.lastBeat;
+    if (!credited && last === was) return false;
+    play.lastBeat[pid] = last;
+    if (credited) {
+      play.onBeats[pid] = (play.onBeats[pid] ?? 0) + 1;
+      play.creditedAt[pid] = at;
+    }
+    return true;
   }
 
   #arcadeStep(
@@ -3003,6 +3828,108 @@ class MockHub {
       }
     }
     if (moved) this.#broadcastState();
+  }
+
+  /**
+   * The bots unseal.
+   *
+   * Each picks a shape, then taps its word out at a plausible pace. Most of
+   * them get it; some crack the tin on a wrong letter, because the Lounge is
+   * where half the round's design lives and a Floor nobody ever leaves shows
+   * none of it; and one reads the docs, so the halved score has something to
+   * be seen on. A bot only ever taps letters that are on its own tin — it is
+   * given the cue the same way a phone is, and no more.
+   */
+  #botsUnseal(): void {
+    const s = this.session;
+    const play = s.arcadePlay;
+    if (play?.kind !== "unseal") return;
+    s.participants
+      .filter((p) => p.bot)
+      .forEach((p, i) => {
+        const shape = UNSEAL_ORDER[i % UNSEAL_ORDER.length] ?? "circle";
+        const at = mockTinIndexFor(play, shape, s.arcadeNumber(p.pid));
+        if (at === -1) return;
+        play.pick[p.pid] = at;
+        const tin = play.tins[at];
+        const answer = play.key[at];
+        if (!tin || !answer) return;
+        const word = mockUnsealLetters(answer.answer);
+        // One bot in five cracks its tin, and one in seven reads the docs.
+        const cracksAt = i % 5 === 2 ? 1 + (i % Math.max(1, word.length - 1)) : -1;
+        const reader = i % 7 === 3;
+        // The umbrella takes longer per letter than the circle, which is what
+        // makes the fastest-in-shape board worth looking at.
+        const pace = 420 + (i % 5) * 160;
+        word.forEach((letter, n) => {
+          this.#later(
+            () => {
+              const now = s.arcadePlay;
+              if (now?.kind !== "unseal" || s.arcadePhase !== "running") return;
+              if (s.arcadeStanding[p.pid] === "drained") return;
+              if ((now.progress[p.pid] ?? 0) !== n) return;
+              if (n === cracksAt) {
+                // A letter that *is* on the tin but is not the next one —
+                // which is the only kind of wrong tap a phone can make.
+                const wrong = mockUnsealLetters(tin.cue).find((c) => c !== letter);
+                if (wrong === undefined) return;
+                s.arcadeBanked[p.pid] = mockUnsealPoints(now, p.pid);
+                s.drain(p.pid, this.#now());
+                this.#broadcastState();
+                return;
+              }
+              if (reader && n === 0) now.docs[p.pid] = true;
+              now.progress[p.pid] = n + 1;
+              if (n + 1 >= word.length && !now.unsealOrder.includes(p.pid)) {
+                now.unsealedMs[p.pid] = Math.max(
+                  0,
+                  this.#now() - (s.arcadeStartedAt ?? this.#now()),
+                );
+                now.unsealOrder.push(p.pid);
+              }
+              s.arcadeBanked[p.pid] = mockUnsealPoints(now, p.pid);
+              this.#sendStateTo((c) => c.role !== "participant" || c.pid === p.pid);
+            },
+            (900 + i * 90 + n * pace + Math.random() * 400) / this.#cfg.speed,
+          );
+        });
+      });
+    this.#broadcastState();
+  }
+
+  /**
+   * The bots pull, on the beat.
+   *
+   * They tap on the grid rather than at random, because the point of watching
+   * this round is the rope moving in time — a rope fed by uniform noise looks
+   * the same whatever the heartbeat is doing. Each bot has its own accuracy
+   * and a few are hopeless, which is what puts nodes into elections and gives
+   * the Desktop something to say.
+   */
+  #startBotBeats(): void {
+    const s = this.session;
+    if (this.#botBeatTimer !== null) clearInterval(this.#botBeatTimer);
+    this.#botBeatTimer = setInterval(() => {
+      const play = s.arcadePlay;
+      if (s.arcadePhase !== "running" || play?.kind !== "tug_of_raft") return;
+      const now = this.#now();
+      const beat = Math.round((now - play.pullStartedAt) / play.beatMs);
+      if (beat < 0) return;
+      let moved = false;
+      s.participants.forEach((p, i) => {
+        if (!p.bot) return;
+        // One bot in six is off the beat entirely and will time out.
+        if (i % 6 === 1) return;
+        // The rest hit most beats, with a gap now and then.
+        if ((beat + i) % 5 === 0) return;
+        if ((play.lastBeat[p.pid] ?? -1) >= beat) return;
+        // Inside the window, because the bot is tapping *to* the beat.
+        const at = play.pullStartedAt + beat * play.beatMs;
+        if (Math.abs(now - at) > play.beatMs * TUG_TOLERANCE) return;
+        if (this.#recordBeat(p.pid, now)) moved = true;
+      });
+      if (moved) this.#broadcastState();
+    }, 60 / this.#cfg.speed);
   }
 
   /**
@@ -3316,6 +4243,59 @@ class MockHub {
     });
 
     /**
+     * Round 2, Unseal: the shape picker, then the letters.
+     *
+     * At demo pace — a 24-second Floor instead of SPEC.md's 60 — and with the
+     * card up for three seconds rather than twenty, because the picker is
+     * what the card is *for* and the bots pick the moment the Floor opens.
+     * The shape of it is the real one: four tiers, a tin per player number, a
+     * few cracked tins filling the Lounge, and one bot reading the docs, so
+     * the halved score has somewhere to show.
+     */
+    this.#at(139, () => {
+      this.#startRound({ name: "arcade.round", kind: "unseal", seconds: 24 });
+      this.#broadcastState();
+    });
+    this.#at(142, () => {
+      this.#beginPlay();
+      this.#broadcastState();
+    });
+    this.#at(168, () => {
+      if (this.session.arcadePhase !== "idle") return;
+      this.session.arcadePhase = "reveal";
+      this.#broadcastState();
+    });
+
+    /**
+     * Round 3, Tug of Raft: three pulls at the real 100 bpm.
+     *
+     * The pulls are shortened to eight seconds from SPEC.md's twenty-five,
+     * but **the heartbeat is not scaled** and must not be: 100 bpm is the
+     * thing being demonstrated, and a demo at 300 bpm would show a rope moving
+     * and tell nobody whether the beat works. Three pulls still reshuffle the
+     * sides, which is the other half of the round.
+     */
+    this.#at(174, () => {
+      this.#startRound({
+        name: "arcade.round",
+        kind: "tug_of_raft",
+        pulls: 3,
+        pullSeconds: 8,
+        bpm: 100,
+      });
+      this.#broadcastState();
+    });
+    this.#at(177, () => {
+      this.#beginPlay();
+      this.#broadcastState();
+    });
+    this.#at(203, () => {
+      if (this.session.arcadePhase !== "idle") return;
+      this.session.arcadePhase = "reveal";
+      this.#broadcastState();
+    });
+
+    /**
      * Round 5, The Glass Bridge: three waves across six steps.
      *
      * At demo pace — 6 / 4 / 3 seconds a step instead of SPEC.md's 12 / 9 / 6
@@ -3329,7 +4309,7 @@ class MockHub {
      * bots' own delays are divided by the speed and the server's timers are
      * not — so drive the arcade at `speed=1`.
      */
-    this.#at(139, () => {
+    this.#at(209, () => {
       this.#startRound({
         name: "arcade.round",
         kind: "glass_bridge",
@@ -3337,13 +4317,13 @@ class MockHub {
       });
       this.#broadcastState();
     });
-    this.#at(142, () => {
+    this.#at(212, () => {
       this.#beginPlay();
       this.#broadcastState();
     });
     // 6 × 6 + 6 × 4 + 6 × 3 = 78 s of bridge, walked by the step timer on its
     // own, exactly as the server's does.
-    this.#at(224, () => {
+    this.#at(294, () => {
       if (this.session.arcadePhase !== "idle") return;
       this.session.arcadePhase = "reveal";
       for (const p of this.session.participants) {
@@ -3354,12 +4334,12 @@ class MockHub {
       this.#broadcastState();
     });
 
-    this.#at(232, () => {
+    this.#at(302, () => {
       this.session.segment = "standings";
       this.#broadcastState();
     });
 
-    this.#at(234, () => {
+    this.#at(304, () => {
       const p = this.session.participants[4];
       if (!p) return;
       const spot = this.session.grantSpot(
@@ -3371,12 +4351,12 @@ class MockHub {
       this.#toast("spot", `Spot Award — ${p.nickname} — ${spot.reason}`);
     });
 
-    this.#at(236, () => {
+    this.#at(306, () => {
       this.session.seal = "sealed";
       this.#broadcastState();
     });
 
-    this.#at(248, () => {
+    this.#at(318, () => {
       this.session.seal = "revealed";
       this.session.segment = "final";
       this.#broadcastState();
@@ -3394,12 +4374,12 @@ class MockHub {
      * that forty seconds over three photos works out to — and a message holds
      * five seconds instead of however long it takes to read one out.
      */
-    this.#at(250, () => {
+    this.#at(320, () => {
       this.session.segment = "sendoff";
       this.#broadcastState();
     });
     for (let i = 0; i < 7; i += 1) {
-      this.#at(270 + i * 5, () => {
+      this.#at(340 + i * 5, () => {
         if (this.session.segment !== "sendoff") return;
         this.session.stepSendoff(1);
         this.#broadcastState();
@@ -3408,7 +4388,7 @@ class MockHub {
 
     // Long enough for the big screen's final reveal to actually finish: four
     // four-second dwells, then the hold on the empty first slot.
-    this.#at(312, () => {
+    this.#at(382, () => {
       this.#clearArcadeTimers();
       this.session.reset();
       this.#directorStarted = false;

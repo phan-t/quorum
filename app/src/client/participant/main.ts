@@ -94,6 +94,18 @@ const view = createParticipantView({
   onArcadeStep: (round, step, choice) => {
     client?.arcadeStep(round, step, choice);
   },
+  onArcadeShape: (round, shape) => {
+    client?.arcadeShape(round, shape);
+  },
+  onArcadeLetter: (round, letter) => {
+    client?.arcadeLetter(round, letter);
+  },
+  onArcadeDocs: (round) => {
+    client?.arcadeDocs(round);
+  },
+  onArcadeBeat: (round) => {
+    client?.arcadeBeat(round);
+  },
   onArcadeBack: (pid) => {
     client?.arcadeBack(pid);
   },
@@ -426,6 +438,38 @@ function guardTopFive(state: RenderState): void {
   }
   if (r?.answered !== undefined || r?.eligible !== undefined) {
     console.error("protocol violation: participant received the room's answer counts");
+  }
+
+  // Unseal's version. The word is the round, so the two fields that would
+  // give it away are the recap — which carries every answer — and any cue but
+  // this phone's own, which arrives on `arcadeMine` and nowhere else. A
+  // public list of cues would be nine anagrams on a shared screen, which is
+  // somebody else's tin solved out loud.
+  const u = arcade.unseal;
+  if (u !== undefined) {
+    if (arcade.phase !== "reveal" && u.recap !== undefined) {
+      console.error(
+        "protocol violation: participant received the Unseal answers before the reveal",
+      );
+    }
+    if (u.progress !== undefined || u.docs !== undefined) {
+      console.error("protocol violation: participant received the room's Unseal detail");
+    }
+    if (u.unsealOrder !== undefined || u.shapes.some((sh) => sh.fastest !== undefined)) {
+      console.error("protocol violation: participant received the Floor's results");
+    }
+  }
+
+  // Tug of Raft has no answer to leak — nobody drains and there is nothing to
+  // know — but the rule about *what another player did* still holds, and the
+  // per-player beat counts are exactly that.
+  const t = arcade.tug;
+  if (t !== undefined) {
+    if (t.sides !== undefined || t.leaders !== undefined || t.onBeats !== undefined) {
+      console.error(
+        "protocol violation: participant received the room's Tug of Raft detail",
+      );
+    }
   }
 
   // The Glass Bridge's version, and it is the loudest one in this function

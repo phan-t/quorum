@@ -29,17 +29,21 @@ import {
   LIGHT_FACE,
   STAFF_CARD,
   STATE_LOCK_ERROR,
+  UNSEAL_FACE,
   activityHue,
   answerTiles,
   bridgeSteps,
   formatCountdown,
   gridEntries,
   playerName,
+  playerTag,
   questionLabel,
   remainingMs,
   resolveView,
   stackedBar,
   timerFraction,
+  tugBeatAt,
+  tugRope,
   waveRosters,
   wipeFraction,
   type ViewKind,
@@ -1200,6 +1204,58 @@ function sceneArcade(): Scene {
     bridgeWaves,
   ]);
 
+  /* Unseal */
+  const unsealHead = h("p", { class: "mono s-unseal-head" });
+  const unsealTiles = h("div", { class: "s-tins", role: "list" });
+  const unsealRecap = h("ol", { class: "s-unseal-recap", attrs: { hidden: true } });
+  /**
+   * The four tins, as the room may see them.
+   *
+   * Counts, never people: SPEC.md's conceit is that you pick before you know
+   * the word, and a shape is a word length — so "Player 017 took the
+   * umbrella" on a screen three metres from Player 017 is a hint nobody
+   * agreed to give. What the room gets is four tiles filling up, which is the
+   * round card's whole animation, and the +10 board at the end.
+   *
+   * In the flow, not over the grid: the dormitory steps aside for this the
+   * way it does for the bridge. A full-bleed panel over the grid is how the
+   * Desktop ends up showing the room an empty rectangle.
+   */
+  const unseal = h("section", { class: "s-unseal", attrs: { hidden: true } }, [
+    unsealHead,
+    unsealTiles,
+    unsealRecap,
+  ]);
+
+  /* Tug of Raft */
+  const tugHead = h("p", { class: "mono s-tug-head" });
+  const tugRopeTrack = h("div", { class: "s-rope-track" });
+  const tugRopeKnot = h("div", { class: "s-rope-knot", attrs: { "aria-hidden": "true" } });
+  const tugSideA = h("div", { class: "s-cluster", attrs: { "data-side": "a" } });
+  const tugSideB = h("div", { class: "s-cluster", attrs: { "data-side": "b" } });
+  const tugPulse = h("div", { class: "s-pulse", attrs: { "aria-hidden": "true" } });
+  const tugRopeRow = h("div", { class: "s-rope" }, [
+    tugRopeTrack,
+    tugRopeKnot,
+    tugPulse,
+  ]);
+  const tugWins = h("p", { class: "mono s-tug-wins" });
+  /**
+   * The rope, the heartbeat and the two clusters.
+   *
+   * The pulse is drawn from the server's beat grid on this surface exactly as
+   * it is on every phone — `pullStartedAt + n * beatMs` against the corrected
+   * clock — and for a reason this surface makes obvious: the Desktop is the
+   * heartbeat the room is watching, and if it ran its own interval the room
+   * would be tapping to a beat the server is not counting. There is one
+   * clock in this round.
+   */
+  const tug = h("section", { class: "s-tug", attrs: { hidden: true } }, [
+    tugHead,
+    h("div", { class: "s-tug-arena" }, [tugSideA, tugRopeRow, tugSideB]),
+    tugWins,
+  ]);
+
   /* the drain, verbatim */
   const drainLog = h("div", { class: "s-drain-log", attrs: { hidden: true } });
 
@@ -1215,6 +1271,8 @@ function sceneArcade(): Scene {
     h("div", { class: "s-arc-head" }, [kicker, title]),
     main,
     bridge,
+    unseal,
+    tug,
     grid,
     counts,
     light,
@@ -1309,17 +1367,24 @@ function sceneArcade(): Scene {
     //
     // Three lines at most, because a step that closes can drain half a wave
     // and the room reads two lines of a terminal, not nine.
-    setClass(drainLog, "inline", g !== undefined);
+    // Unseal's error is its own — DESIGN.md: *The tin has cracked. Player 017
+    // drained.* — and the state-lock error belongs to Plan / Apply alone. It
+    // goes in the flow under the tins for the reason the bridge's does: a
+    // panel over this surface is how the Desktop shows the room a rectangle.
+    const tins = arcade.unseal !== undefined;
+    setClass(drainLog, "inline", g !== undefined || tins);
     replace(drainLog, [
-      g ? null : h("p", { class: "mono s-drain-error", text: STATE_LOCK_ERROR }),
+      g || tins
+        ? null
+        : h("p", { class: "mono s-drain-error", text: STATE_LOCK_ERROR }),
       ...fresh
         .map(Number)
         .sort((a, b) => a - b)
-        .slice(0, g ? 3 : 6)
+        .slice(0, g || tins ? 3 : 6)
         .map((n) =>
           h("p", {
             class: "mono s-drain-who",
-            text: g ? glassLine(n) : HOUSE.drained(n),
+            text: g ? glassLine(n) : tins ? HOUSE.unsealCrack(n) : HOUSE.drained(n),
           }),
         ),
     ]);
@@ -1514,6 +1579,187 @@ function sceneArcade(): Scene {
     }
   };
 
+  /**
+   * The four tins, filling up.
+   *
+   * Everything on this panel is a count or a player number: the words never
+   * reach this surface until the reveal, and nor do the cues — nine anagrams
+   * on a shared screen is somebody else's tin solved out loud by whoever
+   * reads fastest. At the reveal the tiles step aside and the words take the
+   * stage, both halves of each one: the answer, and the note, which is the
+   * thing somebody actually learns.
+   */
+  const paintUnseal = (arcade: ArcadeView): void => {
+    const u = arcade.unseal;
+    if (!u) {
+      unseal.hidden = true;
+      return;
+    }
+    unseal.hidden = false;
+    const revealed = arcade.phase === "reveal";
+    const left = remainingMs(arcade.endsAt, serverNow());
+    setText(
+      unsealHead,
+      revealed
+        ? "NINE TINS. NINE WORDS."
+        : [
+            `${u.unsealed} OF ${u.picked} TINS OPEN`,
+            arcade.phase === "card" ? "CHOOSING" : null,
+            left === null ? null : formatCountdown(left),
+          ]
+            .filter((x) => x !== null)
+            .join(" · "),
+    );
+    unsealTiles.hidden = revealed;
+    replace(
+      unsealTiles,
+      u.shapes.map((sh) => {
+        const face = UNSEAL_FACE[sh.shape];
+        return h(
+          "div",
+          {
+            class: "s-tin",
+            role: "listitem",
+            attrs: {
+              "data-available": sh.available ? "yes" : "no",
+              "aria-label": `${face.name}, worth ${sh.score}, ${sh.picked} chose it, ${sh.unsealed} open`,
+            },
+          },
+          [
+            h("p", {
+              class: "s-tin-glyph",
+              attrs: { "aria-hidden": "true" },
+              text: face.glyph,
+            }),
+            h("p", { class: "mono s-tin-score", text: String(sh.score) }),
+            h("p", { class: "display s-tin-count", text: `${sh.unsealed}/${sh.picked}` }),
+            // The +10 board. A number, because the nickname is on the phone
+            // only and this is the surface the whole room is reading.
+            sh.fastest === undefined
+              ? null
+              : h("p", { class: "mono s-tin-fastest", text: playerTag(sh.fastest) }),
+          ],
+        );
+      }),
+    );
+    const recap = u.recap ?? [];
+    unsealRecap.hidden = recap.length === 0;
+    if (recap.length > 0) {
+      replace(
+        unsealRecap,
+        recap.map((tin) =>
+          h("li", { class: "s-unseal-row" }, [
+            h("span", {
+              class: "s-unseal-shape",
+              attrs: { "aria-hidden": "true" },
+              text: UNSEAL_FACE[tin.shape].glyph,
+            }),
+            h("span", { class: "mono s-unseal-cue", text: tin.cue }),
+            h("span", { class: "display s-unseal-answer", text: tin.answer }),
+            h("span", { class: "s-unseal-note", text: tin.note }),
+          ]),
+        ),
+      );
+    }
+  };
+
+  /**
+   * The rope, and the room's own heartbeat.
+   *
+   * The two clusters are player numbers, which is how the grid is labelled
+   * everywhere else, and the rope's knot is the *share* of the on-beat taps
+   * rather than their difference — a difference needs a scale and there is no
+   * honest one that works for six people and for forty.
+   */
+  const paintTug = (state: RenderState, arcade: ArcadeView): void => {
+    const t = arcade.tug;
+    if (!t) {
+      tug.hidden = true;
+      return;
+    }
+    tug.hidden = false;
+    const left = remainingMs(t.pullEndsAt ?? null, serverNow());
+    setText(
+      tugHead,
+      arcade.phase === "reveal"
+        ? "THREE PULLS. ONE ROPE."
+        : [
+            `PULL ${t.pull + 1} OF ${t.pulls}`,
+            `${Math.round(60_000 / t.beatMs)} BPM`,
+            left === null ? null : formatCountdown(left),
+          ]
+            .filter((x) => x !== null)
+            .join(" · "),
+    );
+
+    const at = tugRope(t.totals);
+    tugRopeTrack.style.setProperty("--at", `${at * 100}%`);
+    tugRopeKnot.style.left = `${at * 100}%`;
+
+    const entries = gridEntries(arcade, state.roster);
+    const sides = t.sides ?? {};
+    const leaders = t.leaders ?? [null, null];
+    for (const [side, host] of [
+      [0, tugSideA],
+      [1, tugSideB],
+    ] as const) {
+      const members = entries.filter((e) => sides[e.pid] === side);
+      replace(host, [
+        h("p", { class: "mono s-cluster-head" }, [
+          h("span", { text: side === 0 ? "SIDE A" : "SIDE B" }),
+          h("span", { class: "s-cluster-n", text: String(t.totals[side]) }),
+        ]),
+        h(
+          "div",
+          { class: "mono s-cluster-tags" },
+          members.map((e) =>
+            h("span", {
+              class: "s-cluster-tag",
+              text: e.tag,
+              attrs: {
+                "data-away": e.away ? "yes" : "no",
+                // The leader carries a mark as well as a hue, because nothing
+                // on this surface may be told apart by colour alone.
+                "data-leader": leaders[side] === e.playerNumber ? "yes" : "no",
+              },
+            }),
+          ),
+        ),
+      ]);
+    }
+    setText(
+      tugWins,
+      `PULLS WON  A ${t.wins[0]} — B ${t.wins[1]}${
+        leaders[0] === null && leaders[1] === null
+          ? ""
+          : `  ·  LEADERS ${leaders[0] === null ? "—" : playerTag(leaders[0])} / ${
+              leaders[1] === null ? "—" : playerTag(leaders[1])
+            }`
+      }`,
+    );
+    paintTugPulse(arcade);
+  };
+
+  /**
+   * The heartbeat itself, off the server's grid and nothing else.
+   *
+   * Called from the arcade ticker at 60 ms, which is a tenth of a 600 ms beat
+   * — close enough that the snap lands where the beat does. A CSS keyframe
+   * would be a second clock, started whenever this element happened to be
+   * laid out, and the whole round is that there is only one.
+   */
+  const paintTugPulse = (arcade: ArcadeView): void => {
+    const t = arcade.tug;
+    if (!t || arcade.phase !== "running") {
+      tugPulse.style.setProperty("--pulse", "0");
+      return;
+    }
+    const beat = tugBeatAt(t, serverNow());
+    if (beat === null) return;
+    tugPulse.style.setProperty("--pulse", (1 - beat.phase).toFixed(3));
+    setAttr(tugPulse, "data-on", beat.onBeat ? "yes" : "no");
+  };
+
   const paintLight = (arcade: ArcadeView): void => {
     const pa = arcade.planApply;
     if (!pa || arcade.phase !== "running") {
@@ -1550,6 +1796,8 @@ function sceneArcade(): Scene {
       replace(cardLines, []);
       replace(grid, []);
       bridge.hidden = true;
+      unseal.hidden = true;
+      tug.hidden = true;
       setText(counts, "");
       light.hidden = true;
       recap.hidden = true;
@@ -1568,14 +1816,30 @@ function sceneArcade(): Scene {
     const onBridge =
       arcade.round === "glass_bridge" &&
       (arcade.phase === "running" || arcade.phase === "reveal");
-    grid.hidden = onBridge;
-    counts.hidden = onBridge;
+    // Unseal's tiles and Tug's rope take the space the grid was using in the
+    // same way the bridge does, and give it back between rounds. Unseal's
+    // picker is live against the round card, so its panel is up then too —
+    // four tiles filling as the room chooses is what the card is *for*.
+    const onTins =
+      arcade.round === "unseal" && arcade.phase !== "idle";
+    const onRope =
+      arcade.round === "tug_of_raft" &&
+      (arcade.phase === "running" || arcade.phase === "reveal");
+    grid.hidden = onBridge || onTins || onRope;
+    counts.hidden = grid.hidden;
     paintGrid(state, arcade);
     paintDrains(arcade);
 
     if (arcade.phase === "card" || arcade.phase === "idle") {
       stair.hidden = false;
       bridge.hidden = true;
+      tug.hidden = true;
+      // Unseal alone keeps its panel up against the round card, because the
+      // card's own instruction — "Choose a shape. You will be given a sealed
+      // tin" — is a control, and the room watching the four tiles fill is the
+      // twenty seconds working rather than being waited out.
+      if (arcade.round === "unseal" && arcade.phase === "card") paintUnseal(arcade);
+      else unseal.hidden = true;
       // Between rounds the headline is always the next game, never a count of
       // who is left — DESIGN.md is explicit that the grid says that, quietly.
       const between = arcade.phase === "idle";
@@ -1629,6 +1893,39 @@ function sceneArcade(): Scene {
 
     stair.hidden = true;
     replace(cardLines, []);
+
+    if (arcade.round === "unseal") {
+      // SPEC.md's own framing for the round, and the answer to the question
+      // everybody has been asking since the picker: the shapes were lengths.
+      setText(
+        title,
+        arcade.phase === "reveal" ? "The shapes were word lengths." : "",
+      );
+      setText(cue, "");
+      setText(recruitCount, "");
+      recap.hidden = true;
+      light.hidden = true;
+      bridge.hidden = true;
+      tug.hidden = true;
+      paintUnseal(arcade);
+      return;
+    }
+    unseal.hidden = true;
+
+    if (arcade.round === "tug_of_raft") {
+      setText(
+        title,
+        arcade.phase === "reveal" ? "Elections achieve nothing." : "",
+      );
+      setText(cue, "");
+      setText(recruitCount, "");
+      recap.hidden = true;
+      light.hidden = true;
+      bridge.hidden = true;
+      paintTug(state, arcade);
+      return;
+    }
+    tug.hidden = true;
 
     if (arcade.round === "glass_bridge") {
       // SPEC.md's own epigraph for the round, which is also the answer to
@@ -1695,7 +1992,35 @@ function sceneArcade(): Scene {
     // countdown. Both are drawn off the absolute epochs the server sent.
     const a = lastState?.arcade;
     if (a?.round === "plan_apply" && a.phase === "running") paintLight(a);
-    else if (a?.round === "glass_bridge" && a.phase === "running" && lastState) {
+    // The heartbeat, which is the one thing on this surface that has to move
+    // in time with something. 60 ms is a tenth of a 600 ms beat.
+    else if (a?.round === "tug_of_raft" && a.phase === "running") {
+      paintTugPulse(a);
+      const t = a.tug;
+      const left = remainingMs(t?.pullEndsAt ?? null, serverNow());
+      setText(
+        tugHead,
+        [
+          `PULL ${(t?.pull ?? 0) + 1} OF ${t?.pulls ?? 0}`,
+          `${Math.round(60_000 / (t?.beatMs ?? 600))} BPM`,
+          left === null ? null : formatCountdown(left),
+        ]
+          .filter((x) => x !== null)
+          .join(" · "),
+      );
+    } else if (a?.round === "unseal" && a.phase === "running") {
+      const u = a.unseal;
+      const left = remainingMs(a.endsAt, serverNow());
+      setText(
+        unsealHead,
+        [
+          `${u?.unsealed ?? 0} OF ${u?.picked ?? 0} TINS OPEN`,
+          left === null ? null : formatCountdown(left),
+        ]
+          .filter((x) => x !== null)
+          .join(" · "),
+      );
+    } else if (a?.round === "glass_bridge" && a.phase === "running" && lastState) {
       const g = a.glass;
       const left = remainingMs(g?.stepEndsAt ?? null, serverNow());
       setText(

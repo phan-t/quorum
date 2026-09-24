@@ -13,6 +13,7 @@ import type {
   ArcadeCell,
   ArcadeGlassView,
   ArcadeRecruitmentView,
+  ArcadeTugView,
   ArcadeView,
   OwnPoints,
   RefusedReason,
@@ -20,7 +21,12 @@ import type {
   RosterEntry,
   TriviaView,
 } from "../../protocol.ts";
-import type { ArcadeRoundKind, GlassWave, Segment } from "../../engine/types.ts";
+import type {
+  ArcadeRoundKind,
+  GlassWave,
+  Segment,
+  UnsealShape,
+} from "../../engine/types.ts";
 
 export type ViewKind =
   | "waiting"
@@ -456,6 +462,30 @@ export const HOUSE = {
   /** DESIGN.md, verbatim, and the funniest line in the product. */
   glassCrossed: (n: number) =>
     `${playerName(n)} has reached the far side. It is not very interesting there.`,
+  /**
+   * DESIGN.md: `> The tin has cracked. Player 017 drained.`
+   *
+   * Split in two the way the bridge's fall is, and for the same reason: the
+   * phone says the half that is about the tin, because the person reading it
+   * already knows whose tin it was, and the Desktop says both halves because
+   * the room does not.
+   */
+  unsealCracked: "The tin has cracked.",
+  unsealCrack: (n: number) =>
+    `The tin has cracked. ${playerName(n)} drained.`,
+  /**
+   * DESIGN.md, verbatim, and the line the whole button is for.
+   *
+   * "Nobody will know" is true and is the joke: reading the docs looks
+   * identical from outside — it is one more letter — and the halving is a
+   * number only this phone and the console ever see.
+   */
+  unsealDocs: "Reading the docs. Score halved. Nobody will know.",
+  /** DESIGN.md, verbatim. **Node**, not Player: in this round you are a node. */
+  tugElection: (n: number) =>
+    `Heartbeat timeout. Node ${playerTag(n)} called an election. Nothing happened.`,
+  /** The other half of the same joke, said once the node is back. */
+  tugElected: "Election complete. No change of leadership.",
   backedSurvived: "Your player survived. The Lounge is pleased.",
   roundEnd: "All nodes rescheduled. The next game will begin shortly.",
   arcadeEnd: "The games have concluded. Please return your tracksuit.",
@@ -596,8 +626,29 @@ export const PLAY_RULE: Readonly<
    */
   plan_apply:
     "Tap to add resources. A tap while it reads LOCKED drains you to the Lounge.",
-  unseal: undefined,
-  tug_of_raft: undefined,
+  /**
+   * Both halves of the round, in one sentence, and the cheat is not in it.
+   *
+   * "Read the docs" is on the screen as a control with its price written on
+   * it, which is where a cost belongs; putting it in this line as well would
+   * make the rule about the cheat rather than about the game. What this line
+   * has to carry is the thing that ends your round, and one wrong tap is it.
+   */
+  unseal: "Tap the letters in order. One wrong letter cracks the tin.",
+  /**
+   * The rule is the *beat*, not the tapping, and the line says so in that
+   * order — a player who reads "tap to pull" and stops there will hammer the
+   * button and score nothing, which is the one way to play this round badly
+   * enough to stop enjoying it.
+   *
+   * It names the election because that is what three missed beats gets you
+   * and nothing else on the phone says so before it happens. It does not say
+   * "you are out", because nobody is: this is the round where nobody drains,
+   * and a line that implied otherwise would be the only frightening sentence
+   * in a game designed to be the opposite.
+   */
+  tug_of_raft:
+    "Tap on the beat to pull. Off the beat does nothing, and three missed beats times you out.",
   gganbu: undefined,
   /**
    * The round is unplayable without this and the screen never said it: two
@@ -648,6 +699,29 @@ export const KEY_HINT = {
    * other way of stepping is one action too.
    */
   glass: "← and → step onto a pane",
+  /**
+   * Unseal's letter tiles.
+   *
+   * Typing the letter is the obvious keyboard for this round and it is better
+   * than the pointer: the tiles are a scramble, so hunting for one with a
+   * trackpad is a second puzzle laid over the first, and it is a puzzle about
+   * cursor travel. The engine takes the **character** rather than a tile
+   * index precisely so this works — a word with a repeated letter has two
+   * tiles that are the same tap, and typing S must not have to mean "the
+   * second S".
+   */
+  unseal: "Type a letter to tap it",
+  /**
+   * Tug of Raft's one control.
+   *
+   * This is the round the laptop correction matters most in. A rhythm game
+   * is natural under a thumb and genuinely unpleasant on a trackpad — the
+   * hand has to stay on the pad, the click travel is long enough to be felt
+   * against a 600 ms beat, and a missed beat is not a missed point but three
+   * of them away from being timed out. Space and Enter are what a `<button>`
+   * already answers to, so the keyboard and the pointer stay one control.
+   */
+  tug: "Space or Enter also pulls",
 } as const;
 
 /**
@@ -1060,6 +1134,215 @@ export function itemEndsAt(
   recruitment: ArcadeRecruitmentView | undefined,
 ): number | null {
   return recruitment?.itemEndsAt ?? null;
+}
+
+/* ------------------------------------------------------------------ */
+/* Unseal                                                              */
+/* ------------------------------------------------------------------ */
+
+/**
+ * The four tins: the glyph the room sees, and the word a screen reader says.
+ *
+ * DESIGN.md's motif list is where the glyphs come from — "○ △ □ … used as the
+ * shape picker in Unseal (with ☆ ☂ added)" — and the name is here because a
+ * screen reader announcing "○" reads out whatever its own table calls that
+ * character, which is not "circle" on every platform and is sometimes nothing
+ * at all. The glyph is `aria-hidden` everywhere it appears and the name is
+ * what is actually announced.
+ */
+export const UNSEAL_FACE: Readonly<
+  Record<UnsealShape, { readonly glyph: string; readonly name: string }>
+> = {
+  circle: { glyph: "○", name: "Circle" },
+  triangle: { glyph: "△", name: "Triangle" },
+  star: { glyph: "☆", name: "Star" },
+  umbrella: { glyph: "☂", name: "Umbrella" },
+};
+
+/** One scrambled letter, as a tile. */
+export interface UnsealTile {
+  /** Position in the cue, which is what makes two identical letters two tiles. */
+  readonly index: number;
+  readonly letter: string;
+  /** Already spent on the solved prefix, so it is no longer a control. */
+  readonly used: boolean;
+}
+
+/**
+ * The cue as tiles, with the ones already tapped marked spent.
+ *
+ * The consumption is a **multiset**, matched left to right, and that is the
+ * whole of why this function exists. GOSSIP has two Ss; after the first S is
+ * tapped exactly one of the two S tiles must go dim, and which one does not
+ * matter as long as it is exactly one. Marking "every tile whose letter is in
+ * the solved prefix" would grey out both of them and leave the player looking
+ * at a word they cannot finish.
+ *
+ * `solved` is the prefix from the server — their own letters, because they
+ * tapped them — and never the rest of the word.
+ */
+export function unsealTiles(cue: string, solved: string): UnsealTile[] {
+  const letters = [...cue.toUpperCase()].filter((c) => /\p{L}/u.test(c));
+  const spent = new Array<boolean>(letters.length).fill(false);
+  for (const c of [...solved.toUpperCase()]) {
+    const at = letters.findIndex((l, i) => !spent[i] && l === c);
+    if (at !== -1) spent[at] = true;
+  }
+  return letters.map((letter, index) => ({
+    index,
+    letter,
+    used: spent[index] === true,
+  }));
+}
+
+/**
+ * A keystroke to the letter it would tap, or null.
+ *
+ * One printable letter, no modifiers, and never an OS key repeat: a held key
+ * would send the same letter thirty times a second, and in a round where one
+ * wrong tap cracks the tin the second one of those is always wrong.
+ */
+export function unsealLetterKey(ev: {
+  readonly key: string;
+  readonly repeat: boolean;
+  readonly altKey: boolean;
+  readonly ctrlKey: boolean;
+  readonly metaKey: boolean;
+}): string | null {
+  if (ev.altKey || ev.ctrlKey || ev.metaKey || ev.repeat) return null;
+  if ([...ev.key].length !== 1) return null;
+  const up = ev.key.toUpperCase();
+  return /\p{L}/u.test(up) ? up : null;
+}
+
+/* ------------------------------------------------------------------ */
+/* Tug of Raft                                                         */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Where the heartbeat is right now, from the server's grid.
+ *
+ * **There is one clock in this round and it is the server's.** `pullStartedAt`
+ * is beat 0 and beat *n* is `pullStartedAt + n * beatMs`, so every surface
+ * draws the same beat at the same instant and a tap is judged against the
+ * beat the player was actually shown. A surface that started its own 600 ms
+ * `setInterval` on the frame it happened to receive would be a second clock:
+ * it would begin a little late, drift by whatever the timer owes, and spend
+ * the back half of a 25-second pull inviting taps a quarter of a beat away
+ * from the one the server is judging. Nothing here measures a duration from
+ * anything but the two absolute epochs on the wire.
+ *
+ * `phase` runs 0 → 1 *from* the nearest beat to the next one and is what the
+ * ring is drawn from; `onBeat` is the window a tap would be credited in,
+ * width from the server rather than from a constant in this file.
+ */
+export interface TugBeat {
+  /** The beat `now` is nearest to, as an index from the pull's start. */
+  readonly beat: number;
+  /** 0 at the last beat, 1 at the next. The pulse. */
+  readonly phase: number;
+  /** A tap at this instant is inside the window around a beat. */
+  readonly onBeat: boolean;
+  /** Milliseconds until the next beat lands. */
+  readonly toNext: number;
+}
+
+export function tugBeatAt(
+  tug: Pick<ArcadeTugView, "pullStartedAt" | "beatMs" | "toleranceMs">,
+  now: number,
+): TugBeat | null {
+  const { pullStartedAt, beatMs, toleranceMs } = tug;
+  if (pullStartedAt === undefined || !(beatMs > 0)) return null;
+  const since = now - pullStartedAt;
+  // Floor, not round: `phase` is "how far past the last beat", and the last
+  // beat is the one that has actually happened.
+  const last = Math.floor(since / beatMs);
+  const into = since - last * beatMs;
+  // `beat` is the one a tap would be judged against, which is the *nearest*
+  // — the same rounding the engine does, so "on the beat" means the same
+  // thing on the ring as it does in the reducer.
+  const beat = Math.round(since / beatMs);
+  const offset = Math.abs(since - beat * beatMs);
+  return {
+    beat,
+    phase: beatMs <= 0 ? 0 : Math.min(1, Math.max(0, into / beatMs)),
+    onBeat: offset <= toleranceMs,
+    toNext: Math.max(0, (last + 1) * beatMs - since),
+  };
+}
+
+/**
+ * Whether this node is timed out right now, derived the way the engine
+ * derives it.
+ *
+ * Elections are **not stored** anywhere — not in the play state and not on
+ * the wire — because the engine has no clock and could only ever write such a
+ * field when some other event happened to arrive, which is exactly when it is
+ * not needed. What the state holds is the last beat the player actually hit,
+ * and everything else falls out of arithmetic against the grid: three missed
+ * beats in a row time a node out from the instant of the third, for
+ * `electionMs`, and then it comes back and counts its misses from the first
+ * beat after the election ended.
+ *
+ * So this function is `resolveBeat` from engine/arcade.ts, asked about *now*
+ * rather than about a tap, and it is the same loop on the same numbers — the
+ * window widths arrive on the wire rather than being written here twice. The
+ * loop terminates because each election advances `last` by at least three.
+ */
+export interface TugElection {
+  readonly inElection: boolean;
+  /** When the election in force ends. Zero when there is none. */
+  readonly endsAt: number;
+  /** Beats missed in a row, as the server would count them at this instant. */
+  readonly missed: number;
+}
+
+export function tugElectionAt(
+  tug: Pick<
+    ArcadeTugView,
+    "pullStartedAt" | "beatMs" | "missesToElection" | "electionMs"
+  >,
+  lastBeat: number,
+  now: number,
+): TugElection {
+  const { pullStartedAt, beatMs, missesToElection, electionMs } = tug;
+  if (pullStartedAt === undefined || !(beatMs > 0)) {
+    return { inElection: false, endsAt: 0, missed: 0 };
+  }
+  const beat = Math.round((now - pullStartedAt) / beatMs);
+  let last = lastBeat;
+  for (;;) {
+    const missed = Math.max(0, beat - last - 1);
+    if (missed < missesToElection) {
+      return { inElection: false, endsAt: 0, missed };
+    }
+    const from = pullStartedAt + (last + missesToElection) * beatMs;
+    const to = from + electionMs;
+    if (now < to) {
+      return { inElection: true, endsAt: to, missed: missesToElection };
+    }
+    last = Math.ceil((to - pullStartedAt) / beatMs) - 1;
+  }
+}
+
+/**
+ * Where the rope is, 0 → 1, with 0.5 the centre line.
+ *
+ * The *share* of the on-beat taps rather than their difference, because a
+ * difference needs a scale and there is no honest one: 25 seconds at 100 bpm
+ * is about 41 beats a player, so a lead of ten taps means one thing in a
+ * room of six and nothing at all in a room of forty. A share needs no scale,
+ * is the thing the round actually measures — SPEC.md's "net on-beat rate" —
+ * and cannot pin the rope against the stop in the first five seconds because
+ * one side happened to start faster.
+ *
+ * A pull nobody has touched sits dead centre, which is the truth about it.
+ */
+export function tugRope(totals: readonly [number, number]): number {
+  const [a, b] = totals;
+  const all = a + b;
+  if (all <= 0) return 0.5;
+  return Math.min(1, Math.max(0, b / all));
 }
 
 /* ------------------------------------------------------------------ */

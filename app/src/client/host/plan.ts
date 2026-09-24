@@ -17,12 +17,19 @@
  * tests.
  */
 
-/** The rounds that exist. The other three are designed, not built. */
-export type ArcadePick = "recruitment" | "plan_apply" | "glass_bridge";
+/** The rounds that exist. Gganbu is designed, not built. */
+export type ArcadePick =
+  | "recruitment"
+  | "plan_apply"
+  | "unseal"
+  | "tug_of_raft"
+  | "glass_bridge";
 
 export const ARCADE_PLAYABLE: readonly ArcadePick[] = [
   "recruitment",
   "plan_apply",
+  "unseal",
+  "tug_of_raft",
   "glass_bridge",
 ];
 
@@ -35,9 +42,12 @@ export interface PlanEntry {
 export type ArcadePlan = readonly PlanEntry[];
 
 /**
- * All three, in the order SPEC.md numbers them. Recruitment first because it
+ * All five, in the order SPEC.md numbers them. Recruitment first because it
  * knocks nobody out and teaches the controls; the bridge last because it is
- * the one that empties the Floor.
+ * the one that empties the Floor. Tug of Raft sits between Unseal and where
+ * Gganbu will go, which is where SPEC.md puts it and for the reason it gives
+ * — "two elimination rounds back-to-back is a downer, and the arcade needs
+ * one round that is pure noise".
  */
 export function defaultPlan(): ArcadePlan {
   return ARCADE_PLAYABLE.map((kind) => ({ kind, included: true }));

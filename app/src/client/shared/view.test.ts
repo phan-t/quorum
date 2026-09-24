@@ -28,6 +28,8 @@ import {
   nextSegment,
   paneKeyIndex,
   playerName,
+  unsealLetterKey,
+  unsealTiles,
   playerTag,
   pointsStripCells,
   pointsStripText,
@@ -752,5 +754,69 @@ describe("the item clock", () => {
     // nulling it, and a timer with nothing behind it shows nothing.
     assert.equal(itemEndsAt({ at: 5, of: 6 }), null);
     assert.equal(itemEndsAt(undefined), null);
+  });
+});
+
+describe("Unseal's letter tiles", () => {
+  /**
+   * The consumption is a multiset, and this is the whole reason the helper
+   * exists. GOSSIP has two Ss: after the first S is tapped exactly one of the
+   * two S tiles must go dim. "Every tile whose letter is in the solved
+   * prefix" would grey out both and leave somebody looking at a word they
+   * cannot finish.
+   */
+  it("spends one tile per solved letter, not every tile with that letter", () => {
+    const tiles = unsealTiles("S I P G O S", "GOS");
+    assert.equal(tiles.map((t) => t.letter).join(""), "SIPGOS");
+    assert.equal(tiles.filter((t) => t.used).length, 3);
+    // One S is spent and one is still there to tap.
+    const esses = tiles.filter((t) => t.letter === "S");
+    assert.deepEqual(
+      esses.map((t) => t.used).sort(),
+      [false, true],
+    );
+  });
+
+  it("spends nothing before the first tap, and everything at the end", () => {
+    assert.equal(unsealTiles("T F A R", "").every((t) => !t.used), true);
+    assert.equal(unsealTiles("T F A R", "RAFT").every((t) => t.used), true);
+  });
+
+  it("drops the spaces the cue is written with", () => {
+    assert.equal(unsealTiles("T F A R", "").length, 4);
+  });
+});
+
+describe("Unseal's keyboard", () => {
+  const key = (over: Partial<Parameters<typeof unsealLetterKey>[0]>) =>
+    unsealLetterKey({
+      key: "a",
+      repeat: false,
+      altKey: false,
+      ctrlKey: false,
+      metaKey: false,
+      ...over,
+    });
+
+  it("turns a letter key into the letter it taps, in upper case", () => {
+    assert.equal(key({ key: "a" }), "A");
+    assert.equal(key({ key: "Q" }), "Q");
+  });
+
+  it("is not a chord, a digit, or a named key", () => {
+    assert.equal(key({ key: "a", metaKey: true }), null);
+    assert.equal(key({ key: "4" }), null);
+    assert.equal(key({ key: "Enter" }), null);
+    assert.equal(key({ key: " " }), null);
+  });
+
+  /**
+   * A held key would send the same letter thirty times a second, and in this
+   * round the second one of those is always the wrong letter — which cracks
+   * the tin. `repeat` is the difference between an accommodation and a way to
+   * lose the round by resting a finger on a key.
+   */
+  it("is not an OS key repeat", () => {
+    assert.equal(key({ key: "a", repeat: true }), null);
   });
 });

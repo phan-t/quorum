@@ -1489,6 +1489,397 @@ body.phone:has(.v-splash) {
   transform: scale(0.995);
 }
 
+/* ---- Unseal ----------------------------------------------------------- *
+ *
+ * Two screens: the shape picker, then the letters. DESIGN.md asks for four
+ * large tiles and then "a grid of scrambled letters as >= 56 px tiles, the
+ * solved letters filling in a row above", and 56px is a floor rather than a
+ * target — the umbrella tier is thirteen letters, so the grid wraps and the
+ * tiles stay square.
+ *
+ * Nothing here is distinguished by colour alone. A spent tile is dimmed *and*
+ * struck *and* not focusable; the chosen shape carries a filled border and a
+ * check as well as green; the filled slots in the solved row carry a letter
+ * and the empty ones carry a rule.
+ * -------------------------------------------------------------------- */
+
+.a-unseal {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.7rem;
+}
+
+/* The picker. Four tiles, each with its glyph, its name and what it pays —
+   the score is the bet, and it is the only number the picker may show. */
+/*
+ * Four tiles, two by two, taking the space.
+ *
+ * `flex: 1` rather than `flex: none` because while the picker is up it is the
+ * *only* thing on the screen — the letters do not exist yet — and a row of
+ * four small tiles pinned to the top of a laptop window with nothing under it
+ * reads as a page that has not finished loading. The rows share the height.
+ */
+.a-shapes {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  grid-auto-rows: minmax(104px, 1fr);
+  gap: 0.6rem;
+  flex: 1;
+  min-height: 0;
+  max-height: 60vh;
+}
+.a-shapes[hidden] {
+  display: none;
+}
+.a-shape {
+  appearance: none;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.2rem;
+  min-height: 104px;
+  padding: 0.8rem 0.5rem;
+  border: 2px solid var(--line);
+  border-radius: 14px;
+  background: var(--panel-2);
+  color: var(--ink);
+  cursor: pointer;
+}
+.a-shape-glyph {
+  font-size: 40px;
+  line-height: 1;
+}
+.a-shape-name {
+  font-size: 13px;
+  font-weight: 600;
+}
+.a-shape-score {
+  font-size: 13px;
+  color: var(--muted);
+}
+@media (hover: hover) and (pointer: fine) {
+  .a-shape:not(:disabled):hover {
+    border-color: var(--arc-players);
+  }
+}
+.a-shape:focus-visible {
+  outline: none;
+  border-color: var(--arc-players);
+  box-shadow: inset 0 0 0 3px var(--ibm-blue);
+}
+/* Chosen: a border, a tinted ground and a tick. Never the colour alone. */
+.a-shape.on {
+  border-color: var(--arc-players);
+  border-width: 3px;
+}
+.a-shape.on .a-shape-name::after {
+  content: " \2713";
+}
+.a-shape:disabled {
+  cursor: default;
+  color: var(--muted);
+  border-style: dashed;
+}
+
+/* The solved row. One slot per letter of the word, which is how long the
+   shape turned out to mean — filled as they tap, ruled while they have not. */
+.a-solved {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  flex: none;
+}
+.a-solved[hidden] {
+  display: none;
+}
+.a-slot {
+  min-width: 1.4em;
+  padding-bottom: 0.15rem;
+  border-bottom: 3px solid var(--line);
+  text-align: center;
+  font-size: 22px;
+  font-weight: 600;
+  line-height: 1.2;
+  color: var(--ink);
+}
+.a-slot[data-filled="yes"] {
+  border-bottom-color: var(--arc-players);
+}
+
+/* The tiles. Square, wrapping, and at least 56px on the shortest side. */
+.a-tiles {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-wrap: wrap;
+  align-content: flex-start;
+  gap: 0.5rem;
+}
+.a-tiles[hidden] {
+  display: none;
+}
+.a-tile {
+  appearance: none;
+  min-width: 56px;
+  min-height: 56px;
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 2px solid var(--line);
+  border-radius: 12px;
+  background: var(--panel-2);
+  color: var(--ink);
+  font-size: 26px;
+  font-weight: 700;
+  cursor: pointer;
+}
+@media (hover: hover) and (pointer: fine) {
+  .a-tile:not(:disabled):hover {
+    border-color: var(--arc-players);
+  }
+}
+.a-tile:focus-visible {
+  outline: none;
+  border-color: var(--arc-players);
+  box-shadow: inset 0 0 0 3px var(--ibm-blue);
+}
+.a-tile:active {
+  transform: scale(0.97);
+}
+/* Spent: dimmed, dashed and struck through. Three signals, no colour among
+   them — --muted on --panel-2 is 5.6:1 dark and 5.9:1 light, so a used tile
+   is still read rather than guessed at. */
+.a-tile[data-used="yes"] {
+  color: var(--muted);
+  border-style: dashed;
+  cursor: default;
+}
+.a-tile[data-used="yes"] .a-tile-letter {
+  text-decoration: line-through;
+}
+.a-tile:disabled {
+  cursor: default;
+}
+
+/* The briefing under the picker. `.a-how` already has the card's styling;
+   this only stops it stretching and takes it off once the tin is open. */
+.a-unseal-how {
+  flex: none;
+}
+.a-unseal-how[hidden] {
+  display: none;
+}
+
+.a-unseal-status {
+  margin: 0;
+  flex: none;
+  color: var(--muted);
+  font-size: 14px;
+  line-height: 1.4;
+}
+
+/*
+ * Read the docs.
+ *
+ * DESIGN.md: "a small mono link, deliberately un-button-like, at the bottom".
+ * So it is underlined mono text and not a slab — but the price is set beside
+ * it at the same size and in the same ink, because SPEC.md calls this the
+ * funniest button in the product and a joke whose cost is hidden is not a
+ * joke, it is a trap. It reads as a decision because both halves of the
+ * decision are on it.
+ */
+.a-docs {
+  appearance: none;
+  flex: none;
+  align-self: flex-start;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.5rem;
+  padding: 0.4rem 0;
+  border: none;
+  background: none;
+  font-family: var(--mono);
+  font-size: 13px;
+  color: var(--arc-lounge);
+  cursor: pointer;
+  text-align: left;
+}
+.a-docs[hidden] {
+  display: none;
+}
+.a-docs-label {
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+.a-docs-price {
+  color: var(--muted);
+}
+.a-docs:disabled {
+  cursor: default;
+  color: var(--muted);
+}
+/* Once it has been read the halving has happened and cannot happen twice, so
+   the link stops being gold: the decision is behind them. */
+.a-docs[data-read="yes"] {
+  color: var(--muted);
+}
+.a-unseal-house[hidden] {
+  display: none;
+}
+
+/* ---- Tug of Raft ------------------------------------------------------ *
+ *
+ * DESIGN.md: "a pulsing ring at 100 bpm, the whole lower half is the tap
+ * target, a strip showing your side's colour and the rope position."
+ *
+ * Every animation on this screen is driven from a custom property the script
+ * sets on an animation frame, off the server's beat grid. There is
+ * deliberately **no CSS animation and no transition on the ring**: a CSS
+ * keyframe would be a second clock, started whenever the element happened to
+ * be laid out, and it would drift away from the beat the taps are judged
+ * against within a single pull.
+ * -------------------------------------------------------------------- */
+
+.a-tug {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.7rem;
+}
+.a-tug-head {
+  margin: 0;
+  flex: none;
+  font-size: 12px;
+  letter-spacing: 0.1em;
+  color: var(--muted);
+}
+
+/* The rope. A track with a knot on it, and the side that is winning has more
+   of the track: the knot's position is the share of the on-beat taps. */
+.a-tug-rope {
+  position: relative;
+  flex: none;
+  height: 14px;
+  border-radius: 999px;
+  background: var(--panel-2);
+  overflow: hidden;
+}
+.a-tug-rope-fill {
+  height: 100%;
+  background: var(--nomad);
+}
+.a-tug-knot {
+  position: absolute;
+  top: -3px;
+  bottom: -3px;
+  width: 4px;
+  margin-left: -2px;
+  border-radius: 2px;
+  background: var(--ink);
+}
+
+/*
+ * The tap target: the whole lower half, with the ring inside it.
+ *
+ * `--pulse` is 1 at the beat and falls to 0 just before the next one, so the
+ * ring snaps open and shrinks away — the snap is the beat. `--window` is the
+ * server's own tolerance as a fraction of the interval, so the band the ring
+ * shows is the band the engine judges by rather than a guess made here.
+ */
+.a-tug-tap {
+  flex: 1;
+  min-height: 160px;
+  position: relative;
+  appearance: none;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.3rem;
+  border: 2px solid var(--line);
+  border-radius: 14px;
+  background: var(--panel-2);
+  color: var(--ink);
+  overflow: hidden;
+  cursor: pointer;
+}
+.a-tug-ring {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 180px;
+  height: 180px;
+  margin: -90px 0 0 -90px;
+  border-radius: 50%;
+  border: 3px solid var(--arc-players);
+  /* Driven entirely by --pulse, which the script sets off the server's grid. */
+  transform: scale(calc(0.45 + 0.55 * var(--pulse, 0)));
+  opacity: calc(0.25 + 0.6 * var(--pulse, 0));
+  pointer-events: none;
+}
+/* Inside the window, the ring fills: colour is the fourth signal, after the
+   ring's size, the word and the count. */
+.a-tug-tap[data-beat="on"] .a-tug-ring {
+  background: color-mix(in srgb, var(--nomad) 18%, transparent);
+}
+.a-tug-word {
+  position: relative;
+  font-size: clamp(36px, 11.5vw, 46px);
+  letter-spacing: 0.04em;
+}
+.a-tug-count {
+  position: relative;
+  font-size: 26px;
+  font-weight: 600;
+  color: var(--muted);
+}
+.a-tug-tap:focus-visible {
+  outline: none;
+  border-color: var(--arc-players);
+  box-shadow: inset 0 0 0 3px var(--ibm-blue);
+}
+.a-tug-tap:active {
+  transform: scale(0.995);
+}
+.a-tug-tap:disabled {
+  cursor: default;
+  color: var(--muted);
+  border-style: dashed;
+}
+/* A credited tap, latched for one paint. The word is what changes; the tick
+   is there so the feedback is not the colour. */
+.a-tug-tap[data-hit="yes"] .a-tug-word::after {
+  content: " \2713";
+  color: var(--arc-players);
+}
+.a-tug-tap[data-hit="no"] .a-tug-word::after {
+  content: " \00B7";
+  color: var(--muted);
+}
+
+/*
+ * The election. Not an error and not a drain — nobody drains in this round —
+ * so it is the announcer's voice in pink rather than the coral error beat,
+ * and the button stays exactly where it is underneath. Two seconds of the
+ * rope not moving is the punishment, and it is funnier than a warning.
+ */
+.a-tug[data-election="yes"] .a-tug-ring {
+  border-color: var(--arc-staff);
+  border-style: dashed;
+}
+.a-tug[data-election="yes"] .a-tug-tap {
+  border-color: var(--arc-staff);
+}
+.a-tug-election[hidden] {
+  display: none;
+}
+
 /* ---- The Glass Bridge ------------------------------------------------ *
  *
  * Two panes as large targets, the step's own clock, and the bridge with
@@ -1975,12 +2366,40 @@ body.phone:has(.v-splash) {
 .a-total {
   margin: 0;
 }
+/* Tug of Raft's reveal: what happened to the rope, in a plain sentence. The
+   round has no answer to read out, so this is the whole of its result. */
+.a-tug-result {
+  margin: 0;
+  color: var(--muted);
+  font-size: 14px;
+  line-height: 1.4;
+}
+
 .a-recap {
   display: grid;
   grid-template-columns: auto 1fr;
   gap: 0.2rem 0.6rem;
   padding: 0.5rem 0;
   border-top: 1px solid var(--line);
+}
+/* Unseal's reveal carries the shape and the scramble in the first column, so
+   the row keeps Recruitment's three-cell shape. The glyph is decoration to a
+   screen reader; the answer is the text. */
+.a-recap-tin {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.15rem;
+}
+.a-recap-shape {
+  font-size: 22px;
+  line-height: 1.1;
+  color: var(--muted);
+}
+.a-recap-scramble {
+  font-size: 12px;
+  letter-spacing: 0.1em;
+  color: var(--muted);
 }
 .a-recap-cue {
   font-size: 24px;

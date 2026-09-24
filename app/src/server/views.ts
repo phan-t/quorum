@@ -14,7 +14,20 @@ import {
   topFive,
   type Standing,
 } from "../engine/scoring.ts";
-import { checkpointsFor, glassFloorView, glassMeView } from "../engine/arcade.ts";
+import {
+  UNSEAL_SHAPES,
+  UNSEAL_SHAPE_SCORE,
+  TUG_ELECTION_MS,
+  TUG_MISSES_TO_ELECTION,
+  beatToleranceMs,
+  checkpointsFor,
+  glassFloorView,
+  glassMeView,
+  pullTotals,
+  tugLeader,
+  unsealFloorView,
+  unsealMeView,
+} from "../engine/arcade.ts";
 import { currentQuestion } from "../engine/trivia.ts";
 import type {
   ArcadeState,
@@ -33,8 +46,14 @@ import type {
   ArcadeMineGlass,
   ArcadeMinePlanApply,
   ArcadeMineRecruitment,
+  ArcadeMineTug,
+  ArcadeMineUnseal,
   ArcadePlanApplyView,
   ArcadeRecruitmentView,
+  ArcadeTugView,
+  ArcadeUnsealRecap,
+  ArcadeUnsealShape,
+  ArcadeUnsealView,
   ArcadeView,
   OwnPoints,
   RenderState,
@@ -528,6 +547,176 @@ export function arcadePlanApplyFor(
 }
 
 /**
+ * Unseal, projected.
+ *
+ * Built from {@link unsealFloorView}, which is the round's **only public
+ * view**, plus one read of `play.key` for the host and for the reveal — the
+ * same shape as the bridge below and for the same reason.
+ *
+ * The round's secret is one thing and it is absolute: **the word in each
+ * tin**. It reaches one phone at a time through `unsealMeView`, and never a
+ * public surface until `revealRound`. Three things follow, and none of them
+ * is absent by being deleted afterwards:
+ *
+ * - **no cue, anywhere on this view.** The scrambled letters are the word
+ *   with the order taken off, and a room that can see all nine cues has a
+ *   room that can solve somebody else's tin out loud. `unsealFloorView` does
+ *   not carry them and cannot be made to by adding a field to `play`.
+ * - **no per-player shape.** `picked` is a count, exactly as the engine makes
+ *   it. A shape is a word length, and "Player 017 picked the umbrella" on a
+ *   screen three metres from Player 017 is a hint they did not agree to give.
+ * - **no length on the picker.** The shapes *are* the lengths, and finding
+ *   that out is what choosing one buys you. SPEC.md: "Pick your shape before
+ *   you know the word."
+ *
+ * What *is* public is the score behind each shape — 10 / 20 / 35 / 50 — which
+ * is the bet stated in advance, and the counts, which are the round's theatre.
+ */
+export function arcadeUnsealFor(
+  state: SessionState,
+  arcade: ArcadeState,
+  role: Role,
+): ArcadeUnsealView | undefined {
+  const play = arcade.play;
+  if (play?.kind !== "unseal") return undefined;
+  const isHost = role === "host";
+  const privileged = isHost || role === "screen";
+  const revealed = arcade.phase === "reveal";
+
+  // The only public view there is. Everything below is a subset of it.
+  const floor = unsealFloorView(play);
+  const has = new Set(play.tins.map((t) => t.shape));
+
+  const shapes: ArcadeUnsealShape[] = UNSEAL_SHAPES.map((shape) => {
+    const fastest = floor.fastest[shape];
+    return {
+      shape,
+      available: has.has(shape),
+      score: UNSEAL_SHAPE_SCORE[shape],
+      picked: floor.picks[shape],
+      unsealed: floor.unsealed[shape],
+      // The +10 board, which is the big screen's reveal and the console's
+      // running read. Omitted rather than nulled where nobody qualified, so
+      // the key is not in the bytes.
+      ...(privileged && fastest !== null
+        ? { fastest: numbersOf(arcade, state, [fastest])[0] ?? 0 }
+        : {}),
+    };
+  });
+
+  const base: ArcadeUnsealView = {
+    shapes,
+    picked: shapes.reduce((n, s2) => n + s2.picked, 0),
+    unsealed: shapes.reduce((n, s2) => n + s2.unsealed, 0),
+  };
+
+  const extra: {
+    unsealOrder?: readonly number[];
+    progress?: Readonly<Record<ParticipantId, number>>;
+    docs?: readonly number[];
+    recap?: readonly ArcadeUnsealRecap[];
+  } = {};
+
+  if (privileged) {
+    extra.unsealOrder = numbersOf(arcade, state, floor.unsealOrder);
+  }
+  if (isHost) {
+    // Counts, never letters: a letter is the prefix of somebody's word. It is
+    // on the console because the host is the only reader not in the room.
+    extra.progress = floor.progress;
+    extra.docs = numbersOf(arcade, state, Object.keys(play.docs));
+  }
+  // The one read of the answer key in this function, and the only one outside
+  // the engine. Everything above was built from the public view.
+  if (isHost || revealed) {
+    extra.recap = play.tins.map((tin, i) => {
+      const answer = play.key[i];
+      return {
+        shape: tin.shape,
+        cue: tin.cue,
+        answer: answer?.answer ?? "",
+        note: answer?.note ?? "",
+      };
+    });
+  }
+  return { ...base, ...extra };
+}
+
+/**
+ * Tug of Raft, projected — which is to say, the heartbeat put on the wire.
+ *
+ * Nothing here is a secret. Nobody drains, there is no answer and no
+ * information asymmetry: SPEC.md builds the round that way deliberately, and
+ * the projection's job is a different one. It has to make every surface count
+ * **the same beats**.
+ *
+ * So the beat travels as a grid, not as a tempo. `pullStartedAt` is beat 0
+ * and beat *n* is `pullStartedAt + n * beatMs`, absolute server epochs
+ * against the client's corrected clock — the same rule as `closesAt` in
+ * trivia, `itemEndsAt` in Recruitment and `stepEndsAt` on the bridge, and for
+ * a sharper reason than any of them. A surface handed "100 bpm" would start
+ * its own interval on whichever frame it happened to receive, drift a little
+ * further from the server's grid with every beat of a 25-second pull, and
+ * spend the back half of the pull inviting taps against a beat the server is
+ * not judging by. There is one clock in this round and it is the server's;
+ * every surface draws the same arithmetic on it.
+ *
+ * `toleranceMs`, `missesToElection` and `electionMs` ride along for the
+ * reason `checkpoints` does in Plan / Apply: they are the rule, the engine
+ * owns them, and a phone with its own copy is a phone that will one day draw
+ * a window the server does not judge by.
+ *
+ * The three things withheld are withheld out of tidiness rather than secrecy,
+ * and the line is DESIGN.md's — every number on the console and nowhere else:
+ * everybody's side and the two leaders go to the surfaces that draw the room
+ * (the Desktop and the console), and the per-player beat counts the leader is
+ * read off go to the console alone. A phone gets its own side and its own
+ * count, on {@link ArcadeMineTug}.
+ */
+export function arcadeTugFor(
+  state: SessionState,
+  arcade: ArcadeState,
+  role: Role,
+): ArcadeTugView | undefined {
+  const play = arcade.play;
+  if (play?.kind !== "tug_of_raft") return undefined;
+  const isHost = role === "host";
+  const privileged = isHost || role === "screen";
+  const running = arcade.phase === "running";
+  const [a, b] = pullTotals(play);
+
+  const base: ArcadeTugView = {
+    pull: play.pull,
+    pulls: play.pulls,
+    pullSeconds: play.pullSeconds,
+    beatMs: play.beatMs,
+    toleranceMs: beatToleranceMs(play.beatMs),
+    missesToElection: TUG_MISSES_TO_ELECTION,
+    electionMs: TUG_ELECTION_MS,
+    // Omitted rather than nulled while the round card is up: the play state
+    // carries zeroes until `beginPlay`, and a surface handed a zero would
+    // start a heartbeat in 1970 and show every node in an election.
+    ...(running
+      ? { pullStartedAt: play.pullStartedAt, pullEndsAt: play.pullEndsAt }
+      : {}),
+    totals: [a, b],
+    wins: play.wins,
+  };
+  if (!privileged) return base;
+
+  const leaders = [tugLeader(play, 0), tugLeader(play, 1)] as const;
+  return {
+    ...base,
+    sides: play.sides,
+    leaders: [
+      leaders[0] === null ? null : (numbersOf(arcade, state, [leaders[0]])[0] ?? 0),
+      leaders[1] === null ? null : (numbersOf(arcade, state, [leaders[1]])[0] ?? 0),
+    ],
+    ...(isHost ? { onBeats: play.onBeats } : {}),
+  };
+}
+
+/**
  * The Glass Bridge, projected. This is the round's whole security surface.
  *
  * Built from {@link glassFloorView}, not from `play`, and that is the point
@@ -660,6 +849,8 @@ export function arcadeViewFor(
   const grid = arcadeGrid(state, arcade);
   const recruitment = arcadeRecruitmentFor(state, arcade, role);
   const planApply = arcadePlanApplyFor(state, arcade, role);
+  const unseal = arcadeUnsealFor(state, arcade, role);
+  const tug = arcadeTugFor(state, arcade, role);
   const glass = arcadeGlassFor(state, arcade, role);
   return {
     activityId: arcade.activityId,
@@ -673,6 +864,8 @@ export function arcadeViewFor(
     inLounge: grid.filter((c) => c.standing === "drained").length,
     ...(recruitment ? { recruitment } : {}),
     ...(planApply ? { planApply } : {}),
+    ...(unseal ? { unseal } : {}),
+    ...(tug ? { tug } : {}),
     ...(glass ? { glass } : {}),
   };
 }
@@ -707,6 +900,41 @@ export function arcadeMineFor(
     };
   }
 
+  // Unseal, straight off the engine's own per-player view — which is the only
+  // way a cue leaves the server at all. Their shape, their letters, the prefix
+  // they have already tapped, and nothing whatever about the rest of the word
+  // or about anybody else's tin.
+  let unseal: ArcadeMineUnseal | undefined;
+  if (play?.kind === "unseal") {
+    const me = unsealMeView(arcade, play, pid);
+    unseal = {
+      shape: me.shape,
+      cue: me.cue,
+      length: me.length,
+      progress: me.progress,
+      solved: me.solved,
+      docs: me.docs,
+      unsealed: me.unsealed,
+      cracked: me.cracked,
+    };
+  }
+
+  // Tug of Raft: their end of the rope, their beats, and the last one they
+  // hit. `lastBeat` is not a decoration — it is what the phone derives its own
+  // election window from, with the same arithmetic the engine uses, because
+  // the engine has no clock to store one with. See `resolveBeat`.
+  let tug: ArcadeMineTug | undefined;
+  if (play?.kind === "tug_of_raft") {
+    tug = {
+      // Somebody who joined after the sides were dealt has no entry until
+      // their first tap deals them one. Side 0 until then, rather than a
+      // phone with no rope to pull.
+      side: play.sides[pid] ?? 0,
+      onBeats: play.onBeats[pid] ?? 0,
+      lastBeat: play.lastBeat[pid] ?? -1,
+    };
+  }
+
   // The Glass Bridge, straight off the engine's own per-player view, which is
   // exported as the leak-free default: it carries their wave, whether it is
   // their turn, how far along they are and whether their own pane held. It
@@ -738,6 +966,8 @@ export function arcadeMineFor(
     ...(seat ? { drainedAt: seat.at } : {}),
     ...(recruitment ? { recruitment } : {}),
     ...(planApply ? { planApply } : {}),
+    ...(unseal ? { unseal } : {}),
+    ...(tug ? { tug } : {}),
     ...(glass ? { glass } : {}),
   };
 }
@@ -917,7 +1147,12 @@ function hostArcade(arcade: ArcadeState): NonNullable<
         ? Object.keys(play.answered)
         : play?.kind === "glass_bridge"
           ? Object.keys(play.stepped)
-          : [],
+          : // Unseal: who is holding a tin. *Who*, never which tin — the value
+            // is an index into the words, and the host's question is only
+            // whether anybody is still choosing.
+            play?.kind === "unseal"
+            ? Object.keys(play.pick)
+            : [],
     drained: Object.entries(arcade.standing)
       .filter(([, st]) => st === "drained")
       .map(([pid]) => pid),

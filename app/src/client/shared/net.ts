@@ -25,6 +25,7 @@ import type {
   RenderState,
   ServerMessage,
 } from "../../protocol.ts";
+import type { UnsealShape } from "../../engine/types.ts";
 import {
   socketUrl,
   webSocketTransport,
@@ -184,6 +185,50 @@ export class QuorumClient {
   arcadeStep(round: number, step: number, choice: 0 | 1): string {
     const cid = this.#nextCid();
     this.#send({ t: "arcade.step", cid, round, step, choice });
+    return cid;
+  }
+
+  /**
+   * Unseal: choose a shape, before knowing the word.
+   *
+   * Changeable while the tin is still closed and final once the Floor opens;
+   * that rule is the engine's. `round` is the arcade's round index, so a pick
+   * in flight when the host moves on cannot hand somebody a tin in the next
+   * round.
+   */
+  arcadeShape(round: number, shape: UnsealShape): string {
+    const cid = this.#nextCid();
+    this.#send({ t: "arcade.shape", cid, round, shape });
+    return cid;
+  }
+
+  /**
+   * Unseal: tap one letter. The character, not a tile index — a word with a
+   * repeated letter has two tiles that are the same tap.
+   */
+  arcadeLetter(round: number, letter: string): string {
+    const cid = this.#nextCid();
+    this.#send({ t: "arcade.letter", cid, round, letter });
+    return cid;
+  }
+
+  /** Unseal: **Read the docs.** Reveals the next letter and halves the round. */
+  arcadeDocs(round: number): string {
+    const cid = this.#nextCid();
+    this.#send({ t: "arcade.docs", cid, round });
+    return cid;
+  }
+
+  /**
+   * Tug of Raft: one tap at the rope.
+   *
+   * No timestamp, and in this round that is the whole point — see the note on
+   * `arcade.beat` in protocol.ts. The beat is judged on the server, against
+   * the same grid this phone is drawing off `pullStartedAt` and `beatMs`.
+   */
+  arcadeBeat(round: number): string {
+    const cid = this.#nextCid();
+    this.#send({ t: "arcade.beat", cid, round });
     return cid;
   }
 

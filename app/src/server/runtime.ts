@@ -17,6 +17,7 @@ import type {
   Event,
   ParticipantId,
   SessionState,
+  UnsealShape,
 } from "../engine/types.ts";
 import type {
   RefusedReason,
@@ -182,6 +183,19 @@ export function pickLightMs(rng: () => number): number {
 }
 
 /**
+ * One seed, for the two rounds that deal something out.
+ *
+ * Drawn here for exactly the reason a light duration is: the engine has no
+ * randomness, and Tug of Raft's sides are "reshuffled by seed before each of
+ * three pulls". A 32-bit integer because `seeded()` treats it as one, and a
+ * whole number because a seed with a fractional part hashes to the same
+ * sides as its neighbours.
+ */
+export function pickSeed(rng: () => number): number {
+  return Math.floor(Math.min(0.999_999_999, Math.max(0, rng())) * 0x1_0000_0000);
+}
+
+/**
  * When a tap happened, in server time, for the engine to judge against the
  * light.
  *
@@ -258,6 +272,8 @@ export class SessionRuntime {
     step: number;
     at: number;
   } | null = null;
+  #pullTimer: ReturnType<typeof setTimeout> | null = null;
+  #pullTimerFor: { round: number; pull: number; at: number } | null = null;
   /**
    * Where the light durations come from. A field rather than a parameter so a
    * test can make the round deterministic without the production path growing
@@ -549,7 +565,7 @@ export class SessionRuntime {
   /* ---------------- the arcade's clocks ---------------- */
 
   /**
-   * Four timers, for the four things the engine cannot do for itself.
+   * Five timers, for the five things the engine cannot do for itself.
    *
    * - **the light**, because the durations are random and the engine has no
    *   randomness;
@@ -558,6 +574,9 @@ export class SessionRuntime {
    * - **the step**, because the Glass Bridge is eighteen deadlines — six
    *   steps for each of three waves — and a host pressing a button eighteen
    *   times is a host who is not watching the room;
+   * - **the pull**, because Tug of Raft is three pulls of twenty-five
+   *   seconds and the seed for the next one's sides has to come from
+   *   somewhere the engine is not;
    * - **the Floor**, because Plan / Apply is seventy-five seconds and then it
    *   is over whether or not anyone is looking at the console.
    *
@@ -573,6 +592,7 @@ export class SessionRuntime {
     this.#armLightTimer(now);
     this.#armItemTimer(now);
     this.#armStepTimer(now);
+    this.#armPullTimer(now);
     this.#armFloorTimer(now);
   }
 
@@ -782,6 +802,88 @@ export class SessionRuntime {
   }
 
   /**
+   * Tug of Raft's pull clock: settle the open pull at `pullEndsAt`, and deal
+   * the next one.
+   *
+   * Two things come next and the timer picks between them, because they are
+   * two different engine events and the engine will refuse the wrong one:
+   *
+   * - another pull — `nextPull`, which closes this one, pays the winners and
+   *   the two leaders, reshuffles the sides and restarts the heartbeat;
+   * - the last pull — `endRound`, which settles it on the way past.
+   *
+   * The seed is drawn here, exactly as a light duration is, and for the same
+   * reason: the engine has no randomness, and a replayed log has to deal the
+   * same sides twice. It is the one thing this timer decides that the engine
+   * could not have.
+   *
+   * Keyed on the round, the pull and the deadline, so re-arming is
+   * idempotent, a host cutting a pull short clears it, and a timeout in
+   * flight when the pull changed checks the state before it does anything.
+   */
+  #armPullTimer(now: number): void {
+    const arcade = arcadeStateOf(this.state);
+    const play = arcade?.play;
+    if (!arcade || arcade.phase !== "running" || play?.kind !== "tug_of_raft") {
+      return this.#clearPullTimer();
+    }
+    const want = {
+      round: arcade.roundIndex,
+      pull: play.pull,
+      at: play.pullEndsAt,
+    };
+    const armed = this.#pullTimerFor;
+    if (
+      armed !== null &&
+      armed.round === want.round &&
+      armed.pull === want.pull &&
+      armed.at === want.at
+    ) {
+      return;
+    }
+    this.#clearPullTimer();
+    this.#pullTimerFor = want;
+    const last = play.pull + 1 >= play.pulls;
+    const timer = setTimeout(
+      () => {
+        this.#pullTimer = null;
+        this.#pullTimerFor = null;
+        const at = arcadeStateOf(this.state);
+        if (
+          !at ||
+          at.phase !== "running" ||
+          at.roundIndex !== want.round ||
+          at.play?.kind !== "tug_of_raft" ||
+          at.play.pull !== want.pull ||
+          at.play.pullEndsAt !== want.at
+        ) {
+          return; // the host got there first, or the round moved on
+        }
+        this.apply(
+          last
+            ? { type: "endRound" }
+            : { type: "nextPull", seed: pickSeed(this.rng) },
+          Date.now(),
+        );
+      },
+      Math.max(0, want.at - now),
+    );
+    timer.unref?.();
+    this.#pullTimer = timer;
+  }
+
+  #clearPullTimer(): void {
+    if (this.#pullTimer !== null) clearTimeout(this.#pullTimer);
+    this.#pullTimer = null;
+    this.#pullTimerFor = null;
+  }
+
+  /** What the pull timer is armed for. Null outside Tug of Raft. */
+  get armedPullAt(): number | null {
+    return this.#pullTimerFor?.at ?? null;
+  }
+
+  /**
    * The Floor's close — for the rounds the Floor's clock actually owns.
    *
    * Recruitment's is owned by the item timer instead, and only one of them may
@@ -793,6 +895,10 @@ export class SessionRuntime {
    * — the last item, every time, and only the last item. The item timer ends
    * the round on the last item (see {@link #armItemTimer}) and `nextItem`
    * keeps `endsAt` in step for the countdown, so nothing is left unowned.
+   *
+   * Tug of Raft is excluded for the same reason again: three pulls are three
+   * deadlines, the pull timer ends the round after the last one, and
+   * `nextPull` keeps `endsAt` in step for the countdown.
    *
    * The Glass Bridge is excluded for exactly the same reason and it matters
    * more there: eighteen deadlines accumulate eighteen lots of event-loop
@@ -810,7 +916,8 @@ export class SessionRuntime {
       arcade.phase !== "running" ||
       arcade.endsAt === null ||
       arcade.play?.kind === "recruitment" ||
-      arcade.play?.kind === "glass_bridge"
+      arcade.play?.kind === "glass_bridge" ||
+      arcade.play?.kind === "tug_of_raft"
     ) {
       return this.#clearFloorTimer();
     }
@@ -855,6 +962,7 @@ export class SessionRuntime {
     this.#clearLightTimer();
     this.#clearItemTimer();
     this.#clearStepTimer();
+    this.#clearPullTimer();
     this.#clearFloorTimer();
   }
 
@@ -869,9 +977,9 @@ export class SessionRuntime {
   }
 
   /**
-   * What the Floor timer is armed for. Null in Recruitment and on the Glass
-   * Bridge, whose endings the item and step timers own — see
-   * {@link #armFloorTimer}.
+   * What the Floor timer is armed for. Null in Recruitment, in Tug of Raft
+   * and on the Glass Bridge, whose endings the item, pull and step timers own
+   * — see {@link #armFloorTimer}.
    */
   get armedFloorAt(): number | null {
     return this.#floorTimerFor?.at ?? null;
@@ -1005,6 +1113,131 @@ export class SessionRuntime {
       { type: "stepPane", pid: client.pid, step, choice },
       corrected,
     );
+  }
+
+  /**
+   * Unseal, at the boundary: the shape pick, one letter, and **Read the
+   * docs**.
+   *
+   * One method for the three of them because they share the whole of their
+   * boundary work, which is one check: `round` is the arcade's `roundIndex`,
+   * and none of the three engine events carries one. A pick or a tap in
+   * flight when the host starts the next round would otherwise land on it —
+   * and in this round that is not a lost frame but a tin handed to somebody
+   * who did not choose it.
+   *
+   * Everything else — drained, the Floor closed, no shape picked yet, a
+   * letter that is not on your own tin, a tin that is already open — is the
+   * engine's, and is left to it.
+   *
+   * `receivedAt` is passed through uncorrected, deliberately. The one instant
+   * this round measures is when a tin came open, and the engine measures it
+   * from `startedAt`, which is the same instant for everybody: subtracting
+   * half a round trip would hand the +10 for the fastest in a shape to
+   * whoever has the worst connection. A latency correction belongs where a
+   * player is judged against a *deadline they could not see coming* — a lock,
+   * a step's close, a beat — and the fastest tin is a race everybody runs on
+   * the same clock.
+   */
+  unseal(
+    client: Client,
+    round: number,
+    event:
+      | { type: "pickShape"; shape: UnsealShape }
+      | { type: "tapLetter"; letter: string }
+      | { type: "readDocs" },
+    receivedAt: number,
+  ): { applied: boolean; rejection?: { code: string; message: string } } {
+    if (client.pid === undefined) {
+      return {
+        applied: false,
+        rejection: { code: "unknown_participant", message: "Not a participant." },
+      };
+    }
+    const arcade = arcadeStateOf(this.state);
+    if (!arcade) {
+      return {
+        applied: false,
+        rejection: { code: "not_in_arcade", message: "The arcade is not open." },
+      };
+    }
+    if (round !== arcade.roundIndex) {
+      return {
+        applied: false,
+        rejection: {
+          code: "wrong_round_phase",
+          message: "That round has moved on.",
+        },
+      };
+    }
+    const pid = client.pid;
+    return this.apply(
+      event.type === "pickShape"
+        ? { type: "pickShape", pid, shape: event.shape }
+        : event.type === "tapLetter"
+          ? { type: "tapLetter", pid, letter: event.letter }
+          : { type: "readDocs", pid },
+      receivedAt,
+    );
+  }
+
+  /**
+   * One tap at the rope in Tug of Raft, turned into an engine event.
+   *
+   * **This is where the heartbeat is judged**, and it is the reason the frame
+   * carries no timestamp. Whether a tap was on the beat is the entire round —
+   * SPEC.md: "a raw tap race rewards whoever's phone registers taps fastest,
+   * and the beat means everyone is capped at the same rate" — so a
+   * client-chosen instant would be an "I hit every beat" claim that nothing
+   * could check, and the cap would be worth exactly nothing.
+   *
+   * The correction is the same one a trivia answer gets and it matters more
+   * here than anywhere else in the product. The beat grid is the server's:
+   * beat *n* of the pull is `pullStartedAt + n * beatMs`, and the window
+   * around it is ±120 ms at 100 bpm. An uncorrected 300 ms link would miss
+   * every beat it hit — the player taps in time with the beat their screen is
+   * showing, the frame lands 150 ms late, and a round designed so that
+   * "the skill is rhythm, not hardware" would be decided by hardware. Taking
+   * the upstream leg off reconstructs when the finger actually came down, in
+   * server time, and that is the instant the engine judges.
+   *
+   * There is no grace to go with it, unlike Plan / Apply's 250 ms. A grace is
+   * a fiction about a *state the phone was shown late*; a beat is a grid both
+   * ends can compute, the phone is drawing the same one off the same absolute
+   * epochs, and a tolerance already exists in the engine and is generous.
+   *
+   * `round` is checked here for the reason a tap's is: `tapBeat` carries no
+   * round id, and the pull resets to 0 at every round.
+   */
+  beat(
+    client: Client,
+    round: number,
+    receivedAt: number,
+  ): { applied: boolean; rejection?: { code: string; message: string } } {
+    if (client.pid === undefined) {
+      return {
+        applied: false,
+        rejection: { code: "unknown_participant", message: "Not a participant." },
+      };
+    }
+    const arcade = arcadeStateOf(this.state);
+    if (!arcade) {
+      return {
+        applied: false,
+        rejection: { code: "not_in_arcade", message: "The arcade is not open." },
+      };
+    }
+    if (round !== arcade.roundIndex) {
+      return {
+        applied: false,
+        rejection: {
+          code: "wrong_round_phase",
+          message: "That round has moved on.",
+        },
+      };
+    }
+    const at = receivedAt - latencyCorrection(medianRtt(client.rtt));
+    return this.apply({ type: "tapBeat", pid: client.pid, at }, receivedAt);
   }
 
   /**

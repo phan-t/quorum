@@ -833,6 +833,295 @@ body {
  * coral, and nothing under 18px.
  * -------------------------------------------------------------------- */
 
+/* ---- Unseal ----------------------------------------------------------- *
+ *
+ * Four tins, filling up, and then the nine words.
+ *
+ * Everything here is a count or a player number. The words and the cues do
+ * not reach this surface until the reveal — nine anagrams on a shared screen
+ * is somebody else's tin solved out loud by whoever reads fastest — so what
+ * the room watches during the round is four tiles and a clock.
+ *
+ * In the document flow, like the bridge, never laid over the grid.
+ * -------------------------------------------------------------------- */
+
+.s-unseal {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1.6vh;
+}
+.s-unseal[hidden] {
+  display: none;
+}
+.s-unseal-head {
+  margin: 0;
+  flex: none;
+  color: var(--muted);
+  font-size: clamp(18px, 1.5vw, 28px);
+  letter-spacing: 0.14em;
+}
+.s-tins {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  gap: 12px;
+  align-items: stretch;
+}
+.s-tins[hidden] {
+  display: none;
+}
+.s-tin {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  padding: 12px;
+  border: 2px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel);
+}
+/* A tier the loaded content has no word for. Dashed as well as dimmed. */
+.s-tin[data-available="no"] {
+  border-style: dashed;
+  opacity: 0.45;
+}
+.s-tin-glyph {
+  margin: 0;
+  font-size: clamp(40px, 5vw, 96px);
+  line-height: 1;
+  color: var(--ink);
+}
+.s-tin-score {
+  margin: 0;
+  font-size: clamp(14px, 1.1vw, 22px);
+  letter-spacing: 0.14em;
+  color: var(--muted);
+}
+.s-tin-count {
+  margin: 0;
+  font-size: clamp(28px, 3.2vw, 64px);
+  color: var(--arc-players);
+}
+/* The +10 board: the fastest in this shape, as a number. The nickname is on
+   the phone only, where the person it belongs to is the only reader. */
+.s-tin-fastest {
+  margin: 0;
+  font-size: clamp(14px, 1.2vw, 24px);
+  letter-spacing: 0.1em;
+  color: var(--arc-lounge);
+}
+.s-tin-fastest::before {
+  content: "\2605 ";
+}
+
+.s-unseal-recap {
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 0.6vh;
+}
+.s-unseal-recap[hidden] {
+  display: none;
+}
+/* Fixed columns rather than `auto`, so nine rows read as a table: the
+   scrambles run from four letters to thirteen, and an `auto` column let the
+   longest one push every answer and every note out of line. */
+.s-unseal-row {
+  display: grid;
+  /* Percentages, not `ch` or `auto`. `ch` resolves against the row's own font
+     while the answer is set two to three times larger, and `auto` let the
+     longest scramble — thirteen spaced letters — push every answer and every
+     note out of line. These four tracks are the same width on every row. */
+  grid-template-columns: 4% 19% 25% 1fr;
+  align-items: baseline;
+  gap: 0 16px;
+  padding: 0.4vh 0;
+  border-top: 1px solid var(--line);
+}
+.s-unseal-shape {
+  font-size: clamp(18px, 1.6vw, 30px);
+  color: var(--muted);
+}
+/* --muted, not --dim: tokens.css is explicit that "--dim never carries text
+   that has to be read", and it measures 3.07:1 dark / 3.19:1 light against
+   the ground. The scramble is quiet, but it is the thing the room is checking
+   the answer against, so it is read. --muted is 5.84 / 5.42. */
+.s-unseal-cue {
+  font-size: clamp(12px, 1vw, 18px);
+  letter-spacing: 0.14em;
+  line-height: 1.2;
+  /* A thirteen-letter scramble wraps inside its own track rather than
+     widening it and moving the answer beside it. */
+  overflow-wrap: anywhere;
+  color: var(--muted);
+}
+.s-unseal-answer {
+  font-size: clamp(20px, 1.8vw, 36px);
+  line-height: 1.1;
+  overflow-wrap: anywhere;
+  color: var(--ink);
+}
+.s-unseal-note {
+  font-size: clamp(13px, 1.1vw, 22px);
+  color: var(--muted);
+}
+
+/* ---- Tug of Raft ------------------------------------------------------ *
+ *
+ * Two clusters, one rope, and the heartbeat.
+ *
+ * The pulse has no CSS animation and must not get one. `--pulse` is set from
+ * the script on every tick, off the server's beat grid; a keyframe would be a
+ * second clock started whenever this element was laid out, and the room would
+ * be tapping to a beat the server is not counting.
+ * -------------------------------------------------------------------- */
+
+.s-tug {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1.6vh;
+}
+.s-tug[hidden] {
+  display: none;
+}
+.s-tug-head {
+  margin: 0;
+  flex: none;
+  color: var(--muted);
+  font-size: clamp(18px, 1.5vw, 28px);
+  letter-spacing: 0.14em;
+}
+.s-tug-arena {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  align-items: center;
+  gap: 2vw;
+}
+.s-cluster {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1vh;
+}
+.s-cluster[data-side="b"] {
+  align-items: flex-end;
+  text-align: right;
+}
+.s-cluster-head {
+  margin: 0;
+  display: flex;
+  gap: 12px;
+  align-items: baseline;
+  font-size: clamp(16px, 1.4vw, 26px);
+  letter-spacing: 0.14em;
+  color: var(--muted);
+}
+.s-cluster-n {
+  font-size: clamp(24px, 2.6vw, 52px);
+  color: var(--arc-players);
+}
+.s-cluster-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.s-cluster[data-side="b"] .s-cluster-tags {
+  justify-content: flex-end;
+}
+.s-cluster-tag {
+  padding: 2px 8px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  font-size: clamp(14px, 1.2vw, 24px);
+  color: var(--ink);
+  background: var(--panel);
+}
+.s-cluster-tag[data-away="yes"] {
+  color: var(--muted);
+  border-style: dashed;
+}
+/* The leader on a side, marked with a glyph as well as a hue: nothing on this
+   surface may be told apart by colour alone. */
+.s-cluster-tag[data-leader="yes"] {
+  border-color: var(--arc-lounge);
+  color: var(--arc-lounge);
+}
+.s-cluster-tag[data-leader="yes"]::after {
+  content: " \2605";
+}
+
+/* The rope: a vertical column with the knot on it, and the heartbeat behind. */
+.s-rope {
+  position: relative;
+  width: clamp(120px, 22vw, 420px);
+  height: clamp(80px, 12vh, 160px);
+  display: flex;
+  align-items: center;
+}
+.s-rope-track {
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 10px;
+  border-radius: 999px;
+  /* The share of the on-beat taps, as a hard edge rather than a gradient: a
+     soft edge on a compressed video tile is no edge at all. */
+  background: linear-gradient(
+    to right,
+    var(--nomad) 0 var(--at, 50%),
+    var(--panel-2) var(--at, 50%) 100%
+  );
+}
+.s-rope-knot {
+  position: absolute;
+  top: 50%;
+  width: 8px;
+  height: clamp(36px, 5vh, 60px);
+  margin: 0 0 0 -4px;
+  transform: translateY(-50%);
+  border-radius: 4px;
+  background: var(--ink);
+}
+.s-pulse {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: clamp(72px, 9vh, 120px);
+  height: clamp(72px, 9vh, 120px);
+  margin: calc(clamp(72px, 9vh, 120px) / -2) 0 0 calc(clamp(72px, 9vh, 120px) / -2);
+  border-radius: 50%;
+  border: 4px solid var(--arc-staff);
+  transform: scale(calc(0.4 + 0.6 * var(--pulse, 0)));
+  opacity: calc(0.2 + 0.7 * var(--pulse, 0));
+  pointer-events: none;
+}
+.s-pulse[data-on="yes"] {
+  border-color: var(--arc-players);
+}
+.s-tug-wins {
+  margin: 0;
+  flex: none;
+  font-size: clamp(16px, 1.3vw, 26px);
+  letter-spacing: 0.12em;
+  color: var(--muted);
+}
+
 .s-bridge {
   position: relative;
   flex: 1;

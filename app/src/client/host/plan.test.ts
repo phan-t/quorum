@@ -25,11 +25,13 @@ import {
 const LABEL: Readonly<Record<ArcadePick, string>> = {
   recruitment: "Recruitment",
   plan_apply: "Plan / Apply",
+  unseal: "Unseal",
+  tug_of_raft: "Tug of Raft",
   glass_bridge: "The Glass Bridge",
 };
 
 describe("the arcade running order", () => {
-  it("starts with all three built rounds, in SPEC order", () => {
+  it("starts with every built round, in SPEC order", () => {
     assert.deepEqual(planIncluded(defaultPlan()), [...ARCADE_PLAYABLE]);
   });
 
@@ -37,8 +39,10 @@ describe("the arcade running order", () => {
     const moved = movePlan(defaultPlan(), "glass_bridge", -1);
     assert.deepEqual(planIncluded(moved), [
       "recruitment",
-      "glass_bridge",
       "plan_apply",
+      "unseal",
+      "glass_bridge",
+      "tug_of_raft",
     ]);
   });
 
@@ -50,17 +54,26 @@ describe("the arcade running order", () => {
 
   it("takes a round out of the order and puts it back", () => {
     const without = togglePlan(defaultPlan(), "plan_apply");
-    assert.deepEqual(planIncluded(without), ["recruitment", "glass_bridge"]);
+    assert.deepEqual(planIncluded(without), [
+      "recruitment",
+      "unseal",
+      "tug_of_raft",
+      "glass_bridge",
+    ]);
     assert.deepEqual(planIncluded(togglePlan(without, "plan_apply")), [
       "recruitment",
       "plan_apply",
+      "unseal",
+      "tug_of_raft",
       "glass_bridge",
     ]);
   });
 
   it("refuses to empty the order — the button would have nothing to name", () => {
-    let plan = togglePlan(defaultPlan(), "plan_apply");
-    plan = togglePlan(plan, "glass_bridge");
+    let plan = defaultPlan();
+    for (const kind of ARCADE_PLAYABLE) {
+      if (kind !== "recruitment") plan = togglePlan(plan, kind);
+    }
     assert.deepEqual(planIncluded(plan), ["recruitment"]);
     assert.equal(isLastIncluded(plan, "recruitment"), true);
     assert.deepEqual(togglePlan(plan, "recruitment"), plan);
@@ -72,13 +85,13 @@ describe("the arcade running order", () => {
     assert.equal(nextRound(plan, new Set(["recruitment"])), "plan_apply");
     assert.equal(
       nextRound(plan, new Set(["recruitment", "plan_apply"])),
-      "glass_bridge",
+      "unseal",
     );
   });
 
   it("skips a round the host took out", () => {
     const plan = togglePlan(defaultPlan(), "plan_apply");
-    assert.equal(nextRound(plan, new Set(["recruitment"])), "glass_bridge");
+    assert.equal(nextRound(plan, new Set(["recruitment"])), "unseal");
   });
 
   it("runs out, so the console can offer the standings instead", () => {
@@ -89,12 +102,13 @@ describe("the arcade running order", () => {
   it("says the order in words for the checklist", () => {
     assert.equal(
       planSummary(defaultPlan(), LABEL),
-      "Recruitment, Plan / Apply, then The Glass Bridge",
+      "Recruitment, Plan / Apply, Unseal, Tug of Raft, then The Glass Bridge",
     );
-    assert.equal(
-      planSummary(togglePlan(togglePlan(defaultPlan(), "plan_apply"), "glass_bridge"), LABEL),
-      "Recruitment",
-    );
+    let only = defaultPlan();
+    for (const kind of ARCADE_PLAYABLE) {
+      if (kind !== "recruitment") only = togglePlan(only, kind);
+    }
+    assert.equal(planSummary(only, LABEL), "Recruitment");
   });
 });
 
@@ -121,7 +135,7 @@ describe("the order, across a refresh", () => {
     );
     assert.deepEqual(
       back?.plan.map((e) => e.kind),
-      ["plan_apply", "recruitment", "glass_bridge"],
+      ["plan_apply", "recruitment", "unseal", "tug_of_raft", "glass_bridge"],
     );
   });
 
@@ -137,7 +151,7 @@ describe("the order, across a refresh", () => {
     );
     assert.deepEqual(
       back?.plan.map((e) => e.kind),
-      ["recruitment", "plan_apply", "glass_bridge"],
+      ["recruitment", "plan_apply", "unseal", "tug_of_raft", "glass_bridge"],
     );
     assert.equal(back?.plan[0]?.included, false);
   });
@@ -148,7 +162,10 @@ describe("the order, across a refresh", () => {
         plan: ARCADE_PLAYABLE.map((kind) => ({ kind, included: false })),
       }),
     );
-    assert.equal(planIncluded(back?.plan ?? []).length, 3);
+    assert.equal(
+      planIncluded(back?.plan ?? []).length,
+      ARCADE_PLAYABLE.length,
+    );
   });
 
   it("ignores a timing that is not a positive number", () => {

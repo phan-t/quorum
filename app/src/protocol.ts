@@ -21,6 +21,7 @@ import type {
   ScoreStatus,
   Segment,
   SessionPhase,
+  UnsealShape,
   WaveSeconds,
 } from "./engine/types.ts";
 
@@ -116,6 +117,50 @@ export type ClientMessage =
    * direction: see {@link ArcadeGlassView}.
    */
   | { t: "arcade.step"; cid: string; round: number; step: number; choice: number }
+  /**
+   * Unseal: choose a shape, before knowing the word.
+   *
+   * No timestamp and nothing else: the shape is the whole bet. `round` is the
+   * arcade's `roundIndex`, so a pick in flight when the host moves on cannot
+   * hand somebody a tin in the next round.
+   *
+   * Changeable while the tin is still closed and final once the Floor opens —
+   * that rule lives in the engine, not here.
+   */
+  | { t: "arcade.shape"; cid: string; round: number; shape: UnsealShape }
+  /**
+   * Unseal: tap one letter of the scrambled cue.
+   *
+   * The **character**, not a tile index, because a word with a repeated
+   * letter has two tiles that are the same tap and an index would make the
+   * two of them different. The engine checks the character is on the tin and
+   * refuses anything else as a malformed frame rather than as a wrong guess.
+   *
+   * No timestamp: the only instant this round measures is when a tin came
+   * open, which decides the +10 for the fastest in a shape, and a
+   * client-chosen one would be a number worth points. The server times it
+   * from its own clock — see `letter` in runtime.ts.
+   */
+  | { t: "arcade.letter"; cid: string; round: number; letter: string }
+  /**
+   * Unseal: **Read the docs.** Reveals the next letter and halves the round.
+   *
+   * Its own frame rather than a flag on `arcade.letter`, because it is not a
+   * guess: it commits whatever the next letter is, which the phone does not
+   * know and must not be told in order to send this.
+   */
+  | { t: "arcade.docs"; cid: string; round: number }
+  /**
+   * Tug of Raft: one tap at the rope.
+   *
+   * No timestamp, for the reason `arcade.tap` carries none and then the one
+   * that matters most in this round: whether a tap was *on the beat* is the
+   * entire game, so a client-chosen instant would be a claim to have hit
+   * every beat that nothing could check. The server times it from its own
+   * clock and its own latency estimate for this socket, and the beat grid it
+   * is judged against is the server's — see `beat` in runtime.ts.
+   */
+  | { t: "arcade.beat"; cid: string; round: number }
   /** The Lounge: back a player, or change who you are backing. */
   | { t: "arcade.back"; cid: string; pid: ParticipantId }
   /**
@@ -240,6 +285,30 @@ export type HostCommand =
    * frame the console could be made to echo.
    */
   | { name: "arcade.round"; kind: "glass_bridge"; waveSeconds: WaveSeconds }
+  /**
+   * Unseal. Only the length of the Floor is the host's to set.
+   *
+   * The nine tins are *not* on this command, for the reason the Bridge's
+   * panes are not: an `UnsealItem` carries the word and the reveal note, so a
+   * round config on the wire would be the answer key leaving the server on a
+   * frame the console could be made to echo.
+   */
+  | { name: "arcade.round"; kind: "unseal"; seconds: number }
+  /**
+   * Tug of Raft: how many pulls, how long each one is, and the heartbeat.
+   *
+   * The **seed is not here**. Sides are "reshuffled by seed before each of
+   * three pulls" and a seed the console chose would be a console that can
+   * deal itself the sides; it is drawn at the socket boundary exactly as
+   * Plan / Apply's light durations are, and for the same reason.
+   */
+  | {
+      name: "arcade.round";
+      kind: "tug_of_raft";
+      pulls: number;
+      pullSeconds: number;
+      bpm: number;
+    }
   /** The round card is up; this opens the Floor. */
   | { name: "arcade.begin" }
   /** Recruitment: next emoji. */
@@ -254,6 +323,14 @@ export type HostCommand =
   | { name: "arcade.nextStep" }
   /** The Glass Bridge: close the wave and send the next one onto the bridge. */
   | { name: "arcade.nextWave" }
+  /**
+   * Tug of Raft: settle the open pull and start the next one, with new sides.
+   *
+   * The server's pull timer sends the identical event at `pullEndsAt`, so
+   * this is the host cutting a pull short and not a second code path. It
+   * carries no seed for the reason `arcade.round` does not.
+   */
+  | { name: "arcade.nextPull" }
   | { name: "arcade.end" }
   | { name: "arcade.reveal" };
 
@@ -529,6 +606,149 @@ export interface ArcadePlanApplyView {
 }
 
 /**
+ * Round 2, Unseal: one of the four tins, as the room may see it.
+ *
+ * `score` is on the wire rather than in the client because it is the whole of
+ * the bet: SPEC.md prices the four shapes at 10 / 20 / 35 / 50 and the pick
+ * is made before the word is known, so the number *is* the question the
+ * picker asks. One source of truth for it — `UNSEAL_SHAPE_SCORE` in
+ * engine/arcade.ts — and the client renders what it is told.
+ *
+ * What is deliberately not here is **who** picked what. `picked` is a count,
+ * exactly as `unsealFloorView` makes it: a per-player shape on the big screen
+ * is a per-player word length, three metres from the person working it out.
+ * And no length: the shapes *are* the lengths, and learning which is which is
+ * what picking buys you.
+ */
+export interface ArcadeUnsealShape {
+  readonly shape: UnsealShape;
+  /** There is at least one tin of this shape. A host may load a set without. */
+  readonly available: boolean;
+  /** What unsealing it pays, in total. SPEC.md: 10 / 20 / 35 / 50. */
+  readonly score: number;
+  /** How many picked it. Numbers, not people. */
+  readonly picked: number;
+  /** How many of those have the tin open. */
+  readonly unsealed: number;
+  /** Fastest in this shape, as a player number. Screen and host, at the end. */
+  readonly fastest?: number;
+}
+
+/**
+ * One tin with its word, at the reveal. **The answer.**
+ *
+ * Every tin, not only the ones somebody held: SPEC.md asks the reveal to read
+ * the note out, and the note is the thing a room of solutions architects
+ * actually takes away — *Reusable Terraform. The thing everyone means to
+ * write and never does.*
+ */
+export interface ArcadeUnsealRecap {
+  readonly shape: UnsealShape;
+  readonly cue: string;
+  readonly answer: string;
+  readonly note: string;
+}
+
+/**
+ * Round 2, Unseal — projected.
+ *
+ * The round's secret is small and absolute: **the words**. They live in
+ * `ArcadePlay.key` and reach one phone at a time, through `unsealMeView`, and
+ * never any public surface until `revealRound`. There is no cue on this
+ * view, no length, and no per-player shape, because any of the three would
+ * say what somebody else is holding.
+ *
+ * | field | participant | screen | host |
+ * | --- | --- | --- | --- |
+ * | `shapes` (glyph, score, counts) | always | always | always |
+ * | `shapes[].fastest` | never | always | always |
+ * | `unsealOrder` | never | always | always |
+ * | `progress` (per player) | never | never | always |
+ * | `docs` (who read them) | never | never | always |
+ * | `recap` (**the words**) | reveal | reveal | always |
+ */
+export interface ArcadeUnsealView {
+  /** The four tins, in picker order: ○ △ ☆ ☂. */
+  readonly shapes: readonly ArcadeUnsealShape[];
+  /** How many are holding a tin at all, and how many are on the Floor. */
+  readonly picked: number;
+  readonly unsealed: number;
+  /** Who got a tin open, in order, as player numbers. Screen and host. */
+  readonly unsealOrder?: readonly number[];
+  /**
+   * Host only: letters tapped, per player.
+   *
+   * A count and never a letter — a letter would be the prefix of somebody's
+   * word. It is on the console for the reason every other number is: the host
+   * is the only reader who is not in the room.
+   */
+  readonly progress?: Readonly<Record<ParticipantId, number>>;
+  /** Host only: who pressed **Read the docs**, as player numbers. */
+  readonly docs?: readonly number[];
+  /** The words, at the reveal. The host has them throughout: they read them out. */
+  readonly recap?: readonly ArcadeUnsealRecap[];
+}
+
+/**
+ * Round 3, Tug of Raft — projected.
+ *
+ * Nothing in this round is a secret. Nobody is drained, there is nothing to
+ * know and no answer to withhold: SPEC.md builds it that way on purpose —
+ * "the arcade needs one round that is pure noise". So the projection's job is
+ * not secrecy, it is making sure **every surface counts the same beats**.
+ *
+ * That is why the beat is described here as a grid rather than as a tempo.
+ * `pullStartedAt` is beat 0 and beat *n* is `pullStartedAt + n * beatMs`, as
+ * absolute server epochs against the client's corrected clock — the same
+ * discipline as `closesAt` in trivia and `stepEndsAt` on the bridge. A
+ * surface that started its own 600 ms interval on the frame it happened to
+ * receive would drift away from the server's grid within a pull, and every
+ * tap it encouraged would be judged against a beat it was not showing.
+ *
+ * `toleranceMs`, `missesToElection` and `electionMs` ride along for the same
+ * reason the checkpoints do in Plan / Apply: they are the rule, the engine
+ * owns them, and a client that hard-coded its own copy would eventually draw
+ * a window the server does not judge by.
+ *
+ * | field | participant | screen | host |
+ * | --- | --- | --- | --- |
+ * | the beat grid and the rope | always | always | always |
+ * | `sides` (everybody's side) | never | always | always |
+ * | `leaders` | never | always | always |
+ * | `onBeats` (per player) | never | never | always |
+ */
+export interface ArcadeTugView {
+  /** Which pull is being pulled, from 0. */
+  readonly pull: number;
+  readonly pulls: number;
+  readonly pullSeconds: number;
+  /** 60 000 / bpm. Beat *n* of the pull is `pullStartedAt + n * beatMs`. */
+  readonly beatMs: number;
+  /** How far off a beat a tap may land and still pull. */
+  readonly toleranceMs: number;
+  /** Missed beats in a row that time a node out. */
+  readonly missesToElection: number;
+  /** How long an election achieves nothing for. */
+  readonly electionMs: number;
+  /** Absolute server epochs. Absent while the round card is up. */
+  readonly pullStartedAt?: number;
+  readonly pullEndsAt?: number;
+  /** On-beat taps this pull, per side. The rope is the difference. */
+  readonly totals: readonly [number, number];
+  /** Pulls won, per side. */
+  readonly wins: readonly [number, number];
+  /** Which side each player is on. The Desktop draws both clusters. */
+  readonly sides?: Readonly<Record<ParticipantId, ParticipantSide>>;
+  /** The best on-beat rate on each side, as player numbers. Null for nobody. */
+  readonly leaders?: readonly [number | null, number | null];
+  /** Host only: on-beat taps per player, which is what the leader is read off. */
+  readonly onBeats?: Readonly<Record<ParticipantId, number>>;
+}
+
+/** 0 or 1. Which rope end, and nothing about which is winning. */
+export type ParticipantSide = 0 | 1;
+
+/**
  * Round 5, The Glass Bridge: one step of the bridge, as the room may see it.
  *
  * The product and the two labels, in display order, and nothing else. This is
@@ -675,6 +895,11 @@ export interface ArcadeGlassView {
  * | `planApply.light` | always | always | always |
  * | `planApply.nextChangeAt` / `headTurnsAt` | **never** | always | always |
  * | `planApply.crossed` / `finishOrder` | never | always | always |
+ * | `unseal.shapes` (glyph, score, counts) | always | always | always |
+ * | `unseal.progress` / `docs` | never | never | always |
+ * | `unseal.recap` (**the words**) | reveal | reveal | always |
+ * | `tug` beat grid and rope | always | always | always |
+ * | `tug.sides` / `leaders` | never | always | always |
  * | `glass.broken` | always | always | always |
  * | `glass.board` | running, reveal | running, reveal | always |
  * | `glass.crossed` / `fastest` | never | always | always |
@@ -694,6 +919,8 @@ export interface ArcadeView {
   readonly inLounge: number;
   readonly recruitment?: ArcadeRecruitmentView;
   readonly planApply?: ArcadePlanApplyView;
+  readonly unseal?: ArcadeUnsealView;
+  readonly tug?: ArcadeTugView;
   readonly glass?: ArcadeGlassView;
 }
 
@@ -717,6 +944,58 @@ export interface ArcadeMinePlanApply {
   readonly resources: number;
   /** 1-based, once they are across the line. Absent until then. */
   readonly place?: number;
+}
+
+/**
+ * Unseal, for the one phone it belongs to.
+ *
+ * This is `unsealMeView()` from engine/arcade.ts on the wire, and it is the
+ * **only** way a cue ever leaves the server: there is no public view of the
+ * tins at all, because publishing the list would say which word sits behind
+ * each shape and "pick your shape before you know the word" is the entire
+ * round.
+ *
+ * `cue` is null until the Floor opens — the tin is handed over at the pick
+ * and opened when the round starts — and `solved` is the prefix this player
+ * has already tapped, theirs because they tapped it. The rest of the word
+ * stays in the key until `revealRound`.
+ */
+export interface ArcadeMineUnseal {
+  /** Null until they choose. ○ △ ☆ ☂ */
+  readonly shape: UnsealShape | null;
+  /** The scrambled letters. Null until the Floor opens. */
+  readonly cue: string | null;
+  /** How long the word is, which is what the shape turns out to have meant. */
+  readonly length: number;
+  readonly progress: number;
+  /** What they have tapped so far, in order. Never one letter more. */
+  readonly solved: string;
+  /** They pressed **Read the docs**. Their Floor score for the round halves. */
+  readonly docs: boolean;
+  readonly unsealed: boolean;
+  readonly cracked: boolean;
+}
+
+/**
+ * Tug of Raft, for the one phone it belongs to.
+ *
+ * Three facts and no fourth: which end of the rope they are on, how many
+ * beats they have hit this pull, and the last beat they hit.
+ *
+ * `lastBeat` is what an **election** is derived from, here exactly as in the
+ * engine. Three missed beats in a row time a node out for two seconds, and
+ * neither side of the wire stores that: the engine has no clock, so it could
+ * only ever write such a field when some other event happened to arrive —
+ * which is precisely when it is not needed. The phone has a clock, so it
+ * derives the same window from `lastBeat`, `pullStartedAt` and `beatMs`, and
+ * the two agree because they are the same arithmetic on the same numbers.
+ */
+export interface ArcadeMineTug {
+  readonly side: ParticipantSide;
+  /** On-beat taps this pull. Reset every pull, like the sides. */
+  readonly onBeats: number;
+  /** The last beat they hit, as an index from the pull's start. −1 for none. */
+  readonly lastBeat: number;
 }
 
 /**
@@ -765,6 +1044,8 @@ export interface ArcadeMine {
   readonly drainedAt?: number;
   readonly recruitment?: ArcadeMineRecruitment;
   readonly planApply?: ArcadeMinePlanApply;
+  readonly unseal?: ArcadeMineUnseal;
+  readonly tug?: ArcadeMineTug;
   readonly glass?: ArcadeMineGlass;
 }
 
@@ -1046,6 +1327,60 @@ export function parseClientMessage(raw: string): ClientMessage | null {
         choice: choice as number,
       };
     }
+    case "arcade.shape": {
+      const cid = str("cid");
+      const round = m["round"];
+      const shape = m["shape"];
+      const SHAPES: readonly UnsealShape[] = [
+        "circle",
+        "triangle",
+        "star",
+        "umbrella",
+      ];
+      if (
+        cid === null ||
+        typeof round !== "number" ||
+        !Number.isInteger(round) ||
+        round < 0 ||
+        !SHAPES.includes(shape as UnsealShape)
+      ) {
+        return null;
+      }
+      return { t: "arcade.shape", cid, round, shape: shape as UnsealShape };
+    }
+    case "arcade.letter": {
+      const cid = str("cid");
+      const round = m["round"];
+      const letter = str("letter");
+      if (
+        cid === null ||
+        letter === null ||
+        typeof round !== "number" ||
+        !Number.isInteger(round) ||
+        round < 0
+      ) {
+        return null;
+      }
+      // Bounded here rather than in the engine, exactly as `arcade.answer` is:
+      // a megabyte of "letter" is a socket problem and not a game rule. The
+      // engine takes the first letter of what arrives and refuses the frame if
+      // that letter is not on this player's own tin.
+      return { t: "arcade.letter", cid, round, letter: letter.slice(0, 8) };
+    }
+    case "arcade.docs":
+    case "arcade.beat": {
+      const cid = str("cid");
+      const round = m["round"];
+      if (
+        cid === null ||
+        typeof round !== "number" ||
+        !Number.isInteger(round) ||
+        round < 0
+      ) {
+        return null;
+      }
+      return { t: m["t"] as "arcade.docs" | "arcade.beat", cid, round };
+    }
     case "arcade.back": {
       const cid = str("cid");
       const pid = str("pid");
@@ -1214,9 +1549,31 @@ function parseHostCommand(v: unknown): HostCommand | null {
           waveSeconds: [ws[0], ws[1], ws[2]] as WaveSeconds,
         };
       }
-      // The other three rounds are designed but not built. Refusing the frame
-      // is how the console finds that out, rather than a round that starts
-      // and does nothing.
+      if (c["kind"] === "unseal") {
+        const seconds = int("seconds");
+        return seconds === null
+          ? null
+          : { name: "arcade.round", kind: "unseal", seconds };
+      }
+      if (c["kind"] === "tug_of_raft") {
+        // No seed. It is drawn at the socket boundary — a seed a console
+        // could choose is a console that can deal itself the sides.
+        const pulls = int("pulls");
+        const pullSeconds = int("pullSeconds");
+        const bpm = int("bpm");
+        return pulls === null || pullSeconds === null || bpm === null
+          ? null
+          : {
+              name: "arcade.round",
+              kind: "tug_of_raft",
+              pulls,
+              pullSeconds,
+              bpm,
+            };
+      }
+      // Gganbu is designed but not built. Refusing the frame is how the
+      // console finds that out, rather than a round that starts and does
+      // nothing.
       return null;
     }
     case "arcade.begin":
@@ -1227,6 +1584,8 @@ function parseHostCommand(v: unknown): HostCommand | null {
       return { name: "arcade.nextStep" };
     case "arcade.nextWave":
       return { name: "arcade.nextWave" };
+    case "arcade.nextPull":
+      return { name: "arcade.nextPull" };
     case "arcade.end":
       return { name: "arcade.end" };
     case "arcade.reveal":

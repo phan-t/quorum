@@ -17,6 +17,7 @@ import type {
   TriviaMine,
   TriviaView,
 } from "../../protocol.ts";
+import type { UnsealShape } from "../../engine/types.ts";
 import { append, h, replace, setAttr, setClass, setText } from "../shared/dom.ts";
 import {
   ARCADE_ROUND_CARD,
@@ -26,6 +27,7 @@ import {
   KEY_HINT,
   LIGHT_FACE,
   PLAY_RULE,
+  UNSEAL_FACE,
   STAFF_CARD,
   STATE_LOCK_ERROR,
   answerKeyIndex,
@@ -49,6 +51,11 @@ import {
   resourceBar,
   stepFraction,
   timerFraction,
+  tugBeatAt,
+  tugElectionAt,
+  tugRope,
+  unsealLetterKey,
+  unsealTiles,
   type BridgeEntry,
   type ViewKind,
 } from "../shared/view.ts";
@@ -80,6 +87,10 @@ export interface ParticipantViewOptions {
   onArcadeTap?: (round: number) => void;
   onArcadeAnswer?: (item: number, answer: string) => void;
   onArcadeStep?: (round: number, step: number, choice: 0 | 1) => void;
+  onArcadeShape?: (round: number, shape: UnsealShape) => void;
+  onArcadeLetter?: (round: number, letter: string) => void;
+  onArcadeDocs?: (round: number) => void;
+  onArcadeBeat?: (round: number) => void;
   onArcadeBack?: (pid: string) => void;
 }
 
@@ -178,6 +189,10 @@ export function createParticipantView(
     arcadeAnswer: (item, answer) => opts.onArcadeAnswer?.(item, answer),
     arcadeStep: (round, step, choice) =>
       opts.onArcadeStep?.(round, step, choice),
+    arcadeShape: (round, shape) => opts.onArcadeShape?.(round, shape),
+    arcadeLetter: (round, letter) => opts.onArcadeLetter?.(round, letter),
+    arcadeDocs: (round) => opts.onArcadeDocs?.(round),
+    arcadeBeat: (round) => opts.onArcadeBeat?.(round),
     arcadeBack: (pid) => opts.onArcadeBack?.(pid),
   };
 
@@ -299,6 +314,10 @@ interface SceneCtx {
   arcadeTap(round: number): void;
   arcadeAnswer(item: number, answer: string): void;
   arcadeStep(round: number, step: number, choice: 0 | 1): void;
+  arcadeShape(round: number, shape: UnsealShape): void;
+  arcadeLetter(round: number, letter: string): void;
+  arcadeDocs(round: number): void;
+  arcadeBeat(round: number): void;
   arcadeBack(pid: string): void;
 }
 
@@ -1102,6 +1121,14 @@ function sceneArcade(ctx: SceneCtx): Scene {
   let glassOpen = false;
   /** How this phone left the bridge, latched at the transition — see paint(). */
   let glassExit: string | null = null;
+  /**
+   * The last frame this scene drew.
+   *
+   * The rope reads it on an animation frame, between renders: the pulse is
+   * drawn from `pullStartedAt` and `beatMs`, which arrive on a frame and then
+   * sit still for a whole pull while the beat goes on ticking.
+   */
+  let seen: RenderState | null = null;
 
   /* ---- Recruitment ---- */
   const cue = h("p", { class: "a-cue", attrs: { "aria-hidden": "true" } });
@@ -1198,6 +1225,27 @@ function sceneArcade(ctx: SceneCtx): Scene {
     lastCheckpoint = null;
     lastPlace = null;
     planHouse.node.hidden = true;
+  };
+
+  /** A new round is a new tin, and last round's shape must not stick. */
+  const resetUnseal = (): void => {
+    shapeSent = null;
+    tileSignature = "";
+    unsealOpen = false;
+    unsealExit = null;
+    docsSaid = false;
+    unsealHouse.node.hidden = true;
+    unsealPicker.dataset["sig"] = "";
+    unsealSolved.dataset["sig"] = "";
+  };
+
+  /** …and a new rope, a new heartbeat and a count that starts at zero. */
+  const resetTug = (): void => {
+    tugPull = -1;
+    tugOptimistic = 0;
+    tugLocalBeat = -1;
+    tugElectionSaid = 0;
+    tugElectionLine.node.hidden = true;
   };
   const planNode = h("div", { class: "a-plan" }, [
     bar,
@@ -1565,6 +1613,534 @@ function sceneArcade(ctx: SceneCtx): Scene {
     );
   };
 
+  /* ---- Unseal ---- */
+
+  /**
+   * The tin, on the phone.
+   *
+   * Two screens in one, and which one is up is decided by whether this player
+   * is holding a tin: the picker, and then the letters. DESIGN.md asks for
+   * "shape picker (four large tiles), then a grid of scrambled letters as
+   * ≥ 56 px tiles, the solved letters filling in a row above", and that is
+   * what this is.
+   *
+   * The picker shows the four glyphs and what each one **pays**, and nothing
+   * about how long the word is. That is not a detail: SPEC.md's whole conceit
+   * is "pick your shape before you know the word", the shapes *are* the word
+   * lengths, and learning which is which is exactly what the pick buys. The
+   * score is the other half of the same sentence — it is the bet, stated in
+   * advance, so the choice is informed about the stake and blind about the
+   * risk, which is the only arrangement that makes it a choice at all.
+   */
+  const unsealTimer = h("p", { class: "mono a-item-timer" });
+  const unsealPicker = h("div", { class: "a-shapes", role: "radiogroup" });
+  const unsealSolved = h("div", { class: "a-solved mono", role: "group" });
+  const unsealTileRow = h("div", { class: "a-tiles" });
+  const unsealKeys = keyHint(KEY_HINT.unseal);
+  const unsealStatus = h("p", { class: "a-unseal-status" });
+  /**
+   * The briefing, on the picker.
+   *
+   * Unseal is the one round whose card the phone does not show — the picker
+   * takes its place, because the card's instruction *is* a control and
+   * twenty seconds of "choose a shape" with nothing to choose with would be
+   * the worst version of this round. But the briefing is the half of the card
+   * that matters most to somebody who joined late, so it comes with it. It
+   * comes off the moment the tin opens: by then the round has started and
+   * the three lines are in the way of the letters.
+   */
+  const unsealHow = h(
+    "div",
+    { class: "a-how a-unseal-how" },
+    HOW_TO_PLAY.unseal.map((line) => h("p", { class: "a-how-line", text: line })),
+  );
+  const unsealHouse = houseSlot("a-unseal-house");
+  unsealHouse.node.hidden = true;
+  /**
+   * **Read the docs.**
+   *
+   * DESIGN.md asks for "a small mono link, deliberately un-button-like, at
+   * the bottom", and SPEC.md calls it the funniest button in the product. The
+   * two are the same instruction read from different ends and they agree on
+   * the thing that matters: it must not look like the way to play. It looks
+   * like a link in a docs site because that is the joke — and the price is
+   * printed on it, in the same size as the label, because a decision whose
+   * cost is somewhere else is not a decision, it is a trap.
+   *
+   * Pressing it again is free: the halving is a boolean and the second letter
+   * costs nothing, which is the show's own point about the honeycomb. So the
+   * label changes once it has been pressed and says so, rather than quietly
+   * charging nothing and letting the player wonder.
+   */
+  const docsLabel = h("span", { class: "a-docs-label" });
+  const docsPrice = h("span", { class: "a-docs-price mono" });
+  const docsButton = h("button", { class: "a-docs", type: "button" }, [
+    docsLabel,
+    docsPrice,
+  ]) as HTMLButtonElement;
+  const unsealNode = h("div", { class: "a-unseal" }, [
+    unsealTimer,
+    playRule(PLAY_RULE.unseal),
+    unsealHouse.node,
+    unsealPicker,
+    unsealHow,
+    unsealSolved,
+    unsealTileRow,
+    unsealKeys,
+    unsealStatus,
+    docsButton,
+  ]);
+
+  /** The shape this phone has asked for, held until the server agrees. */
+  let shapeSent: UnsealShape | null = null;
+  /** The cue the tiles are drawn from, so a burst of frames does not rebuild them. */
+  let tileSignature = "";
+  /** Set while a key is doing the work, so the synthetic click is not a second tap. */
+  let swallowLetterClick = false;
+  /** Whether the letters are a live control right now. */
+  let unsealOpen = false;
+  /** Latched when the tin cracks, for the Lounge underneath. See paint(). */
+  let unsealExit: string | null = null;
+  /** The docs line, said once per round rather than on every repaint. */
+  let docsSaid = false;
+
+  const unsealRound = (): number =>
+    Number(unsealNode.dataset["round"] ?? "-1");
+
+  const pickShape = (shape: UnsealShape): void => {
+    const round = unsealRound();
+    if (round < 0 || !ctx.live) return;
+    shapeSent = shape;
+    ctx.arcadeShape(round, shape);
+    if (seen !== null) paint(seen);
+  };
+
+  const tapLetter = (letter: string): void => {
+    const round = unsealRound();
+    if (round < 0 || !unsealOpen) return;
+    ctx.arcadeLetter(round, letter);
+  };
+
+  docsButton.addEventListener("click", () => {
+    const round = unsealRound();
+    if (round < 0 || docsButton.disabled) return;
+    ctx.arcadeDocs(round);
+  });
+
+  /**
+   * Type a letter to tap it.
+   *
+   * On the window rather than on the tiles, for the reason the bridge's
+   * arrows are: nobody tabs through fourteen scrambled letters under a
+   * sixty-second clock, and a key that works only after a click is an
+   * affordance that arrives too late to be one. A held key is not a stream —
+   * see `unsealLetterKey` — which matters more here than anywhere, because in
+   * this round the second tap of a repeat is always the wrong letter.
+   */
+  const onLetterKey = (ev: KeyboardEvent): void => {
+    if (built !== "unseal" || !unsealOpen || isTypingTarget(ev.target)) return;
+    const letter = unsealLetterKey(ev);
+    if (letter === null) return;
+    ev.preventDefault();
+    swallowLetterClick = true;
+    tapLetter(letter);
+  };
+  if (ctx.live) window.addEventListener("keydown", onLetterKey);
+
+  const paintUnsealTimer = (arcade: ArcadeView): void => {
+    const left = remainingMs(arcade.endsAt, ctx.now());
+    setText(unsealTimer, left === null ? "" : formatCountdown(left));
+    setClass(unsealTimer, "urgent", left !== null && left <= 10_000);
+  };
+
+  const paintUnseal = (arcade: ArcadeView, mine: ArcadeMine): void => {
+    const u = arcade.unseal;
+    if (!u) return;
+    mount("unseal", [unsealNode]);
+    unsealNode.dataset["round"] = String(arcade.roundIndex);
+    const me = mine.unseal;
+    const shape = me?.shape ?? shapeSent;
+    const open = arcade.phase === "running";
+    paintUnsealTimer(arcade);
+
+    // The picker. It is up while nobody is holding a tin, and while the round
+    // card is up it stays up even after a pick, because a shape chosen
+    // against the card may still be changed — that is the engine's rule and
+    // the screen has to agree with it or the button lies.
+    const picking = me?.cue === null || me?.cue === undefined;
+    unsealPicker.hidden = !picking;
+    unsealHow.hidden = !picking;
+    if (picking) {
+      const signature = `${shape ?? ""}:${open}:${u.shapes
+        .map((sh) => `${sh.shape}${sh.available ? 1 : 0}${sh.picked}`)
+        .join(",")}`;
+      if (unsealPicker.dataset["sig"] !== signature) {
+        unsealPicker.dataset["sig"] = signature;
+        replace(
+          unsealPicker,
+          u.shapes.map((sh) => {
+            const face = UNSEAL_FACE[sh.shape];
+            const on = shape === sh.shape;
+            const tile = h(
+              "button",
+              {
+                class: on ? "a-shape on" : "a-shape",
+                type: "button",
+                disabled: !ctx.live || !sh.available,
+                attrs: {
+                  role: "radio",
+                  "aria-checked": on ? "true" : "false",
+                  // The glyph is decoration to a screen reader; this is the
+                  // sentence it reads instead.
+                  "aria-label": `${face.name}, worth ${sh.score}`,
+                },
+              },
+              [
+                h("span", {
+                  class: "a-shape-glyph",
+                  attrs: { "aria-hidden": "true" },
+                  text: face.glyph,
+                }),
+                h("span", { class: "a-shape-name", text: face.name }),
+                h("span", { class: "mono a-shape-score", text: String(sh.score) }),
+              ],
+            ) as HTMLButtonElement;
+            tile.addEventListener("click", () => pickShape(sh.shape));
+            return tile;
+          }),
+        );
+      } else {
+        // Only the selection moved. Repainting the row under a thumb that is
+        // choosing is how a tap lands on nothing.
+        for (const tile of Array.from(unsealPicker.children)) {
+          const name = tile.querySelector(".a-shape-name")?.textContent ?? "";
+          const on = shape !== null && UNSEAL_FACE[shape].name === name;
+          tile.classList.toggle("on", on);
+          setAttr(tile as HTMLElement, "aria-checked", on ? "true" : "false");
+        }
+      }
+    }
+
+    // The letters. `cue` is null until the Floor opens — the tin is handed
+    // over at the pick and opened when the round starts — so this whole half
+    // is simply absent until there is something in it.
+    const cue = me?.cue ?? null;
+    const solved = me?.solved ?? "";
+    const length = me?.length ?? 0;
+    const unsealed = me?.unsealed === true;
+    unsealOpen = cue !== null && !unsealed && open && ctx.live;
+
+    unsealSolved.hidden = cue === null;
+    unsealTileRow.hidden = cue === null;
+    unsealKeys.hidden = !unsealOpen;
+    docsButton.hidden = cue === null || unsealed;
+
+    if (cue !== null) {
+      // The solved row: what they have tapped, and a blank for every letter
+      // still to come. The blanks are how long the word is, which they were
+      // told the moment they picked — the shape *was* the length.
+      const solvedSig = `${solved}/${length}`;
+      if (unsealSolved.dataset["sig"] !== solvedSig) {
+        unsealSolved.dataset["sig"] = solvedSig;
+        replace(
+          unsealSolved,
+          Array.from({ length }, (_, i) =>
+            h("span", {
+              class: "a-slot",
+              text: solved[i] ?? "",
+              attrs: { "data-filled": i < solved.length ? "yes" : "no" },
+            }),
+          ),
+        );
+        setAttr(
+          unsealSolved,
+          "aria-label",
+          `${solved.length} of ${length} letters: ${[...solved].join(" ")}`,
+        );
+      }
+
+      const tiles = unsealTiles(cue, solved);
+      const signature = `${cue}|${solved}|${unsealOpen}`;
+      if (signature !== tileSignature) {
+        tileSignature = signature;
+        replace(
+          unsealTileRow,
+          tiles.map((tile) => {
+            const button = h(
+              "button",
+              {
+                class: "a-tile",
+                type: "button",
+                disabled: !unsealOpen || tile.used,
+                attrs: {
+                  "data-used": tile.used ? "yes" : "no",
+                  "aria-label": tile.used
+                    ? `${tile.letter}, already used`
+                    : tile.letter,
+                },
+              },
+              [h("span", { class: "a-tile-letter", text: tile.letter })],
+            ) as HTMLButtonElement;
+            button.addEventListener("click", () => {
+              if (swallowLetterClick) {
+                swallowLetterClick = false;
+                return;
+              }
+              tapLetter(tile.letter);
+            });
+            button.addEventListener("pointerdown", () => {
+              swallowLetterClick = false;
+            });
+            return button;
+          }),
+        );
+      }
+    }
+
+    // The docs button: its price, and what it says once it has been pressed.
+    const read = me?.docs === true;
+    setText(docsLabel, read ? "Read the docs again" : "Read the docs");
+    setText(
+      docsPrice,
+      read ? "already halved — this one is free" : "reveals the next letter · halves your score",
+    );
+    docsButton.disabled = !unsealOpen;
+    setAttr(docsButton, "data-read", read ? "yes" : "no");
+    if (read && !docsSaid) {
+      docsSaid = true;
+      unsealHouse.node.hidden = false;
+      unsealHouse.set(HOUSE.unsealDocs);
+      setText(announce, HOUSE.unsealDocs);
+    }
+
+    setText(
+      unsealStatus,
+      cue === null
+        ? shape === null
+          ? "Pick a shape. You will not see the word until you do."
+          : open
+            ? "Your tin is on its way."
+            : `${UNSEAL_FACE[shape].name}. You may change your mind until the round starts.`
+        : unsealed
+          ? `The tin is open. Banked ${mine.banked}.`
+          : `${length} letters. Tap them in order.`,
+    );
+  };
+
+  /* ---- Tug of Raft ---- */
+
+  /**
+   * The rope, on the phone.
+   *
+   * DESIGN.md: "a pulsing ring at 100 bpm, the whole lower half is the tap
+   * target, a strip showing your side's colour and the rope position". This
+   * is that, with one addition DESIGN could not have known it needed: a
+   * **key**. The participant surface is a laptop, and a rhythm game played by
+   * travelling a trackpad and clicking is a different and worse game — the
+   * click travel is a real fraction of a 600 ms beat, and three missed beats
+   * is a timeout rather than a lost point.
+   *
+   * Everything that moves here is drawn from `pullStartedAt` and `beatMs`
+   * against the corrected server clock. This surface starts **no clock of its
+   * own**: the animation frame asks "where is the server's beat now" and
+   * draws that. A local `setInterval(600)` would be a second clock, would
+   * begin wherever the frame happened to land, and would drift a little
+   * further from the grid the taps are judged against with every beat of the
+   * pull — inviting taps at instants the server is not counting, in the one
+   * round whose entire purpose is that everybody is capped at the same rate.
+   */
+  const tugHead = h("p", { class: "mono a-tug-head" });
+  const tugRopeFill = h("div", { class: "a-tug-rope-fill" });
+  const tugRopeKnot = h("div", { class: "a-tug-knot", attrs: { "aria-hidden": "true" } });
+  const tugRopeBar = h("div", { class: "a-tug-rope", role: "img" }, [
+    tugRopeFill,
+    tugRopeKnot,
+  ]);
+  const tugRing = h("div", { class: "a-tug-ring", attrs: { "aria-hidden": "true" } });
+  const tugWord = h("span", { class: "display a-tug-word", text: "PULL" });
+  const tugCount = h("span", { class: "mono a-tug-count" });
+  const tugButton = h("button", { class: "a-tug-tap", type: "button" }, [
+    tugRing,
+    tugWord,
+    tugCount,
+  ]) as HTMLButtonElement;
+  const tugStatus = h("p", { class: "a-tug-status" });
+  const tugElectionLine = houseSlot("a-tug-election");
+  tugElectionLine.node.hidden = true;
+  const tugNode = h("div", { class: "a-tug" }, [
+    tugHead,
+    playRule(PLAY_RULE.tug_of_raft),
+    tugRopeBar,
+    tugElectionLine.node,
+    tugButton,
+    keyHint(KEY_HINT.tug),
+    tugStatus,
+  ]);
+
+  /** The animation frame that draws the pulse. Null when the rope is not up. */
+  let tugFrame: number | null = null;
+  /** The last beat this phone credited itself, so one beat is one pull. */
+  let tugLocalBeat = -1;
+  /** Local count, so the button answers the finger rather than the link. */
+  let tugOptimistic = 0;
+  /** Which pull the local count belongs to; a new pull starts from zero. */
+  let tugPull = -1;
+  /** Whether the election line has been said for the election in force. */
+  let tugElectionSaid = 0;
+  let swallowTugClick = false;
+
+  const pullOnce = (): void => {
+    const round = Number(tugNode.dataset["round"] ?? "-1");
+    if (round < 0 || !ctx.live) return;
+    const a = seen?.arcade;
+    const t = a?.tug;
+    if (!t || a?.phase !== "running") return;
+    // Judged locally as well, and only so the button can answer immediately:
+    // the server's verdict is the one that counts and arrives on the next
+    // frame. Judging it here off the *same grid* is why the two agree — this
+    // is the server's `beatMs` and the server's tolerance, not a guess.
+    const beat = tugBeatAt(t, ctx.now());
+    const election = tugElectionAt(t, seen?.arcadeMine?.tug?.lastBeat ?? -1, ctx.now());
+    if (beat !== null && beat.onBeat && !election.inElection && beat.beat > tugLocalBeat) {
+      tugLocalBeat = beat.beat;
+      tugOptimistic += 1;
+      setAttr(tugButton, "data-hit", "yes");
+    } else {
+      setAttr(tugButton, "data-hit", "no");
+    }
+    ctx.arcadeBeat(round);
+  };
+
+  tugButton.addEventListener("pointerdown", () => {
+    swallowTugClick = false;
+  });
+  tugButton.addEventListener("click", () => {
+    if (swallowTugClick) {
+      swallowTugClick = false;
+      return;
+    }
+    pullOnce();
+  });
+
+  /**
+   * Space and Enter, from anywhere on the page while the rope is up.
+   *
+   * The same control as the button, not a second one — `isTapKey` is what
+   * Plan / Apply uses and it rejects the OS key repeat, which here would be
+   * thirty taps a second against a beat you can only hit once. On the window
+   * because nobody tabs to a control before a heartbeat starts.
+   */
+  const onPullKey = (ev: KeyboardEvent): void => {
+    if (built !== "tug" || isTypingTarget(ev.target)) return;
+    const { handled, taps } = isTapKey(ev);
+    if (!handled) return;
+    ev.preventDefault();
+    if (!taps) return;
+    swallowTugClick = true;
+    pullOnce();
+  };
+  if (ctx.live) window.addEventListener("keydown", onPullKey);
+
+  const stopTugFrame = (): void => {
+    if (tugFrame !== null) cancelAnimationFrame(tugFrame);
+    tugFrame = null;
+  };
+
+  /**
+   * The pulse, every animation frame, off the server's grid and nothing else.
+   *
+   * `--pulse` runs 1 at the beat down to 0 just before the next one, which is
+   * a ring that snaps open and closes: the snap is the beat, and a sine or a
+   * fade would put the loudest moment of the animation somewhere that is not
+   * the instant a tap counts. `--window` is the real tolerance from the
+   * server, so the band the ring shows is the band the engine judges by.
+   */
+  const paintTugPulse = (): void => {
+    const a = seen?.arcade;
+    const t = a?.tug;
+    if (!t || a?.phase !== "running") return;
+    const now = ctx.now();
+    const beat = tugBeatAt(t, now);
+    if (beat === null) return;
+    tugButton.style.setProperty("--pulse", (1 - beat.phase).toFixed(3));
+    tugButton.style.setProperty("--window", (t.toleranceMs / t.beatMs).toFixed(3));
+    setAttr(tugButton, "data-beat", beat.onBeat ? "on" : "off");
+    const election = tugElectionAt(t, seen?.arcadeMine?.tug?.lastBeat ?? -1, now);
+    setAttr(tugNode, "data-election", election.inElection ? "yes" : "no");
+    tugElectionLine.node.hidden = !election.inElection;
+    if (election.inElection && tugElectionSaid !== election.endsAt) {
+      tugElectionSaid = election.endsAt;
+      const line = HOUSE.tugElection(seen?.arcadeMine?.playerNumber ?? 0);
+      tugElectionLine.set(line);
+      setText(announce, line);
+    }
+    tugFrame = requestAnimationFrame(paintTugPulse);
+  };
+
+  const paintTug = (state: RenderState, arcade: ArcadeView, mine: ArcadeMine): void => {
+    const t = arcade.tug;
+    if (!t) return;
+    mount("tug", [tugNode]);
+    tugNode.dataset["round"] = String(arcade.roundIndex);
+    const me = mine.tug;
+    const side = me?.side ?? 0;
+    // A new pull is a new rope, a new heartbeat and a leader who has to earn
+    // it again — so the local count starts from nothing too.
+    if (tugPull !== t.pull) {
+      tugPull = t.pull;
+      tugOptimistic = 0;
+      tugLocalBeat = -1;
+      tugElectionSaid = 0;
+    }
+    const left = remainingMs(t.pullEndsAt ?? null, ctx.now());
+    setText(
+      tugHead,
+      [
+        `PULL ${t.pull + 1} OF ${t.pulls}`,
+        `SIDE ${side === 0 ? "A" : "B"}`,
+        `WON ${t.wins[0]}–${t.wins[1]}`,
+        left === null ? null : formatCountdown(left),
+      ]
+        .filter((x) => x !== null)
+        .join(" · "),
+    );
+    setAttr(tugNode, "data-side", side === 0 ? "a" : "b");
+
+    // The rope. `tugRope` is the *share* of the on-beat taps rather than the
+    // difference, so it needs no scale and cannot pin against the stop in the
+    // first five seconds because one side started faster. 0 is side A's end.
+    const at = tugRope(t.totals);
+    tugRopeFill.style.width = `${at * 100}%`;
+    tugRopeKnot.style.left = `${at * 100}%`;
+    setAttr(
+      tugRopeBar,
+      "aria-label",
+      t.totals[0] === t.totals[1]
+        ? `The rope is level, ${t.totals[0]} pulls each`
+        : `Side ${t.totals[0] > t.totals[1] ? "A" : "B"} is ahead, ${t.totals[0]} to ${t.totals[1]}`,
+    );
+
+    const server = me?.onBeats ?? 0;
+    if (server > tugOptimistic) tugOptimistic = server;
+    setText(tugCount, String(Math.max(server, tugOptimistic)));
+    tugButton.disabled = !ctx.live || arcade.phase !== "running";
+    setAttr(tugButton, "aria-label", "Pull on the beat");
+    setText(
+      tugStatus,
+      arcade.phase === "running"
+        ? `You are on side ${side === 0 ? "A" : "B"}. Banked ${mine.banked}.`
+        : "The heartbeat starts when the round does.",
+    );
+
+    // The pulse runs on its own frame loop while the rope is up, and only
+    // then: this is the one surface in the product with an animation that has
+    // to be exact, and the one place a stray loop would keep running behind
+    // another round.
+    stopTugFrame();
+    if (arcade.phase === "running") tugFrame = requestAnimationFrame(paintTugPulse);
+    void state;
+  };
+
   /* ---- the drain, and the Lounge ---- */
   const drainNode = h("div", { class: "a-drain" }, [
     h("p", { class: "mono a-drain-error", text: STATE_LOCK_ERROR }),
@@ -1591,6 +2167,10 @@ function sceneArcade(ctx: SceneCtx): Scene {
 
   const mount = (key: string, children: readonly Node[]): void => {
     if (built === key) return;
+    // The rope's animation frame belongs to the rope. Leaving it running
+    // behind the Lounge, the reveal or the next round would be a loop nobody
+    // can see that never stops — and it reads the state on every frame.
+    if (built === "tug" && key !== "tug") stopTugFrame();
     built = key;
     // A live region's message belongs to the screen that produced it. Without
     // this, "State locked. Do not tap." was still sitting in the status when
@@ -1779,7 +2359,7 @@ function sceneArcade(ctx: SceneCtx): Scene {
     // see paint(). Null outside the bridge, and cleared by the next round.
     setText(
       drainNode.querySelector(".a-drain-error") as HTMLElement,
-      glassExit ?? STATE_LOCK_ERROR,
+      glassExit ?? unsealExit ?? STATE_LOCK_ERROR,
     );
     setText(
       drainNode.querySelector(".a-drain-who") as HTMLElement,
@@ -1901,8 +2481,40 @@ function sceneArcade(ctx: SceneCtx): Scene {
     // and both notes are shown because the real one's is the thing somebody
     // learns. This is the first frame on which any of it has existed.
     const glassRecap = arcade.glass?.recap ?? [];
+    // Unseal's answers, which is the first frame on which any of them has
+    // existed. Every tin, not only the one this player held: SPEC.md asks the
+    // reveal to read the note out, and the note — *Reusable Terraform. The
+    // thing everyone means to write and never does* — is the thing a room of
+    // solutions architects actually takes away from the round.
+    const unsealRecap = arcade.unseal?.recap ?? [];
+    /**
+     * Tug of Raft's own result, which is otherwise nothing at all.
+     *
+     * Nobody drains in this round and there is no answer to read out, so the
+     * reveal had one number on it — the points — for a round the player has
+     * just spent seventy-five seconds tapping through. This says what
+     * happened to the rope, which is the thing they were watching.
+     *
+     * Public facts only: the pulls each side won, and their own end of the
+     * rope. Not the leader, which is a per-player number and lives on the
+     * console and the Desktop.
+     */
+    const tug = arcade.tug;
+    const tugLine =
+      tug === undefined
+        ? null
+        : `${
+            tug.wins[0] === tug.wins[1]
+              ? `The rope finished level, ${tug.wins[0]} pulls each`
+              : `Side ${tug.wins[0] > tug.wins[1] ? "A" : "B"} took it, ${Math.max(
+                  tug.wins[0],
+                  tug.wins[1],
+                )} pulls to ${Math.min(tug.wins[0], tug.wins[1])}`
+          } · you pulled for side ${(mine.tug?.side ?? 0) === 0 ? "A" : "B"}.`;
     // Keyed on what it draws, so a later frame in the same reveal redraws it.
-    mount(`reveal:${mine.banked}:${mine.total}:${survived}:${glassRecap.length}`, [
+    mount(
+      `reveal:${mine.banked}:${mine.total}:${survived}:${glassRecap.length}:${unsealRecap.length}:${tugLine ?? ""}`,
+      [
       h("div", { class: "a-reveal" }, [
         h("p", { class: "label", text: "Banked this round" }),
         h("p", { class: "mono a-banked", text: String(mine.banked) }),
@@ -1929,6 +2541,23 @@ function sceneArcade(ctx: SceneCtx): Scene {
             ),
           ]),
         ),
+        ...unsealRecap.map((tin) =>
+          h("div", { class: "a-recap" }, [
+            // The shape and the cue share the first column, so this row has
+            // the same three-cell shape as Recruitment's and the grid does
+            // not have to know which round it is drawing.
+            h("span", { class: "a-recap-tin" }, [
+              h("span", {
+                class: "a-recap-shape",
+                attrs: { "aria-hidden": "true" },
+                text: UNSEAL_FACE[tin.shape].glyph,
+              }),
+              h("span", { class: "mono a-recap-scramble", text: tin.cue }),
+            ]),
+            h("span", { class: "a-recap-answer", text: tin.answer }),
+            h("span", { class: "a-recap-note", text: tin.note }),
+          ]),
+        ),
         ...recap.map((item) =>
           h("div", { class: "a-recap" }, [
             h("span", { class: "a-recap-cue", attrs: { "aria-hidden": "true" }, text: item.cue }),
@@ -1936,14 +2565,19 @@ function sceneArcade(ctx: SceneCtx): Scene {
             h("span", { class: "a-recap-note", text: item.note }),
           ]),
         ),
+        tugLine === null
+          ? null
+          : h("p", { class: "a-tug-result", text: tugLine }),
         survived ? houseLine(HOUSE.backedSurvived) : null,
         houseLine(HOUSE.roundEnd),
-      ]),
-    ]);
+        ]),
+      ],
+    );
   };
 
   const paint = (state: RenderState): void => {
     keepAnnounce = false;
+    seen = state;
     const arcade = state.arcade;
     // The console's preview is a picture of the room, and the room has no
     // single `arcadeMine`. A neutral one lets the preview show the round card,
@@ -2024,11 +2658,15 @@ function sceneArcade(ctx: SceneCtx): Scene {
           : g?.committed
             ? HOUSE.glassPane(pane)
             : HOUSE.glassPaneMissed(pane);
+      // Unseal has its own error and DESIGN.md writes it: *The tin has
+      // cracked.* The Lounge underneath draws whichever of the three applies,
+      // and the state-lock error is Plan / Apply's and only Plan / Apply's.
+      unsealExit = arcade.round === "unseal" ? HOUSE.unsealCracked : null;
       node.classList.add("is-draining");
       buzz([120, 60, 120]);
       setText(
         announce,
-        `${glassExit ?? STATE_LOCK_ERROR}. ${HOUSE.drained(mine.playerNumber)}`,
+        `${glassExit ?? unsealExit ?? STATE_LOCK_ERROR}. ${HOUSE.drained(mine.playerNumber)}`,
       );
       // The Lounge is about to mount underneath this, and a mount clears the
       // live region. This one message outlives its screen on purpose.
@@ -2046,11 +2684,27 @@ function sceneArcade(ctx: SceneCtx): Scene {
     lastStanding = mine.standing;
 
     if (arcade.phase === "reveal") return paintReveal(state, arcade, mine);
+    // Unseal is the one round whose card is a control. "Choose a shape. You
+    // will be given a sealed tin" is what the card *says*, and the engine
+    // accepts a pick against it — so the phone shows the picker rather than
+    // the card, and the card's own lines are on the Desktop where the room is
+    // already reading them. A card with the instruction and no way to obey it
+    // would spend the twenty seconds the pick is meant to happen in.
+    if (arcade.phase === "card" && arcade.round === "unseal") {
+      optimistic = 0;
+      lastLightAt = null;
+      resetCheckpointLine();
+      resetBridge();
+      resetTug();
+      return paintUnseal(arcade, mine);
+    }
     if (arcade.phase === "card") {
       optimistic = 0;
       lastLightAt = null;
       resetCheckpointLine();
       resetBridge();
+      resetUnseal();
+      resetTug();
       return paintCard(arcade);
     }
     if (arcade.phase === "idle") {
@@ -2060,6 +2714,8 @@ function sceneArcade(ctx: SceneCtx): Scene {
       lastLightAt = null;
       resetCheckpointLine();
       resetBridge();
+      resetUnseal();
+      resetTug();
       mount("between", [
         h("div", { class: "a-card" }, [houseLine(HOUSE.roundEnd)]),
       ]);
@@ -2068,6 +2724,8 @@ function sceneArcade(ctx: SceneCtx): Scene {
     if (mine.standing === "drained") return paintLounge(state, arcade, mine);
     if (arcade.round === "recruitment") return paintRecruitment(state, arcade, mine);
     if (arcade.round === "plan_apply") return paintPlan(arcade, mine);
+    if (arcade.round === "unseal") return paintUnseal(arcade, mine);
+    if (arcade.round === "tug_of_raft") return paintTug(state, arcade, mine);
     if (arcade.round === "glass_bridge") return paintGlass(state, arcade, mine);
     // A round that is designed but not built: say so rather than show a
     // button that does nothing.
@@ -2095,7 +2753,12 @@ function sceneArcade(ctx: SceneCtx): Scene {
       const a = state.arcade;
       if (a?.phase !== "running") return;
       if (a.round === "recruitment") paintItemTimer(a);
+      else if (a.round === "unseal" && built === "unseal") paintUnsealTimer(a);
       else if (a.round === "glass_bridge" && built === "glass") paintStepTimer(a);
+      // Tug of Raft is deliberately not here. Its clock is the heartbeat and
+      // it is drawn on an animation frame, five times faster than this tick:
+      // a 200 ms heartbeat sampler against a 600 ms beat would show the ring
+      // in three positions and none of them at the beat.
     },
     clearStep() {
       // The server refused the commitment — the step closed under the frame,
@@ -2107,6 +2770,9 @@ function sceneArcade(ctx: SceneCtx): Scene {
     stop() {
       window.removeEventListener("keydown", onTapKey);
       window.removeEventListener("keydown", onPaneKey);
+      window.removeEventListener("keydown", onLetterKey);
+      window.removeEventListener("keydown", onPullKey);
+      stopTugFrame();
       if (drainTimer !== null) clearTimeout(drainTimer);
       drainTimer = null;
     },

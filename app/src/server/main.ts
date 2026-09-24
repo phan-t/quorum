@@ -20,6 +20,7 @@ import type { HostCommand, RefusedReason } from "../protocol.ts";
 import {
   DEFAULT_ACTIVITIES,
   SessionRegistry,
+  pickSeed,
   recordRtt,
   type Client,
   type SessionRuntime,
@@ -33,6 +34,8 @@ import type { StoredEvent } from "./store/types.ts";
 import { recoverSessions, rehydrate } from "./recovery.ts";
 import { recruitmentRound } from "../arcade/recruitment.ts";
 import { glassBridgeRound } from "../arcade/glass-bridge.ts";
+import { unsealRound } from "../arcade/unseal.ts";
+import { tugOfRaftRound } from "../arcade/tug-of-raft.ts";
 import { formatErrors, importTriviaJson } from "../trivia/import.ts";
 import {
   formatErrors as formatSendoffErrors,
@@ -1193,6 +1196,10 @@ wss.on("connection", (socket: WebSocket, req: IncomingMessage) => {
       case "arcade.answer":
       case "arcade.tap":
       case "arcade.step":
+      case "arcade.shape":
+      case "arcade.letter":
+      case "arcade.docs":
+      case "arcade.beat":
       case "arcade.back": {
         if (client.role !== "participant") {
           runtime.send(client, {
@@ -1213,7 +1220,25 @@ wss.on("connection", (socket: WebSocket, req: IncomingMessage) => {
               ? runtime.submitAnswer(client, msg.item, msg.answer, now)
               : msg.t === "arcade.step"
                 ? runtime.step(client, msg.round, msg.step, msg.choice, now)
-                : runtime.back(client, msg.pid, now);
+                : msg.t === "arcade.shape"
+                  ? runtime.unseal(
+                      client,
+                      msg.round,
+                      { type: "pickShape", shape: msg.shape },
+                      now,
+                    )
+                  : msg.t === "arcade.letter"
+                    ? runtime.unseal(
+                        client,
+                        msg.round,
+                        { type: "tapLetter", letter: msg.letter },
+                        now,
+                      )
+                    : msg.t === "arcade.docs"
+                      ? runtime.unseal(client, msg.round, { type: "readDocs" }, now)
+                      : msg.t === "arcade.beat"
+                        ? runtime.beat(client, msg.round, now)
+                        : runtime.back(client, msg.pid, now);
         if (out.rejection) {
           runtime.send(client, {
             t: "refusedCmd",
@@ -1518,6 +1543,34 @@ function commandToEvent(cmd: HostCommand, runtime: SessionRuntime): Event | null
           config: recruitmentRound(undefined, cmd.secondsPerItem),
         };
       }
+      if (cmd.kind === "unseal") {
+        return {
+          type: "startRound",
+          round: "unseal",
+          // Same rule as the Bridge's, and for the same reason: an
+          // `UnsealItem` carries the word and the reveal note, so nine tins
+          // arriving from a browser would be the answer key arriving from a
+          // browser. The host sets how long the Floor runs and nothing else.
+          config: unsealRound(undefined, cmd.seconds),
+        };
+      }
+      if (cmd.kind === "tug_of_raft") {
+        return {
+          type: "startRound",
+          round: "tug_of_raft",
+          // The seed is drawn *here*, not on the command, for the reason
+          // Plan / Apply's light durations are drawn here: the engine has no
+          // randomness, and a seed a console could choose is a console that
+          // can deal itself the sides. Pulls two and three get theirs from
+          // the pull timer.
+          config: tugOfRaftRound(
+            pickSeed(runtime.rng),
+            cmd.pulls,
+            cmd.pullSeconds,
+            cmd.bpm,
+          ),
+        };
+      }
       if (cmd.kind === "glass_bridge") {
         return {
           type: "startRound",
@@ -1531,15 +1584,18 @@ function commandToEvent(cmd: HostCommand, runtime: SessionRuntime): Event | null
           config: glassBridgeRound(undefined, cmd.waveSeconds),
         };
       }
-      return {
-        type: "startRound",
-        round: "plan_apply",
-        config: {
-          kind: "plan_apply",
-          target: cmd.target,
-          seconds: cmd.seconds,
-        },
-      };
+      if (cmd.kind === "plan_apply") {
+        return {
+          type: "startRound",
+          round: "plan_apply",
+          config: {
+            kind: "plan_apply",
+            target: cmd.target,
+            seconds: cmd.seconds,
+          },
+        };
+      }
+      return null;
     case "arcade.begin":
       return { type: "beginPlay" };
     case "arcade.next":
@@ -1553,6 +1609,11 @@ function commandToEvent(cmd: HostCommand, runtime: SessionRuntime): Event | null
       return { type: "nextStep" };
     case "arcade.nextWave":
       return { type: "nextWave" };
+    // The host cutting a pull short, and the pull timer, send the identical
+    // event — with a seed drawn the same way in both places, because the
+    // engine has no randomness and the sides have to be reshuffled.
+    case "arcade.nextPull":
+      return { type: "nextPull", seed: pickSeed(runtime.rng) };
     case "arcade.end":
       return { type: "endRound" };
     case "arcade.reveal":

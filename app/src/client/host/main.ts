@@ -30,6 +30,7 @@ import {
   LIGHT_FACE,
   SEGMENT_LABEL,
   SEGMENT_PHASE,
+  UNSEAL_FACE,
   answerTiles,
   bridgeEntries,
   formatCountdown,
@@ -821,7 +822,7 @@ function fireRestart(): void {
   if (restartGo.disabled) return;
   const code = lastState?.hostExtras?.joinCode ?? "";
   if (code === "") {
-    primary.flash("not connected — nothing was changed");
+    primary.flash("not connected, nothing was changed");
     return;
   }
   // Refusals land in the primary button, which is the one place on this
@@ -1042,7 +1043,7 @@ function cardForEntry(entry: RunbookEntry): HoldingCard | null {
  * written anything, or a step whose card was deleted. Neutral and true.
  */
 const STANDBY_TITLE = "Back shortly";
-const STANDBY_LINE = "Sit tight — we'll pick this up in a moment.";
+const STANDBY_LINE = "Sit tight. We'll pick this up in a moment.";
 
 function cardTitle(card: HoldingCard | null): string {
   const t = card?.title.trim() ?? "";
@@ -1832,7 +1833,7 @@ function changeRunbook(
 let runbookDrag: string | null = null;
 
 const RUNBOOK_FULL =
-  "Keep at least one segment \u2014 the runbook has to have something between the lobby and the final.";
+  "Keep at least one segment. The runbook has to have something between the lobby and the final.";
 
 /**
  * One row per step: where it comes in the order, what it is, and the three
@@ -1918,7 +1919,7 @@ function renderRunbookSetup(): void {
           // selected, so the row does not silently claim a card it is not
           // showing.
           const gone = h("option", {
-            text: "\u2014 pick a card \u2014",
+            text: "Pick a card",
             attrs: { value: "" },
           }) as HTMLOptionElement;
           gone.selected = true;
@@ -2186,7 +2187,7 @@ function renamedCard(): void {
 
 const CARDS_FULL = `That is as many holding cards as one afternoon takes (${CARD_MAX}).`;
 const CARDS_LAST =
-  "Keep at least one card \u2014 SHIFT+H has to have something to put up, and that is the key you reach for when something has gone wrong.";
+  "Keep at least one card. SHIFT+H has to have something to put up, and that is the key you reach for when something has gone wrong.";
 
 function renderCardsSetup(): void {
   replace(
@@ -2522,7 +2523,7 @@ function renderSendoff(s: RenderState): void {
   if (ahead !== null) {
     setText(
       sendoffNextLabel,
-      so.phase === "opening" ? "First message — nobody has seen this" : "Next — the room has not seen this",
+      so.phase === "opening" ? "First message. Nobody has seen this" : "Next. The room has not seen this",
     );
     setText(sendoffNextFrom, ahead.from);
     setText(sendoffNextText, ahead.message);
@@ -2553,7 +2554,7 @@ function renderSendoff(s: RenderState): void {
   setText(
     sendoffNote,
     so.phase === "opening"
-      ? "Space shows the first message. Music only plays if the Desktop tab has had a click or a keypress in it — click it once before you start, and check somebody in the room can hear it."
+      ? "Space shows the first message. Music only plays if the Desktop tab has had a click in it."
       : so.phase === "kudos"
         ? "Space shows the next one. Read ahead here; Skip advances past one without putting it on the screen."
         : so.phase === "closing"
@@ -2641,8 +2642,8 @@ const bodyTrivia = h("section", { class: "pb pb-trivia" }, [
  *
  * The picker is a local choice until the host presses the primary button,
  * because `startRound` is what commits it and a round that started because
- * somebody clicked a radio would be a round nobody meant to start. The two
- * built rounds are selectable; the other four are listed and disabled, so the
+ * somebody clicked a radio would be a round nobody meant to start. The five
+ * built rounds are selectable; Gganbu is listed and disabled, so the
  * host can see the shape of the run of show without being able to start
  * something that does not exist.
  */
@@ -2665,10 +2666,10 @@ const ARCADE_ROUNDS: readonly ArcadeRoundKind[] = [
  * mechanic from SPEC.md's round table, said as the thing the player does.
  */
 const ARCADE_ROUND_WHAT: Readonly<Record<ArcadeRoundKind, string>> = {
-  recruitment: "Two emoji, one product name — type it. Six items, nobody is knocked out.",
+  recruitment: "Two emoji, one product name. Type it. Six items, nobody is knocked out.",
   plan_apply: "Tap fast while the light is green. Stop the moment it turns. Tapping on red knocks you out.",
   unseal: "Pick a shape, then tap the scrambled letters in order. One wrong tap and you are out.",
-  tug_of_raft: "Tug of war. Two teams, one rope — tap on the beat. Nobody is knocked out.",
+  tug_of_raft: "Tug of war. Two teams, one rope. Tap on the beat, and nobody is knocked out.",
   gganbu: "Paired off. Six over-or-under questions, and you bet tokens against your partner.",
   glass_bridge: "Pick the real product feature, twice per step. Pick the fake one and you are out.",
 };
@@ -2684,8 +2685,8 @@ const ARCADE_PHASE_WORD: Readonly<Record<ArcadePhase, string>> = {
 const ARCADE_BUILT: Readonly<Record<ArcadeRoundKind, boolean>> = {
   recruitment: true,
   plan_apply: true,
-  unseal: false,
-  tug_of_raft: false,
+  unseal: true,
+  tug_of_raft: true,
   gganbu: false,
   glass_bridge: true,
 };
@@ -2758,7 +2759,7 @@ for (const kind of ARCADE_ROUNDS) {
     attrs: {
       role: "radio",
       "aria-checked": "false",
-      title: built ? "" : "Designed, not built yet — you cannot start this one",
+      title: built ? "" : "Designed, not built yet. You cannot start this one",
     },
   }, [
     h("span", { class: "a-pick-name", text: ARCADE_ROUND_LABEL[kind] }),
@@ -2848,6 +2849,80 @@ const arcadeWave3 = h("input", {
   attrs: { min: "3", max: "60", "aria-label": "Seconds a step, wave 3" },
 }) as HTMLInputElement;
 
+/**
+ * Unseal's one setting: how long the Floor runs.
+ *
+ * The nine tins are not a host setting and are not on the wire, for the
+ * reason the bridge's eighteen panes are not: an `UnsealItem` carries the
+ * word and the reveal note, so a console that could choose them would be a
+ * console the answer key travels through.
+ */
+const arcadeUnsealSeconds = h("input", {
+  class: "field field-num",
+  type: "number",
+  value: "60",
+  attrs: { min: "15", max: "300", "aria-label": "Seconds of play" },
+}) as HTMLInputElement;
+
+const arcadeUnsealCfg = h("div", { class: "a-cfg" }, [
+  h("label", { class: "field-row" }, [
+    h("span", { class: "label", text: "Seconds of play" }),
+    arcadeUnsealSeconds,
+  ]),
+  h("p", {
+    class: "pb-note",
+    text: "Everyone picks a shape first. The shape decides how long their word is, and how much it scores.",
+  }),
+]);
+
+/**
+ * Tug of Raft's three numbers.
+ *
+ * The **seed is not one of them**. Sides are reshuffled before each pull and
+ * the seed is drawn on the server, exactly as Plan / Apply's light durations
+ * are: a seed a console could choose is a console that can deal itself the
+ * sides.
+ */
+const arcadeTugPulls = h("input", {
+  class: "field field-num",
+  type: "number",
+  value: "3",
+  attrs: { min: "1", max: "9", "aria-label": "Number of pulls" },
+}) as HTMLInputElement;
+const arcadeTugSeconds = h("input", {
+  class: "field field-num",
+  type: "number",
+  value: "25",
+  attrs: { min: "5", max: "120", "aria-label": "Seconds a pull" },
+}) as HTMLInputElement;
+const arcadeTugBpm = h("input", {
+  class: "field field-num",
+  type: "number",
+  value: "100",
+  attrs: { min: "40", max: "200", "aria-label": "Heartbeat, beats per minute" },
+}) as HTMLInputElement;
+
+const arcadeTugCfg = h("div", { class: "a-cfg" }, [
+  h("div", { class: "a-cfg-row" }, [
+    h("label", { class: "a-cfg-cell" }, [
+      h("span", { class: "label", text: "Pulls" }),
+      arcadeTugPulls,
+    ]),
+    h("label", { class: "a-cfg-cell" }, [
+      h("span", { class: "label", text: "Seconds a pull" }),
+      arcadeTugSeconds,
+    ]),
+    h("label", { class: "a-cfg-cell" }, [
+      h("span", { class: "label", text: "Beats a minute" }),
+      arcadeTugBpm,
+    ]),
+  ]),
+  h("p", {
+    class: "pb-note",
+    text: "Two teams pull a rope by tapping on a steady beat; tapping off the beat does nothing. Nobody is knocked out.",
+  }),
+]);
+
 const arcadeGlassCfg = h("div", { class: "a-cfg" }, [
   // One row, not three. The console's panel scrolls, and every row this
   // block spends is a row the round's own controls are pushed below the fold
@@ -2878,6 +2953,8 @@ const arcadeGlassCfg = h("div", { class: "a-cfg" }, [
 const ARCADE_CFG: Readonly<Record<ArcadePick, HTMLElement>> = {
   recruitment: arcadeRecruitCfg,
   plan_apply: arcadePlanCfg,
+  unseal: arcadeUnsealCfg,
+  tug_of_raft: arcadeTugCfg,
   glass_bridge: arcadeGlassCfg,
 };
 
@@ -2897,6 +2974,10 @@ const TIMING_FIELDS: readonly (readonly [HTMLInputElement, string])[] = [
   [arcadeWave1, "wave1"],
   [arcadeWave2, "wave2"],
   [arcadeWave3, "wave3"],
+  [arcadeUnsealSeconds, "unsealSeconds"],
+  [arcadeTugPulls, "tugPulls"],
+  [arcadeTugSeconds, "tugPullSeconds"],
+  [arcadeTugBpm, "tugBpm"],
 ];
 
 function saveSetup(): void {
@@ -3118,7 +3199,7 @@ const arcadeSetup = h("section", { class: "a-setup" }, [
   arcadeSetupNote,
   h("p", {
     class: "pb-note",
-    text: "Unseal, Tug of Raft and Gganbu are designed but not built, so they are not in the order.",
+    text: "Gganbu is designed but not built, so it is not in the order.",
   }),
 ]);
 
@@ -3189,7 +3270,7 @@ function renderArcadeSetup(): void {
         changeSetup(
           togglePlan(arcadePlan, kind),
           isLastIncluded(arcadePlan, kind)
-            ? "Keep at least one round \u2014 the arcade has to have something to announce."
+            ? "Keep at least one round. The arcade has to have something to announce."
             : "",
         ),
       );
@@ -3275,6 +3356,14 @@ const arcadeNextWave = control({
   onFire: (c) => issue({ name: "arcade.nextWave" }, c),
 });
 
+const arcadeNextPull = control({
+  label: "Start the next pull",
+  className: "ctl-secondary",
+  title:
+    "Tug of Raft only. Ends this pull, pays the winning side, reshuffles the teams and starts the next one. The clock does this anyway.",
+  onFire: (c) => issue({ name: "arcade.nextPull" }, c),
+});
+
 const bodyArcade = h("section", { class: "pb pb-arcade" }, [
   arcadeState,
   arcadeUpNext,
@@ -3293,6 +3382,7 @@ const bodyArcade = h("section", { class: "pb pb-arcade" }, [
     arcadePractice.el,
     arcadeEnd.el,
     arcadeNext.el,
+    arcadeNextPull.el,
     arcadeNextStep.el,
     arcadeNextWave.el,
   ]),
@@ -3314,6 +3404,22 @@ function arcadeRoundCommand(pick: ArcadePick): HostCommand {
       name: "arcade.round",
       kind: "recruitment",
       secondsPerItem: int(arcadeSeconds, 20),
+    };
+  }
+  if (pick === "unseal") {
+    return {
+      name: "arcade.round",
+      kind: "unseal",
+      seconds: int(arcadeUnsealSeconds, 60),
+    };
+  }
+  if (pick === "tug_of_raft") {
+    return {
+      name: "arcade.round",
+      kind: "tug_of_raft",
+      pulls: int(arcadeTugPulls, 3),
+      pullSeconds: int(arcadeTugSeconds, 25),
+      bpm: int(arcadeTugBpm, 100),
     };
   }
   if (pick === "glass_bridge") {
@@ -3414,6 +3520,7 @@ function renderArcade(s: RenderState): void {
     arcadeBridge.hidden = true;
     arcadeEnd.setDisabled(true);
     arcadeNext.setDisabled(true);
+    arcadeNextPull.setDisabled(true);
     arcadeNextStep.setDisabled(true);
     arcadeNextWave.setDisabled(true);
     // The running order is still live: the host can still change it, and the
@@ -3472,6 +3579,8 @@ function renderArcade(s: RenderState): void {
   // open, because the host is the one about to read it out.
   const r = a.recruitment;
   const pa = a.planApply;
+  const un = a.unseal;
+  const tu = a.tug;
   const gl = a.glass;
   if (!gl) arcadeBridge.hidden = true;
   if (r) {
@@ -3483,7 +3592,7 @@ function renderArcade(s: RenderState): void {
     );
     setText(
       arcadeItem,
-      `Item ${r.at + 1} of ${r.of}${itemLeft === null ? "" : ` · ${formatCountdown(itemLeft)}`} — ${r.cue ?? ""} → ${r.answer ?? "?"}  (${r.solved ?? 0} solved, ${r.answered ?? 0} of ${r.eligible ?? 0} answered)`,
+      `Item ${r.at + 1} of ${r.of}${itemLeft === null ? "" : ` · ${formatCountdown(itemLeft)}`} · ${r.cue ?? ""} → ${r.answer ?? "?"}  (${r.solved ?? 0} solved, ${r.answered ?? 0} of ${r.eligible ?? 0} answered)`,
     );
     const note = r.note ?? "";
     arcadeNote.hidden = note === "";
@@ -3496,8 +3605,8 @@ function renderArcade(s: RenderState): void {
       arcadeItem,
       [
         LIGHT_FACE[pa.light].sign === "PLAN"
-          ? "GREEN (PLAN) — taps count"
-          : "RED (APPLY) — tapping knocks you out",
+          ? "GREEN (PLAN): taps count"
+          : "RED (APPLY): tapping knocks you out",
         `${pa.crossed ?? 0} finished`,
         `${pa.target} taps to finish`,
         `points banked at ${pa.checkpoints.join(" / ")}`,
@@ -3509,6 +3618,74 @@ function renderArcade(s: RenderState): void {
       pa.headTurnsAt === undefined
         ? "The light goes back to green on its own."
         : `The light turns red in ${Math.max(0, Math.round((pa.headTurnsAt - (client?.now() ?? Date.now())) / 100) / 10)}s.`,
+    );
+  } else if (un) {
+    // The console is the one surface that may hold the words while the round
+    // is running, because the host is the one who reads them out at the
+    // reveal — the same rule Recruitment's answer and the bridge's key
+    // follow, and for the same reason: it is the only surface in the
+    // building that is not in the room.
+    const unsealLeft = remainingMs(a.endsAt, client?.now() ?? Date.now());
+    setText(
+      arcadeItem,
+      [
+        `${un.unsealed} of ${un.picked} tins open`,
+        unsealLeft === null ? null : formatCountdown(unsealLeft),
+        ...un.shapes
+          .filter((sh) => sh.available)
+          .map(
+            (sh) =>
+              `${UNSEAL_FACE[sh.shape].glyph} ${sh.unsealed}/${sh.picked}${
+                sh.fastest === undefined ? "" : ` fastest ${playerTag(sh.fastest)}`
+              }`,
+          ),
+      ]
+        .filter((x) => x !== null)
+        .join(" · "),
+    );
+    // Who read the docs, which is the one thing the host can see and nobody
+    // else can — the phone says "Nobody will know", and on every surface but
+    // this one that is true.
+    const readers = un.docs ?? [];
+    arcadeNote.hidden = false;
+    setText(
+      arcadeNote,
+      [
+        un.recap === undefined
+          ? ""
+          : `Words: ${un.recap.map((t) => t.answer).join(" · ")}`,
+        readers.length === 0
+          ? "Nobody has read the docs."
+          : `Read the docs: ${readers.map((n) => playerTag(n)).join(" ")} — scores halved.`,
+      ]
+        .filter((x) => x !== "")
+        .join("  |  "),
+    );
+  } else if (tu) {
+    const pullLeft = remainingMs(tu.pullEndsAt ?? null, client?.now() ?? Date.now());
+    const leaders = tu.leaders ?? [null, null];
+    setText(
+      arcadeItem,
+      [
+        `PULL ${tu.pull + 1} OF ${tu.pulls}`,
+        `${Math.round(60_000 / tu.beatMs)} bpm`,
+        pullLeft === null ? null : formatCountdown(pullLeft),
+        `rope ${tu.totals[0]}–${tu.totals[1]}`,
+        `pulls won ${tu.wins[0]}–${tu.wins[1]}`,
+      ]
+        .filter((x) => x !== null)
+        .join(" · "),
+    );
+    arcadeNote.hidden = false;
+    setText(
+      arcadeNote,
+      // The leaders are the +5 a side, win or lose, and the host reads them
+      // out at the end of each pull. Nobody drains in this round, so the
+      // Floor/Lounge split below stays where it was — which is the one thing
+      // a host new to this round will ask about.
+      `Leaders: A ${leaders[0] === null ? "—" : playerTag(leaders[0])} · B ${
+        leaders[1] === null ? "—" : playerTag(leaders[1])
+      }. Nobody is knocked out in this round.`,
     );
   } else if (gl) {
     // The console is the one surface that may hold the answer while the
@@ -3615,6 +3792,13 @@ function renderArcade(s: RenderState): void {
     !bridging || g === undefined || (g.step ?? 0) + 1 >= g.of,
   );
   arcadeNextWave.setDisabled(!bridging || g === undefined || g.wave >= 3);
+  // "Start the next pull" is refused on the last pull — there is no next one
+  // — and says so by being unpressable rather than by being pressed.
+  const tugging = a.phase === "running" && a.round === "tug_of_raft";
+  const tg = a.tug;
+  arcadeNextPull.setDisabled(
+    !tugging || tg === undefined || tg.pull + 1 >= tg.pulls,
+  );
 }
 
 const bodies: Record<string, HTMLElement> = {
@@ -3730,7 +3914,7 @@ function primaryPlan(): Plan {
     switch (t.phase) {
       case "idle":
         return cmdPlan(
-          `Open ${questionLabel(t)}${suddenDeathArmed ? " — sudden death" : ""}`,
+          `Open ${questionLabel(t)}${suddenDeathArmed ? " · sudden death" : ""}`,
           { name: "trivia.open", suddenDeath: suddenDeathArmed },
         );
       case "open":
@@ -4077,7 +4261,7 @@ function renderPreflight(s: RenderState): void {
     loaded > 0 ? "ready" : "not",
     loaded > 0
       ? `${loaded} trivia question${loaded === 1 ? "" : "s"} loaded.`
-      : "No trivia questions loaded. Upload the event's trivia-questions.json — the command is in its runbook — or trivia opens empty in front of the room.",
+      : "No trivia questions loaded. Upload the event's trivia-questions.json, using the command in its runbook, or trivia opens empty in front of the room.",
   );
 
   const order = planIncluded(arcadePlan);
@@ -4251,13 +4435,13 @@ function renderTrivia(s: RenderState): void {
     triviaSet,
     loaded > 0
       ? `${loaded} question${loaded === 1 ? "" : "s"} loaded, from this event's trivia-questions.json.`
-      : "Nothing loaded. Upload the event's trivia-questions.json — the command is in its runbook.",
+      : "Nothing loaded. Upload the event's trivia-questions.json, using the command in its runbook.",
   );
   if (t === undefined) {
     setText(triviaHead, "NO QUESTIONS LOADED");
     setText(
       triviaQuestion,
-      "This session has no questions. Upload the event's trivia-questions.json before you open trivia — the command is in that event's runbook.",
+      "This session has no questions. Upload the event's trivia-questions.json before you open trivia. The command is in that event's runbook.",
     );
     triviaRound.hidden = true;
     replace(triviaAnswers, []);
