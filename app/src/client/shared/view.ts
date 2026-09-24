@@ -29,6 +29,7 @@ export type ViewKind =
   | "trivia"
   | "arcade"
   | "standings"
+  | "sendoff"
   | "sealed"
   | "final";
 
@@ -69,6 +70,7 @@ export const SEGMENT_LABEL: Readonly<Record<Segment, string>> = {
   trivia: "Trivia",
   arcade: "Arcade",
   standings: "Standings",
+  sendoff: "Send-off",
   final: "Final",
 };
 
@@ -79,6 +81,7 @@ export const SEGMENT_PHASE: Readonly<Record<Segment, number>> = {
   trivia: 3,
   arcade: 4,
   standings: 1,
+  sendoff: 1,
   final: 1,
 };
 
@@ -95,6 +98,7 @@ export const SEGMENT_BUILT: Readonly<Record<Segment, boolean>> = {
   holding: true,
   trivia: true,
   arcade: true,
+  sendoff: true,
   standings: true,
   final: true,
 };

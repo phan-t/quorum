@@ -152,6 +152,8 @@ function build(k: ViewKind): Scene {
       return sceneFinal();
     case "waiting":
       return sceneCard("Quorum", "Not open yet.");
+    case "sendoff":
+      return sceneSendoff();
     case "trivia":
       return sceneTrivia();
     case "arcade":
@@ -162,6 +164,57 @@ function build(k: ViewKind): Scene {
 /* ------------------------------------------------------------------ */
 /* Scenes                                                              */
 /* ------------------------------------------------------------------ */
+
+/**
+ * The send-off.
+ *
+ * One message at a time, filling the screen. Not a wall of tiles: this is read
+ * across a video call at whatever size the worst connection in the room is
+ * receiving, and a grid of fifteen messages is a grid nobody reads.
+ *
+ * The type steps down as the message gets longer rather than overflowing or
+ * shrinking to nothing — kudos are not a fixed size, and the longest here is
+ * four times the shortest.
+ */
+function sceneSendoff(): Scene {
+  const kicker = h("p", { class: "s-kicker label" });
+  const message = h("p", { class: "s-kudo" });
+  const from = h("p", { class: "s-kudo-from" });
+  const counter = h("p", { class: "mono s-kudo-count" });
+  const node = h("section", { class: "s-stage s-sendoff" }, [
+    kicker,
+    message,
+    from,
+    counter,
+  ]);
+  return {
+    node,
+    update(state) {
+      const so = state.sendoff;
+      if (!so) return;
+      setText(kicker, so.subtitle === null ? so.name : `${so.name} · ${so.subtitle}`);
+      const k = so.kudo;
+      message.hidden = k === null;
+      from.hidden = k === null;
+      if (k !== null) {
+        setText(message, k.message);
+        setText(from, k.from);
+        // Three steps, by length. A 34-word message and a 145-word one cannot
+        // share a size without one of them being wrong.
+        const n = k.message.length;
+        node.dataset["len"] = n < 220 ? "short" : n < 520 ? "medium" : "long";
+      }
+      const closing = so.phase === "closing" || so.phase === "done";
+      if (closing && so.line !== null) {
+        message.hidden = false;
+        setText(message, so.line);
+        node.dataset["len"] = "short";
+      }
+      setText(counter, so.phase === "kudos" ? `${so.index} of ${so.total}` : "");
+      counter.hidden = so.phase !== "kudos";
+    },
+  };
+}
 
 function sceneCard(kicker: string, line: string): Scene {
   const title = h("h1", { class: "display s-title" });

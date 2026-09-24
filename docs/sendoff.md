@@ -35,8 +35,16 @@ follow, and they are the reason for the choice:
 
 **One kudo at a time, filling the Desktop.** Not a wall of tiles. The Desktop
 is read across a video call, at whatever size the worst connection in the room
-is receiving, and a grid of twenty messages is a grid nobody reads. Photo,
-message, and who wrote it.
+is receiving, and a grid of twenty messages is a grid nobody reads. The message
+and who wrote it, set large.
+
+**Kudos carry no photo.** The photos people send for a farewell are not
+portraits of the person who wrote each message — they are group shots, and
+nobody can say which of forty-three belongs beside which of fifteen messages.
+Pairing them would mean guessing, and a wrong guess on a farewell slideshow is
+wrong in front of everyone at once. So the photos run as montages and the
+messages are text. This is a decision about what the material actually is, not
+a simplification.
 
 **The host advances it.** This is the most important decision in the design and
 the easiest one to get wrong. An auto-advancing montage walks past the moment
@@ -82,10 +90,10 @@ who cannot is finding out at the same moment as the person it is about.
     "seconds": 40
   },
   "kudos": [
-    { "from": "…", "message": "…", "photo": "…" }
+    { "from": "…", "message": "…" }
   ],
   "closing": {
-    "photo": "team.jpg",
+    "photos": ["…"],
     "line": "…"
   }
 }
@@ -173,8 +181,9 @@ mid-send-off reads as the session having ended.
 - **The messages are other people's words.** They are rendered as text, never
   as markup, and never through anything that would let a `<script>` in a kudos
   file reach the Desktop.
-- **A kudo with no photo must look deliberate**, not broken — the message
-  centred, rather than a message beside an empty frame.
+- **A message set large must stay readable at length.** Kudos are not a fixed
+  size: one will be six words and one will be a paragraph, and the type has to
+  step down rather than overflow or shrink to nothing.
 
 ---
 

@@ -3491,6 +3491,7 @@ function issue(cmd: HostCommand, from: Control | null): void {
 const SEGMENT_ADVANCE_LABEL: Readonly<Record<Segment, string>> = {
   lobby: "Show the lobby",
   holding: "Show the holding card",
+  sendoff: "Start the send-off",
   trivia: "Open trivia",
   arcade: "Open the arcade",
   standings: "Show standings",

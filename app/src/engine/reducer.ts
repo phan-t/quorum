@@ -26,6 +26,7 @@ import type {
   RawScore,
   ReduceResult,
   RejectCode,
+  SendoffState,
   SessionState,
   TriviaAnswer,
   TriviaState,
@@ -148,6 +149,7 @@ export function newSession(input: NewSessionInput): SessionState {
     segment: "lobby",
     seal: "live",
     practice: false,
+    sendoff: null,
     activities: input.activities,
     tiebreakOrder: input.tiebreakOrder ?? input.activities.map((a) => a.id),
     participants: {},
@@ -188,6 +190,64 @@ const BROADCAST_STANDINGS: Effect[] = [
  * same statement about a person in both, and two copies of it would be one
  * copy away from disagreeing.
  */
+/**
+ * One step through the send-off, forward or back, or `null` at either end.
+ *
+ * Forward and back are the same list read in two directions, so they are one
+ * function: an `opening → kudos → closing → done` written twice is two things
+ * to keep in step, and the one that gets forgotten is always the reverse.
+ *
+ * Stepping back out of `done` lands on the last thing there was, not on
+ * `closing` unconditionally — a send-off with no closing photos and no closing
+ * line would otherwise put an empty screen in front of the room when the host
+ * corrects an overshoot.
+ */
+function stepSendoff(
+  so: SendoffState,
+  dir: 1 | -1,
+  now: number,
+): SendoffState | null {
+  const kudos = so.content.kudos.length;
+  const hasOpening = so.content.opening.photos.length > 0;
+  const hasClosing =
+    so.content.closing.photos.length > 0 || (so.content.closing.line ?? "") !== "";
+
+  const at = (phase: SendoffState["phase"], index: number): SendoffState => ({
+    ...so,
+    phase,
+    at: index,
+    // Stamped on the way in and cleared on the way out, so a Desktop that
+    // reloads mid-montage knows how far through it is rather than restarting
+    // it in front of everyone.
+    openingStartedAt: phase === "opening" ? now : null,
+  });
+
+  if (dir === 1) {
+    if (so.phase === "opening") return kudos > 0 ? at("kudos", 0) : hasClosing ? at("closing", 0) : at("done", 0);
+    if (so.phase === "kudos") {
+      if (so.at + 1 < kudos) return at("kudos", so.at + 1);
+      return hasClosing ? at("closing", 0) : at("done", 0);
+    }
+    if (so.phase === "closing") return at("done", 0);
+    return null;
+  }
+
+  if (so.phase === "done") {
+    if (hasClosing) return at("closing", 0);
+    if (kudos > 0) return at("kudos", kudos - 1);
+    return hasOpening ? at("opening", 0) : null;
+  }
+  if (so.phase === "closing") {
+    if (kudos > 0) return at("kudos", kudos - 1);
+    return hasOpening ? at("opening", 0) : null;
+  }
+  if (so.phase === "kudos") {
+    if (so.at > 0) return at("kudos", so.at - 1);
+    return hasOpening ? at("opening", 0) : null;
+  }
+  return null;
+}
+
 function withActivityTotals(
   state: SessionState,
   activityId: ActivityId,
@@ -638,6 +698,18 @@ export function reduce(
           // A restart is the room starting again, and leaving practice on
           // through one would be a silent reason the next game scored nothing.
           practice: false,
+          // The content stays loaded; where the room got to does not. Same
+          // reasoning as the trivia questions: re-uploading is not the point
+          // of a restart, and making the host do it would be a surprise.
+          sendoff:
+            state.sendoff === null
+              ? null
+              : {
+                  ...state.sendoff,
+                  phase: state.sendoff.content.opening.photos.length > 0 ? "opening" : "kudos",
+                  at: 0,
+                  openingStartedAt: null,
+                },
           // Participants, nicknames, join-order numbers and kick decisions all
           // survive untouched. A kick is a decision about a person, not a
           // score, and un-kicking somebody as a side effect of wiping the
@@ -717,6 +789,63 @@ export function reduce(
         ...BROADCAST_STANDINGS,
         PERSIST,
       ]);
+    }
+
+    /**
+     * The send-off's content. Same rule as a question set: replace it freely
+     * until it has been in front of the room, refuse afterwards. A montage
+     * that changes halfway through is a montage nobody can follow, and a
+     * message list that changes after three have been read is a list whose
+     * numbering no longer matches what the room heard.
+     */
+    case "loadSendoff": {
+      if (event.content.kudos.length === 0 && event.content.opening.photos.length === 0) {
+        return unchanged(
+          reject("host", "no_questions_loaded", "That send-off has no messages and no photos."),
+        );
+      }
+      if (state.sendoff !== null && state.sendoff.phase !== "opening") {
+        return unchanged(
+          reject("host", "wrong_phase", "The send-off has started. Restart the session to change it."),
+        );
+      }
+      return applied(
+        {
+          ...state,
+          sendoff: {
+            content: event.content,
+            phase: event.content.opening.photos.length > 0 ? "opening" : "kudos",
+            at: 0,
+            openingStartedAt: null,
+          },
+        },
+        [BROADCAST_STATE, PERSIST],
+      );
+    }
+
+    /**
+     * One step on. The whole segment is this and its reverse, because the host
+     * drives it with the same space bar as everything else and the only two
+     * things they can mean are "next" and "I went too fast".
+     */
+    case "sendoffNext": {
+      const so = state.sendoff;
+      if (!so) {
+        return unchanged(reject("host", "wrong_phase", "No send-off is loaded."));
+      }
+      const next = stepSendoff(so, 1, now);
+      if (next === null) return unchanged();
+      return applied({ ...state, sendoff: next }, [BROADCAST_STATE, PERSIST]);
+    }
+
+    case "sendoffBack": {
+      const so = state.sendoff;
+      if (!so) {
+        return unchanged(reject("host", "wrong_phase", "No send-off is loaded."));
+      }
+      const next = stepSendoff(so, -1, now);
+      if (next === null) return unchanged();
+      return applied({ ...state, sendoff: next }, [BROADCAST_STATE, PERSIST]);
     }
 
     case "setSegment": {

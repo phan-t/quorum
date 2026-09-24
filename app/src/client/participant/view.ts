@@ -308,6 +308,8 @@ function buildScene(kind: ViewKind, ctx: SceneCtx): Scene {
       return sceneWaiting();
     case "lobby":
       return sceneLobby();
+    case "sendoff":
+      return sceneSendoff();
     case "holding":
       return sceneHolding();
     case "standings":
@@ -334,6 +336,44 @@ function sceneWaiting(): Scene {
     node,
     update(state) {
       setText(title, state.title);
+    },
+  };
+}
+
+/**
+ * The send-off, on a phone.
+ *
+ * The same message the room is looking at, in text, and not a shrunken copy of
+ * the Desktop. Somebody whose screen-share has frozen is still reading along,
+ * which at this point in a session matters more than it does anywhere else.
+ *
+ * Nothing to tap. The points strip stays: the competition is usually not
+ * settled yet when this runs, and taking the scoreboard away mid-send-off
+ * reads as the session having ended.
+ */
+function sceneSendoff(): Scene {
+  const who = h("p", { class: "label so-for" });
+  const message = h("p", { class: "so-message" });
+  const from = h("p", { class: "so-from" });
+  const node = h("section", { class: "v v-sendoff" }, [who, message, from]);
+  return {
+    node,
+    update(state) {
+      const so = state.sendoff;
+      if (!so) return;
+      setText(who, so.name);
+      const k = so.kudo;
+      if (k !== null) {
+        setText(message, k.message);
+        setText(from, k.from);
+        message.hidden = false;
+        from.hidden = false;
+        return;
+      }
+      from.hidden = true;
+      const line = so.phase === "closing" || so.phase === "done" ? so.line : null;
+      setText(message, line ?? "");
+      message.hidden = line === null;
     },
   };
 }

@@ -38,6 +38,7 @@ import type {
   ArcadeView,
   OwnPoints,
   RenderState,
+  SendoffView,
   Role,
   RosterEntry,
   ScoreRow,
@@ -741,6 +742,48 @@ export function arcadeMineFor(
   };
 }
 
+/**
+ * The send-off, projected for one surface.
+ *
+ * `next` is the whole reason this is a projection rather than the state: the
+ * host sees the message after this one and nobody else does. Kudos are written
+ * by people who did not know the room they would be read into, and one of them
+ * will be a joke that does not survive a farewell — a host who can read ahead
+ * can skip it without anyone knowing there was something to skip.
+ */
+export function sendoffViewFor(
+  state: SessionState,
+  role: ViewOptions["role"],
+): SendoffView | undefined {
+  const so = state.sendoff;
+  if (!so) return undefined;
+  const { content, phase } = so;
+  const kudo = phase === "kudos" ? (content.kudos[so.at] ?? null) : null;
+  const photos =
+    phase === "opening"
+      ? content.opening.photos
+      : phase === "closing"
+        ? content.closing.photos
+        : [];
+  const view: SendoffView = {
+    name: content.name,
+    subtitle: content.subtitle,
+    phase,
+    index: phase === "kudos" ? so.at + 1 : 0,
+    total: content.kudos.length,
+    kudo: kudo === null ? null : { from: kudo.from, message: kudo.message },
+    photos,
+    seconds: content.opening.seconds,
+    // Only ever the montage's, and only while the montage is up: a music key
+    // on a message frame is a track that would start under somebody reading.
+    music: phase === "opening" ? content.opening.music : null,
+    line: phase === "closing" || phase === "done" ? content.closing.line : null,
+  };
+  if (role !== "host") return view;
+  const after = phase === "kudos" ? (content.kudos[so.at + 1] ?? null) : (content.kudos[0] ?? null);
+  return { ...view, next: after === null ? null : { from: after.from, message: after.message } };
+}
+
 export function renderStateFor(
   state: SessionState,
   opts: ViewOptions,
@@ -787,6 +830,8 @@ export function renderStateFor(
   const arcade = arcadeStateOf(state);
   const arcadeView = arcade ? arcadeViewFor(state, arcade, opts.role) : undefined;
 
+  const sendoffView = sendoffViewFor(state, opts.role);
+
   const base: RenderState = {
     sid: state.sid,
     title: state.title,
@@ -794,6 +839,7 @@ export function renderStateFor(
     segment: state.segment,
     seal: state.seal,
     practice: state.practice,
+    ...(sendoffView === undefined ? {} : { sendoff: sendoffView }),
     holding: state.holding,
     roster,
     joinsLocked: state.joinsLocked,

@@ -759,6 +759,30 @@ export interface ArcadeMine {
  * the top five is ever visible and enforcing it in the client would mean
  * shipping the rest of the list to the phone.
  */
+/** One message, as any surface may see it. */
+export interface KudoView {
+  readonly from: string;
+  readonly message: string;
+}
+
+export interface SendoffView {
+  readonly name: string;
+  readonly subtitle: string | null;
+  readonly phase: "opening" | "kudos" | "closing" | "done";
+  /** 1-based, for "4 of 15". Zero outside the messages. */
+  readonly index: number;
+  readonly total: number;
+  /** The message on screen now, or null in a montage. */
+  readonly kudo: KudoView | null;
+  /** Photo keys for the montage this phase is showing; empty otherwise. */
+  readonly photos: readonly string[];
+  readonly seconds: number;
+  readonly music: string | null;
+  readonly line: string | null;
+  /** Host only. The reason the console can skip one without anybody knowing. */
+  readonly next?: KudoView | null;
+}
+
 export interface RenderState {
   readonly sid: string;
   readonly title: string;
@@ -774,6 +798,14 @@ export interface RenderState {
    * looking at.
    */
   readonly practice: boolean;
+  /**
+   * The send-off, when the room is in one.
+   *
+   * Carries only what the surface being drawn is allowed to know. The host's
+   * projection includes the *next* message; nobody else's does — see
+   * docs/sendoff.md for why a host who can read ahead can skip one quietly.
+   */
+  readonly sendoff?: SendoffView;
   readonly holding: { title: string; line: string } | null;
   readonly roster: readonly RosterEntry[];
   readonly joinsLocked: boolean;

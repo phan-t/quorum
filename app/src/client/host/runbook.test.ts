@@ -46,6 +46,7 @@ const LABEL: Readonly<Record<Segment, string>> = {
   holding: "Holding card",
   trivia: "Trivia",
   arcade: "Arcade",
+  sendoff: "Send-off",
   standings: "Standings",
   final: "Final",
 };

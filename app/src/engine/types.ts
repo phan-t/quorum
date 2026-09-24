@@ -19,7 +19,65 @@ export type Segment =
   | "trivia"
   | "arcade"
   | "standings"
+  | "sendoff"
   | "final";
+
+/* ------------------------------------------------------------------ */
+/* The send-off                                                        */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Where the send-off has got to.
+ *
+ * `opening` and `closing` are photo montages; `kudos` is the messages, one at
+ * a time. `done` is a real state rather than an absence: the last message
+ * having been read is not the same as the segment never having started, and
+ * the Desktop shows something different for each.
+ */
+export type SendoffPhase = "opening" | "kudos" | "closing" | "done";
+
+/** One message. No photo: see docs/sendoff.md — they are not paired. */
+export interface Kudo {
+  readonly from: string;
+  readonly message: string;
+}
+
+/**
+ * The content of a send-off, as the engine holds it.
+ *
+ * Photos are **keys, not bytes**. The images live in their own store rows,
+ * served over HTTP the way the promo card is, and only their keys travel
+ * through state — a snapshot is replayed and broadcast, and seven megabytes of
+ * JPEG has no business in either.
+ */
+export interface SendoffContent {
+  readonly name: string;
+  readonly subtitle: string | null;
+  readonly opening: {
+    readonly photos: readonly string[];
+    readonly seconds: number;
+    /** A key, or null. Off unless the file says otherwise — see the note. */
+    readonly music: string | null;
+  };
+  readonly kudos: readonly Kudo[];
+  readonly closing: {
+    readonly photos: readonly string[];
+    readonly line: string | null;
+  };
+}
+
+export interface SendoffState {
+  readonly content: SendoffContent;
+  readonly phase: SendoffPhase;
+  /** Index into `content.kudos`. Meaningful only while `phase` is `kudos`. */
+  readonly at: number;
+  /**
+   * When the montage started, so the Desktop can place itself in it after a
+   * reload. Null outside `opening`. The engine does not end the montage on
+   * this — the host does, with the same key as everything else.
+   */
+  readonly openingStartedAt: number | null;
+}
 
 /** Whether cumulative standings are visible. See SPEC.md "Seal and reveal". */
 export type Seal = "live" | "sealed" | "revealed";
@@ -248,6 +306,8 @@ export interface SessionState {
    * that during a practice round meant it.
    */
   readonly practice: boolean;
+  /** Null until a send-off is loaded. Not every event has one. */
+  readonly sendoff: SendoffState | null;
   readonly activities: readonly Activity[];
   /** Activity ids in tiebreak precedence order. */
   readonly tiebreakOrder: readonly ActivityId[];
@@ -879,6 +939,18 @@ export type Event =
    * thing the room just did counted.
    */
   | { type: "setPractice"; on: boolean }
+  /** Replace the send-off content. Refused once it has started, like trivia. */
+  | { type: "loadSendoff"; content: SendoffContent }
+  /**
+   * Forward and back through the send-off, a step at a time.
+   *
+   * Two events rather than one `goto`, because the host drives this with the
+   * space bar and the only two things they can mean are "next" and "I went too
+   * fast". A `goto` would also let a console with a stale view jump the room to
+   * a message it has already heard.
+   */
+  | { type: "sendoffNext" }
+  | { type: "sendoffBack" }
   | { type: "setSegment"; segment: Segment }
   | { type: "setSeal"; seal: Seal }
   | { type: "setHolding"; holding: HoldingCard | null }
