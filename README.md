@@ -16,6 +16,7 @@ huddle — run that one on the existing tools.
 
 | File | For |
 | --- | --- |
+| [`docs/sendoff.md`](docs/sendoff.md) | The send-off segment: kudos, photos and music for the part of an event that is not a game — and why it is a segment rather than an activity |
 | [`SPEC.md`](SPEC.md) | What it does and why: the three surfaces, the session lifecycle, trivia and its question file, the arcade's six rounds and the Lounge, manual entry for the TTX, the holding page, failure modes at a live event, open questions |
 | [`ARCHITECTURE.md`](ARCHITECTURE.md) | How it is built: one stateful process on ECS Fargate, the data model, the WebSocket protocol, AWS topology, HCP Terraform with OIDC, GitHub Actions, the deploy decision, restart behaviour, local dev, cost |
 | [`DESIGN.md`](DESIGN.md) | What it looks like: the shared tokens, the phone-first participant view, the host console, the Desktop over compressed video, and the arcade's Squid Game register with its copy |
