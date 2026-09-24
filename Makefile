@@ -34,9 +34,15 @@ INFRA    = infra
 .PHONY: check deploy build push apply up down url plan fmt
 
 ## Fail early and clearly rather than three minutes into an apply.
-check:
+## Just an AWS session. Staging reads the admin key from SSM and talks to the
+## running service over HTTPS; it never touches Terraform, and requiring the
+## HCP organisation for it turned "load tomorrow's questions" into "configure
+## your infrastructure tooling first".
+aws-check:
 	@aws sts get-caller-identity --query 'Arn' --output text 2>/dev/null \
-	  || { echo "No AWS session. Run: awscreds && tfawscreds"; exit 1; }
+	  || { echo "No AWS session. Run: awscreds"; exit 1; }
+
+check: aws-check
 	@test -n "$(TF_CLOUD_ORGANIZATION)" \
 	  || { echo "TF_CLOUD_ORGANIZATION is unset. Run: export TF_CLOUD_ORGANIZATION=tphan"; exit 1; }
 	@echo "region   $(REGION)"
@@ -105,7 +111,7 @@ down: check
 ## Stage an event: create the session, load its questions, stage the console's
 ## setup, and print the tokens. Run it the morning of, from a terminal, with
 ## AWS credentials — the admin key is read from SSM and never stored here.
-stage: check
+stage: aws-check
 	@test -n "$(EVENT)" || { echo "Set EVENT, e.g. make stage EVENT=2026-09-25-sa-apj-huddle"; exit 1; }
 	@test -d config/events/$(EVENT) || { echo "No config/events/$(EVENT)"; exit 1; }
 	@cd app && QUORUM_URL="https://$(HOST)" \
