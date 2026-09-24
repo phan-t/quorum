@@ -556,6 +556,7 @@ const SERVER_SKEW_MS = 1_237;
 class MockSession {
   sid = "mock-session";
   title = "SA APJ Quorum";
+  sessionSubtitle: string | null = "Friday 25 September 2026";
   joinCode = sampleJoinCode();
   phase: SessionPhase = "draft";
   segment: Segment = "lobby";
@@ -1462,6 +1463,7 @@ class MockSession {
     const base = {
       sid: this.sid,
       title: this.title,
+      subtitle: this.sessionSubtitle,
       phase: this.phase,
       segment: this.segment,
       seal: this.seal,

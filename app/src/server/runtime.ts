@@ -1350,8 +1350,22 @@ export class SessionRegistry {
   }
 }
 
+/**
+ * What a new session scores.
+ *
+ * The tabletop exercise used to be here as a `manual` activity, a column for
+ * the host to type results into because it is judged off-platform. It came out
+ * on 24 Sep 2026: the exercise is run and judged by somebody else, and a
+ * leaderboard column that only fills in if the host remembers to ask for the
+ * numbers and type them is a column that is usually empty and always slightly
+ * wrong.
+ *
+ * `manual` remains a supported kind and the machinery for it is untouched, so
+ * an event that wants an off-platform activity scored adds one back. Nothing
+ * here is per-event yet; that belongs in `session.json` beside the runbook,
+ * and is the obvious next thing if a second event wants a different set.
+ */
 export const DEFAULT_ACTIVITIES: readonly Activity[] = [
-  { id: "ttx", title: "Agentic Security TTX", kind: "manual", spotCap: 2 },
   { id: "trivia", title: "Trivia", kind: "trivia", spotCap: 2 },
   { id: "arcade", title: "Hashi Arcade", kind: "arcade", spotCap: 2 },
 ];

@@ -888,7 +888,7 @@ describe("seal", () => {
     const priya = await join(s.joinCode, "Priya");
     applyEvent(s, { type: "setScore", activityId: "trivia", pid: kenji.pid, raw: 900 });
     applyEvent(s, { type: "setScore", activityId: "trivia", pid: priya.pid, raw: 400 });
-    applyEvent(s, { type: "setScore", activityId: "ttx", pid: priya.pid, raw: 50 });
+    applyEvent(s, { type: "setScore", activityId: "arcade", pid: priya.pid, raw: 50 });
     await sleep(150);
     return { s, host, screen, kenji, priya };
   }

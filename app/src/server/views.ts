@@ -835,6 +835,7 @@ export function renderStateFor(
   const base: RenderState = {
     sid: state.sid,
     title: state.title,
+    subtitle: state.subtitle,
     phase: state.phase,
     segment: state.segment,
     seal: state.seal,

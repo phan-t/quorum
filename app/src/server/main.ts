@@ -937,6 +937,8 @@ function handleHttp(req: IncomingMessage, res: ServerResponse): void {
       .then((body) => {
         const b = (body ?? {}) as Record<string, unknown>;
         const title = typeof b["title"] === "string" ? b["title"] : "Team Huddle";
+        const rawSub = b["subtitle"];
+        const subtitle = typeof rawSub === "string" && rawSub.trim() !== "" ? rawSub.trim() : null;
         // The console's staged setup, kept as the text it arrived as. The
         // server never parses it: it is the console's vocabulary, versioned by
         // the console, and a server that understood it would be a second place
@@ -950,6 +952,7 @@ function handleHttp(req: IncomingMessage, res: ServerResponse): void {
         const state = newSession({
           sid: newId("ses"),
           title,
+          subtitle,
           joinCode: newJoinCode(registry.takenCodes()),
           activities: DEFAULT_ACTIVITIES,
         });

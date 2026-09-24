@@ -85,6 +85,7 @@ function build(b: Build): SessionState {
   return {
     sid: "s",
     title: "t",
+  subtitle: null,
     joinCode: "RAFT",
     phase: "running",
     segment: "standings",

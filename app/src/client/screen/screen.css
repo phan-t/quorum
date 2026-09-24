@@ -102,6 +102,16 @@ body {
   flex-direction: column;
   gap: 2vh;
 }
+/* The date, and anything else that is not the session's name. Muted and well
+   under the title, so the title still reads as the title. */
+.s-subtitle {
+  margin: 0.2rem 0 0;
+  color: var(--muted);
+  font-size: 2.2vh;
+}
+.s-subtitle[hidden] {
+  display: none;
+}
 .s-join-url {
   margin: 0;
   font-size: clamp(32px, 2.6vw, 52px);

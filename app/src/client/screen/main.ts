@@ -618,6 +618,9 @@ function sceneCard(kicker: string, line: string): Scene {
 
 function sceneLobby(): Scene {
   const title = h("h1", { class: "display s-title" });
+  // Under the title, and hidden when a session set none: an empty line between
+  // the name and the join code is a gap the eye reads as a mistake.
+  const subtitle = h("p", { class: "s-subtitle", attrs: { hidden: true } });
   const url = h("p", { class: "mono s-join-url" });
   const canvas = h("canvas", { class: "s-qr" });
   const qrWrap = h("div", { class: "s-qr-wrap" }, [canvas]);
@@ -811,6 +814,7 @@ function sceneLobby(): Scene {
     h("div", { class: "s-lobby-left" }, [
       h("p", { class: "s-kicker label", text: "Join" }),
       title,
+      subtitle,
       url,
       h("p", { class: "s-lobby-count" }, [
         count,
@@ -828,6 +832,8 @@ function sceneLobby(): Scene {
       offerPromo(state.sid);
       showJoin(joinUrl(state.joinCode));
       setText(title, state.title);
+      setText(subtitle, state.subtitle ?? "");
+      subtitle.hidden = (state.subtitle ?? "") === "";
       setText(count, String(state.roster.length));
       // Nicknames as they arrive. Text, never markup.
       replace(

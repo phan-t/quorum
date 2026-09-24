@@ -135,6 +135,7 @@ export const MAX_NICKNAME_LENGTH = 24;
 export interface NewSessionInput {
   readonly sid: string;
   readonly title: string;
+  readonly subtitle?: string | null;
   readonly joinCode: string;
   readonly activities: readonly Activity[];
   readonly tiebreakOrder?: readonly ActivityId[];
@@ -144,6 +145,7 @@ export function newSession(input: NewSessionInput): SessionState {
   return {
     sid: input.sid,
     title: input.title,
+    subtitle: input.subtitle ?? null,
     joinCode: input.joinCode,
     phase: "draft",
     segment: "lobby",

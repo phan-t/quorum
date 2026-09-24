@@ -50,7 +50,7 @@ function makeSession() {
   created.runtime.apply({ type: "open" }, now);
   created.runtime.apply({ type: "start" }, now);
   created.runtime.apply({ type: "join", pid: "p1", nickname: "Priya" }, now);
-  created.runtime.apply({ type: "join", pid: "p2", nickname: "Ade, the host" }, now);
+  created.runtime.apply({ type: "join", pid: "p2", nickname: "Lee, the host" }, now);
   created.runtime.apply(
     { type: "setScore", activityId: "trivia", pid: "p1", raw: 18400 },
     now,
@@ -85,11 +85,11 @@ describe("GET /api/sessions/:sid/export.csv", () => {
     const lines = (await res.text()).trimEnd().split("\r\n");
     assert.equal(
       lines[0],
-      "Name,Agentic Security TTX Raw,Agentic Security TTX Pts,Trivia Raw,Trivia Pts,Hashi Arcade Raw,Hashi Arcade Pts,Spot Awards,TOTAL",
+      "Name,Trivia Raw,Trivia Pts,Hashi Arcade Raw,Hashi Arcade Pts,Spot Awards,TOTAL",
     );
-    assert.equal(lines[1], "Priya,,,18400,100,,,0,100");
+    assert.equal(lines[1], "Priya,18400,100,,,0,100");
     // A comma in a nickname is quoted rather than shifting every column right.
-    assert.equal(lines[2], '"Ade, the host",,,9200,50,,,10,60');
+    assert.equal(lines[2], '"Lee, the host",9200,50,,,10,60');
   });
 
   it("refuses with no token", async () => {

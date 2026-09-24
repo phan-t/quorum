@@ -435,6 +435,7 @@ function sceneLobby(): Scene {
     nick,
   ]);
   const title = h("h1", { class: "display lobby-title" });
+  const subtitle = h("p", { class: "lobby-subtitle", attrs: { hidden: true } });
   const prize = h("p", { class: "lobby-prize" });
   const count = h("span", { class: "num lobby-count" });
   const chips = h("div", { class: "lobby-chips" });
@@ -442,6 +443,7 @@ function sceneLobby(): Scene {
   const node = h("section", { class: "v v-lobby" }, [
     you,
     title,
+    subtitle,
     prize,
     h("div", { class: "lobby-here" }, [
       count,
@@ -459,6 +461,8 @@ function sceneLobby(): Scene {
       you.hidden = nickname === null;
       if (nickname !== null) setText(nick, nickname);
       setText(title, state.title);
+      setText(subtitle, state.subtitle ?? "");
+      subtitle.hidden = (state.subtitle ?? "") === "";
       // Deliberately *not* `state.holding.line`, which is what this used to
       // read. `holding` is the last card the host set, not the card currently
       // on screen — the engine only clears it on a restart — so once any card

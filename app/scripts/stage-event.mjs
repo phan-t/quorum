@@ -50,6 +50,11 @@ try {
 }
 
 const title = typeof session.title === "string" ? session.title : null;
+// A second line for what is not the name: a date, a time, a place. Optional.
+const subtitle =
+  typeof session.subtitle === "string" && session.subtitle.trim() !== ""
+    ? session.subtitle.trim()
+    : null;
 if (!title) die("session.json needs a \"title\".");
 
 // The questions travel in their own file, because that is the file people edit
@@ -122,7 +127,7 @@ const post = async (path, body, token, contentType = "application/json") => {
 /* 1 — the session, with the console's setup staged onto it */
 const created = await post(
   "/api/sessions",
-  JSON.stringify({ title, ...(session.console ? { setup: session.console } : {}) }),
+  JSON.stringify({ title, ...(subtitle ? { subtitle } : {}), ...(session.console ? { setup: session.console } : {}) }),
   adminKey,
 );
 if (!created.ok) die(`Creating the session failed (${created.status}): ${created.text}`);

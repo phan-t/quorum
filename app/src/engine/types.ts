@@ -282,6 +282,16 @@ export interface TriviaState {
 export interface SessionState {
   readonly sid: string;
   readonly title: string;
+  /**
+   * A second line under the title, for the things that are not the name.
+   *
+   * A date belongs here rather than in `title`: the title is what the session
+   * *is* and gets set in display type across the Desktop, and "SA APJ Team
+   * Huddle 25th September 2026" set at that size is a name with an
+   * administrative detail welded onto it. Null on a session that does not
+   * want one. Nothing in the engine reads it.
+   */
+  readonly subtitle: string | null;
   readonly joinCode: string;
   readonly phase: SessionPhase;
   readonly segment: Segment;

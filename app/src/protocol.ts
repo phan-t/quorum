@@ -801,6 +801,8 @@ export interface SendoffView {
 export interface RenderState {
   readonly sid: string;
   readonly title: string;
+  /** Under the title in the lobby. Null when the session set none. */
+  readonly subtitle: string | null;
   readonly phase: SessionPhase;
   readonly segment: Segment;
   readonly seal: Seal;
