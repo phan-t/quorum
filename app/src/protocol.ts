@@ -789,6 +789,15 @@ export interface SendoffView {
   readonly total: number;
   /** The message on screen now, or null in a montage. */
   readonly kudo: KudoView | null;
+  /**
+   * The longest message in the set, in characters.
+   *
+   * The Desktop sets every message at one size, and the size that works is the
+   * one the longest message needs — but a surface only ever holds the message
+   * it is showing, so it cannot find that out by looking. This is the whole
+   * reason the number is on the wire.
+   */
+  readonly longest: number;
   /** Photo keys for the montage this phase is showing; empty otherwise. */
   readonly photos: readonly string[];
   readonly seconds: number;

@@ -20,6 +20,7 @@ So the example is the thing that ships, and the events stay on the machine.
 
 ```
 config/events/2026-09-25-sa-apj-huddle/
+  session.json              the title, what the event scores, the console's setup
   trivia-questions.json     the set uploaded to the session
   promo-card.html           the poster the Desktop shows in the lobby, if there is one
   sendoff.json              the send-off's messages, and the photos it names
@@ -30,8 +31,18 @@ config/events/2026-09-25-sa-apj-huddle/
   roster.md
 ```
 
-`promo-card.html`, `sendoff.json` and the photos are the files in here the
-service *does* read, by being uploaded to it.
+`session.json`, `promo-card.html`, `sendoff.json` and the photos are the files
+in here the service *does* read, by being staged or uploaded to it.
+
+`session.json` is what `make stage` reads. Besides the title and the console's
+setup it carries `activities`, the list of things this event scores — a
+leaderboard column each, and a Spot Award budget each. Leave it out and the
+session gets the default set, trivia and the arcade; write it to score
+something else, including a `manual` activity for one judged off-platform. The
+server validates the list when the session is created and refuses the whole
+thing with an error per entry, because a session's activities cannot be changed
+afterwards. See
+[docs/event-config.md](../docs/event-config.md#what-the-session-scores).
 
 `promo-card.html` is one self-contained page, everything inline, at most
 300,000 characters. The Desktop frames it beside the join link while the room

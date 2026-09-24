@@ -278,9 +278,9 @@ body.phone #app {
   font-size: clamp(28px, 9vw, 44px);
 }
 .lobby-subtitle {
-  margin: 0.15rem 0 0;
+  margin: 0.1rem 0 0;
   color: var(--muted);
-  font-size: 13px;
+  font-size: 11px;
 }
 .lobby-subtitle[hidden] {
   display: none;
@@ -392,8 +392,20 @@ body.phone #app {
 .so-note[hidden] {
   display: none;
 }
+.so-for-sub {
+  margin: 0.1rem 0 0;
+  color: var(--muted);
+  font-size: 11px;
+}
+.so-for-sub[hidden] {
+  display: none;
+}
+/* The same quotation marks as the Desktop, for the same reason: these are
+   somebody's words about somebody, and the punctuation should say so. */
 .so-message {
   margin: 0;
+  quotes: "\201C" "\201D";
+  text-indent: -0.4em;
   /* Sized to the message, not to the panel: the attribution belongs directly
      under the words, and a laptop window beside a video call is wide and
      shallow, so a paragraph told to fill it leaves the name stranded at the
@@ -409,6 +421,26 @@ body.phone #app {
   color: var(--ink);
 }
 .so-message[hidden] {
+  display: none;
+}
+.so-message::before {
+  content: open-quote;
+}
+.so-message::after {
+  content: close-quote;
+}
+/* The montage on a phone. It takes the room it can and no more: the message
+   frames on either side of it are the content, and a photo that pushed them
+   off the screen would be the decoration winning. */
+.so-photo {
+  display: block;
+  width: 100%;
+  max-height: 46vh;
+  object-fit: contain;
+  border-radius: 6px;
+  margin: 0.4rem 0;
+}
+.so-photo[hidden] {
   display: none;
 }
 .so-from {
@@ -2075,15 +2107,22 @@ body.phone:has(.v-splash) {
   .v-lobby {
     display: grid;
     grid-template-columns: minmax(260px, 0.95fr) minmax(0, 1.05fr);
-    grid-template-rows: auto auto auto minmax(0, 1fr);
+    grid-template-rows: auto auto auto auto minmax(0, 1fr);
     grid-template-areas:
-      "you   here"
-      "title chips"
-      "prize chips"
-      "wait  chips";
+      "you      here"
+      "title    chips"
+      "subtitle chips"
+      "prize    chips"
+      "wait     chips";
     column-gap: clamp(24px, 4cqw, 56px);
     row-gap: clamp(6px, 1.4cqh, 16px);
     align-content: start;
+  }
+  /* Its own row under the title. Without a named area it auto-placed into
+     whatever cell was free, which put the date beside the session name
+     instead of under it. */
+  .v-lobby .lobby-subtitle {
+    grid-area: subtitle;
   }
   .v-lobby .lobby-you {
     grid-area: you;

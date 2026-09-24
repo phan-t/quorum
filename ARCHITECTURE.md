@@ -365,7 +365,7 @@ files, exporting. Everything live goes over the socket.
 
 | Method | Path | Auth | Does |
 | --- | --- | --- | --- |
-| `POST` | `/api/sessions` | admin key | Creates a session; returns `sid`, `joinCode`, host and screen tokens (shown once) |
+| `POST` | `/api/sessions` | admin key | Creates a session; optional `activities` (the event's own scored set, validated all-or-nothing, rejected as `invalid_activities` with errors addressed by position — absent means the default set); returns `sid`, `joinCode`, host and screen tokens (shown once) |
 | `GET` | `/api/sessions/:sid` | host | Session config and current state summary |
 | `PATCH` | `/api/sessions/:sid` | host | Title, activities, tiebreak order, roster paste |
 | `POST` | `/api/sessions/:sid/content/trivia` | host | JSON question file; validates and replaces the set; rejects with `invalid_questions` and errors addressed by question number |

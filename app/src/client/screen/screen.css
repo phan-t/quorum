@@ -105,9 +105,9 @@ body {
 /* The date, and anything else that is not the session's name. Muted and well
    under the title, so the title still reads as the title. */
 .s-subtitle {
-  margin: 0.2rem 0 0;
+  margin: 0.15rem 0 0;
   color: var(--muted);
-  font-size: 2.2vh;
+  font-size: 1.5vh;
 }
 .s-subtitle[hidden] {
   display: none;
@@ -1341,8 +1341,25 @@ body {
  * the size works out to be — a 100px line running the full 1920 is a line
  * the eye loses its place in.
  */
+/* The date, under the name rather than beside it. Smaller than the name and
+   the same muted ink, so the eye reads one thing and then its footnote. */
+.s-kicker-sub {
+  margin: 0.15rem 0 0;
+  color: var(--muted);
+  font-size: 1.5vh;
+  letter-spacing: 0.14em;
+}
+.s-kicker-sub[hidden] {
+  display: none;
+}
+/* A quotation, set as one. The opening mark hangs into the left margin so the
+   first line of text still starts on the same edge as the name above it —
+   a quote mark that pushes the first line in is the thing that makes a block
+   of type look accidentally indented. */
 .s-kudo {
   margin: 0;
+  quotes: "\201C" "\201D";
+  text-indent: -0.42em;
   /* The box the fit measures against: whatever the card has left once the
      name, the attribution and the counter have taken theirs. `min-height: 0`
      is what lets a flex item be smaller than its content, and `overflow:
@@ -1372,6 +1389,12 @@ body {
 /* Who wrote it, in the arcade's green — the one hue on this surface that is
    already "a person", and 9.82:1 on --ground. Not a quotation mark: the
    message is somebody's words and the attribution is the product's. */
+.s-kudo::before {
+  content: open-quote;
+}
+.s-kudo::after {
+  content: close-quote;
+}
 .s-kudo-from {
   margin: 0;
   flex: none;

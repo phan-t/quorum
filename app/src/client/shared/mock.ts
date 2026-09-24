@@ -160,7 +160,14 @@ interface MockRow {
   rank: number;
 }
 
-/** The three the server ships with — `DEFAULT_ACTIVITIES` in runtime.ts. */
+/**
+ * What the mock event scores. A stand-in, not the server's list: a real
+ * session takes its activities from the event's `session.json`, and a session
+ * that names none falls back to `DEFAULT_ACTIVITIES` in runtime.ts, which is
+ * trivia and the arcade. Three here, one of them `manual`, because the mock is
+ * a surface to develop against and a manual column is the one the default set
+ * no longer has.
+ */
 const ACTIVITIES: readonly Omit<ActivitySummary, "spotsLeft">[] = [
   { id: "ttx", title: "Agentic Security TTX", kind: "manual", spotCap: 2 },
   { id: "trivia", title: "Trivia", kind: "trivia", spotCap: 2 },
@@ -1431,6 +1438,7 @@ class MockSession {
       phase,
       index: phase === "kudos" ? this.sendoffAt + 1 : 0,
       total: so.kudos.length,
+      longest: so.kudos.reduce((n: number, k: { message: string }) => Math.max(n, k.message.length), 0),
       kudo: kudo === null ? null : { from: kudo.from, message: kudo.message },
       photos,
       seconds: so.opening.seconds,

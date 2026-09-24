@@ -334,6 +334,43 @@ describe("loadTrivia", () => {
       "session_closed",
     );
   });
+
+  /**
+   * `state.trivia` is one slot, not a map keyed by activity.
+   *
+   * This is the behaviour behind the rule that a session may configure at most
+   * one `trivia` activity — `src/activities/import.ts` refuses a second one,
+   * and this test is what that rule is protecting against. A second trivia
+   * activity's set does not sit beside the first: it replaces it outright,
+   * with nothing rejected and nothing said, leaving the first activity with no
+   * questions and no error anybody saw. If the engine ever grows a slot per
+   * activity, this test fails and that rule should be revisited rather than
+   * kept out of habit.
+   */
+  test("a second trivia activity's set replaces the first's — the slot is single", () => {
+    const two: readonly Activity[] = [
+      act("trivia"),
+      { id: "trivia-2", title: "trivia-2", kind: "trivia", spotCap: 2 },
+    ];
+    const s = accept(
+      newSession({ sid: "s", title: "t", joinCode: "RAFT", activities: two }),
+      [
+        { type: "open" },
+        { type: "join", pid: "p1", nickname: "p1" },
+        { type: "start" },
+        { type: "loadTrivia", activityId: "trivia", questions: [q(), q(), q()] },
+      ],
+    );
+    assert.equal(trivia(s).activityId, "trivia");
+    assert.equal(trivia(s).questions.length, 3);
+
+    const r = run(s, { type: "loadTrivia", activityId: "trivia-2", questions: [q()] });
+    assert.deepEqual(rejectCodes(r.effects), [], "nothing objects");
+    // One slot: the second activity is the loaded one now, and the first has
+    // no questions left at all.
+    assert.equal(trivia(r.state).activityId, "trivia-2");
+    assert.equal(trivia(r.state).questions.length, 1);
+  });
 });
 
 /* ------------------------------------------------------------------ */

@@ -771,6 +771,7 @@ export function sendoffViewFor(
     phase,
     index: phase === "kudos" ? so.at + 1 : 0,
     total: content.kudos.length,
+    longest: content.kudos.reduce((n, k) => Math.max(n, k.message.length), 0),
     kudo: kudo === null ? null : { from: kudo.from, message: kudo.message },
     photos,
     seconds: content.opening.seconds,

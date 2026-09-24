@@ -219,6 +219,28 @@ describe("player numbers", () => {
     assertRefused(open, run(open, { type: "enterArcade", activityId: "arcade" }), "wrong_phase");
   });
 
+  /**
+   * `state.arcade` is one slot, not a map keyed by activity.
+   *
+   * This is the behaviour behind the rule that a session may configure at most
+   * one `arcade` activity — `src/activities/import.ts` refuses a second one,
+   * and this test is what that rule is protecting against. A second arcade
+   * activity cannot be entered at all once the first has been, and the refusal
+   * talks about the phase, which is not a sentence anybody can act on with a
+   * room waiting. If the engine ever grows a slot per activity, this test
+   * fails and that rule should be revisited rather than kept out of habit.
+   */
+  test("a second arcade activity can never be entered — the slot is single", () => {
+    const second: Activity = { id: "arcade-2", title: "Arcade II", kind: "arcade", spotCap: 2 };
+    const base = accept(
+      newSession({ sid: "s", title: "Offsite", joinCode: "RAFT", activities: [ARCADE, second] }),
+      [{ type: "open" }, { type: "start" }, { type: "join", pid: "p1", nickname: "Player one" }],
+    );
+    const s = accept(base, [{ type: "enterArcade", activityId: "arcade" }]);
+    assert.equal(arcadeOf(s).activityId, "arcade");
+    assertRefused(s, run(s, { type: "enterArcade", activityId: "arcade-2" }), "wrong_phase");
+  });
+
   test("every arcade event before enterArcade is not_in_arcade", () => {
     const s = lobby(["p1", "p2"]);
     const events: Event[] = [

@@ -361,10 +361,63 @@ function sceneWaiting(): Scene {
  */
 function sceneSendoff(): Scene {
   const who = h("p", { class: "label so-for" });
+  const whoSub = h("p", { class: "label so-for-sub", attrs: { hidden: true } });
   const message = h("p", { class: "so-message" });
   const from = h("p", { class: "so-from" });
   const note = h("p", { class: "v-note so-note" });
-  const node = h("section", { class: "v v-sendoff" }, [who, note, message, from]);
+  /**
+   * The montage, on the phone too.
+   *
+   * It used to say "Photos, on the shared screen." — true, and useless to
+   * somebody whose share had frozen, or who was on a phone, or who was simply
+   * looking down. The photos are already served without a token so that an
+   * `<img>` can carry them, so there is nothing to solve here beyond showing
+   * them. Decorative, hence `alt=""`: the montage has no words and inventing
+   * captions for somebody's holiday photographs would be worse than silence.
+   */
+  const photo = h("img", {
+    class: "so-photo",
+    attrs: { alt: "", decoding: "async", hidden: true },
+  }) as HTMLImageElement;
+  const node = h("section", { class: "v v-sendoff" }, [who, whoSub, note, photo, message, from]);
+  let rotation: ReturnType<typeof setInterval> | null = null;
+  let showing = "";
+
+  const stopPhotos = (): void => {
+    if (rotation !== null) clearInterval(rotation);
+    rotation = null;
+    photo.hidden = true;
+    showing = "";
+  };
+
+  /** Cycle a phase's photos. Restarted only when the set itself changes. */
+  const runPhotos = (sid: string, keys: readonly string[], seconds: number): void => {
+    const key = keys.join("|");
+    if (key === showing) return;
+    stopPhotos();
+    if (keys.length === 0) return;
+    showing = key;
+    const urls = keys.map(
+      (k) => `/api/sessions/${encodeURIComponent(sid)}/assets/${encodeURIComponent(k)}`,
+    );
+    let at = 0;
+    const step = (): void => {
+      const url = urls[at % urls.length];
+      at += 1;
+      if (url === undefined) return;
+      photo.src = url;
+      photo.hidden = false;
+    };
+    step();
+    // The same pacing as the Desktop, floored so a long list does not flicker.
+    const each = Math.max(2_500, Math.round((seconds * 1000) / Math.max(1, keys.length)));
+    rotation = setInterval(step, each);
+  };
+
+  // A photo that 404s leaves the last good one up rather than a broken glyph.
+  photo.addEventListener("error", () => {
+    photo.hidden = true;
+  });
   return {
     node,
     update(state) {
@@ -379,7 +432,9 @@ function sceneSendoff(): Scene {
         from.hidden = true;
         return;
       }
-      setText(who, so.subtitle === null ? so.name : `${so.name} · ${so.subtitle}`);
+      setText(who, so.name);
+      setText(whoSub, so.subtitle ?? "");
+      whoSub.hidden = (so.subtitle ?? "") === "";
       node.dataset["phase"] = so.phase;
 
       const k = so.kudo;
@@ -388,11 +443,12 @@ function sceneSendoff(): Scene {
         setText(from, k.from);
         message.hidden = false;
         from.hidden = false;
-        message.style.setProperty("--so-size", kudoSize(k.message));
+        message.style.setProperty("--so-size", kudoSize(so.longest));
         // Which one of how many, so a phone that lost the share still knows
         // where the room is. Quiet: it is not the content.
         setText(note, `${so.index} of ${so.total}`);
         note.hidden = false;
+        stopPhotos();
         return;
       }
 
@@ -401,17 +457,9 @@ function sceneSendoff(): Scene {
       setText(message, line ?? "");
       message.hidden = line === null || line === "";
       message.style.removeProperty("--so-size");
-      // The montage has no words of its own on this screen, so it says what
-      // is happening rather than showing an empty panel for forty seconds.
-      setText(
-        note,
-        so.phase === "opening"
-          ? "Photos, on the shared screen."
-          : so.phase === "closing"
-            ? "Photos, on the shared screen."
-            : "",
-      );
-      note.hidden = note.textContent === "";
+      runPhotos(state.sid, so.photos, so.seconds);
+      setText(note, "");
+      note.hidden = true;
     },
   };
 }
@@ -422,10 +470,19 @@ function sceneSendoff(): Scene {
  * The same fit the Desktop uses, in a range this screen can hold — a browser
  * window beside a video call, or a phone in a pocket at the back of a room.
  */
-function kudoSize(text: string): string {
-  const n = Math.max(1, text.length);
+/**
+ * One size for every message in the set, from the longest.
+ *
+ * Not from the message being shown. Sizing each one on its own meant the type
+ * jumped between people, which reads as some messages mattering more than
+ * others — they do not, and a farewell is the last place to imply it. The
+ * Desktop does the same thing by measuring; a phone is narrow enough that the
+ * arithmetic is close enough and much cheaper.
+ */
+function kudoSize(longest: number): string {
+  const n = Math.max(1, longest);
   const px = 420 / Math.sqrt(n);
-  return `clamp(17px, ${px.toFixed(1)}px, 26px)`;
+  return `clamp(15px, ${px.toFixed(1)}px, 26px)`;
 }
 
 function sceneLobby(): Scene {

@@ -39,6 +39,10 @@ import {
   importSendoffJson,
   sendoffAssetKeys,
 } from "../sendoff/import.ts";
+import {
+  formatErrors as formatActivityErrors,
+  importActivities,
+} from "../activities/import.ts";
 
 /**
  * A ceiling on the staged console setup, which the server stores without
@@ -949,12 +953,35 @@ function handleHttp(req: IncomingMessage, res: ServerResponse): void {
           rawSetup === undefined || rawSetup === null
             ? null
             : JSON.stringify(rawSetup).slice(0, MAX_SETUP_CHARS);
+        // What this session scores, from the event's own `session.json`.
+        // Unlike the console's setup above, this one the server very much does
+        // parse: it becomes engine state that nothing can change afterwards,
+        // and the errors are addressed so staging can print which entry is
+        // wrong. Absent means `DEFAULT_ACTIVITIES` — and absent has to keep
+        // meaning exactly that, because every session created before this key
+        // existed was created that way.
+        const rawActivities = b["activities"];
+        let activities = DEFAULT_ACTIVITIES;
+        if (rawActivities !== undefined && rawActivities !== null) {
+          const parsed = importActivities(rawActivities);
+          if (!parsed.ok) {
+            return json(res, 400, {
+              error: "invalid_activities",
+              errors: formatActivityErrors(parsed.errors),
+              detail: parsed.errors,
+            });
+          }
+          activities = parsed.activities;
+        }
         const state = newSession({
           sid: newId("ses"),
           title,
           subtitle,
           joinCode: newJoinCode(registry.takenCodes()),
-          activities: DEFAULT_ACTIVITIES,
+          activities,
+          // `tiebreakOrder` is deliberately not sent from the file: the order
+          // of the list *is* the tiebreak order, which is what `newSession`
+          // derives when it is not given one. See docs/event-config.md.
         });
         const created = registry.add(state, Date.now(), setup);
         json(res, 201, {

@@ -143,7 +143,7 @@ export function createScoringPanel(opts: Opts): ScoringPanel {
   const spotReason = h("input", {
     class: "field sc-reason",
     type: "text",
-    placeholder: "Reason — it gets read out to the room",
+    placeholder: "Reason",
     attrs: { maxlength: "120", "aria-label": "Spot Award reason" },
   });
   const spotNote = h("span", { class: "mono sc-spot-note" });
@@ -216,7 +216,7 @@ export function createScoringPanel(opts: Opts): ScoringPanel {
     setText(
       spotNote,
       empty
-        ? "A reason is required — it is read out to the room."
+        ? "A reason is required."
         : "Worth 10 points. Two per activity by default.",
     );
     spotNote.classList.toggle("sc-spot-note-warn", empty);

@@ -8,6 +8,7 @@
 
 import type { WebSocket } from "ws";
 import { reduce } from "../engine/reducer.ts";
+import { DEFAULT_SPOT_CAP } from "../activities/import.ts";
 import { lockInForceAt } from "../engine/arcade.ts";
 import type {
   Activity,
@@ -1351,21 +1352,25 @@ export class SessionRegistry {
 }
 
 /**
- * What a new session scores.
+ * What a new session scores **when it does not say**.
  *
- * The tabletop exercise used to be here as a `manual` activity, a column for
- * the host to type results into because it is judged off-platform. It came out
- * on 24 Sep 2026: the exercise is run and judged by somebody else, and a
- * leaderboard column that only fills in if the host remembers to ask for the
- * numbers and type them is a column that is usually empty and always slightly
- * wrong.
+ * Only a default now. An event sets its own list in `session.json`, staging
+ * sends it to `POST /api/sessions` and `src/activities/import.ts` validates
+ * it — see docs/event-config.md. What is left here is what a session created
+ * without that key gets: every session made before the key existed, and every
+ * event happy with trivia and the arcade.
  *
- * `manual` remains a supported kind and the machinery for it is untouched, so
- * an event that wants an off-platform activity scored adds one back. Nothing
- * here is per-event yet; that belongs in `session.json` beside the runbook,
- * and is the obvious next thing if a second event wants a different set.
+ * The tabletop exercise used to be in this list as a `manual` activity, a
+ * column for the host to type results into because it is judged off-platform.
+ * It came out on 24 Sep 2026: the exercise is run and judged by somebody else,
+ * and a leaderboard column that only fills in if the host remembers to ask for
+ * the numbers and type them is a column that is usually empty and always
+ * slightly wrong. Making that change meant editing this file to change one
+ * event's scoring, which is the thing `activities` exists to stop. `manual`
+ * remains a supported kind and its machinery is untouched, so an event that
+ * wants an off-platform activity scored adds one back in its own file.
  */
 export const DEFAULT_ACTIVITIES: readonly Activity[] = [
-  { id: "trivia", title: "Trivia", kind: "trivia", spotCap: 2 },
-  { id: "arcade", title: "Hashi Arcade", kind: "arcade", spotCap: 2 },
+  { id: "trivia", title: "Trivia", kind: "trivia", spotCap: DEFAULT_SPOT_CAP },
+  { id: "arcade", title: "Hashi Arcade", kind: "arcade", spotCap: DEFAULT_SPOT_CAP },
 ];

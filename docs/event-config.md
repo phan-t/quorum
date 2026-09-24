@@ -19,7 +19,7 @@ endpoint to return. Nothing else has to happen before 2:00pm.
 
 ```
 config/events/2026-09-25-sa-apj-huddle/
-  session.json            title, and the console's setup
+  session.json            title, what the session scores, the console's setup
   trivia-questions.json   the question set
   promo-card.html         optional: the poster shown in the Desktop's lobby
   sendoff.json            optional: the send-off's messages and photo names
@@ -38,9 +38,14 @@ content about the people in the room and this repository is public. See
 ```json
 {
   "title": "SA APJ Team Huddle",
+  "subtitle": "Friday 25 September 2026",
   "questions": "trivia-questions.json",
   "promo": "promo-card.html",
   "sendoff": "sendoff.json",
+  "activities": [
+    { "id": "trivia", "title": "Trivia", "kind": "trivia" },
+    { "id": "arcade", "title": "Hashi Arcade", "kind": "arcade" }
+  ],
   "console": {
     "cards": { "cards": [{ "id": "card-1", "title": "…", "line": "…" }] },
     "runbook": [{ "kind": "holding", "included": true, "id": "holding", "card": "card-1" }],
@@ -49,14 +54,90 @@ content about the people in the room and this repository is public. See
 }
 ```
 
-`title`, `questions`, `promo` and `sendoff` are the server's. Everything under
-`console` is the console's, and the server never looks inside it.
+`title`, `subtitle`, `questions`, `promo`, `sendoff` and `activities` are the
+server's. Everything under `console` is the console's, and the server never
+looks inside it.
+
+`subtitle` is the second line under the name — a date, a time, a place. Optional
+and null by default; a session without one shows nothing in its place.
 
 `promo` can be left out — it defaults to `promo-card.html`, and an event with
 no such file stages exactly as it did before promo cards existed. Set it to
 `false` to skip the upload for an event that has the file but does not want it.
 
 `sendoff` works the same way, defaulting to `sendoff.json`.
+
+---
+
+## What the session scores
+
+`activities` is the list of things this event scores: a leaderboard column
+each, a Spot Award budget each, and a term each in the tiebreak.
+
+```json
+"activities": [
+  { "id": "trivia",  "title": "Trivia",       "kind": "trivia" },
+  { "id": "arcade",  "title": "Hashi Arcade", "kind": "arcade" },
+  { "id": "ttx",     "title": "Security TTX", "kind": "manual", "spotCap": 2 }
+]
+```
+
+**Leave it out and the session gets the default set** — trivia and the arcade,
+with two Spot Awards each. That is what every session created before this key
+existed got, and it is what most events want; the key is for the event that
+wants something else.
+
+| | |
+| --- | --- |
+| `id` | Required. Lowercase letters, digits, `-` and `_`, starting with a letter or a digit, ≤ 32 characters. Unique within the list. |
+| `title` | Required, ≤ 40 characters. What the room, the console and the CSV call it. |
+| `kind` | Required. `trivia`, `arcade` or `manual`. |
+| `spotCap` | Optional, default 2, 0–10. Spot Awards this activity's facilitator may grant. |
+
+**At most one `trivia` and at most one `arcade`.** The engine holds one of each
+— `state.trivia` and `state.arcade` are single slots, not maps keyed by
+activity — so a second trivia activity's question set would silently replace
+the first's, and a second arcade activity could never be opened at all. Both
+are discovered in the room, so both are refused when the session is created.
+Any number of `manual` activities is fine: a manual activity is scores typed in
+against an id, and there is no slot to shadow.
+
+**`manual` is for an activity judged off-platform.** A tabletop exercise run
+and scored by somebody else, a paper quiz, a bake-off. The host types the
+results into the console's scoring grid and they normalise like any other raw
+score. Worth knowing before adding one: a column that only fills in if the host
+remembers to ask for the numbers is a column that is usually empty and always
+slightly wrong, which is exactly why the September 2026 huddle stopped scoring
+its TTX.
+
+**The order is the tiebreak order.** A tie for first is settled by comparing
+normalised points in each activity in turn, in the order they are written here,
+before sudden death. Put the activity that should settle a tie first. There is
+no separate `tiebreakOrder` key: two orders in one file is two things to keep
+in step, and the one that gets forgotten is the one nobody looks at until there
+is a tie on the screen.
+
+**A question set is loaded into the `trivia` activity.** Staging uploads
+`trivia-questions.json` to whichever activity has `"kind": "trivia"`, so an
+`activities` list with no trivia activity is one that cannot take a question
+file — leave `questions` pointing at a file that exists and include a trivia
+activity, or expect staging to stop at step 2.
+
+### It is validated when the session is created, all or nothing
+
+The whole list is rejected or none of it is, with an error per problem,
+addressed by position — `Activity 3, kind: "trvia" is not an activity kind.` —
+and staging prints those lines rather than the JSON. **Unknown keys are
+errors**: a `"spotcap"` is somebody who believes they set a cap, and silently
+defaulting it to 2 is how a facilitator runs out of awards in front of the
+room. The rules are in `app/src/activities/import.ts`, written to the same
+three rules as the question and send-off importers.
+
+**A session's activities cannot be changed after it is created.** They are
+engine state, fixed at `POST /api/sessions`, and there is no endpoint that
+edits them — changing them means creating another session, which means another
+join code and another set of tokens. That is the reason the validation is this
+strict at the one moment it can be.
 
 ---
 
@@ -282,8 +363,8 @@ corrupt stored value is.
 
 ## What is not in here yet
 
-`session.json` covers the title, the questions, the promo card, the send-off
-and the console's setup. It does
+`session.json` covers the title and subtitle, the questions, the promo card,
+the send-off, what the session scores and the console's setup. It does
 not yet carry the practice flag, per-question timer overrides, or the arcade's
 timings as anything but the console's own `timings` object. Those are all
 server-side or engine-side state and each needs its own decision about whether

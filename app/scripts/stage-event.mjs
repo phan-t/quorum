@@ -57,6 +57,11 @@ const subtitle =
     : null;
 if (!title) die("session.json needs a \"title\".");
 
+// What this event scores. Passed through untouched — the server validates it
+// and answers with an error per entry, and a second copy of those rules here
+// is a second copy to keep in step. Absent means the server's default set.
+const activities = session.activities;
+
 // The questions travel in their own file, because that is the file people edit
 // and because the importer's errors are about questions, not about setup.
 const questionsFile =
@@ -127,10 +132,28 @@ const post = async (path, body, token, contentType = "application/json") => {
 /* 1 — the session, with the console's setup staged onto it */
 const created = await post(
   "/api/sessions",
-  JSON.stringify({ title, ...(subtitle ? { subtitle } : {}), ...(session.console ? { setup: session.console } : {}) }),
+  JSON.stringify({
+    title,
+    ...(subtitle ? { subtitle } : {}),
+    ...(activities !== undefined && activities !== null ? { activities } : {}),
+    ...(session.console ? { setup: session.console } : {}),
+  }),
   adminKey,
 );
-if (!created.ok) die(`Creating the session failed (${created.status}): ${created.text}`);
+if (!created.ok) {
+  // The activity list is the one part of this request the server validates
+  // entry by entry, and it answers with a line per problem. Printing the lines
+  // rather than the JSON is the difference between fixing the entry and
+  // reading a blob at five to two.
+  const lines = created.body?.errors;
+  if (Array.isArray(lines) && lines.length > 0) {
+    die(
+      `Creating the session failed (${created.status}). session.json's "activities":\n` +
+        lines.map((l) => `    ${l}`).join("\n"),
+    );
+  }
+  die(`Creating the session failed (${created.status}): ${created.text}`);
+}
 const { sid, joinCode, hostToken, screenToken } = created.body;
 
 /* 2 — the questions */

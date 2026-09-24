@@ -363,12 +363,16 @@ function sceneSendoff(): Scene {
     photoB,
   ]);
   const kicker = h("p", { class: "s-kicker label" });
+  // The date is not part of the name, so it does not share the name's line.
+  const kickerSub = h("p", { class: "s-kicker-sub label", attrs: { hidden: true } });
   const message = h("p", { class: "s-kudo" });
   const from = h("p", { class: "s-kudo-from" });
   const counter = h("p", { class: "mono s-kudo-count" });
-  const card = h("div", { class: "s-sendoff-card" }, [kicker, message, from, counter]);
+  const card = h("div", { class: "s-sendoff-card" }, [kicker, kickerSub, message, from, counter]);
   const node = h("section", { class: "s-stage s-sendoff" }, [montage, card]);
 
+  /** The longest message in the set, so every message is set at one size. */
+  let longestChars = 0;
   let photos: MontagePhoto[] = [];
   let shown = -1;
   let front = 0;
@@ -502,8 +506,34 @@ function sceneSendoff(): Scene {
    * checking the Desktop on a laptop, and a message that is slightly too small
    * there is better than one with its last line cut off.
    */
+  /**
+   * One size for every message, fitted to the longest.
+   *
+   * Fitting each message on its own looked reasonable in isolation and wrong
+   * in sequence: the room watched the type jump between 32px and 75px from one
+   * person to the next, which reads as some messages mattering more than
+   * others. They do not, and a farewell is the last place to imply it.
+   *
+   * So the fit is done once against the longest message in the set, and every
+   * message is set at that. `longest` is on the wire precisely because a
+   * surface only holds the message it is showing and cannot measure the rest.
+   *
+   * The probe is a synthetic string of that length rather than the real text,
+   * which the Desktop must not have early — a host skips a message the room
+   * has not seen, and a Desktop that had been sent it could leak it. Word
+   * lengths differ, so the estimate is approximate; it is biased long, and a
+   * message that ends up slightly smaller than it had to be is a much better
+   * failure than one with its last line cut off.
+   */
   function fitMessage(): void {
     if (message.hidden) return;
+    const target = Math.max(longestChars, message.textContent?.length ?? 0);
+    const real = message.textContent ?? "";
+    // "lorem ipsum " repeated is close enough to English word lengths for a
+    // wrapping estimate, and it never contains a word longer than the box.
+    let probe = "";
+    while (probe.length < target) probe += "lorem ipsum dolor sit amet ";
+    message.textContent = probe.slice(0, target);
     let lo = KUDO_MIN_PX;
     let hi = KUDO_MAX_PX;
     for (let i = 0; i < 8; i += 1) {
@@ -512,6 +542,7 @@ function sceneSendoff(): Scene {
       if (message.scrollHeight <= message.clientHeight) lo = mid;
       else hi = mid;
     }
+    message.textContent = real;
     message.style.fontSize = `${Math.floor(lo)}px`;
   }
 
@@ -558,7 +589,10 @@ function sceneSendoff(): Scene {
       }
 
       node.dataset["phase"] = so.phase;
-      setText(kicker, so.subtitle === null ? so.name : `${so.name} · ${so.subtitle}`);
+      longestChars = so.longest;
+      setText(kicker, so.name);
+      setText(kickerSub, so.subtitle ?? "");
+      kickerSub.hidden = (so.subtitle ?? "") === "";
 
       /* ---- the montage ---- */
       const sig = `${so.phase}|${so.photos.join("|")}`;
