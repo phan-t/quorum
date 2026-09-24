@@ -36,8 +36,8 @@ and the host's attention one thing (a console, not four windows).
 - **No teams.** Everyone scores as an individual, exactly as
   [SCORING.md](SCORING.md) argues. The data
   model does not forbid teams later; the product does not build them now.
-- **No content authoring UI.** Trivia comes from a CSV; arcade rounds are
-  files in this repo. A form-based question editor is a second product.
+- **No content authoring UI.** Trivia comes from a JSON file; arcade rounds
+  are files in this repo. A form-based question editor is a second product.
 - **No chat, video or audio.** The video call is the room. Quorum is what is on
   the shared screen and in everyone's hand.
 - **It does not run the TTX.** The Agentic Security TTX happens off-platform;
@@ -290,9 +290,9 @@ timer. The Desktop shows the same plus the answer count as it climbs.
    answered" and a close button, because waiting out a 30-second timer when
    everyone has answered is dead air).
 4. Reveal: correct answer, the answer distribution as bars, the note if the
-   CSV has one, then the activity's top five. Host advances.
+   question file has one, then the activity's top five. Host advances.
 
-**Scoring per question.** Base 1000 (the CSV can override per question).
+**Scoring per question.** Base 1000 (a question can override it).
 A correct answer scores `round(base × (1 − (t ÷ T) ÷ 2))` where `t` is the
 response time and `T` the time limit, so a correct answer at the buzzer is
 worth half of an instant one, never less. Wrong or no answer: 0. A streak bonus
@@ -304,42 +304,88 @@ on the server and corrected for the connection's measured latency, capped at
 someone in Sydney on fibre. [ARCHITECTURE.md](ARCHITECTURE.md#clocks-and-fairness)
 has the mechanism.
 
-**Multi-answer questions.** `Correct answer(s)` may list several (`2;4`);
-any listed answer is correct. Kahoot semantics.
+**Multi-answer questions.** `correct` may name several answers
+(`["B", "D"]`); any of them is correct. Kahoot semantics.
 
-**Two- and three-answer questions** are allowed by leaving answer columns blank.
+**Two- and three-answer questions** are allowed by giving two or three answers.
 
-**Sudden death** is a mode on any question: no timer, first correct answer
-wins, the Desktop shows the winner's name, no points change.
+**Sudden death** draws a question from the tiebreak pool rather than from the
+twenty: no timer, first correct answer wins, the Desktop shows the winner's
+name, no points change. A sudden death that consumed one of the scored
+questions would have changed the game it was asked to settle.
 
-### CSV format
+### Question file
 
-The Kahoot import file that already exists is the format, so the 20-question
-set in
-`kahoot-import.csv`
-loads unchanged.
+Questions are JSON. The 20-question set ships in this repo as
+`trivia-questions.json`.
 
-```csv
-Question,Answer 1,Answer 2,Answer 3,Answer 4,Time limit (sec),Correct answer(s),Note,Round,Points
-In what year was HashiCorp founded?,2008,2010,2012,2015,20,3,,History,
-"Which product does secrets management, encryption as a service and dynamic credentials?",Consul,Boundary,Vault,Nomad,20,3,"Dynamic credentials are the bit people forget.",Name that product,
-Which product's brand colour is purple?,Vault,Consul,Terraform,Nomad,10,3,,Brand,500
+```json
+{
+  "title": "HashiCorp & IBM trivia",
+  "questions": [
+    {
+      "text": "In what year was HashiCorp founded?",
+      "answers": ["2008", "2010", "2012", "2015"],
+      "correct": "C",
+      "timeLimitSec": 20,
+      "round": "History"
+    },
+    {
+      "text": "Which product does secrets management, encryption as a service and dynamic credentials?",
+      "answers": ["Consul", "Boundary", "Vault", "Nomad"],
+      "correct": "C",
+      "timeLimitSec": 20,
+      "note": "Dynamic credentials are the bit people forget.",
+      "round": "Name that product"
+    },
+    {
+      "text": "Which product's brand colour is purple?",
+      "answers": ["Vault", "Consul", "Terraform", "Nomad"],
+      "correct": "C",
+      "timeLimitSec": 10,
+      "round": "Brand",
+      "basePoints": 500
+    }
+  ]
+}
 ```
 
-| Column | Required | Rules |
-| --- | --- | --- |
-| `Question` | Yes | ≤ 200 characters. Longer will not fit a phone |
-| `Answer 1`–`Answer 4` | 1 and 2 | 3 and 4 may be blank. ≤ 80 characters each |
-| `Time limit (sec)` | Yes | 5–120 |
-| `Correct answer(s)` | Yes | 1-based index, or several separated by `;` |
-| `Note` | No | Shown on the reveal. This is the bit people learn from |
-| `Round` | No | Consecutive questions with the same value get a round card between them |
-| `Points` | No | Base points, default 1000. 0 makes a question a warm-up |
+A bare list of questions is accepted as well as the wrapped object. The
+wrapper exists to carry a title, not to be ceremony.
 
-Header names match by exact text so the file is also still a valid Kahoot
-import. Import validates every row and rejects the file with line-numbered
-errors rather than loading half of it: a set with question 14 missing is
-worse than a set that failed to load in the dry run.
+| Key | Required | Rules |
+| --- | --- | --- |
+| `text` | Yes | ≤ 200 characters. Longer will not fit a phone |
+| `answers` | Yes | Two to four of them, ≤ 80 characters each |
+| `correct` | Yes | The correct answer's letter, or a list of letters |
+| `timeLimitSec` | Yes | 5–120 |
+| `note` | No | Shown on the reveal. This is the bit people learn from |
+| `round` | No | Consecutive questions with the same value get a round card between them |
+| `basePoints` | No | Base points, default 1000. 0 makes a question a warm-up |
+| `tiebreak` | No | `true` takes the question out of the scored set and into the sudden-death pool |
+
+The answer is named by its letter rather than by its position because a letter
+is what the question bank writes and what a participant sees, and it is
+neither 0-based nor 1-based, so the off-by-one that a column of answer numbers
+invited has nowhere left to happen. A number in `correct` is refused with a
+message naming the letter to use instead: it is almost always a half-finished
+migration from the old CSV, and it is the one mistake that imports cleanly and
+marks the wrong answer.
+
+Unknown keys are errors, at the file level and at the question level. A file
+carrying `timelimitSec` is a file whose author believes they set a timer, and
+silently defaulting it is how a 20-second question becomes something else in
+front of thirty people.
+
+A question flagged `tiebreak` is lifted out of the twenty and into the pool
+sudden death draws on. Sudden death scores nothing, and a question that scores
+nothing must not also be one of the questions that do, so a file of 23
+questions with three flagged is a twenty-question game with three tiebreakers
+behind it.
+
+Import validates every question and rejects the file with addressed errors
+(`Question 8, correct: …`) rather than loading half of it: a set with question
+14 missing is worse than a set that failed to load in the dry run.
 
 Questions load per session. Editing a loaded set means re-uploading; there is
 no in-app editor by design. The ⚠️ VERIFY discipline in the question bank stays
@@ -733,7 +779,8 @@ and the playbook's fallback stands: read it out, score in chat, keep going.
 Accounts, SSO, any identity beyond the host and screen tokens. Teams. Chat,
 reactions, emoji storms. A question editor. Multi-language. Native apps.
 Analytics beyond a CSV export. Prize fulfilment. The TTX content. Kahoot
-compatibility beyond reading its CSV. Running the session with no host.
+compatibility of any kind, including reading its CSV. Running the session with
+no host.
 
 ## Open questions
 

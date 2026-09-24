@@ -1044,8 +1044,8 @@ describe("the tiebreak pool", () => {
   });
 
   test("a file with no tiebreakers falls back to the built-in pool", () => {
-    // Every CSV the importer produces today is this case, and "never a coin
-    // flip" has to be true for them too.
+    // Most files flag nothing, and "never a coin flip" has to be true for
+    // them too.
     const s = accept(
       newSession({ sid: "s", title: "t", joinCode: "RAFT", activities: ACTIVITIES }),
       [

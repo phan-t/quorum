@@ -16,7 +16,7 @@ huddle — run that one on the existing tools.
 
 | File | For |
 | --- | --- |
-| [`SPEC.md`](SPEC.md) | What it does and why: the three surfaces, the session lifecycle, trivia and its CSV, the arcade's six rounds and the Lounge, manual entry for the TTX, the holding page, failure modes at a live event, open questions |
+| [`SPEC.md`](SPEC.md) | What it does and why: the three surfaces, the session lifecycle, trivia and its question file, the arcade's six rounds and the Lounge, manual entry for the TTX, the holding page, failure modes at a live event, open questions |
 | [`ARCHITECTURE.md`](ARCHITECTURE.md) | How it is built: one stateful process on ECS Fargate, the data model, the WebSocket protocol, AWS topology, HCP Terraform with OIDC, GitHub Actions, the deploy decision, restart behaviour, local dev, cost |
 | [`DESIGN.md`](DESIGN.md) | What it looks like: the shared tokens, the phone-first participant view, the host console, the Desktop over compressed video, and the arcade's Squid Game register with its copy |
 
@@ -31,9 +31,9 @@ joiners get Bench Credit. The service computes it; it does not change it.
 surface shows cumulative standings — not the Desktop, not a phone, not a
 running total — until the host reveals.
 
-**The content** is what is already in this repo:
-`kahoot-import.csv`
-loads as-is, and the eighteen arcade items in
+**The content** is what is already in this repo: the 20-question set ships as
+`trivia-questions.json`,
+and the eighteen arcade items in
 `hashi-arcade/index.html` become
 rounds 0, 2 and 5.
 

@@ -1,0 +1,125 @@
+{
+  "title": "HashiCorp & IBM trivia",
+  "questions": [
+    {
+      "text": "In what year was HashiCorp founded?",
+      "answers": ["2008", "2010", "2012", "2015"],
+      "correct": "C",
+      "timeLimitSec": 20
+    },
+    {
+      "text": "Which was HashiCorp's first product?",
+      "answers": ["Terraform", "Vagrant", "Vault", "Consul"],
+      "correct": "B",
+      "timeLimitSec": 20
+    },
+    {
+      "text": "Who co-founded HashiCorp with Armon Dadgar?",
+      "answers": ["Mitchell Hashimoto", "Solomon Hykes", "Kelsey Hightower", "Adam Jacob"],
+      "correct": "A",
+      "timeLimitSec": 20
+    },
+    {
+      "text": "Which HashiCorp product was released first?",
+      "answers": ["Vault", "Consul", "Nomad", "Boundary"],
+      "correct": "B",
+      "timeLimitSec": 30
+    },
+    {
+      "text": "Which two products were announced together at HashiConf Digital 2020?",
+      "answers": ["Vault & Consul", "Boundary & Waypoint", "Nomad & Packer", "Terraform & Sentinel"],
+      "correct": "B",
+      "timeLimitSec": 30
+    },
+    {
+      "text": "What is HashiCorp's published product design philosophy called?",
+      "answers": ["The HashiCorp Way", "The Tao of HashiCorp", "The Blue Book", "Infrastructure Manifesto"],
+      "correct": "B",
+      "timeLimitSec": 20
+    },
+    {
+      "text": "Which product does secrets management, encryption as a service and dynamic credentials?",
+      "answers": ["Consul", "Boundary", "Vault", "Nomad"],
+      "correct": "C",
+      "timeLimitSec": 20
+    },
+    {
+      "text": "Which product gives secure remote access to hosts without distributing SSH keys or VPNs?",
+      "answers": ["Consul", "Boundary", "Vault", "Packer"],
+      "correct": "B",
+      "timeLimitSec": 20
+    },
+    {
+      "text": "Which product schedules containers, raw binaries, Java and VMs as workloads?",
+      "answers": ["Nomad", "Consul", "Waypoint", "Terraform"],
+      "correct": "A",
+      "timeLimitSec": 20
+    },
+    {
+      "text": "Which product does service discovery, health checking and service mesh?",
+      "answers": ["Nomad", "Boundary", "Consul", "Terraform"],
+      "correct": "C",
+      "timeLimitSec": 20
+    },
+    {
+      "text": "Which product builds identical machine images for many platforms from one config?",
+      "answers": ["Vagrant", "Packer", "Waypoint", "Terraform"],
+      "correct": "B",
+      "timeLimitSec": 20
+    },
+    {
+      "text": "Which product creates reproducible dev environments, driven by a Vagrantfile?",
+      "answers": ["Packer", "Waypoint", "Vagrant", "Nomad"],
+      "correct": "C",
+      "timeLimitSec": 20
+    },
+    {
+      "text": "What is HashiCorp's policy-as-code framework called?",
+      "answers": ["Rego", "Gatekeeper", "Sentinel", "Guardrail"],
+      "correct": "C",
+      "timeLimitSec": 20
+    },
+    {
+      "text": "Which product scans code and systems for leaked secrets?",
+      "answers": ["Vault Sentinel", "Vault Radar", "Consul Watch", "Vault Scout"],
+      "correct": "B",
+      "timeLimitSec": 30
+    },
+    {
+      "text": "Which Terraform command previews changes without applying them?",
+      "answers": ["terraform preview", "terraform plan", "terraform dry-run", "terraform diff"],
+      "correct": "B",
+      "timeLimitSec": 20
+    },
+    {
+      "text": "By default, what is Terraform's state file called?",
+      "answers": ["state.json", "terraform.tfstate", "tfstate.lock", "main.tfstate"],
+      "correct": "B",
+      "timeLimitSec": 20
+    },
+    {
+      "text": "What best describes a Vault dynamic secret?",
+      "answers": ["A secret that rotates yearly", "A credential generated on demand, with a lease", "An encrypted static value", "A secret shared between two apps"],
+      "correct": "B",
+      "timeLimitSec": 30
+    },
+    {
+      "text": "Which consensus protocol backs integrated storage in Vault, Consul and Nomad?",
+      "answers": ["Paxos", "Raft", "Zab", "Two-phase commit"],
+      "correct": "B",
+      "timeLimitSec": 20
+    },
+    {
+      "text": "What is IBM's long-standing nickname?",
+      "answers": ["Big Iron", "Big Blue", "The Blue Giant", "Blue Sky"],
+      "correct": "B",
+      "timeLimitSec": 10
+    },
+    {
+      "text": "IBM's Deep Blue defeated which world chess champion in 1997?",
+      "answers": ["Anatoly Karpov", "Magnus Carlsen", "Garry Kasparov", "Vladimir Kramnik"],
+      "correct": "C",
+      "timeLimitSec": 20
+    }
+  ]
+}

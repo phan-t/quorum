@@ -40,7 +40,7 @@ import { newSession, replay } from "../engine/reducer.ts";
 import { computeStandings } from "../engine/scoring.ts";
 import { SessionRegistry, type Client } from "../server/runtime.ts";
 import { renderStateFor, triviaPodium } from "../server/views.ts";
-import { importTriviaCsv } from "../trivia/import.ts";
+import { importTriviaJson } from "../trivia/import.ts";
 
 /* ------------------------------------------------------------------ */
 /* The oracle: SPEC.md, in integers                                     */
@@ -125,10 +125,10 @@ const BASE = 1000;
 
 function loadSet(): readonly Question[] {
   const text = readFileSync(
-    new URL("../trivia/fixtures/kahoot-import.csv", import.meta.url),
+    new URL("../trivia/fixtures/trivia-questions.json", import.meta.url),
     "utf8",
   );
-  const result = importTriviaCsv(text);
+  const result = importTriviaJson(text);
   assert.ok(result.ok, "the launch set must load");
   return result.questions;
 }

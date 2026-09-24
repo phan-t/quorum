@@ -32,7 +32,7 @@ import type { StoredEvent } from "./store/types.ts";
 import { recoverSessions, rehydrate } from "./recovery.ts";
 import { recruitmentRound } from "../arcade/recruitment.ts";
 import { glassBridgeRound } from "../arcade/glass-bridge.ts";
-import { formatErrors, importTriviaCsv } from "../trivia/import.ts";
+import { formatErrors, importTriviaJson } from "../trivia/import.ts";
 import {
   eventsJsonl,
   mergeEventLogs,
@@ -243,7 +243,7 @@ async function serveExport(
  * with `trivia_already_started`: swapping the set mid-activity would rewrite
  * questions people have already been scored on.
  */
-async function loadTriviaCsv(
+async function loadTriviaQuestions(
   res: ServerResponse,
   sid: string,
   presented: string,
@@ -267,12 +267,12 @@ async function loadTriviaCsv(
     return json(res, 413, { error: "too_large" });
   }
 
-  const result = importTriviaCsv(text);
+  const result = importTriviaJson(text);
   if (!result.ok) {
     return json(res, 400, {
-      error: "invalid_csv",
-      // Line-numbered, in the file's own order, so the host can fix the file
-      // rather than guess which row the importer disliked.
+      error: "invalid_questions",
+      // Addressed by question, in the file's own order, so the host can fix the
+      // file rather than guess which entry the importer disliked.
       errors: formatErrors(result.errors),
       detail: result.errors,
     });
@@ -366,7 +366,7 @@ function handleHttp(req: IncomingMessage, res: ServerResponse): void {
     }
   }
 
-  // POST /api/sessions/:sid/content/trivia — the Kahoot CSV, host token only.
+  // POST /api/sessions/:sid/content/trivia — the question JSON, host token only.
   if (req.method === "POST" && path.startsWith("/api/sessions/")) {
     const rest = path.slice("/api/sessions/".length);
     const cut = rest.indexOf("/");
@@ -377,7 +377,7 @@ function handleHttp(req: IncomingMessage, res: ServerResponse): void {
       } catch {
         /* use it as typed; it will simply not match a session */
       }
-      void loadTriviaCsv(res, sid, bearer(req), req);
+      void loadTriviaQuestions(res, sid, bearer(req), req);
       return;
     }
   }

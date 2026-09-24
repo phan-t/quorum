@@ -8,9 +8,9 @@
  * a sudden death that consumes one of the twenty has changed the game it was
  * supposed to settle.
  *
- * So a loaded set may carry its own tiebreakers — rows flagged `Tiebreak`,
- * lifted out of the twenty by `loadTrivia` — and when it carries none, which
- * is every file the importer produces today, sudden death draws on these.
+ * So a loaded set may carry its own tiebreakers — questions the file flags
+ * `tiebreak`, lifted out of the twenty by `loadTrivia` — and when it carries
+ * none, which is the ordinary case, sudden death draws on these.
  *
  * ## Where this file should live
  *

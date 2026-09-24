@@ -355,7 +355,7 @@ files, exporting. Everything live goes over the socket.
 | `POST` | `/api/sessions` | admin key | Creates a session; returns `sid`, `joinCode`, host and screen tokens (shown once) |
 | `GET` | `/api/sessions/:sid` | host | Session config and current state summary |
 | `PATCH` | `/api/sessions/:sid` | host | Title, activities, tiebreak order, roster paste |
-| `POST` | `/api/sessions/:sid/content/trivia` | host | CSV upload; validates and replaces the set; returns line-numbered errors on failure |
+| `POST` | `/api/sessions/:sid/content/trivia` | host | JSON question file; validates and replaces the set; rejects with `invalid_questions` and errors addressed by question number |
 | `POST` | `/api/sessions/:sid/content/arcade` | host | Round selection and per-round settings |
 | `POST` | `/api/sessions/:sid/manual/:activityId` | host | Draft scores (typed or pasted); returns fuzzy-match proposals for confirmation |
 | `GET` | `/api/sessions/:sid/export.csv` | host | The `scoresheet.csv` shape: `Name, <Activity> Raw, <Activity> Pts, …, Spot Awards, TOTAL` |

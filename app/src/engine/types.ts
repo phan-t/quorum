@@ -105,9 +105,9 @@ export interface Question {
    * rows with three flagged is a twenty-question game with three tiebreakers
    * behind it.
    *
-   * Optional, and absent on every question the CSV importer builds today: a
-   * `Tiebreak` column is the follow-up that fills it. Until then sudden death
-   * draws on the built-in pool — see engine/tiebreak.ts.
+   * Optional, and false by omission on almost every question. A file that
+   * flags none is the ordinary case, and sudden death then draws on the
+   * built-in pool instead — see engine/tiebreak.ts.
    */
   readonly tiebreak?: boolean;
 }
@@ -172,8 +172,8 @@ export interface TriviaState {
    *
    * Filled from the questions flagged {@link Question.tiebreak} in the loaded
    * file, from an explicit pool on `loadTrivia`, or — when the file carries
-   * neither, which is every file the importer produces today — from the
-   * built-in pool, so that a host can always settle a tie without a coin flip.
+   * neither, which is the ordinary case — from the built-in pool, so that a
+   * host can always settle a tie without a coin flip.
    */
   readonly tiebreakers: readonly Question[];
   /**

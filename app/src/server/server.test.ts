@@ -1875,68 +1875,91 @@ describe("trivia over the wire", () => {
   });
 });
 
-describe("the trivia CSV upload", () => {
-  const CSV = [
-    "Question,Answer 1,Answer 2,Answer 3,Answer 4,Time limit (sec),Correct answer(s),Note,Round,Points",
-    "In what year was HashiCorp founded?,2008,2010,2012,2015,20,2,,History,",
-    '"Which product does secrets management, encryption as a service and dynamic credentials?",Consul,Boundary,Vault,Nomad,20,3,"Dynamic credentials are the bit people forget.",Name that product,',
-  ].join("\n");
+describe("the trivia question upload", () => {
+  const SET = JSON.stringify({
+    title: "HashiCorp & IBM trivia",
+    questions: [
+      {
+        text: "In what year was HashiCorp founded?",
+        answers: ["2008", "2010", "2012", "2015"],
+        correct: "C",
+        timeLimitSec: 20,
+        round: "History",
+      },
+      {
+        text: "Which product does secrets management and dynamic credentials?",
+        answers: ["Consul", "Boundary", "Vault", "Nomad"],
+        correct: "C",
+        timeLimitSec: 20,
+        note: "Dynamic credentials are the bit people forget.",
+        round: "Name that product",
+      },
+    ],
+  });
 
   async function upload(s: TestSession, body: string, token?: string): Promise<Response> {
     return fetch(`http://127.0.0.1:${port}/api/sessions/${s.runtime.state.sid}/content/trivia`, {
       method: "POST",
       headers: {
-        "content-type": "text/csv",
+        "content-type": "application/json",
         ...(token === undefined ? {} : { authorization: `Bearer ${token}` }),
       },
       body,
     });
   }
 
-  it("loads a Kahoot export unchanged", async () => {
+  it("loads a question file unchanged", async () => {
     const s = makeSession("running");
-    const res = await upload(s, CSV, s.hostToken);
+    const res = await upload(s, SET, s.hostToken);
     assert.equal(res.status, 200);
     assert.deepEqual(await res.json(), { activityId: "trivia", questions: 2 });
     assert.equal(s.runtime.state.trivia?.questions.length, 2);
-    // 1-based in the CSV, 0-based in the engine, converted once.
-    assert.deepEqual(s.runtime.state.trivia?.questions[0]?.correct, [1]);
+    // A letter in the file, a 0-based index in the engine, converted once.
+    assert.deepEqual(s.runtime.state.trivia?.questions[0]?.correct, [2]);
   });
 
-  it("rejects the whole file with line-numbered errors", async () => {
+  it("rejects the whole file with errors addressed by question", async () => {
     // SPEC.md: "a set with question 14 missing is worse than a set that
     // failed to load in the dry run."
     const s = makeSession("running");
-    const bad = CSV + "\nA question with no time limit,a,b,,,,1,,,";
+    const bad = JSON.stringify({
+      questions: [
+        ...(JSON.parse(SET) as { questions: unknown[] }).questions,
+        { text: "A question with no time limit", answers: ["a", "b"], correct: "A" },
+      ],
+    });
     const res = await upload(s, bad, s.hostToken);
     assert.equal(res.status, 400);
     const body = (await res.json()) as { error: string; errors: string[] };
-    assert.equal(body.error, "invalid_csv");
+    assert.equal(body.error, "invalid_questions");
     assert.ok(body.errors.length > 0);
-    assert.ok(body.errors.every((e) => /^Line \d+/.test(e)), body.errors.join(" | "));
+    assert.ok(
+      body.errors.every((e) => /^Question \d+/.test(e)),
+      body.errors.join(" | "),
+    );
     assert.equal(s.runtime.state.trivia, null, "half a set was loaded");
   });
 
   it("replaces the set during prep and refuses once a question has opened", async () => {
     const s = makeSession("running");
-    assert.equal((await upload(s, CSV, s.hostToken)).status, 200);
+    assert.equal((await upload(s, SET, s.hostToken)).status, 200);
     // Re-uploading is the only way to edit a set, so a fix in the green room
     // has to work.
-    assert.equal((await upload(s, CSV, s.hostToken)).status, 200);
+    assert.equal((await upload(s, SET, s.hostToken)).status, 200);
 
     applyEvent(s, { type: "openQuestion", suddenDeath: false });
-    const res = await upload(s, CSV, s.hostToken);
+    const res = await upload(s, SET, s.hostToken);
     assert.equal(res.status, 409);
     assert.equal(((await res.json()) as { error: string }).error, "trivia_already_started");
   });
 
   it("answers an unknown session and a wrong token the same way", async () => {
     const s = makeSession("running");
-    assert.equal((await upload(s, CSV, "not-the-token")).status, 401);
-    assert.equal((await upload(s, CSV)).status, 401);
+    assert.equal((await upload(s, SET, "not-the-token")).status, 401);
+    assert.equal((await upload(s, SET)).status, 401);
     const missing = await fetch(
       `http://127.0.0.1:${port}/api/sessions/ses_does_not_exist/content/trivia`,
-      { method: "POST", headers: { authorization: `Bearer ${s.hostToken}` }, body: CSV },
+      { method: "POST", headers: { authorization: `Bearer ${s.hostToken}` }, body: SET },
     );
     assert.equal(missing.status, 401);
   });

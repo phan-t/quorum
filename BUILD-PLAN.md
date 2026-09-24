@@ -107,11 +107,11 @@ would still have been worth building.
 
 ## Phase 3 — Trivia
 
-- CSV import in the existing Kahoot shape, plus the optional columns
+- JSON question-file import, with the optional keys
 - Question flow: open, answer, lock, reveal, leaderboard
 - Speed-weighted scoring with the latency correction
 - Sudden-death mode for a tiebreak
-- The 20-question launch set loads unmodified
+- The 20-question launch set loads as it ships
 
 **Done when:** thirty bots play a full 20-question round and the scores match a
 hand-computed expectation.
@@ -138,9 +138,13 @@ hand-computed expectation.
 > **Sudden death cannot serve as SCORING.md's tiebreak as built.** It is a
 > mode on a question, so it consumes one from the loaded set, and after the
 > last question `nextQuestion` refuses with `no_more_questions`. A host who
-> wants to settle a tie has to carry a spare question in the CSV. Either
+> wants to settle a tie has to carry a spare question in the set. Either
 > SCORING.md should say that out loud or sudden death needs to work off a
 > question that is not part of the scored set.
+>
+> **Closed 24 Sep 2026 by the JSON question file**, whose `tiebreak` key marks
+> a question as exactly that: outside the twenty, in the pool sudden death
+> draws on. The CSV had no way to say it without inventing a column.
 >
 > One engine/mock divergence left standing: the engine does not auto-close a
 > sudden-death question on the first correct tap — the host closes it, and the
@@ -317,7 +321,7 @@ places. Worth deciding once rather than at each phase.
 
 | | Today | After |
 | --- | --- | --- |
-| Trivia questions | `question-bank.md` + a Kahoot CSV | Ships in this repo as the launch trivia set, loaded into `CONTENT#` at session create |
+| Trivia questions | `question-bank.md` + a Kahoot CSV | Ships in this repo as the launch trivia set in `trivia-questions.json`, loaded into `CONTENT#` at session create |
 | Arcade items | A `ROUNDS` array inside a host-driven HTML page | Ships here as structured round content |
 | Facilitator guides | Activity READMEs | **Stay in the library.** They are about running a session with humans, which is true whatever software is underneath |
 | The existing HTML boards and Kahoot import | Activity folders | **Stay, as the fallback.** Retire them only after this service has run a real session without incident |
