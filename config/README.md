@@ -18,23 +18,23 @@ indexed, forkable, and keeps the file in its history after a delete.
 
 So the example is the one that ships, and the real set stays private.
 
-## Where the real one actually lives
+## It is not backed up
 
-`trivia-questions.json` here is a **symlink** into the private `team-building`
-repository, which is where an event's set is written and versioned:
+`trivia-questions.json` is an ordinary file here, ignored by git. That means it
+is in no repository, on no remote, and in no backup — it exists in this working
+directory and nowhere else. Losing the laptop loses the set.
 
+That is the accepted trade for keeping real people out of a public repository,
+but it is worth knowing before the morning of an event rather than during one.
+Copy the file somewhere before you rely on it.
+
+For the 25 September 2026 huddle the last committed copy is in the private
+team-building repository's history, before it was removed on 24 Sep 2026:
+
+```bash
+cd ~/Developer/HashiCorp/team-building
+git show 3fa324e:config/trivia-questions.json > ~/Developer/HashiCorp/quorum/config/trivia-questions.json
 ```
-config/trivia-questions.json -> ../../team-building/config/trivia-questions.json
-```
-
-That repo sits next to this one. A copy would have been simpler and worse: it
-would be a second truth that nothing versions and nothing backs up, and the one
-question you cannot answer at 1:55pm is which of two files is the current one.
-
-If the symlink dangles — team-building not cloned, or cloned somewhere else —
-the upload fails with a missing file, which is the right way to find out. Fix
-it by cloning team-building alongside this repo, or by pointing the link at
-wherever the set lives.
 
 ## Using it
 
