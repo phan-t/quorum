@@ -536,8 +536,18 @@ describe("thirty bots play the launch set", () => {
   const revealedState = played.runtime.state;
 
   test("the importer read the file the way a person reads it", () => {
-    assert.equal(questions.length, 20);
-    questions.forEach((q, i) => {
+    // `SET` is a hand transcription of the questions this round plays, and
+    // that is the whole of its value: it is an independent reading of the
+    // file rather than a copy of whatever the importer produced. The file is
+    // allowed to grow past it — questions get added — so this pins the ones
+    // it transcribed and plays those, rather than pinning the file's length
+    // and having every new question break a round simulation that never
+    // claimed to cover it.
+    assert.ok(
+      questions.length >= SET.length,
+      `the example set has ${questions.length} questions; this fixture needs at least ${SET.length}`,
+    );
+    questions.slice(0, SET.length).forEach((q, i) => {
       const [limitSec, oneBased] = SET[i] ?? [0, 0];
       assert.equal(q.timeLimitSec, limitSec, `Q${i + 1} time limit`);
       assert.deepEqual(q.correct, [oneBased - 1], `Q${i + 1} correct answer`);

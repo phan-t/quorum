@@ -234,7 +234,7 @@ describe("the committed example set", () => {
   );
 
   it("loads", () => {
-    assert.equal(ok(text).length, 20);
+    assert.equal(ok(text).length, 40);
   });
 
   it("marks exactly one correct answer per question, inside its own answers", () => {
