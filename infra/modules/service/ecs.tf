@@ -70,6 +70,18 @@ resource "aws_ecs_task_definition" "this" {
         # So /healthz can report which build is answering, which is what the
         # deploy workflow asserts against after a staging release.
         { name = "QUORUM_VERSION", value = var.image_tag },
+        # The task only ever hears from the ALB in alb.tf, so the socket's peer
+        # address is one ENI for the entire room. The join limit is ten hellos
+        # a minute per address; unset, that is ten hellos a minute for thirty
+        # people, and the eleventh person to scan the QR code is told to wait.
+        # With it set the server reads the address the ALB appended to
+        # X-Forwarded-For instead — see `clientAddress` in
+        # app/src/server/address.ts, which reads the header only when this is
+        # on, and reads the last entry rather than the caller's first.
+        #
+        # Hardcoded rather than a variable: this module always puts an ALB in
+        # front, so there is no configuration of it in which "0" would be true.
+        { name = "QUORUM_TRUST_PROXY", value = "1" },
       ]
 
       # The secret. The ECS agent resolves this at task start using the

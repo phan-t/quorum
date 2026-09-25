@@ -25,6 +25,7 @@ import {
   type Client,
   type SessionRuntime,
 } from "./runtime.ts";
+import { clientAddress } from "./address.ts";
 import { hashToken, newId, newJoinCode, tokenMatches } from "./tokens.ts";
 import { AWAY_AFTER_MS } from "./views.ts";
 import { Persister } from "./persist.ts";
@@ -86,7 +87,12 @@ import {
 const PORT = Number(process.env["PORT"] ?? 3000);
 const ADMIN_KEY = process.env["QUORUM_ADMIN_KEY"] ?? "";
 const VERSION = process.env["QUORUM_VERSION"] ?? "dev";
-/** Set behind a load balancer that appends X-Forwarded-For. */
+/**
+ * Set behind a load balancer that appends X-Forwarded-For. Production is, and
+ * `infra/modules/service/ecs.tf` sets this; a laptop is not, and does not.
+ * What turns on it is `clientAddress` in address.ts, and through that the
+ * per-address join limit.
+ */
 const TRUST_PROXY = process.env["QUORUM_TRUST_PROXY"] === "1";
 
 // Top-level await: the store has to exist before the first session does, and
@@ -1108,18 +1114,13 @@ function probeParticipants(runtime: SessionRuntime, now: number): void {
 }
 
 wss.on("connection", (socket: WebSocket, req: IncomingMessage) => {
-  // X-Forwarded-For is client-supplied. Behind the ALB the *last* entry is
-  // the one the load balancer appended and the only one we can believe; the
-  // first is whatever the caller typed, which would let anyone pick their own
-  // rate-limit bucket. Off the ALB, trust the socket.
-  const xff = (req.headers["x-forwarded-for"] as string | undefined)
-    ?.split(",")
-    .map((s) => s.trim())
-    .filter(Boolean);
-  const ip =
-    (TRUST_PROXY && xff && xff.length > 0 ? xff[xff.length - 1] : undefined) ??
-    req.socket.remoteAddress ??
-    "unknown";
+  // The key the join limit below is counted against. See address.ts for why
+  // it is the last entry of the chain and not the first.
+  const ip = clientAddress(
+    req.headers["x-forwarded-for"],
+    req.socket.remoteAddress,
+    TRUST_PROXY,
+  );
 
   let joined: Pending | null = null;
   // A socket that never says hello is a port scan, not a participant.
