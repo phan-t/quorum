@@ -21,19 +21,31 @@
  *
  * | Tin | Letters | Words |
  * | --- | --- | --- |
- * | ○ circle | 4–5 | RAFT |
+ * | ○ circle | 4–5 | RAFT, VAULT |
  * | △ triangle | 6 | MODULE, GOSSIP, UNSEAL |
  * | ☆ star | 8 | SENTINEL, PROVIDER |
  * | ☂ umbrella | 11+ | DECLARATIVE, IDEMPOTENCY, ORCHESTRATION |
  *
  * A tier with more than one word hands them out by arcade player number, so
- * two people sitting together are not unscrambling the same word. The circle
- * tier has exactly one, which is what the existing content gives it, and
- * everybody who picks the circle gets RAFT. That is a small hole — the first
- * person to solve it out loud has solved it for the tier — and it is the price
- * of "reuse the existing items verbatim". A host who wants it closed adds a
- * second four- or five-letter word and passes their own items to
- * `unsealRound`; nothing else has to change.
+ * two people sitting together are not unscrambling the same word.
+ *
+ * ## Why the circle tier has two
+ *
+ * The existing content gives it one, and for a while it shipped that way: one
+ * word for the whole tier, so the first person to say RAFT out loud on the
+ * call solved it for everybody who picked the circle. That is not a hole a
+ * host can be expected to notice in the room, and the circle is the tier the
+ * cautious pick — it is the one that most needs to still be a game.
+ *
+ * So VAULT is added, and it is the only item here that is not from the
+ * existing board or the umbrella brief. It is last in the list rather than
+ * next to RAFT because the tins are dealt by index: appending leaves every
+ * other tin where it was, and the six existing items stay the first six, in
+ * their original order, which is what the tests read them as.
+ *
+ * Two words still means two people in ten share a word; the fix for a big room
+ * is more circle words, not a different mechanism, and a host who wants that
+ * passes their own items to `unsealRound`.
  *
  * ## One cue is its own word backwards
  *
@@ -43,14 +55,15 @@
  * nothing in the tier for anybody to spot. It is kept as it is, because the
  * brief was to reuse the existing items verbatim, and a test records it so
  * that a future change to the content does not quietly introduce the pattern
- * that this one does not have.
+ * that this one does not have. VAULT, which is now in the same tier, was
+ * scrambled against that test rather than by eye.
  *
  * ## The additions
  *
- * Three words with nothing to verify in them: each is a term of art rather
- * than a fact, so there is no date, no branding and no acquisition to be wrong
- * about. The notes are the same shape as the existing six — one line, what the
- * thing is, with the joke where the word has one.
+ * Four words with nothing to verify in them: each is a term of art or a
+ * product name rather than a fact, so there is no date, no branding and no
+ * acquisition to be wrong about. The notes are the same shape as the existing
+ * six — one line, what the thing is, with the joke where the word has one.
  */
 
 import type { ArcadeRoundConfig, UnsealItem } from "../engine/types.ts";
@@ -59,13 +72,14 @@ import type { ArcadeRoundConfig, UnsealItem } from "../engine/types.ts";
 export const UNSEAL_SECONDS = 60;
 
 /**
- * Nine tins.
+ * Ten tins.
  *
  * The six existing Scrambled items are first, in their original order, with
  * their shape read off the length of the word: RAFT is four letters and
  * therefore a circle, MODULE and GOSSIP and UNSEAL are six and therefore
  * triangles, SENTINEL and PROVIDER are eight and therefore stars. SPEC.md
- * assigns exactly these, by name, so the mapping is not an inference.
+ * assigns exactly these, by name, so the mapping is not an inference. Then the
+ * three umbrellas, and last the second circle.
  */
 export const UNSEAL_ITEMS: readonly UnsealItem[] = [
   {
@@ -121,6 +135,12 @@ export const UNSEAL_ITEMS: readonly UnsealItem[] = [
     cue: "T A H R S O C I N T E O R",
     answer: "ORCHESTRATION",
     note: "What Nomad does: place the work, keep it running, move it when a node goes away.",
+  },
+  {
+    shape: "circle",
+    cue: "L T V A U",
+    answer: "VAULT",
+    note: "Secrets, PKI and dynamic credentials. The round you are playing is named after starting one.",
   },
 ];
 

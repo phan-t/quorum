@@ -42,7 +42,30 @@ import type {
 /* Round 0 — Recruitment                                               */
 /* ------------------------------------------------------------------ */
 
-/** SPEC.md: "Every correct answer within the timer scores 10". */
+/**
+ * SPEC.md: "Every correct answer within the timer scores 10".
+ *
+ * **This is the largest number in the arcade, and it is a decision rather than
+ * an accident.** Six items at 10 + 5 is a Floor max of 90. On the running
+ * order the event actually uses — Recruitment, Plan / Apply, the Bridge — the
+ * Floor can pay 90 + 40 + 63 = 193, so Recruitment is 47% of it, and it is the
+ * round that asks the least: six product names an SA knows cold, with the +5
+ * going to the first three in the room *per item*. That makes it a typing race
+ * rather than a quiz, and two or three emoji typed quickly outweigh a whole
+ * honest tin in Unseal.
+ *
+ * The case for leaving it there is SPEC.md's own: "round one sets whether
+ * people think they can win", it is the round that hands out the player
+ * numbers, and a round nobody can be knocked out of has to pay enough to be
+ * worth playing. The case against is that a typing race settles the
+ * leaderboard before the rounds with a decision in them have started.
+ *
+ * Nobody has chosen between those, so the pair is named and asserted rather
+ * than quietly tuned. The retune is this line: at 5 the round is
+ * 6 × (5 + 5) = 60 and its share of the same three falls to 60 / 163 = 37%.
+ * arcade.test.ts holds the ceilings and the ratio, so either number moving
+ * fails a test that prints the arithmetic instead of passing in silence.
+ */
 export const RECRUITMENT_CORRECT = 10;
 
 /** "…the first three correct in the room score +5" — per item, not per round. */
@@ -232,6 +255,58 @@ export const UNSEAL_LETTER_BANK = 2;
 export const UNSEAL_FASTEST_BONUS = 10;
 
 /**
+ * What **Read the docs** costs: a rule the round is handed, rather than a
+ * halving written into {@link unsealFloorPoints}.
+ *
+ * It is a rule and not a number because the current one has a known effect on
+ * the shape pick. Reading the docs commits the next letter, there is no limit
+ * on the presses, and {@link fastestUnseal} skips a reader — so every shape
+ * has a risk-free branch worth half its tin, and the whole payoff table is:
+ *
+ * |  | honest | honest, fastest | docs |
+ * | --- | --- | --- | --- |
+ * | ○ circle | 10 | 20 | 5 |
+ * | △ triangle | 20 | 30 | 10 |
+ * | ☆ star | 35 | 45 | 17 |
+ * | ☂ umbrella | 50 | 60 | 25 |
+ *
+ * Read it down the columns and the umbrella wins all three, which is the
+ * problem: the shape is picked before the word is known, and picking the
+ * umbrella has no downside to weigh. Its worst case is a guaranteed 25, which
+ * is more than a circle can score even with the fastest bonus (20) and more
+ * than an honest triangle that is not fastest (20). "Pick your shape before
+ * you know the word" is supposed to be the risk decision of the round, and
+ * with this rule there is nothing in it to decide.
+ *
+ * Halving harder does not fix it — {@link UNSEAL_DOCS_COSTS.quarter} still
+ * leaves the docs column monotone in the shape score, 2 / 5 / 8 / 12, and 12
+ * still beats an honest circle. What fixes it is flattening that column, which
+ * is {@link UNSEAL_DOCS_COSTS.cappedAtCheapestTin}: 5 / 10 / 10 / 10, where
+ * buying a big word gets you no further than buying a small one and beating an
+ * honest circle means opening a tin honestly.
+ *
+ * **Nothing has been retuned.** `halve` is SPEC.md's rule — "it reveals the
+ * next letter and halves your score for the round" — and it is what ships.
+ * Swapping the line below is the whole change; unseal.test.ts asserts the
+ * table above, so a swap shows up as a payoff table that moved rather than as
+ * a number somewhere in a round.
+ */
+export type UnsealDocsCost = (raw: number, shape: UnsealShape) => number;
+
+export const UNSEAL_DOCS_COSTS = {
+  /** SPEC.md's rule, rounding down. */
+  halve: (raw: number) => Math.floor(raw / 2),
+  /** Half, but never more than an honest circle tin pays: 5 / 10 / 10 / 10. */
+  cappedAtCheapestTin: (raw: number) =>
+    Math.min(Math.floor(raw / 2), UNSEAL_SHAPE_SCORE.circle),
+  /** A quarter: keeps the dominance, narrows it. 2 / 5 / 8 / 12. */
+  quarter: (raw: number) => Math.floor(raw / 4),
+} as const satisfies Record<string, UnsealDocsCost>;
+
+/** The rule in force. This line is the retune. */
+export const UNSEAL_DOCS_COST: UnsealDocsCost = UNSEAL_DOCS_COSTS.halve;
+
+/**
  * The Lounge: the player you backed got their tin open.
  *
  * **Five, not SPEC.md's ten.** The Lounge rule is the settled one — the better
@@ -340,14 +415,20 @@ export function unsealAnswerFor(
  * against 50) but a host who loads a twenty-letter circle word should not
  * discover that by paying somebody 40 for failing.
  *
- * **Read the docs** halves the lot, rounding down: SPEC.md prices the cheat at
- * "halves your score for the round", and the round in question is this one —
- * the Floor. It does not reach into the Lounge, where the points are for
- * something the reader did afterwards and did honestly.
+ * **Read the docs** is charged by {@link UNSEAL_DOCS_COST}, which by default
+ * halves the lot, rounding down: SPEC.md prices the cheat at "halves your
+ * score for the round", and the round in question is this one — the Floor. It
+ * does not reach into the Lounge, where the points are for something the
+ * reader did afterwards and did honestly.
+ *
+ * `docsCost` is a parameter so a test can price the same round two ways in one
+ * assertion. Nothing in the engine passes it: the round is played on the rule
+ * the module names.
  */
 export function unsealFloorPoints(
   play: UnsealPlay,
   pid: ParticipantId,
+  docsCost: UnsealDocsCost = UNSEAL_DOCS_COST,
 ): number {
   const tin = tinFor(play, pid);
   if (!tin) return 0;
@@ -357,7 +438,7 @@ export function unsealFloorPoints(
     progress >= tin.length
       ? score
       : Math.min(progress * UNSEAL_LETTER_BANK, score);
-  return play.docs[pid] ? Math.floor(raw / 2) : raw;
+  return play.docs[pid] ? docsCost(raw, tin.shape) : raw;
 }
 
 /**

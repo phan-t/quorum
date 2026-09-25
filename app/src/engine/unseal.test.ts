@@ -33,6 +33,8 @@ import {
   tinIndexFor,
   UNSEAL_BACKED_FASTEST,
   UNSEAL_BACKED_UNSEALS,
+  UNSEAL_DOCS_COST,
+  UNSEAL_DOCS_COSTS,
   UNSEAL_FASTEST_BONUS,
   UNSEAL_LETTER_BANK,
   UNSEAL_SHAPE_SCORE,
@@ -174,8 +176,8 @@ function unsealWord(
 /* ------------------------------------------------------------------ */
 
 describe("the launch content", () => {
-  test("nine tins: the existing six, plus three for the umbrella", () => {
-    assert.equal(UNSEAL_ITEMS.length, 9);
+  test("ten tins: the existing six, three umbrellas, and a second circle", () => {
+    assert.equal(UNSEAL_ITEMS.length, 10);
     assert.equal(UNSEAL_SECONDS, 60);
     assert.deepEqual(
       UNSEAL_ITEMS.map((i) => i.answer),
@@ -189,8 +191,26 @@ describe("the launch content", () => {
         "DECLARATIVE",
         "IDEMPOTENCY",
         "ORCHESTRATION",
+        "VAULT",
       ],
     );
+  });
+
+  test("no tier is one word for the whole room", () => {
+    // A tier with a single word is solved for everybody in it the moment one
+    // person says it out loud on the call, which is how the circle shipped
+    // with only RAFT in it. Every tier that the picker offers has at least two
+    // now, so a host who takes a word out has to notice.
+    const perShape = new Map<UnsealShape, number>();
+    for (const item of UNSEAL_ITEMS) {
+      perShape.set(item.shape, (perShape.get(item.shape) ?? 0) + 1);
+    }
+    for (const shape of UNSEAL_SHAPES) {
+      assert.ok(
+        (perShape.get(shape) ?? 0) >= 2,
+        `the ${shape} tier has ${perShape.get(shape) ?? 0} word(s); one is solved for the tier by one person`,
+      );
+    }
   });
 
   test("the existing six are the Scrambled board, verbatim", () => {
@@ -245,8 +265,9 @@ describe("the launch content", () => {
 
   test("partial credit can never beat completion, in any tier", () => {
     // 2 a letter up to the crack, against the shape score for opening it. The
-    // closest call in the launch set is a five-letter circle, which would tie;
-    // RAFT is four, so 8 against 10.
+    // closest call in the launch set is VAULT, the five-letter circle: cracking
+    // on its last letter banks 8 against the 10 for opening it. A six-letter
+    // circle would pay the same for failing as for succeeding.
     for (const item of UNSEAL_ITEMS) {
       const letters = unsealLetters(item.answer).length;
       assert.ok(
@@ -261,8 +282,9 @@ describe("the launch content", () => {
     // It is kept, because the brief was to reuse the existing items verbatim
     // and because a four-letter word has twenty-four arrangements and one of
     // them was always going to look like something. The other five are
-    // genuinely scrambled, and so are the three additions — which matters
-    // most at the umbrella tier, the one that pays 50.
+    // genuinely scrambled, and so are the four additions — which matters most
+    // at the umbrella tier, the one that pays 50, and at VAULT, which shares
+    // the circle with the one cue this test has to make an exception for.
     const forwards = (item: UnsealItem) =>
       unsealLetters(item.cue).join("") === unsealLetters(item.answer).join("");
     const backwards = (item: UnsealItem) =>
@@ -299,7 +321,7 @@ describe("the launch content", () => {
 describe("handing out tins", () => {
   test("splitting content leaves the word on one side of the line", () => {
     const { tins: shown, key } = splitTins(UNSEAL_ITEMS);
-    assert.equal(shown.length, 9);
+    assert.equal(shown.length, 10);
     assert.deepEqual(shown[0], { shape: "circle", cue: "T F A R", length: 4 });
     assert.deepEqual(key[0], {
       answer: "RAFT",
@@ -319,8 +341,10 @@ describe("handing out tins", () => {
     assert.equal(tinIndexFor(shown, "triangle", 2), 4);
     assert.equal(tinIndexFor(shown, "triangle", 3), 5);
     assert.equal(tinIndexFor(shown, "triangle", 4), 3);
-    // The circle tier has one word, so everybody gets it.
+    // The circle tier has two, and the second one is last in the list: RAFT
+    // at 0, VAULT at 9, and odd player numbers come back round to RAFT.
     assert.equal(tinIndexFor(shown, "circle", 1), 0);
+    assert.equal(tinIndexFor(shown, "circle", 2), 9);
     assert.equal(tinIndexFor(shown, "circle", 7), 0);
     // A number nobody has been given yet still gets a tin.
     assert.equal(tinIndexFor(shown, "circle", undefined), 0);
@@ -727,6 +751,86 @@ describe("the numbers", () => {
       17,
       "floor(35 ÷ 2)",
     );
+  });
+
+  test("the payoff table, shape by shape, honest against Read the docs", () => {
+    // Written out rather than derived, because the thing worth seeing is the
+    // shape of the table and not any one number in it. Every row is one
+    // player opening their own tin all the way.
+    let s = carded(4);
+    s = accept(s, { type: "pickShape", pid: "p1", shape: "circle" }, T0 - 40);
+    s = accept(s, { type: "pickShape", pid: "p2", shape: "triangle" }, T0 - 30);
+    s = accept(s, { type: "pickShape", pid: "p3", shape: "star" }, T0 - 20);
+    s = accept(s, { type: "pickShape", pid: "p4", shape: "umbrella" }, T0 - 10);
+    s = accept(s, { type: "beginPlay" }, T0);
+    const play = tins(s);
+    const holder: Readonly<Record<UnsealShape, ParticipantId>> = {
+      circle: "p1",
+      triangle: "p2",
+      star: "p3",
+      umbrella: "p4",
+    };
+
+    /** What `shape` scores for an open tin, with the docs pressed or not. */
+    const opened = (shape: UnsealShape, docs: boolean, cost = UNSEAL_DOCS_COST) => {
+      const pid = holder[shape];
+      const at = play.pick[pid];
+      assert.ok(at !== undefined, `${pid} is not holding a tin`);
+      return unsealFloorPoints(
+        {
+          ...play,
+          progress: { [pid]: play.tins[at]!.length },
+          docs: docs ? { [pid]: true } : {},
+        },
+        pid,
+        cost,
+      );
+    };
+
+    const table = UNSEAL_SHAPES.map((shape) => ({
+      shape,
+      honest: opened(shape, false),
+      // A reader is skipped by fastestUnseal, so this column is honest-only.
+      fastest: opened(shape, false) + UNSEAL_FASTEST_BONUS,
+      docs: opened(shape, true),
+    }));
+    assert.deepEqual(table, [
+      { shape: "circle", honest: 10, fastest: 20, docs: 5 },
+      { shape: "triangle", honest: 20, fastest: 30, docs: 10 },
+      { shape: "star", honest: 35, fastest: 45, docs: 17 },
+      { shape: "umbrella", honest: 50, fastest: 60, docs: 25 },
+    ]);
+
+    // And the reason the table is worth having in front of somebody. SPEC's
+    // rule for the round is "pick your shape before you know the word", which
+    // is only a decision if the big tin can cost you something. It cannot:
+    // pressing the docs is risk-free and unlimited, so the umbrella's worst
+    // case is a guaranteed 25 — more than the circle can score at its
+    // absolute best, and more than an honest triangle that is not fastest.
+    const [circle, triangle, , umbrella] = table;
+    assert.ok(umbrella!.docs > circle!.fastest, "an umbrella reader beats the best circle");
+    assert.ok(umbrella!.docs > triangle!.honest, "an umbrella reader beats an honest triangle");
+    for (const row of table.slice(0, 3)) {
+      assert.ok(umbrella!.docs > row.docs, `an umbrella reader beats a ${row.shape} reader`);
+    }
+
+    // The alternatives in UNSEAL_DOCS_COSTS, priced on the same four tins, so
+    // that changing the rule is a table that moves and not an argument.
+    // `quarter` keeps the docs column ordered by shape and keeps the
+    // dominance with it; `cappedAtCheapestTin` flattens it, and an umbrella
+    // reader no longer beats somebody who opened a circle honestly.
+    assert.deepEqual(
+      UNSEAL_SHAPES.map((shape) => opened(shape, true, UNSEAL_DOCS_COSTS.quarter)),
+      [2, 5, 8, 12],
+    );
+    const capped = UNSEAL_SHAPES.map((shape) =>
+      opened(shape, true, UNSEAL_DOCS_COSTS.cappedAtCheapestTin),
+    );
+    assert.deepEqual(capped, [5, 10, 10, 10]);
+    assert.ok(capped[3]! <= circle!.honest, "capped, the umbrella stops dominating");
+
+    // Nothing is retuned: the rule in force is the one SPEC.md describes.
+    assert.equal(UNSEAL_DOCS_COST, UNSEAL_DOCS_COSTS.halve);
   });
 
   test("the round folds into the arcade total once, at the end", () => {

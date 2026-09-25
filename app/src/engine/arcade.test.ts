@@ -899,6 +899,70 @@ describe("the Lounge", () => {
   });
 });
 
+describe("the point ceiling", () => {
+  test("Recruitment is 47% of what the Floor can pay in the plan that is run", () => {
+    // A balance decision written down as a test, because nobody has taken it
+    // yet. The console's running order is the host's, but the one the event
+    // uses is three rounds — Recruitment, Plan / Apply, the Bridge — and on
+    // that order the easiest round pays nearly half of everything.
+    //
+    // SPEC's own figures, recomputed from the constants by floorMax.
+    const floor = {
+      recruitment: floorMax(recruitmentRound()),
+      plan_apply: floorMax({ kind: "plan_apply", target: 120, seconds: 75 }),
+      glass_bridge: floorMax(glassBridgeRound()),
+    };
+    assert.deepEqual(floor, { recruitment: 90, plan_apply: 40, glass_bridge: 63 });
+
+    const played = floor.recruitment + floor.plan_apply + floor.glass_bridge;
+    assert.equal(played, 193);
+    assert.equal(
+      Math.round((floor.recruitment / played) * 100),
+      47,
+      "Recruitment's share of the Floor moved: that is a balance decision, not a refactor",
+    );
+
+    // Where the 90 comes from, so a change to either number lands here with
+    // its arithmetic attached: six emoji, 10 for the answer and 5 for being
+    // in the first three on that item.
+    assert.equal(
+      floor.recruitment,
+      RECRUITMENT_ITEMS.length * (RECRUITMENT_CORRECT + RECRUITMENT_FIRST_BONUS),
+    );
+    // The retune arcade.ts describes, priced here rather than in a comment: at
+    // 5 + 5 the round is 60, and its share of the same three falls to 37%.
+    const halved = RECRUITMENT_ITEMS.length * (5 + RECRUITMENT_FIRST_BONUS);
+    assert.equal(halved, 60);
+    assert.equal(
+      Math.round((halved / (halved + floor.plan_apply + floor.glass_bridge)) * 100),
+      37,
+    );
+  });
+
+  test("and 30% of all five rounds, if a host runs every one of them", () => {
+    // The five rounds the console can offer — Gganbu is designed, not built.
+    const all =
+      floorMax(recruitmentRound()) +
+      floorMax({ kind: "plan_apply", target: 120, seconds: 75 }) +
+      floorMax(unsealRound()) +
+      floorMax(tugOfRaftRound(1)) +
+      floorMax(glassBridgeRound());
+    assert.equal(all, 298);
+    assert.equal(Math.round((floorMax(recruitmentRound()) / all) * 100), 30);
+    // Whichever way the order is cut, Recruitment is the largest single round
+    // on the Floor, and it is the only one nobody can be knocked out of.
+    const others = [
+      floorMax({ kind: "plan_apply", target: 120, seconds: 75 }),
+      floorMax(unsealRound()),
+      floorMax(tugOfRaftRound(1)),
+      floorMax(glassBridgeRound()),
+    ];
+    for (const other of others) {
+      assert.ok(floorMax(recruitmentRound()) > other);
+    }
+  });
+});
+
 describe("the Lounge cap", () => {
   test("a perfect Lounge is worth less than a perfect Floor, round by round", () => {
     // SPEC's "Arcade scoring summary", all six rounds.

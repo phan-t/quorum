@@ -475,7 +475,7 @@ round card (20 s) and the reveal (20 s).
 | --- | --- | --- | --- | --- | --- |
 | 0 | **Recruitment** | Emoji Decode | 6 existing items | 2.5 min | No |
 | 1 | **Plan / Apply** | Red Light, Green Light | — | 3 min | Yes |
-| 2 | **Unseal** | Dalgona | 6 existing Scrambled items + 3 | 3 min | Yes |
+| 2 | **Unseal** | Dalgona | 6 existing Scrambled items + 4 | 3 min | Yes |
 | 3 | **Tug of Raft** | Tug of War | — | 3 min | No |
 | 4 | **Gganbu** | Marbles | 6 new Over/Under items | 3.5 min | Yes |
 | 5 | **The Glass Bridge** | Glass Bridge | 6 Real-or-Fake pairs (3 existing) | 3.5 min | Yes |
@@ -528,8 +528,8 @@ red, the way it looks in a real terminal, and then the gold Lounge card.
 you know the word.*
 
 A shape-pick screen first, exactly as the show: ○ △ ☆ ☂. Then the reveal:
-the shapes are word lengths. Circle is a four- or five-letter term (`RAFT`),
-triangle six (`MODULE`, `GOSSIP`, `UNSEAL`), star eight (`SENTINEL`,
+the shapes are word lengths. Circle is a four- or five-letter term (`RAFT`,
+`VAULT`), triangle six (`MODULE`, `GOSSIP`, `UNSEAL`), star eight (`SENTINEL`,
 `PROVIDER`), umbrella eleven-plus (`DECLARATIVE`, `IDEMPOTENCY`). The letters
 appear scrambled on the phone; **tap them in order**. One wrong tap cracks the
 tin. Sixty seconds.
@@ -554,6 +554,11 @@ The existing six Scrambled items ship as launch content. The umbrella tier
 needs three long words added; they are in the round file with the same
 `cue / ans / note` shape, and the reveal reads the note aloud — *the thing
 everyone means to write and never does* survives intact.
+
+The circle tier needs a second word for the same reason a tier is dealt out by
+player number at all: with one word in it, the first person to say `RAFT` on
+the call has solved the tier for everybody who picked the cautious shape.
+`VAULT` is that second word.
 
 #### Round 3 — Tug of Raft (Tug of War)
 

@@ -659,6 +659,12 @@ function mockTinIndexFor(
  * The letters bank *towards* the shape score rather than on top of it, which
  * is what makes SPEC.md's Floor max 60 (50 + 10) rather than more. **Read the
  * docs** halves the lot, rounding down.
+ *
+ * The halving is the engine's `UNSEAL_DOCS_COST`, which is a swappable rule
+ * there because what it does to the shape pick is an open question. This is
+ * the second implementation and it is deliberately not importing that one, so
+ * anyone who swaps the rule has to come here as well or watch the mock
+ * disagree with the server.
  */
 function mockUnsealPoints(play: MockUnsealPlay, pid: string): number {
   const at = play.pick[pid];
