@@ -301,9 +301,9 @@ export function refusalCopy(
  * Deliberately a constant and *not* `state.holding.line`, which is what the
  * phone and the Desktop both used to read. `holding` is the last card the
  * host set, not the card on screen — the engine clears it only on a restart —
- * so a session whose last card was "Agentic Security TTX / By Abhijeet
- * Lokhande" sealed its scores under "Scores are hidden / By Abhijeet
- * Lokhande", which is what a real room saw. The lobby had the same bug and
+ * so a session whose last card named an activity and its facilitator sealed
+ * its scores under "Scores are hidden" followed by that facilitator's name,
+ * which is what a real room saw. The lobby had the same bug and
  * was fixed the same way: a card's second line belongs to that card, and a
  * screen that wants a line of its own is given one.
  */

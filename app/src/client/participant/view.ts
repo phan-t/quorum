@@ -596,7 +596,7 @@ function sceneLobby(): Scene {
       // had been shown, its second line followed the room back into the lobby.
       // With one card, typed in the lobby before anything ran, the two were
       // the same thing and this worked. With named cards it meant the lobby
-      // announced "By Abhijeet Lokhande" under the session title.
+      // announced the facilitator's name under the session title.
       //
       // A card's second line belongs to that card. The prize line DESIGN.md
       // describes here needs a field of its own; until it has one, the lobby
@@ -772,9 +772,10 @@ function sceneStandings(final: boolean): Scene {
 
 function sceneSealed(): Scene {
   // `SEALED_LINE`, and deliberately not `state.holding.line`, which is what
-  // this read until a sealed phone said "Scores are hidden / By Abhijeet
-  // Lokhande" at a real event — the same bug the lobby had, in the same
-  // place, for the same reason. See `SEALED_LINE`.
+  // this read until a sealed phone showed, under "Scores are hidden", the
+  // facilitator named on the last holding card — at a real event. The lobby
+  // had the same bug, in the same place, for the same reason. See
+  // `SEALED_LINE`.
   const node = h("section", { class: "v v-sealed" }, [
     lockGlyph("sealed-lock"),
     h("h1", { class: "display xl", text: "Scores are hidden" }),

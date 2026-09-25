@@ -2258,7 +2258,7 @@ function sceneStandings(): Scene {
 
 function sceneSealed(): Scene {
   // `SEALED_LINE`, not the holding card's second line, which is what this
-  // read until a real room saw "Scores are hidden / By Abhijeet Lokhande" on
+  // read until a real room saw "Scores are hidden / By <a facilitator>" on
   // the wall. See `SEALED_LINE` for why that happens and why the fix is a
   // line of this screen's own.
   const node = h("section", { class: "s-stage s-sealed" }, [

@@ -483,7 +483,7 @@ interface MockSendoff {
  * at a farewell — it is here so the Skip control has something to be for.
  */
 const MOCK_SENDOFF: MockSendoff = {
-  name: "Abhijeet Lokhande",
+  name: "Alex Rivera",
   subtitle: "Last day 30 September 2026",
   opening: {
     photos: [
@@ -519,7 +519,7 @@ const MOCK_SENDOFF: MockSendoff = {
   ],
   closing: {
     photos: [mockPhoto("#4f2a1d", "#f6f5f3", "Last day")],
-    line: "Thank you, Abhijeet. Don't be a stranger.",
+    line: "Thank you, Alex. Don't be a stranger.",
   },
 };
 
