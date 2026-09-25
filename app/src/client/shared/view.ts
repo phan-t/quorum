@@ -1230,6 +1230,52 @@ export const UNSEAL_FACE: Readonly<
   umbrella: { glyph: "☂", name: "Umbrella" },
 };
 
+/**
+ * Counts one to twenty, spelled, for headers the room reads at a glance.
+ *
+ * The reveal headers on the shared screen are sentences rather than readouts
+ * — "THREE PULLS. ONE ROPE." — and a digit in the middle of one reads as a
+ * score. Past twenty a count falls back to digits at the call site, which
+ * looks wrong but is never *wrong*, and no round here has twenty of anything.
+ */
+const COUNT_WORDS: readonly string[] = [
+  "NO",
+  "ONE",
+  "TWO",
+  "THREE",
+  "FOUR",
+  "FIVE",
+  "SIX",
+  "SEVEN",
+  "EIGHT",
+  "NINE",
+  "TEN",
+  "ELEVEN",
+  "TWELVE",
+  "THIRTEEN",
+  "FOURTEEN",
+  "FIFTEEN",
+  "SIXTEEN",
+  "SEVENTEEN",
+  "EIGHTEEN",
+  "NINETEEN",
+  "TWENTY",
+];
+
+/**
+ * The Unseal reveal header, counted from the tins that were actually in play.
+ *
+ * This header was a literal — "NINE TINS. NINE WORDS." — until a tenth tin
+ * was added to the circle tier and the literal was not, which told the whole
+ * room a number the board underneath it disagreed with. Counting the recap
+ * instead means the content file is the only place a tin is ever added, and
+ * a host who runs a shorter Floor gets a header that matches what was dealt.
+ */
+export function unsealRevealHead(tins: number): string {
+  const word = COUNT_WORDS[tins] ?? String(tins);
+  return tins === 1 ? "ONE TIN. ONE WORD." : `${word} TINS. ${word} WORDS.`;
+}
+
 /** One scrambled letter, as a tile. */
 export interface UnsealTile {
   /** Position in the cue, which is what makes two identical letters two tiles. */

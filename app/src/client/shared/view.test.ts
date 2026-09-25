@@ -30,6 +30,7 @@ import {
   paneKeyIndex,
   playerName,
   unsealLetterKey,
+  unsealRevealHead,
   unsealTiles,
   playerTag,
   pointsStripCells,
@@ -54,6 +55,10 @@ import {
   RUN_OF_SHOW,
   SEGMENT_BUILT,
 } from "./view.ts";
+// The round's content, imported here and nowhere in the client itself: the
+// tins never reach a browser, but the number of them is what the reveal
+// header claims, and a test is the only place the two can be held together.
+import { UNSEAL_ITEMS } from "../../arcade/unseal.ts";
 import type {
   ActivitySummary,
   ArcadeGlassView,
@@ -812,6 +817,30 @@ describe("the item clock", () => {
     // nulling it, and a timer with nothing behind it shows nothing.
     assert.equal(itemEndsAt({ at: 5, of: 6 }), null);
     assert.equal(itemEndsAt(undefined), null);
+  });
+});
+
+describe("Unseal's reveal header", () => {
+  /**
+   * This header shipped as the literal "NINE TINS. NINE WORDS." and then a
+   * tenth tin was added to the circle tier without it, so for one commit the
+   * shared screen told the room a number the board under it disagreed with.
+   * The count now comes from the recap, and this is the test that notices
+   * when the content and the copy part company again.
+   */
+  it("counts the tins the room was actually dealt", () => {
+    assert.equal(unsealRevealHead(UNSEAL_ITEMS.length), "TEN TINS. TEN WORDS.");
+    assert.equal(unsealRevealHead(9), "NINE TINS. NINE WORDS.");
+    assert.equal(unsealRevealHead(11), "ELEVEN TINS. ELEVEN WORDS.");
+  });
+
+  /**
+   * A one-tin Floor is not a shape the arcade deals today, but the header is
+   * a sentence and "ONE TINS" is the kind of thing a room reads out loud.
+   */
+  it("is a sentence at one tin, and digits past the words it knows", () => {
+    assert.equal(unsealRevealHead(1), "ONE TIN. ONE WORD.");
+    assert.equal(unsealRevealHead(21), "21 TINS. 21 WORDS.");
   });
 });
 

@@ -297,7 +297,7 @@ export type HostCommand =
   /**
    * Unseal. Only the length of the Floor is the host's to set.
    *
-   * The nine tins are *not* on this command, for the reason the Bridge's
+   * The tins are *not* on this command, for the reason the Bridge's
    * panes are not: an `UnsealItem` carries the word and the reveal note, so a
    * round config on the wire would be the answer key leaving the server on a
    * frame the console could be made to echo.

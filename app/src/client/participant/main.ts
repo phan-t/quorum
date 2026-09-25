@@ -562,8 +562,8 @@ function guardTopFive(state: RenderState): void {
   // Unseal's version. The word is the round, so the two fields that would
   // give it away are the recap — which carries every answer — and any cue but
   // this phone's own, which arrives on `arcadeMine` and nowhere else. A
-  // public list of cues would be nine anagrams on a shared screen, which is
-  // somebody else's tin solved out loud.
+  // public list of cues would be a board of anagrams on a shared screen,
+  // which is somebody else's tin solved out loud.
   const u = arcade.unseal;
   if (u !== undefined) {
     if (arcade.phase !== "reveal" && u.recap !== undefined) {

@@ -47,6 +47,7 @@ import {
   timerFraction,
   tugBeatAt,
   tugRope,
+  unsealRevealHead,
   waveRosters,
   wipeFraction,
   type ViewKind,
@@ -1681,11 +1682,11 @@ function sceneArcade(): Scene {
    * The four tins, filling up.
    *
    * Everything on this panel is a count or a player number: the words never
-   * reach this surface until the reveal, and nor do the cues — nine anagrams
-   * on a shared screen is somebody else's tin solved out loud by whoever
-   * reads fastest. At the reveal the tiles step aside and the words take the
-   * stage, both halves of each one: the answer, and the note, which is the
-   * thing somebody actually learns.
+   * reach this surface until the reveal, and nor do the cues — a public list
+   * of anagrams on a shared screen is somebody else's tin solved out loud by
+   * whoever reads fastest. At the reveal the tiles step aside and the words
+   * take the stage, both halves of each one: the answer, and the note, which
+   * is the thing somebody actually learns.
    */
   const paintUnseal = (arcade: ArcadeView): void => {
     const u = arcade.unseal;
@@ -1696,10 +1697,14 @@ function sceneArcade(): Scene {
     unseal.hidden = false;
     const revealed = arcade.phase === "reveal";
     const left = remainingMs(arcade.endsAt, serverNow());
+    // The recap is read here as well as below because it is the only thing on
+    // this view that knows how many tins were dealt, and the header counts
+    // them rather than stating a number that a tenth tin can quietly falsify.
+    const recap = u.recap ?? [];
     setText(
       unsealHead,
-      revealed
-        ? "NINE TINS. NINE WORDS."
+      revealed && recap.length > 0
+        ? unsealRevealHead(recap.length)
         : [
             `${u.unsealed} OF ${u.picked} TINS OPEN`,
             arcade.phase === "card" ? "CHOOSING" : null,
@@ -1753,7 +1758,6 @@ function sceneArcade(): Scene {
             .join("  ·  ")}`,
     );
 
-    const recap = u.recap ?? [];
     unsealRecap.hidden = recap.length === 0;
     if (recap.length > 0) {
       replace(

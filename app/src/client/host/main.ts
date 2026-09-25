@@ -2926,7 +2926,7 @@ const arcadeWave3 = h("input", {
 /**
  * Unseal's one setting: how long the Floor runs.
  *
- * The nine tins are not a host setting and are not on the wire, for the
+ * The tins are not a host setting and are not on the wire, for the
  * reason the bridge's eighteen panes are not: an `UnsealItem` carries the
  * word and the reveal note, so a console that could choose them would be a
  * console the answer key travels through.

@@ -1,5 +1,5 @@
 /**
- * Round 2 — Unseal. The launch content: nine tins, one word in each.
+ * Round 2 — Unseal. The launch content: ten tins, one word in each.
  *
  * As with recruitment.ts and glass-bridge.ts this is a literal, imported like
  * any other module — no I/O, no clock, no randomness. The host's per-round

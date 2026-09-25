@@ -835,12 +835,12 @@ body {
 
 /* ---- Unseal ----------------------------------------------------------- *
  *
- * Four tins, filling up, and then the nine words.
+ * Four tins, filling up, and then the words.
  *
  * Everything here is a count or a player number. The words and the cues do
- * not reach this surface until the reveal — nine anagrams on a shared screen
- * is somebody else's tin solved out loud by whoever reads fastest — so what
- * the room watches during the round is four tiles and a clock.
+ * not reach this surface until the reveal — a board of anagrams on a shared
+ * screen is somebody else's tin solved out loud by whoever reads fastest —
+ * so what the room watches during the round is four tiles and a clock.
  *
  * In the document flow, like the bridge, never laid over the grid.
  * -------------------------------------------------------------------- */

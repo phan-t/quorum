@@ -1558,7 +1558,7 @@ function commandToEvent(cmd: HostCommand, runtime: SessionRuntime): Event | null
           type: "startRound",
           round: "unseal",
           // Same rule as the Bridge's, and for the same reason: an
-          // `UnsealItem` carries the word and the reveal note, so nine tins
+          // `UnsealItem` carries the word and the reveal note, so a tin
           // arriving from a browser would be the answer key arriving from a
           // browser. The host sets how long the Floor runs and nothing else.
           config: unsealRound(undefined, cmd.seconds),

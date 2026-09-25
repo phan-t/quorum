@@ -348,7 +348,7 @@ interface MockGlassPlay {
  * away from putting the word on the phone of the person trying to work it
  * out — and a mock that imported the split could never catch the server
  * failing to make it. The *content* is imported, because content is not a
- * rule and a second copy of nine words is how one of them silently rots.
+ * rule and a second copy of the words is how one of them silently rots.
  */
 interface MockUnsealPlay {
   kind: "unseal";
