@@ -5,7 +5,7 @@
 
 This is the writing surface; it is not what the service reads. Quorum loads
 JSON — `config/trivia-questions.json`, with the committed worked example in
-`config/trivia-questions.example.json` and the format documented in
+`config/event.example/trivia-questions.json` and the format documented in
 [`config/README.md`](../config/README.md) and
 [SPEC.md](../SPEC.md#question-file). Swapping a question in means editing the
 JSON, not this file.
@@ -17,8 +17,8 @@ Correct answer in **bold**. `T` = suggested time limit, in seconds.
 > confirmed them. Re-check if this bank is reused for a later event.
 
 > **None of the three verified questions are in the shipped set.** A8, D4 and
-> E4 are bank-only: `config/trivia-questions.example.json` is the twenty below
-> and none of the three is among them. Verifying them protects a *future*
+> E4 are bank-only: `config/event.example/trivia-questions.json` is a superset
+> of the twenty below and none of the three is among them. Verifying them protects a *future*
 > swap, not the next game. If you swap one in, the JSON is what the service
 > reads — edit that, not this.
 
@@ -198,8 +198,9 @@ Weighted to HashiCorp history and products, IBM kept as seasoning:
 | **C** — deep cuts | C1, C3, C5, C7 (4) | Where the field separates |
 | **E** — IBM | E1, E2 (2) | Light touch, keeps it fun |
 
-That is **20**, and it is exactly what `config/trivia-questions.example.json`
-contains. Swap in **D1/D2** (licensing) for a crowd that will enjoy the
+That is **20**, and it is the core of what
+`config/event.example/trivia-questions.json` contains — twenty more were added
+to that file later, so it is forty now and this table is the original set. Swap in **D1/D2** (licensing) for a crowd that will enjoy the
 argument, and keep **Round F** in reserve for a sudden-death tiebreak — a
 question marked `"tiebreak": true` in the JSON is lifted out of the scored
 twenty and into the pool sudden death draws on.

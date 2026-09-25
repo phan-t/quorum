@@ -229,7 +229,7 @@ describe("the committed example set", () => {
   // The example the README points people at. If it stops loading, the thing we
   // tell people to copy is broken.
   const text = readFileSync(
-    new URL("../../../config/trivia-questions.example.json", import.meta.url),
+    new URL("../../../config/event.example/trivia-questions.json", import.meta.url),
     "utf8",
   );
 

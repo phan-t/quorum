@@ -2,8 +2,7 @@
 
 | | |
 | --- | --- |
-| `trivia-questions.example.json` | **Committed.** Forty HashiCorp and IBM questions: the format's worked example, and what the test suite loads — so if it stops being valid, the build says so. |
-| `event.example/` | **Committed.** A whole event directory, invented end to end. Copy it to start a real one. See [its README](event.example/README.md). |
+| `event.example/` | **Committed.** A whole event directory, invented end to end, including the forty HashiCorp and IBM questions the test suite loads — so if that set stops being valid, the build says so. Copy it to start a real one. See [its README](event.example/README.md). |
 | `events/<date>-<name>/` | **Gitignored.** One directory per event: its question set, its run of show, its roster, whatever else that event needs. |
 
 ## Why the events are not in git

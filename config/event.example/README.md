@@ -19,10 +19,9 @@ example in the repository without any real person's words being in it. See
 | File | What it demonstrates |
 | --- | --- |
 | `session.json` | The title and subtitle, a third `manual` activity for something scored off-platform, and the console's runbook and arcade plan |
-| `trivia-questions.json` | The forty HashiCorp and IBM questions, the same set as `../trivia-questions.example.json`. The optional keys — `round`, `note`, `basePoints`, `tiebreak` — are documented in [SPEC.md](../../SPEC.md#question-file); none of them are used here |
+| `trivia-questions.json` | The forty HashiCorp and IBM questions, and what the test suite loads. The optional keys — `round`, `note`, `basePoints`, `tiebreak` — are documented in [SPEC.md](../../SPEC.md#question-file); none of them are used here |
 | `sendoff.json` | A send-off with messages and no photos, which is legal and is still the thing. One message is long enough to be split across slides |
 | `promo-card.html` | A self-contained poster, no scripts and no webfonts |
-| `run-of-show.md` | What the host reads. Nothing parses it |
 
 ## What is not here
 

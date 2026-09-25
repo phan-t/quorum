@@ -39,7 +39,7 @@ phone, not a running total, until the host reveals them.
 
 **The content** is the material these sessions already used. A question set
 is a JSON file per event. The committed example is
-[`config/trivia-questions.example.json`](config/trivia-questions.example.json),
+[`config/event.example/trivia-questions.json`](config/event.example/trivia-questions.json),
 and a real event's questions live in its own gitignored directory under
 `config/events/`. The arcade's existing items became rounds 0, 2 and 5,
 which are Recruitment, Unseal and The Glass Bridge.

@@ -2,7 +2,7 @@
  * Phase 3's acceptance test. BUILD-PLAN.md: "thirty bots play a full
  * 20-question round and the scores match a hand-computed expectation."
  *
- * Thirty bots play the real launch set — `config/trivia-questions.example.json`,
+ * Thirty bots play the real launch set — `config/event.example/trivia-questions.json`,
  * the twenty HashiCorp and IBM questions, which is the generic set without the
  * event-specific block an event adds — through the *runtime* (`SessionRuntime`,
  * fake sockets, fake clock), so the path under test is the one a real tap takes: the socket
@@ -125,7 +125,7 @@ const BASE = 1000;
 
 function loadSet(): readonly Question[] {
   const text = readFileSync(
-    new URL("../../../config/trivia-questions.example.json", import.meta.url),
+    new URL("../../../config/event.example/trivia-questions.json", import.meta.url),
     "utf8",
   );
   const result = importTriviaJson(text);
