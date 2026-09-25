@@ -10,7 +10,7 @@ spreadsheet. Every seam between those tools was a name match done by hand
 during a three-minute break. Quorum replaces the seams. The activities are
 the same ones that were already being run.
 
-**Status: built and in use.** It ran the SA APJ huddle on 25 September 2026.
+**Status: built and in use.** It has run a full session with a live room.
 Deploys are `make deploy` from a laptop with a current AWS session. The
 service is parked at zero between events and raised with `make up`.
 
@@ -65,8 +65,8 @@ The activities Quorum automates were worked out first as a private activity
 library: a trivia question bank, the arcade rounds, facilitation notes, and a
 rule for normalising scores across activities that count in different units.
 
-That library was folded into this repository in September 2026, once the
-service had taken over everything the seams were for. What survived is
+That library was folded into this repository once the service had taken over
+everything the seams were for. What survived is
 [the question bank](docs/question-bank.md),
 [how to run a session](docs/running-an-event.md) and
 [the scoring rules](SCORING.md). The rest of it existed only to hold three
