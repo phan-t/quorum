@@ -1069,10 +1069,12 @@ export class SessionRuntime {
 
   clearArcadeTimers(): void {
     // The coalescing tick is one of the arcade's clocks, so it goes with
-    // them. Whatever it was holding is dropped rather than sent: this runs on
-    // the way out of the process and on a round the caller is abandoning, and
-    // in both cases at most one beat of rope is lost on sockets that are
-    // about to be told to reconnect anyway.
+    // them. Whatever it was holding is dropped rather than sent, which is
+    // safe because of who calls this: in the running server only the drain in
+    // main.ts does, and it closes every socket with 1012 moments later, so at
+    // most one tick of rope is lost on a connection that is about to
+    // reconnect and be sent the whole state again. Tests call it so the
+    // process can exit.
     this.#takeDirty();
     this.#clearLightTimer();
     this.#clearItemTimer();

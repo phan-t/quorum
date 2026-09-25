@@ -293,22 +293,58 @@ describe("a broadcast projects the role-level view once", () => {
  * arcade produces, because Tug of Raft is the round where every surface
  * carries the whole grid.
  *
- * Measured at roughly 18.4 KB per phone, 55.7 KB for the console, 20.6 KB for
- * the big screen and 1.9 MB for one full fan-out, with about fifteen per cent
- * of headroom on top. They are here to catch a field quietly added to a
- * per-player row: a single extra number on `RosterEntry` or `ArcadeCell` is
- * a hundred copies in every phone's frame and ten thousand in the console's,
- * and that is the shape of every frame-size regression this project has had.
+ * Measured at 18.4 KB per phone, 53.4 KB for the console, 20.6 KB for the big
+ * screen and 1.9 MB for one full fan-out, with five per cent of headroom on
+ * top. Five per cent is deliberate and it is worth knowing what it buys:
+ * about ten bytes per per-player row, which is one timestamp-shaped number
+ * added to `RosterEntry` or `ArcadeCell`. The test below adds exactly that
+ * and checks these numbers reject it, so the claim is not left to prose.
+ *
+ * It is not a hair trigger, and the earlier version of this comment said it
+ * was. A one-digit flag on a single row type costs 700 bytes at a hundred
+ * players and passes; it shows up here only once a second or third field
+ * joins it. The console is the least sensitive of the four because its frame
+ * is the biggest, so a row-shaped regression trips the phone, the screen and
+ * the fan-out first.
  *
  * If a deliberate change moves one of these, move the number and say why in
  * the commit — do not widen the budget to make room for an accident.
  */
 const BUDGET = {
-  phone: 21_000,
-  host: 64_000,
-  screen: 24_000,
-  broadcast: 2_200_000,
+  phone: 19_400,
+  host: 56_100,
+  screen: 21_700,
+  broadcast: 2_012_000,
 } as const;
+
+/**
+ * Adds a field to every roster row reachable from a frame, the way a careless
+ * addition to `RosterEntry` would, and answers how many rows it touched. The
+ * shape it looks for is the roster's own — a row carrying `pid`, `nickname`
+ * and `conn` — so it finds the roster wherever a view happens to hang it.
+ */
+function growEveryRosterRow(value: unknown, node: unknown, seen = new Set<object>()): number {
+  if (node === null || typeof node !== "object") return 0;
+  if (seen.has(node)) return 0;
+  seen.add(node);
+  if (Array.isArray(node)) {
+    let found = 0;
+    for (const item of node) found += growEveryRosterRow(value, item, seen);
+    return found;
+  }
+  const row = node as Record<string, unknown>;
+  let found = 0;
+  if ("pid" in row && "nickname" in row && "conn" in row) {
+    // A two-letter key on purpose. A long name would pad the regression out
+    // and let a looser budget catch it; `at` is the cheapest a timestamp
+    // field can realistically be, so this asks the hard version of the
+    // question.
+    row.at = value;
+    found = 1;
+  }
+  for (const key of Object.keys(row)) found += growEveryRosterRow(value, row[key], seen);
+  return found;
+}
 
 describe("what a frame costs at a hundred players", () => {
   it("stays inside its budget", () => {
@@ -329,6 +365,42 @@ describe("what a frame costs at a hundred players", () => {
     assert.ok(
       broadcast <= BUDGET.broadcast,
       `one full fan-out ${broadcast} > ${BUDGET.broadcast}`,
+    );
+  });
+
+  it("would fail on a timestamp added to every roster row", () => {
+    // A budget is only worth having if it fails on the regression it names,
+    // and at the fifteen per cent of headroom this started with it did not:
+    // a field of exactly this shape landed inside the budget and the guard
+    // said nothing. So the sensitivity is asserted here rather than claimed
+    // above it, and tightening the numbers has something holding it in place.
+    const state = pulling(100);
+    const pids = pidsOf(state);
+    const lastSeen = new Map(pids.map((p) => [p, T0]));
+    const views = prepareViews(state, lastSeen, T0 + 3_000);
+
+    const frame = (s: unknown) => JSON.stringify({ t: "state", seq: 1, state: s }).length;
+    const phoneView = views.participant(pids[0]);
+    const hostView = views.host();
+    const screenView = views.screen();
+    const touched =
+      growEveryRosterRow(T0, phoneView) +
+      growEveryRosterRow(T0, hostView) +
+      growEveryRosterRow(T0, screenView);
+    assert.equal(touched, 300, "a hundred roster rows in each of the three frames");
+
+    const phone = frame(phoneView);
+    const screen = frame(screenView);
+    const broadcast = phone * pids.length + frame(hostView) + screen;
+
+    // The console's frame is the biggest, so a hundred extra rows are a
+    // smaller share of it and it is the one surface this does not trip. The
+    // other three are what a row-shaped regression runs into first.
+    assert.ok(phone > BUDGET.phone, `phone frame ${phone} still inside ${BUDGET.phone}`);
+    assert.ok(screen > BUDGET.screen, `screen frame ${screen} still inside ${BUDGET.screen}`);
+    assert.ok(
+      broadcast > BUDGET.broadcast,
+      `one full fan-out ${broadcast} still inside ${BUDGET.broadcast}`,
     );
   });
 
