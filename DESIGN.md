@@ -131,6 +131,16 @@ cached; the numbers come back at reveal.
 edge: *reconnecting…*. It goes away by itself. The page beneath it keeps
 showing the last state so the person is never looking at a blank screen.
 
+Before the first welcome there is no page beneath it, and that is the one
+case where a phone could sit on nothing at all: opening the join link while
+the server restarts. So the page paints a *Joining…* card the moment it
+starts connecting, and after two seconds of silence the card says the server
+may be restarting and that it keeps trying — because somebody who does not
+know a page is retrying reloads it, and reloading mid-deploy achieves
+nothing. A card that ends the session, *You were removed* or a dead link,
+carries a button back to the join screen; a dead end with no control on it
+reads as a broken page.
+
 **Segments on the phone:**
 
 | Segment | What it shows |
@@ -142,7 +152,7 @@ showing the last state so the person is never looking at a blank screen.
 | Trivia — locked | The tile you chose, outlined, the other three dimmed. "Locked in." No colour change, no tick, until the reveal |
 | Trivia — reveal | Correct tile fills in `--hit`; yours if wrong outlines in `--miss`; your points for the question count up in mono; the note; then the trivia top five |
 | Standings | Top five, ranks 1–5 in mono, names in condensed display, totals right-aligned. Or the sealed card |
-| Final | The reveal, mirrored from the Desktop at phone scale |
+| Final | Not the rows. A card saying the standings are on the shared screen, held until the Desktop's climb has had time to land, and then the top five at phone scale. The wire carries the whole result the moment the segment opens and the Desktop spends twenty-three seconds revealing it; a phone that paints it immediately tells its owner — and their neighbour — who won |
 
 The phone shows the question text because the participant may not be able
 to read the Desktop; see the spec. It does not show the answer
@@ -250,7 +260,7 @@ is about surviving that.
 | Trivia | Question in display type; answers as four tiles with shapes; timer; answer count as a bar filling toward "27 of 27" |
 | Trivia reveal | Correct tile stays lit, others dim; distribution bars; the note; then the trivia top five |
 | Standings | Top five, ranks and totals, activity contributions as a stacked bar under each name in the activity hues — the live scoreboard already does this well; keep it |
-| Sealed | The lock card: *Standings are sealed*, and a line the host can set ("Revealed at 3:33") |
+| Sealed | The lock card: *Scores are hidden*, and one fixed line — *Revealed at the end.* The host-settable line described here was implemented by reading the holding card's second line, which belongs to that card and followed it onto this screen; a line the host can set needs a field of its own |
 | Final | See below |
 | Arcade | The arena — see the register below |
 
@@ -262,6 +272,12 @@ Spot Award toasts that landed during the sealed period replay as a scroll
 above it. Nothing else animates; the arrival of each name is a hard cut with
 the `pop` easing. The host controls the pace with the space bar so they can
 talk over it.
+
+The phones are counting the same clock: `finalRevealMs` in
+`client/shared/view.ts` is how long this takes, both surfaces read it from
+there, and the phone shows a card pointing at the shared screen until the
+Desktop would have landed on the winner. The pace is local on both, which is
+as close as they can be until the protocol carries a step.
 
 ## The arcade register
 

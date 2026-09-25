@@ -39,11 +39,14 @@ import {
   stackedBar,
   stepFraction,
   timerFraction,
+  finalRevealMs,
   waveOfNumber,
   waveRosters,
   wipeFraction,
   ARCADE_ROUND_CARD,
   ARCADE_ROUND_NUMBER,
+  FINAL_DWELL_MS,
+  FINAL_EMPTY_FIRST_HOLD_MS,
   HOUSE,
   KEY_HINT,
   LIGHT_FACE,
@@ -55,6 +58,7 @@ import type {
   ArcadeGlassView,
   ArcadeView,
   RosterEntry,
+  StandingRow,
   TriviaView,
 } from "../../protocol.ts";
 
@@ -162,6 +166,48 @@ describe("stackedBar", () => {
       stackedBar({ perActivity: { ttx: null }, bench: [], spot: 0 }, ACTIVITIES, 0),
       [],
     );
+  });
+});
+
+describe("the final reveal's pace", () => {
+  const standings = (n: number): StandingRow[] =>
+    Array.from({ length: n }, (_, i) => ({
+      rank: i + 1,
+      nickname: `player ${i + 1}`,
+      total: 100 - i,
+      perActivity: { ttx: 100 - i },
+      bench: [],
+      spot: 0,
+    }));
+
+  it("lands the winner when the Desktop's climb and hold are both over", () => {
+    // Four steps at four seconds, then seven on the empty first place: the
+    // twenty-three seconds a room actually sits through.
+    assert.equal(finalRevealMs(standings(5)), 23_000);
+    assert.equal(
+      finalRevealMs(standings(5)),
+      4 * FINAL_DWELL_MS + FINAL_EMPTY_FIRST_HOLD_MS,
+    );
+  });
+
+  it("shortens with the field, because a short climb is a short climb", () => {
+    assert.equal(finalRevealMs(standings(3)), 2 * FINAL_DWELL_MS + FINAL_EMPTY_FIRST_HOLD_MS);
+    // One player: nothing to climb, and the hold on the empty slot is the
+    // whole reveal.
+    assert.equal(finalRevealMs(standings(1)), FINAL_EMPTY_FIRST_HOLD_MS);
+  });
+
+  it("is immediate when there is nothing to reveal", () => {
+    // Both surfaces say "no scores were recorded" in words; pacing a reveal
+    // of an empty list would be twenty-three seconds of a blank screen.
+    assert.equal(finalRevealMs([]), 0);
+  });
+
+  it("counts joint places by rank and not by position", () => {
+    // Two firsts is one step fewer to climb, and the phone must wait exactly
+    // as long as the Desktop takes rather than as long as the list is.
+    const tied = standings(5).map((r, i) => ({ ...r, rank: i === 1 ? 1 : r.rank }));
+    assert.equal(finalRevealMs(tied), 3 * FINAL_DWELL_MS + FINAL_EMPTY_FIRST_HOLD_MS);
   });
 });
 

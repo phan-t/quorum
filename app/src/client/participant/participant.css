@@ -145,6 +145,12 @@ body.phone #app {
   font-size: 34px;
   margin: 8px 0 12px;
 }
+/* The way back off a dead end. Sized to its words rather than to the card,
+   because it is not the primary action of a page somebody wanted to be on. */
+.terminal-again {
+  margin-top: 24px;
+  padding: 0 24px;
+}
 
 /* -------------------------------------------------------------- follow -- */
 
@@ -526,6 +532,19 @@ body.phone #app {
   font-weight: 600;
 }
 .v-standings .v-note[hidden] {
+  display: none;
+}
+
+/* The phone while the Desktop is climbing to the winner: one card, where the
+   rows will be, saying where the reveal is happening. It replaces the list
+   rather than sitting above it, because the whole point is that there is
+   nothing to read here yet. */
+.v-hold {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.v-hold[hidden] {
   display: none;
 }
 

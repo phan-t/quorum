@@ -26,13 +26,16 @@ import {
   HOW_TO_PLAY,
   ARCADE_ROUND_LABEL,
   HOUSE,
+  FINAL_DWELL_MS,
   LIGHT_FACE,
+  SEALED_LINE,
   STAFF_CARD,
   STATE_LOCK_ERROR,
   UNSEAL_FACE,
   activityHue,
   answerTiles,
   bridgeSteps,
+  finalRevealMs,
   formatCountdown,
   gridEntries,
   playerName,
@@ -2225,19 +2228,16 @@ function sceneStandings(): Scene {
 }
 
 function sceneSealed(): Scene {
-  const line = h("p", { class: "s-line s-line-big" });
+  // `SEALED_LINE`, not the holding card's second line, which is what this
+  // read until a real room saw "Scores are hidden / By Abhijeet Lokhande" on
+  // the wall. See `SEALED_LINE` for why that happens and why the fix is a
+  // line of this screen's own.
   const node = h("section", { class: "s-stage s-sealed" }, [
     h("div", { class: "s-lock" }, [lockGlyph("s-lock-glyph")]),
     h("h1", { class: "display s-title s-title-huge", text: "Scores are hidden" }),
-    line,
+    h("p", { class: "s-line s-line-big", text: SEALED_LINE }),
   ]);
-  return {
-    node,
-    update(state) {
-      setText(line, state.holding?.line ?? "");
-      line.hidden = (state.holding?.line ?? "") === "";
-    },
-  };
+  return { node, update() {} };
 }
 
 /**
@@ -2248,10 +2248,11 @@ function sceneSealed(): Scene {
  * one to two seconds and a thing that shows for two seconds was never seen.
  * The pace is local; the host pacing it with the space bar needs a message
  * this protocol does not have yet.
+ *
+ * The numbers live in shared/view.ts because the phone counts them too — it
+ * holds its own rows back until this climb has landed — and a copy here is a
+ * copy that drifts.
  */
-const DWELL_MS = 4_000;
-const EMPTY_FIRST_HOLD_MS = 7_000;
-
 function sceneFinal(): Scene {
   const list = h("ol", { class: "s-rows s-final-rows" });
   const winnerName = h("p", { class: "display s-winner-name" });
@@ -2296,7 +2297,7 @@ function sceneFinal(): Scene {
       timers.push(
         setTimeout(() => {
           list.insertBefore(standingRow(row, top, activities), list.firstChild);
-        }, i * DWELL_MS),
+        }, i * FINAL_DWELL_MS),
       );
     });
     const first = rows.find((r) => r.rank === 1);
@@ -2322,7 +2323,7 @@ function sceneFinal(): Scene {
           );
           winner.hidden = false;
         },
-        climb.length * DWELL_MS + EMPTY_FIRST_HOLD_MS,
+        finalRevealMs(rows),
       ),
     );
   };

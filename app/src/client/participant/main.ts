@@ -20,6 +20,19 @@ initTheme();
 const STORE_KEY = "quorum.rejoin.v1";
 const NICK_MAX = 24;
 
+/**
+ * How long the page waits before it explains itself.
+ *
+ * A join on a working server is a few hundred milliseconds, and saying
+ * "connecting…" over the top of that is noise. What this covers is the other
+ * case: a deploy takes the server down for about twenty seconds, the socket's
+ * backoff caps at ten (see shared/net.ts), and a phone that opens the join
+ * link into that window used to sit on a blank black page for as long as the
+ * person was willing to hold it — the reconnect banner was being written into
+ * a view that is only mounted once the welcome arrives.
+ */
+const CONNECTING_NOTICE_MS = 2_000;
+
 interface Stored {
   code: string;
   nickname: string;
@@ -113,6 +126,10 @@ const view = createParticipantView({
 let nickname = "";
 let joinCode = codeFromPath();
 let rejoinToken: string | null = null;
+// Declared up here with the rest of the page's state rather than beside the
+// functions that use it: the first `connect()` runs at module top level, and
+// a `let` further down the file is still in its dead zone at that point.
+let connectingTimer: ReturnType<typeof setTimeout> | null = null;
 
 const stored = readStore();
 if (stored && (joinCode === "" || stored.code === joinCode)) {
@@ -136,6 +153,7 @@ if (rejoinToken !== null) {
 /* ------------------------------------------------------------------ */
 
 function showJoin(error: { title: string; detail: string } | null): void {
+  clearConnectingNotice();
   const prefilled = codeFromPath() !== "";
 
   const codeInput = h("input", {
@@ -301,14 +319,77 @@ function showJoin(error: { title: string; detail: string } | null): void {
   (joinCode === "" ? codeInput : nickInput).focus();
 }
 
+/**
+ * The end of the road: removed, or a link that will never work.
+ *
+ * With a way back, which it did not have. "You were removed" was a card with
+ * no control on it at all, so somebody removed by mistake — or holding a
+ * stale link — had a page that could do nothing and no hint that reloading
+ * was the way out of it. The button says what it does rather than promising
+ * a way back in: the host still decides whether the door opens.
+ */
 function showTerminal(title: string, detail: string): void {
+  clearConnectingNotice();
   replace(app, [
     h("div", { class: "terminal-card" }, [
       h("p", { class: "label", text: "Quorum" }),
       h("h1", { class: "display", text: title }),
       h("p", { class: "v-note", text: detail }),
+      h("button", {
+        class: "primary terminal-again",
+        type: "button",
+        text: "Reload and start again",
+        on: {
+          click: () => {
+            location.reload();
+          },
+        },
+      }),
     ]),
   ]);
+}
+
+/* ------------------------------------------------------------------ */
+/* Connecting                                                          */
+/* ------------------------------------------------------------------ */
+
+/**
+ * The page while the socket is coming up.
+ *
+ * `explain` is the difference between the first paint and the one that
+ * follows a couple of seconds of silence. The first is quiet — the normal
+ * case is over before it is read — and the second says what is happening and
+ * that the page is handling it, because a person who does not know a page is
+ * retrying reloads it, and reloading during a deploy achieves nothing.
+ */
+function showConnecting(explain: boolean): void {
+  const rejoining = rejoinToken !== null;
+  replace(app, [
+    h("div", { class: "terminal-card" }, [
+      h("p", { class: "label", text: "Quorum" }),
+      h("h1", { class: "display", text: rejoining ? "Rejoining…" : "Joining…" }),
+      explain
+        ? h("p", {
+            class: "v-note",
+            text: "The session's server is not answering yet — it may be restarting. This page keeps trying on its own.",
+          })
+        : null,
+    ]),
+  ]);
+}
+
+/** Explain the wait if it outlasts {@link CONNECTING_NOTICE_MS}. */
+function armConnectingNotice(): void {
+  clearConnectingNotice();
+  connectingTimer = setTimeout(() => {
+    connectingTimer = null;
+    showConnecting(true);
+  }, CONNECTING_NOTICE_MS);
+}
+
+function clearConnectingNotice(): void {
+  if (connectingTimer !== null) clearTimeout(connectingTimer);
+  connectingTimer = null;
 }
 
 /* ------------------------------------------------------------------ */
@@ -317,6 +398,12 @@ function showTerminal(title: string, detail: string): void {
 
 function connect(): void {
   client?.stop();
+
+  // Something on screen before the socket is even attempted. On the rejoin
+  // path there is nothing else here — no join form, no view — and a page that
+  // paints nothing is indistinguishable from a page that is broken.
+  if (app.firstElementChild === null) showConnecting(false);
+  armConnectingNotice();
 
   const hello = (): Hello =>
     rejoinToken === null
@@ -328,6 +415,7 @@ function connect(): void {
     ...(mock ? { transport: mockTransport(mock) } : {}),
 
     onWelcome(welcome) {
+      clearConnectingNotice();
       if (welcome.rejoinToken !== undefined) {
         rejoinToken = welcome.rejoinToken;
         writeStore({ code: joinCode, nickname, token: welcome.rejoinToken });
@@ -344,6 +432,13 @@ function connect(): void {
       // A banner, never a modal. The page underneath keeps its last state, so
       // nobody is ever looking at a blank screen while the socket comes back.
       view.setBanner(status === "reconnecting" ? "reconnecting…" : null);
+      // Before the welcome there is no view to put that banner in, and this
+      // is the status that says the wait is not a fast one: skip the couple
+      // of seconds of quiet and say so now.
+      if (status === "reconnecting" && app.firstElementChild !== view.root) {
+        clearConnectingNotice();
+        showConnecting(true);
+      }
     },
 
     onRefused(reason, message) {

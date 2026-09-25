@@ -19,6 +19,7 @@ import type {
   RefusedReason,
   RenderState,
   RosterEntry,
+  StandingRow,
   TriviaView,
 } from "../../protocol.ts";
 import type {
@@ -289,6 +290,57 @@ export function refusalCopy(
   }
 }
 
+
+/* ------------------------------------------------------------------ */
+/* The scoring surfaces: the sealed line, and the pace of the reveal    */
+/* ------------------------------------------------------------------ */
+
+/**
+ * What the sealed screen says under "Scores are hidden", on every surface.
+ *
+ * Deliberately a constant and *not* `state.holding.line`, which is what the
+ * phone and the Desktop both used to read. `holding` is the last card the
+ * host set, not the card on screen — the engine clears it only on a restart —
+ * so a session whose last card was "Agentic Security TTX / By Abhijeet
+ * Lokhande" sealed its scores under "Scores are hidden / By Abhijeet
+ * Lokhande", which is what a real room saw. The lobby had the same bug and
+ * was fixed the same way: a card's second line belongs to that card, and a
+ * screen that wants a line of its own is given one.
+ */
+export const SEALED_LINE = "Revealed at the end.";
+
+/**
+ * The pace of the final reveal, in one place because two surfaces play it.
+ *
+ * The Desktop cuts 5th, 4th, 3rd, 2nd on a four-second dwell — video latency
+ * is one to two seconds, so a step that shows for two was never seen — holds
+ * an empty first place for seven, and then shows the winner. The protocol has
+ * no step message for the phone to follow, so the phone counts the same
+ * arithmetic from the moment the final standings arrive and shows nothing
+ * until the Desktop would have landed on the winner.
+ *
+ * Both surfaces read these numbers from here rather than each keeping their
+ * own, because the failure mode of two copies is the whole bug this exists to
+ * prevent: thirty phones announcing the winner while the room is still
+ * looking at an empty first place.
+ */
+export const FINAL_DWELL_MS = 4_000;
+export const FINAL_EMPTY_FIRST_HOLD_MS = 7_000;
+
+/**
+ * When the winner lands, in milliseconds after the final standings arrive.
+ *
+ * Zero for an empty result: there is no climb to pace, and both surfaces say
+ * "no scores were recorded" straight away rather than pacing a reveal of
+ * nothing. A result with no first place — which the engine does not produce —
+ * still waits out the hold, because the honest answer to "when has the
+ * Desktop finished" is "when its last timer has fired".
+ */
+export function finalRevealMs(rows: readonly StandingRow[]): number {
+  if (rows.length === 0) return 0;
+  const climb = rows.filter((r) => r.rank > 1).length;
+  return climb * FINAL_DWELL_MS + FINAL_EMPTY_FIRST_HOLD_MS;
+}
 
 /* ------------------------------------------------------------------ */
 /* The arcade register                                                 */

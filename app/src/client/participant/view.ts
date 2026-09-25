@@ -27,12 +27,14 @@ import {
   KEY_HINT,
   LIGHT_FACE,
   PLAY_RULE,
+  SEALED_LINE,
   UNSEAL_FACE,
   STAFF_CARD,
   STATE_LOCK_ERROR,
   answerKeyIndex,
   answerTiles,
   bridgeSteps,
+  finalRevealMs,
   floorEntries,
   formatCountdown,
   glassBackable,
@@ -642,6 +644,26 @@ function sceneHolding(): Scene {
   };
 }
 
+/**
+ * Standings, and — with `final` — the reveal the room is watching.
+ *
+ * The final rows are held back. The wire carries the whole result the moment
+ * the host reaches the final segment, and this phone could paint all five
+ * rows in one frame; the Desktop takes twenty-three seconds to climb to the
+ * winner. A phone that renders immediately reads the winner's name out to its
+ * owner, and to whoever is sitting next to them, before the room's screen has
+ * left fifth place — which is what happened in front of a room. So the phone
+ * says where to look, counts out the Desktop's own pace from
+ * {@link finalRevealMs}, and shows the rows when the winner lands there.
+ *
+ * Counted locally, from the moment the result arrives, because the protocol
+ * has no message for "the Desktop is on step three". The two surfaces get the
+ * state within a frame of each other, so counting the same arithmetic from
+ * the same broadcast is as close as this can be without a new message — and
+ * being a second late is harmless in a way that being twenty seconds early is
+ * not. A phone that joins or reconnects mid-reveal waits out a fresh count,
+ * which is late rather than early, and therefore the right way to be wrong.
+ */
 function sceneStandings(final: boolean): Scene {
   const heading = h("p", {
     class: "label",
@@ -659,52 +681,105 @@ function sceneStandings(final: boolean): Scene {
   // and it is the screen the host talks over while the line is up.
   const house = houseSlot("a-standings-house");
   house.node.hidden = true;
+  const hold = h("div", { class: "v-hold", attrs: { hidden: true } }, [
+    // Not "look up": half the room is watching the share in another window.
+    h("h1", { class: "display xl", text: "On the shared screen" }),
+    h("p", {
+      class: "v-note",
+      text: "The final standings are being revealed there. They appear here when the winner does.",
+    }),
+  ]);
   const node = h("section", { class: "v v-standings" }, [
     heading,
     house.node,
+    hold,
     list,
     empty,
   ]);
+
+  let timer: ReturnType<typeof setTimeout> | null = null;
+  let signature = "";
+  let holding = false;
+  let latest: RenderState | null = null;
+
+  const paint = (): void => {
+    const state = latest;
+    if (state === null) return;
+    const concluded =
+      !final && state.arcade !== undefined && state.arcade.round !== null;
+    house.node.hidden = !concluded;
+    if (concluded) house.set(HOUSE.arcadeEnd);
+    hold.hidden = !holding;
+    const rows = holding ? [] : state.standings;
+    // Nothing to say about an empty result while the card is up saying it.
+    empty.hidden = holding || state.standings.length > 0;
+    replace(
+      list,
+      rows.map((row, i) =>
+        h(
+          "li",
+          { class: final && i === 0 ? "row row-winner" : "row" },
+          [
+            h("span", { class: "num rank", text: String(row.rank) }),
+            h("span", { class: "display name", text: row.nickname }),
+            h("span", { class: "num total", text: String(row.total) }),
+          ],
+        ),
+      ),
+    );
+  };
+
+  /**
+   * Start the wait, once per result.
+   *
+   * Keyed on the result itself and not on the broadcast: state arrives many
+   * times a minute, and a wait that restarted on each one would never end. A
+   * result that genuinely changes — a spot award after the final segment is
+   * reached — restarts it, which is what the Desktop does with its own climb.
+   */
+  const arm = (state: RenderState): void => {
+    const sig = state.standings
+      .map((r) => `${r.rank}:${r.nickname}:${r.total}`)
+      .join("|");
+    if (sig === signature) return;
+    signature = sig;
+    if (timer !== null) clearTimeout(timer);
+    timer = null;
+    const wait = finalRevealMs(state.standings);
+    holding = wait > 0;
+    if (!holding) return;
+    timer = setTimeout(() => {
+      timer = null;
+      holding = false;
+      paint();
+    }, wait);
+  };
+
   return {
     node,
     update(state) {
-      const concluded =
-        !final && state.arcade !== undefined && state.arcade.round !== null;
-      house.node.hidden = !concluded;
-      if (concluded) house.set(HOUSE.arcadeEnd);
-      const rows = state.standings;
-      empty.hidden = rows.length > 0;
-      replace(
-        list,
-        rows.map((row, i) =>
-          h(
-            "li",
-            { class: final && i === 0 ? "row row-winner" : "row" },
-            [
-              h("span", { class: "num rank", text: String(row.rank) }),
-              h("span", { class: "display name", text: row.nickname }),
-              h("span", { class: "num total", text: String(row.total) }),
-            ],
-          ),
-        ),
-      );
+      latest = state;
+      if (final) arm(state);
+      paint();
+    },
+    stop() {
+      if (timer !== null) clearTimeout(timer);
+      timer = null;
     },
   };
 }
 
 function sceneSealed(): Scene {
-  const line = h("p", { class: "v-note" });
+  // `SEALED_LINE`, and deliberately not `state.holding.line`, which is what
+  // this read until a sealed phone said "Scores are hidden / By Abhijeet
+  // Lokhande" at a real event — the same bug the lobby had, in the same
+  // place, for the same reason. See `SEALED_LINE`.
   const node = h("section", { class: "v v-sealed" }, [
     lockGlyph("sealed-lock"),
     h("h1", { class: "display xl", text: "Scores are hidden" }),
-    line,
+    h("p", { class: "v-note", text: SEALED_LINE }),
   ]);
-  return {
-    node,
-    update(state) {
-      setText(line, state.holding?.line ?? "Revealed at the end.");
-    },
-  };
+  return { node, update() {} };
 }
 
 /* ------------------------------------------------------------------ */
