@@ -88,10 +88,12 @@ each surface. Three surfaces each counting for themselves drift, and a console
 a slide ahead of the Desktop is a host pressing Skip on a message the room is
 still reading.
 
-**An opening stretch with music, then silence.** The run opens on photographs,
-and the music plays under them until the first message — then it stops and does
-not come back, however many photographs follow. See the music section: this
-shape is not a preference, it is the only one that works over a video call.
+**Music across the run, or not at all.** The track plays for the whole run and
+stops at the closing card. This replaces an earlier rule that scoped it to the
+photographs before the first message; see the music section, which still holds
+that a track under somebody *reading aloud* is the failure to avoid. Playing it
+across the run is therefore a decision about how the room is run — the messages
+are read in silence by the people they are for, not performed by the host.
 
 ---
 
@@ -179,10 +181,16 @@ silently:
 3. **Music under a person reading aloud means neither is heard.** The room gets
    a muddy compromise instead of either thing.
 
-So the music plays under the photographs that open the run, while nobody is
-speaking, and stops at the first message and stays stopped — the run returns
-to photographs several times after that, and a track fading up and down under
-a farewell six times is worse than one that simply ended. A **preflight row** covers the first failure:
+So the music runs under the whole segment or not at all, and the host does not
+talk over it: a track fading up and down between photographs and messages six
+times is worse than either leaving it on or leaving it off.
+
+**It will be a loop, and a short one.** An asset is a DynamoDB row and the item
+limit is 400KB, so `MAX_ASSET_BYTES` is 300,000 — about 43 seconds at 56 kbps
+mono. A run takes eight to fifteen minutes, and the element loops, so that clip
+goes round a dozen times or more. Choose a track that survives repetition, or
+accept the opening sting instead. Carrying a whole track would mean chunking
+audio across several rows, which nothing here does yet. A **preflight row** covers the first failure:
 *play three seconds and ask somebody in the room whether they heard it.* That
 is the only way to know, and it takes ten seconds at 1:50pm rather than
 discovering it at 3:41.

@@ -1038,7 +1038,16 @@ export function sendoffViewFor(
     // Only ever under the photographs, and only before the first message: a
     // track still playing while somebody's words are on the screen is the
     // failure docs/sendoff.md's music section is entirely about.
-    music: phase === "run" && beforeFirstMessage(plan, so.at) ? content.opening.music : null,
+    // The whole run, not just the photographs before the first message.
+    //
+    // docs/sendoff.md scoped it to the opening because a track under somebody
+    // reading aloud means neither is heard — which is still true, and is why
+    // this is a decision about how the room is run rather than a default. The
+    // host asked for it across the run, so the messages are read in silence
+    // by the people they are for rather than aloud by the host. The element
+    // loops, so a clip shorter than the run repeats; see the note in the file
+    // about how short a clip the 300KB asset ceiling forces.
+    music: phase === "run" ? content.opening.music : null,
     line: phase === "closing" || phase === "done" ? content.closing.line : null,
     auto: so.auto,
     autoSeconds: so.autoSeconds,
@@ -1066,13 +1075,6 @@ export function sendoffViewFor(
   };
 }
 
-/** True while no message has been shown yet — the opening run of photographs. */
-function beforeFirstMessage(plan: SendoffState["plan"], at: number): boolean {
-  for (let i = 0; i <= at && i < plan.length; i += 1) {
-    if (plan[i]!.kind === "kudo") return false;
-  }
-  return true;
-}
 
 export function renderStateFor(
   state: SessionState,

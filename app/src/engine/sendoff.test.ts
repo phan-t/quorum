@@ -310,7 +310,7 @@ describe("what each surface is told", () => {
     assert.fail("never reached a message");
   });
 
-  test("the music stops at the first message and does not come back", async () => {
+  test("the music plays across the whole run, messages included", async () => {
     const { renderStateFor } = await import("../server/views.ts");
     let s = ready(
       content({
@@ -324,8 +324,12 @@ describe("what each surface is told", () => {
       const view = renderStateFor(s, opts).sendoff;
       if (!view) break;
       if (view.kudo) seenMessage = true;
-      if (seenMessage) {
-        assert.equal(view.music, null, "music was still playing under somebody's words");
+      if (view.phase === "run") {
+        assert.equal(view.music, "song.mp3", "the track cut out inside the run");
+      } else {
+        // Off at the closing card and after: the run is over and the last
+        // frame is not a thing to play music under.
+        assert.equal(view.music, null, "music outlived the run");
       }
     }
     assert.ok(seenMessage, "never reached a message");

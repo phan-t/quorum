@@ -1890,11 +1890,6 @@ class MockSession {
     const ordinal =
       kudoSlide === null ? 0 : messageSlides.filter((i) => i <= this.sendoffAt).length;
 
-    let beforeFirst = true;
-    for (let i = 0; i <= this.sendoffAt && i < plan.length; i += 1) {
-      if (plan[i]!.kind === "kudo") beforeFirst = false;
-    }
-
     const view: SendoffView = {
       name: so.name,
       subtitle: so.subtitle,
@@ -1916,10 +1911,8 @@ class MockSession {
             ? plan.flatMap((slide) => (slide.kind === "photo" ? [slide.key] : []))
             : [],
       seconds: so.opening.seconds,
-      // Only under the photographs, and only before the first message: a
-      // track playing while somebody's words are up is the failure the design
-      // note's music section is entirely about.
-      music: phase === "run" && beforeFirst ? so.opening.music : null,
+      // The whole run — see the note in views.ts.
+      music: phase === "run" ? so.opening.music : null,
       line: phase === "closing" || phase === "done" ? so.closing.line : null,
       auto: this.sendoffAuto,
       autoSeconds: this.sendoffSeconds,
