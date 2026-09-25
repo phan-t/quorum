@@ -23,7 +23,8 @@ data "aws_iam_policy_document" "ecs_tasks_assume" {
 # --- execution role ----------------------------------------------------------
 
 resource "aws_iam_role" "execution" {
-  # quorum-* so the bootstrap role's IAM permissions cover it.
+  # quorum-* because the operator's own IAM permissions are scoped to that
+  # prefix. A role named anything else fails the apply on CreateRole.
   name               = "${var.name_prefix}-task-execution"
   description        = "ECS agent: pull the image, read the admin key, open the log stream."
   assume_role_policy = data.aws_iam_policy_document.ecs_tasks_assume.json

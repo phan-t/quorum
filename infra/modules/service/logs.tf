@@ -11,8 +11,9 @@ resource "aws_cloudwatch_log_group" "this" {
 # RunningTaskCount comes from Container Insights, which is why it is enabled on
 # the cluster. Standard Container Insights on one task is cents a month.
 #
-# Deliberately not alarmed on when desired_count is 0: staging parked between
-# rehearsals is the expected state, not an incident.
+# Deliberately not created at all when desired_count is 0: the service parked
+# between events is the expected state, not an incident, and an alarm that is
+# always firing between October and March is an alarm nobody reads in March.
 resource "aws_cloudwatch_metric_alarm" "running_task_count" {
   count = var.desired_count > 0 ? 1 : 0
 

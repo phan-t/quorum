@@ -22,9 +22,9 @@ terraform {
   #     from `make down`. A VCS run would quietly raise a parked service.
   #   - Nothing in CI can build or push the image anyway: the account denies
   #     non-human credentials, so no automation can reach ECR.
-  #   - The credentials here are an 8-hour doormat session pushed by
-  #     `tfawscreds`. Any run not triggered by a human who just refreshed is a
-  #     coin flip.
+  #   - The credentials this workspace runs with are an 8-hour doormat session
+  #     pushed into a variable set by `tfawscreds`. Any run not triggered by a
+  #     human who just refreshed is a coin flip.
   #
   # `organization` is omitted on purpose — it comes from TF_CLOUD_ORGANIZATION,
   # so this public repo does not name someone's org.
@@ -38,10 +38,22 @@ terraform {
 provider "aws" {
   region = var.aws_region
 
-  # Credentials are minted per run by HCP Terraform against quorum-tfc-run.
-  # There is no access key here and no provider `assume_role` block: the run
-  # already *is* the role. Set TFC_AWS_PROVIDER_AUTH and TFC_AWS_RUN_ROLE_ARN as
-  # environment variables on the workspace and nothing else.
+  # No credentials here, and no `assume_role` block either — but not because the
+  # run federates an identity. It cannot: this account denies
+  # iam:CreateOpenIDConnectProvider, so HCP Terraform's dynamic credentials are
+  # not available and TFC_AWS_PROVIDER_AUTH would have nothing to authenticate
+  # against.
+  #
+  # What the workers actually get is a copy of the operator's own eight-hour STS
+  # session, pushed into the AWS Authentication variable set by `tfawscreds`
+  # before every apply. The comment on the `cloud` block above says the same
+  # thing; this one used to claim a per-run role instead, which is the design
+  # that was wanted and not the one that runs.
+  #
+  # `allowed_account_ids` is therefore doing real work: the credentials are a
+  # human's, that human has access to more than this account, and a wrong
+  # AWS_PROFILE at the moment `tfawscreds` ran is a plausible mistake. It fails
+  # the plan instead of applying somewhere else.
   allowed_account_ids = [var.aws_account_id]
 
   default_tags {

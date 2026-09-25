@@ -19,10 +19,10 @@ Load Balancer, talking to one DynamoDB table.
    ECS Fargate service, desired_count = 1
    ┌───────────────────────────────────────┐
    │  node process                         │
-   │   ├─ static SPA (participant, host,   │
-   │   │   screen — one bundle, three      │
-   │   │   entry routes)                   │
-   │   ├─ REST (Fastify)                   │
+   │   ├─ three static clients             │
+   │   │   (participant, host, screen),    │
+   │   │   served from dist/client         │
+   │   ├─ REST (node:http)                 │
    │   ├─ WebSocket hub (ws)               │
    │   └─ game engine: pure reducers,      │
    │       in-memory session state,        │
@@ -33,11 +33,21 @@ Load Balancer, talking to one DynamoDB table.
            DynamoDB (on-demand)          SSM Parameter Store (admin key)
 ```
 
-**Stack:** Node 22, TypeScript end to end. Fastify for HTTP, `ws` for
-WebSockets, Preact + Vite for the three clients. One language means the
-message protocol is a single `protocol.ts` shared by server and clients, and
-the game engine's reducers run unchanged in the test suite and in the browser
-(the phone predicts the next state locally, then reconciles with the server).
+**Stack:** Node 24, TypeScript end to end, and almost nothing else. The whole
+dependency list is `ws` and the two AWS SDK packages; HTTP is `node:http`, and
+there is no web framework, no bundler and no UI library. The three clients are
+plain TypeScript and plain DOM, compiled by `tsc` into `dist/client` and served
+by the same process.
+
+That is a choice rather than an omission. The server runs its TypeScript
+directly — Node strips the types — so there is no build step between an edit and
+a running server, and the only compile in the project is the one a browser
+forces. A framework would have to earn its place against three pages whose
+entire job is to redraw a projection the server sends them.
+
+One language means the message protocol is a single `protocol.ts` shared by
+server and clients, and the game engine's reducers are the same functions in the
+test suite and on the server.
 
 ### Why one stateful process, not serverless
 
@@ -61,9 +71,10 @@ rejected:
 
 The cost is that there is no high availability: one task, and a restart is a
 ~20-second gap. [Durability and restart](#durability-and-restart) makes that
-gap survivable, and the [deploy policy](#deploying-around-a-live-session)
-makes it rare. That trade is correct for this product and would be wrong for
-a public one.
+gap survivable, and the rule about not deploying during an event — which is a
+rule a person keeps, not a pipeline, and lives in
+[infra/README.md](infra/README.md) — makes it rare. That trade is correct for
+this product and would be wrong for a public one.
 
 ### The game engine
 
@@ -82,8 +93,13 @@ This is not architectural piety. It buys three things the product needs:
 the trivia and arcade rules are unit-tested as functions of `(state, event,
 now)` with a fake clock; a session is *replayable* from its event log, which
 is how a restart recovers and how a scoring dispute is settled after the
-fact; and the phone can run the same reducer on its own inputs for zero-lag
-feedback in the tap games, then accept the server's answer as truth.
+fact; and the rules have exactly one implementation, so there is no second one
+in a client to disagree with it.
+
+The clients import `engine/types.ts` for its types and nothing else. They do not
+run the reducer. Where a surface needs to feel instant — the tap counter in
+Plan / Apply — it counts optimistically in the browser and lets the next
+broadcast correct it, which is a counter and not a second copy of the rules.
 
 ## Data model
 
@@ -93,13 +109,10 @@ thousand items and under a megabyte.
 
 | PK | SK | Item |
 | --- | --- | --- |
-| `SESSION#<sid>` | `META` | title, state, joinCode, hostTokenHash, screenTokenHash, seal, activities[], tiebreakOrder[], createdAt, ttl |
+| `SESSION#<sid>` | `META` | sid, title, joinCode, phase, seal, hostTokenHash, screenTokenHash, the console's opaque `setup` blob, createdAt, updatedAt, ttl |
 | `SESSION#<sid>` | `SNAPSHOT` | full in-memory state, JSON, version, seq — rewritten on every transition |
-| `SESSION#<sid>` | `EVENT#<seq:010d>` | one game event: type, payload, at, byPid — append-only |
-| `SESSION#<sid>` | `PARTICIPANT#<pid>` | nickname, nicknameKey, playerNumber, rejoinTokenHash, joinedAt, kicked |
-| `SESSION#<sid>` | `SCORE#<activityId>#<pid>` | raw, status (`played`/`bench`/`unset`), publishedAt |
-| `SESSION#<sid>` | `SPOT#<seq>` | pid, activityId, reason, at |
-| `SESSION#<sid>` | `CONTENT#<activityId>` | the parsed trivia set or arcade config for this session |
+| `SESSION#<sid>` | `EVENT#<seq:010d>` | one game event: type, the event itself, at, byPid — append-only |
+| `SESSION#<sid>` | `PARTICIPANT#<pid>` | nickname, nicknameKey, playerNumber, rejoinTokenHashes[], joinedAt, kicked |
 | `SESSION#<sid>#PROMO` | `PROMO` | the event's promo card, one HTML page, chars, at |
 | `SESSION#<sid>#ASSET` | `ASSET#<key>` | one send-off photo or the music file: bytes (Binary), contentType, size, at |
 | `CODE#<joinCode>` | `ACTIVE` | sid — exists only while the session is joinable |
@@ -118,48 +131,91 @@ moved the card. A separate partition needs no filter, and the read is a
 GSI: none. Join codes are looked up by their own PK; everything else is a
 query on `SESSION#<sid>`. The `SNAPSHOT` item is the fast path for restart;
 `EVENT#` items are the audit trail and the slow path when a snapshot is
-suspected. `SCORE#` and `SPOT#` are also derivable from events but are written
-as their own items so the export is a query, not a replay.
+suspected.
+
+**Scores and spot awards have no items of their own.** They are fields of the
+session state, so they ride in the `SNAPSHOT` and are derivable from the
+`EVENT#` log, and the CSV export is built from the loaded state rather than
+from a second set of rows. A row per score per activity would be a second
+place for the same number to live, and the first time the two disagreed it
+would be in front of a room.
+
+**Finding a session at boot is a `Scan`, not a query.** There is no index on
+`phase`, so recovery scans the table for `META` items in `draft`, `lobby`,
+`running` or `closed` and then reads each of those partitions. That is
+affordable because this table holds a handful of `META` rows and the TTL
+clears them at 90 days; `DynamoStore.loadRecoverable` says what to do instead
+if that ever stops being true.
 
 **Retention.** `ttl` on every item is 90 days from session close. Nicknames
 are the only personal data and there is no reason to keep them longer than
 the next event's planning.
 
-**What is not in the database.** Launch content (the trivia set, the arcade
-rounds) ships in the container from the repo files and is copied into
-`CONTENT#` when a session is created, so a session is self-contained and a
-content change in the repo never rewrites a session in flight.
+**Where content comes from.** The arcade's items ship in the container, as
+modules under `src/arcade/`, and are attached to the round when the host starts
+it — which is also why a round's answer key never travels on a host command.
+The trivia set and the send-off arrive per session over REST and become engine
+state, so they are in the `SNAPSHOT` like everything else. Neither has an item
+of its own, and a content change in the repo cannot rewrite a session already
+in flight, because a running session holds what it was given.
 
 ## WebSocket protocol
 
 JSON text frames. Every message is `{ "t": "<type>", ...fields }`. Server
 broadcasts carry `seq`, a per-session monotonic counter; a client that sees a
 gap sends `resync` and gets a full `state`. Client messages carry `cid`, a
-client-generated id echoed in the `ack` so the phone can reconcile its
-prediction.
+client-generated id echoed in the `ack` so a client can reconcile an optimistic
+update.
 
 One socket per client. Role is fixed at `hello`: participant, host, or screen.
 
-### Connection
+`protocol.ts` is the authority on all of this, and it is a union type rather
+than a document, so the compiler checks what the tables below only describe.
+
+### Server to client
+
+There are **nine** of them, and that is the whole list.
 
 | Type | Direction | Fields |
 | --- | --- | --- |
-| `hello` | C→S | `role`, then one of: `{ joinCode, nickname }`, `{ rejoinToken }`, `{ hostToken }`, `{ screenToken }` |
-| `welcome` | S→C | `pid`, `rejoinToken` (participant), `sid`, `serverTime` |
-| `refused` | S→C | `reason` (`nickname_taken`, `invalid_nickname`, `lobby_locked`, `no_such_code`, `not_joinable`, `kicked`, `bad_token`, `rate_limited`, `malformed`), `message` |
-| `state` | S→C | full render state for that role, `seq` |
-| `resync` | C→S | — |
-| `ping` / `pong` | C↔S | `t0`, `t1` — see [clocks](#clocks-and-fairness) |
+| `welcome` | S→C | `role`, `sid`, `pid` and `rejoinToken` (participant only), `serverTime`, `protocol` |
+| `refused` | S→C | `reason` (`no_such_code`, `nickname_taken`, `invalid_nickname`, `lobby_locked`, `kicked`, `bad_token`, `not_joinable`, `rate_limited`, `malformed`), `message` |
+| `state` | S→C | `seq`, and the whole `RenderState` projected for that role |
+| `roster` | S→all | `seq`, `[{ pid, nickname, playerNumber, conn }]` — `conn` is `on`/`away` |
+| `seal` | S→all | `seq`, `state`: `live`/`sealed`/`revealed` |
+| `toast` | S→all | `seq`, `kind`: `spot`/`text`, `text` |
+| `ack` | S→C | `cid`, `applied` |
+| `refusedCmd` | S→C | `cid`, `code`, `message` — why a host command was refused |
+| `pong` | S→C | `t0`, `t1` — see [clocks](#clocks-and-fairness) |
 
-### Session and segments
+**There is no `segment` frame and no `own` frame.** Both were sketched here and
+neither was built, for the reason the trivia deltas below were not: a segment
+change and a points change are both changes to the render state, and re-sending
+the projection is already how every other change reaches a surface. A second,
+parallel path is a second way for a surface to go stale, and the surfaces that
+go stale are the ones nobody notices until a live session.
 
-| Type | Direction | Fields |
-| --- | --- | --- |
-| `segment` | S→all | `kind`, `seq`, segment payload (holding title/line/until; standings top5 or `sealed`; …) |
-| `roster` | S→all | `[{ pid, nickname, playerNumber, conn }]` — `conn` is `on`/`away` |
-| `seal` | S→all | `state`: `live`/`sealed`/`revealed` |
-| `own` | S→C | `total`, `byActivity` — the participant's own points strip, omitted while sealed |
-| `toast` | S→all | `kind`: `spot`, `text` |
+So the segment is `state.segment`, the holding card is `state.holding`, the
+standings are `state.standings`, and the participant's own points strip is
+`state.own` — present only for a participant, and omitted entirely while sealed
+rather than nulled.
+
+### Client to server
+
+`hello`, `resync`, `ping`, `host.cmd`, and one frame per thing a participant can
+do: `trivia.answer`, `arcade.answer`, `arcade.tap`, `arcade.step`,
+`arcade.shape`, `arcade.letter`, `arcade.docs`, `arcade.beat`, `arcade.back`.
+
+`hello` is three shapes, one per role: `{ role: "participant", joinCode,
+nickname, rejoinToken? }`, `{ role: "host", hostToken }`, `{ role: "screen",
+screenToken }`.
+
+**None of the participant frames carries a timestamp**, and that is the single
+most repeated decision in `protocol.ts`. Every instant that is worth points —
+how fast a trivia answer arrived, whether a tap landed before the state lock,
+how long a runner took to choose a pane — is measured by the server from its own
+clock and its own latency estimate for that socket. A client-supplied `at` would
+be a number worth points, which is a number worth forging.
 
 ### Trivia
 
@@ -215,56 +271,33 @@ answered, so a reload during a question shows "locked in", not the answers.
 
 ### Arcade
 
-The arcade is one segment with a round-level state machine inside it. Rounds
-share an envelope and differ in `floor`:
+The arcade is one segment with a round-level state machine inside it. Like
+trivia, it rides in `RenderState` rather than in frames of its own: one
+`arcade` block projected per role, plus a participant-only `arcadeMine`.
 
-```jsonc
-// S→all
-{ "t": "arcade.round", "seq": 520, "round": "plan_apply", "index": 1, "of": 5,
-  "phase": "card" | "floor" | "reveal",
-  "startsAt": 1790337300000, "endsAt": 1790337375000,
-  "floor": { /* round-specific public state, see below */ },
-  "lounge": { "backable": ["p03", "p12", …], "backs": { "p07": "p12", … } } }
+`ArcadeView` carries the envelope every round shares — `round`, `roundIndex`,
+`phase` (`idle` / `card` / `running` / `reveal`), `startedAt`, `endsAt`, the
+`grid` of players, and how many are `onFloor` and `inLounge` — and then exactly
+one optional round block: `recruitment`, `planApply`, `unseal`, `tug` or
+`glass`. `ArcadeMine` is the same idea for one player: their player number,
+standing, banked and total, who they are backing, and the same one-of-five
+round block cut for them.
 
-// S→C, private
-{ "t": "arcade.me", "status": "floor" | "drained" | "away",
-  "banked": 15, "roundPoints": 15, "playerNumber": "017",
-  "me": { /* round-specific private state */ } }
+**Five of the six designed rounds are built.** Gganbu is in the engine —
+pairing, wagers, scoring — and is reachable from nowhere: `arcade.round` has no
+`gganbu` variant, so `parseClientMessage` refuses one on the wire, and the
+console lists it disabled so a host can see the shape of the run of show
+without starting something that does not exist. SPEC.md's round table is the
+design; this is what a session can play.
 
-// C→S — one message type, `kind` is round-specific
-{ "t": "arcade.input", "cid": "9c1", "kind": "tap", "n": 7, "at": 1790337312850 }
-{ "t": "arcade.input", "cid": "9c2", "kind": "letter", "i": 4 }
-{ "t": "arcade.input", "cid": "9c3", "kind": "wager", "side": "over", "n": 3 }
-{ "t": "arcade.input", "cid": "9c4", "kind": "pane", "step": 2, "choice": 0 }
-{ "t": "arcade.input", "cid": "9c5", "kind": "back", "pid": "p12" }
+**"Public" means the Desktop and the host, not a participant.** The projection
+is per role and enforced by leaving a field out rather than nulling it, so a
+key a participant may not have never appears in its bytes.
 
-// S→C
-{ "t": "arcade.drained", "reason": "state_lock", "banked": 15,
-  "line": "Error: state lock held by another process" }
-```
-
-Round-specific `floor` payloads, briefly. **"Public" here means the Desktop
-and the host, not a phone.** The projection is per role and enforced by leaving
-a field out rather than nulling it, so a key a phone may not have never appears
-in its bytes.
-
-The one that decides `plan_apply` is the epoch of the *next* light change —
-this table used to list it as `nextTurnHintAt` in the public payload, and that
-is unshippable: a client holding it can tap flat out, stop 401 ms before every
-lock, and never be caught. It goes to the screen and the host only, as
-`nextChangeAt` and its 400 ms telegraph `headTurnsAt`. `progress` and
-`finished` are likewise withheld from phones; a phone is told its own count and
-nothing about anyone else's.
-
-
-| Round | Public `floor` | Private `me` |
-| --- | --- | --- |
-| `recruitment` | `item { cue }`, `itemEndsAt`, `solved: [pid]` | `answered`, `correct` |
-| `plan_apply` | `light: "plan"/"apply"`, `lightChangedAt`, `target`, `checkpoints` | `n`, `checkpoint` |
-| `unseal` | `shapes: { pid: "circle" }`, `progress: { pid: k }`, `cracked: [pid]` | `word` (scrambled), `taps`, `hintsUsed` |
-| `tug_of_raft` | `pull: 1..3`, `sides: { a: [pid], b: [pid] }`, `rope: -1..1`, `beatEpoch`, `bpm` | `side`, `onBeat`, `misses`, `electing` |
-| `gganbu` | `item { prompt, line }`, `itemEndsAt`, `tokens: { pid: n }` | `rival`, `tokens`, `wager` |
-| `glass_bridge` | `step`, `wave`, `stepEndsAt`, `broken: (0\|1\|null)[]` indexed by step, `position: { pid: step }` | `wave`, `step`, `fallen` |
+The one that decides Plan / Apply is the epoch of the *next* light change. A
+client holding it can tap flat out, stop 401 ms before every lock, and never be
+caught, so it goes to the screen and the host only, with its 400 ms telegraph.
+A participant is told its own count and nothing about anyone else's.
 
 **The Glass Bridge's public payload is the whole game, so three things are
 deliberately absent from it.**
@@ -283,24 +316,36 @@ which is exactly what waves 2 and 3 are promised, and no more.
 No per-player pane choice appears anywhere, because **a pane that held
 identifies the real pane just as completely as a pane that broke**. The engine
 does not store one: a pane that holds advances you and a pane that breaks
-drains you, so `position` is a count and nothing can be joined back to a pane.
+drains you, so a position is a count and nothing can be joined back to a pane.
 
 There is also no screen-only secret here — the Desktop is in the room — so
 a participant's view must be a *subset* of the public one rather than a
 different cut of it.
 
+**Input is one frame per thing a player does**, not one generic envelope.
+`arcade.answer`, `arcade.tap`, `arcade.step`, `arcade.shape`, `arcade.letter`,
+`arcade.docs`, `arcade.beat`, `arcade.back`. A single `arcade.input` carrying a
+`kind` was the earlier sketch and would have made every round's payload
+optional on every other round's frame; separate frames mean the parser rejects
+a pane choice sent during Unseal instead of the engine having to.
+
+Each of them carries the `round` it was meant for, and the ones that can cross
+a boundary carry the item or step as well, for the reason `trivia.answer`
+carries an index: a frame in flight when the host advances is a commitment to
+something the player never saw, and the engine refuses it rather than applying
+it to whatever is open now.
+
 **Taps, as built.** This section used to describe batching ten taps into one
-`arcade.input` per 100 ms carrying a *client* timestamp, and a 10 Hz
-`arcade.round` broadcast. Neither exists, and the client timestamp in
-particular should not: the server times the tap itself, as it does a trivia
-answer, because a client timestamp is a number the player's own device chooses
-about whether they beat the lock.
+frame per 100 ms carrying a *client* timestamp, and a 10 Hz broadcast. Neither
+exists, and the client timestamp in particular should not: the server times the
+tap itself, as it does a trivia answer, because a client timestamp is a number
+the player's own device chooses about whether they beat the lock.
 
 What is built: one `arcade.tap` per tap, and **an ordinary tap produces no
-broadcast and no write at all**. Only a milestone — a checkpoint, a crossing,
-a drain, a light turn — moves points or the room's state, and only those fan
-out. The phone counts optimistically in between, so the button answers the
-thumb rather than the link. There is no periodic broadcast anywhere.
+broadcast and no write at all**. Only a milestone — a checkpoint, a crossing, a
+drain, a light turn — moves points or the room's state, and only those fan out.
+The client counts optimistically in between, so the button answers the finger
+rather than the link. There is no periodic broadcast anywhere.
 
 Sixty players tapping flat out is therefore ~600 inbound messages a second and
 close to nothing outbound, which is the opposite way round from the design
@@ -308,28 +353,62 @@ above and the reason it was abandoned.
 
 ### Host
 
+One frame carries every console button:
+
 ```jsonc
 // C→S
-{ "t": "host.cmd", "cid": "h41", "cmd": "trivia.open", "qid": "q07" }
-{ "t": "host.cmd", "cid": "h42", "cmd": "segment", "kind": "holding",
-  "title": "Agentic Security TTX", "line": "Ade has the room. Back here at 2:40.", "until": 1790338800000 }
-{ "t": "host.cmd", "cid": "h43", "cmd": "seal" }
-{ "t": "host.cmd", "cid": "h44", "cmd": "participant.release", "pid": "p07" }
-{ "t": "host.cmd", "cid": "h45", "cmd": "spot", "pid": "p12", "activityId": "trivia", "reason": "best recovery of the afternoon" }
+{ "t": "host.cmd", "cid": "h41", "cmd": { "name": "trivia.open", "suddenDeath": false } }
+{ "t": "host.cmd", "cid": "h42", "cmd": { "name": "holding",
+  "title": "Agentic Security TTX", "line": "Ade has the room. Back here at 2:40." } }
+{ "t": "host.cmd", "cid": "h43", "cmd": { "name": "seal", "state": "sealed" } }
+{ "t": "host.cmd", "cid": "h44", "cmd": { "name": "participant.release", "pid": "p07" } }
+{ "t": "host.cmd", "cid": "h45", "cmd": { "name": "spot.grant", "pid": "p12",
+  "activityId": "trivia", "reason": "best recovery of the afternoon" } }
 ```
 
-The full command list mirrors the console's buttons one to one: `segment`,
-`lobby.lock`, `trivia.open|close|reveal|next|reask|sudden_death`,
-`arcade.start|advance|pause|skip`, `seal|reveal|unseal`, `participant.rename|
-release|kick|bench|played`, `spot`, `manual.draft|publish`. Host commands
-that would be destructive from the wrong state are rejected with a
-`refused` explaining why, not silently ignored — the console shows the
-refusal inline.
+The command is an object with a `name`, not a bare string with sibling fields,
+so each command's own arguments are typed with it and a command that needs none
+is `{ name }` and nothing else. `cmd` is `null` when the frame could not be
+parsed — it still arrives, so the server can answer `refusedCmd` on that `cid`,
+because a console that gets silence cannot tell a rejected click from a dropped
+one.
 
-The host and screen receive everything participants receive plus the answered
-count, and the host alone receives per-participant answer state and correctness
-before the reveal. The per-role table under "Trivia" above is the authority on
-which is which.
+`HostCommand` in `protocol.ts` is the list. Grouped by what they do:
+
+| Group | Commands |
+| --- | --- |
+| Session | `open`, `start`, `close`, `session.reopen`, `session.restart` |
+| Room | `segment`, `holding`, `seal`, `practice`, `lobby.lock` |
+| People | `participant.kick`, `participant.release` |
+| Scoring | `score.set`, `score.status`, `spot.grant`, `spot.revoke` |
+| Trivia | `trivia.open`, `trivia.close`, `trivia.reveal`, `trivia.next` |
+| Arcade | `arcade.enter`, `arcade.round`, `arcade.begin`, `arcade.next`, `arcade.nextStep`, `arcade.nextWave`, `arcade.nextPull`, `arcade.end`, `arcade.reveal` |
+| Send-off | `sendoff.next`, `sendoff.back`, `sendoff.auto`, `sendoff.speed` |
+
+Two of them are worth singling out.
+
+**`session.restart` carries `confirm`**, which must be the session's own join
+code, and the server refuses the command without it. It is not authentication —
+the socket is already the host's — it is the reason this one command cannot be
+fired by a frame that merely names it. Every other command is expressible as a
+bare `{ name }`, which is fine for a command that shows a holding card and is
+not fine for the one that wipes the afternoon.
+
+**`arcade.round` carries settings and never content.** The emoji items, the
+eighteen panes, the tins: all of them live on the server and are attached when
+the round starts. A round config on the wire would be the answer key leaving the
+server on a frame the console could be made to echo.
+
+Host commands that would be destructive from the wrong state are refused with a
+`refusedCmd` explaining why, not silently ignored — the console shows the
+refusal inline, in the button.
+
+The host and the screen receive everything participants receive plus the
+answered count, and the host alone receives per-participant answer state. *Who*
+has answered, never *what* they answered: the console's job is to decide whether
+to wait, and a grid of choices would be the answer key on a screen the host
+sometimes shares by accident. The per-role table under "Trivia" above is the
+authority on which is which.
 
 ### Clocks and fairness
 
@@ -360,31 +439,60 @@ page is not silently disconnected.
 
 ## REST endpoints
 
-REST is for things that are not real-time: creating sessions, uploading
-files, exporting. Everything live goes over the socket.
+REST is for things that are not real-time: creating sessions, loading content,
+exporting, and operating the service between events. Everything live goes over
+the socket.
 
 | Method | Path | Auth | Does |
 | --- | --- | --- | --- |
-| `POST` | `/api/sessions` | admin key | Creates a session; optional `activities` (the event's own scored set, validated all-or-nothing, rejected as `invalid_activities` with errors addressed by position — absent means the default set); returns `sid`, `joinCode`, host and screen tokens (shown once) |
-| `GET` | `/api/sessions/:sid` | host | Session config and current state summary |
-| `PATCH` | `/api/sessions/:sid` | host | Title, activities, tiebreak order, roster paste |
+| `POST` | `/api/sessions` | admin key | Creates a session; optional `activities` (the event's own scored set, validated all-or-nothing, rejected as `invalid_activities` with errors addressed by position — absent means the default set) and an opaque `setup` blob the console reads back; returns `sid`, `joinCode`, host and screen tokens (shown once) |
+| `GET` | `/api/sessions` | admin key | Every session this task holds: sid, title, join code, phase, segment, counts, age. Never the tokens |
+| `POST` | `/api/sessions/:sid/close` | admin key | Retires a session. Refuses one with sockets attached unless `?force=1` |
 | `POST` | `/api/sessions/:sid/content/trivia` | host | JSON question file; validates and replaces the set; rejects with `invalid_questions` and errors addressed by question number |
-| `POST` | `/api/sessions/:sid/content/arcade` | host | Round selection and per-round settings |
-| `POST` | `/api/sessions/:sid/manual/:activityId` | host | Draft scores (typed or pasted); returns fuzzy-match proposals for confirmation |
-| `GET` | `/api/sessions/:sid/export.csv` | host | The `scoresheet.csv` shape: `Name, <Activity> Raw, <Activity> Pts, …, Spot Awards, TOTAL` |
+| `POST` | `/api/sessions/:sid/content/sendoff` | host | The send-off file. Keys, not bytes — the photos follow one request each |
+| `POST` | `/api/sessions/:sid/content/promo` | host | The promo card, one self-contained HTML page |
+| `POST` | `/api/sessions/:sid/assets/<key>` | host | One send-off photo or the music file, as bytes |
+| `GET` | `/api/sessions/:sid/assets/<key>` | — | That asset back, for the Desktop to draw. No token; see below |
+| `GET`/`HEAD` | `/api/sessions/:sid/promo` | — | The promo card. No token; `HEAD` is how the Desktop asks whether there is one to frame |
+| `GET` | `/api/sessions/:sid/setup` | host | The staged console setup, as the text it arrived as. The console asks once, on load |
+| `GET` | `/api/sessions/:sid/export.csv` | host | The scoresheet: `Name, <Activity> Raw, <Activity> Pts, …, Spot Awards, TOTAL` |
 | `GET` | `/api/sessions/:sid/events.jsonl` | host | The event log, for disputes |
-| `GET` | `/j/:code` | — | Serves the participant app with the code prefilled |
-| `GET` | `/healthz` | — | `200 { ok, sessionsLive, socketsOpen, version }` — also the deploy-freeze signal |
+| `GET` | `/healthz` | — | `200 { ok, sessionsLive, socketsOpen, version, store, persist }` |
 | `GET` | `/status` | — | Plain-text version of the above, for humans |
+| `GET` | `/`, `/j/:code`, `/host`, `/screen` | — | The three client shells; `/j/:code` is the participant page with the code prefilled |
 
-**Auth.** Three bearer tokens, all 128-bit random, base32, compared by hash:
-the **admin key** (one, from SSM, creates sessions), the **host token** (per
-session, in the console URL fragment so it never hits a log), the **screen
-token** (per session, view-only). No user accounts, as specified. Participant
-identity is the rejoin token issued at `hello`. That is the whole security
-model; it is proportionate to a team quiz.
+**Two reads carry no token, on purpose.** An `<iframe>`, an `<img>` and an
+`<audio>` cannot carry an `Authorization` header, and the promo card and the
+send-off assets are exactly those three elements' sources on the Desktop.
 
-Rate limits: `hello` at 10 per minute per IP; `/api/sessions` at 10 per hour.
+That is acceptable for these and nowhere else in this service because of what
+they are: a poster and a montage the room is seconds away from watching on a
+shared screen. No scores, no roster, no names. It still takes an unguessable
+session id to ask, and a session with no card answers exactly as an unknown
+session does, so it is not a session-id oracle either. Everything that *writes*
+them needs the host token.
+
+**`/healthz` stays `ok` while persistence is degraded.** The session is still
+playable, and pulling the task out of the load balancer would end it — a far
+worse outcome than a gap in the audit trail. The `persist` block is where a
+degraded store is visible.
+
+**Unknown session and wrong token answer alike**, everywhere here: a 404 that
+appears only for a real sid is a session-id oracle.
+
+**Auth.** Three bearer tokens, all compared by hash in constant time: the
+**admin key** (one, from SSM, creates and retires sessions), the **host token**
+(per session, in the console URL fragment so it never hits a log), the **screen
+token** (per session, view-only). Tokens are 128-bit random, base32; the join
+code is separate and is `hvs.` plus 24 base62 characters. No user accounts, as
+specified. Participant identity is the rejoin token issued at `hello`. That is
+the whole security model; it is proportionate to a team quiz.
+
+Rate limits: `hello` at 10 per minute per address; `/api/sessions` at 10 per
+hour. Behind the ALB the socket's peer address is one ENI for the entire room, so
+the task is told to read `X-Forwarded-For` instead — see `QUORUM_TRUST_PROXY` in
+the task definition and `clientAddress` in `server/address.ts`.
+
 Nicknames ≤ 24 characters, stripped of control characters, rendered as text
 never HTML.
 
@@ -399,24 +507,43 @@ delivery per session. Participant inputs during a hot round (taps) are
 folded into the snapshot rather than logged individually — a tap is not an
 audit event, an answer is.
 
-**On start** the process scans for sessions in `lobby` or `running`, loads
-each `SNAPSHOT`, replays any `EVENT#` with `seq` greater than the snapshot's
-(there should be none or one), and re-arms timers from the state: a
-`closesAt` in the past fires immediately, one in the future is scheduled.
+**On start** the process scans for sessions in `draft`, `lobby`, `running` or
+`closed`, loads each `SNAPSHOT`, replays any `EVENT#` with `seq` greater than
+the snapshot's (there should be none or one), marks everybody the snapshot
+thought was present as `away`, and re-arms timers from the state: a `closesAt`
+in the past fires immediately, one in the future is scheduled. All of this
+happens before the port opens.
+
+`draft` and `closed` are in that list because both were left out once and both
+cost a session. A host sets an event up the day before, which is exactly the
+gap `draft` covers; and `reopen` exists to undo an accidental close, which a
+restart would otherwise make permanent. In both cases the rows were still in
+the table and the export still worked, while the console got `bad_token` for a
+link that was correct — see the comment on `loadRecoverable`.
 
 **On SIGTERM** (ECS stop, deploy) the process stops accepting `hello`, writes
 final snapshots, closes every socket with code `1012 Service Restart`, and
-exits. ECS gives it 30 s. Clients treat `1012` as "reconnect with backoff
-starting at 1 s", and the rejoin token gets them back as themselves.
+exits. ECS gives it 30 s. Clients treat `1012` as a reconnect, backing off
+300 ms, 800 ms, 1.6 s, 3.2 s, 6.4 s and then every 10 s — with an immediate
+attempt when the tab wakes, so nobody waits out a backoff their phone slept
+through — and the rejoin token gets them back as themselves.
 
 **What a mid-game restart looks like from the room.** Roughly twenty seconds
-(task stop, new task pull and start, health check) during which phones show
+(task stop, new task pull and start, health check) during which surfaces show
 the reconnect banner. Then everyone is back on the same segment. If a trivia
 question was open, the snapshot has the answers received before the process
-died and lost the ones sent during the gap; the console shows this question
-flagged with "n answers may be missing" and a **re-ask** button, and the host
-chooses. Nothing about the scoreboard is ever inconsistent, because scores
-are derived from persisted events.
+died and lost the ones sent during the gap. Nothing about the scoreboard is
+ever inconsistent, because scores are derived from persisted events.
+
+**There is no re-ask.** This paragraph used to promise one — a flag on the
+affected question and a button to ask it again — and none of it exists: no
+event in the engine, no command on the wire, and nothing in the console that
+counts how many answers a gap swallowed. A host who loses answers to a restart
+is holding a question that scored some of the room and not the rest, and the
+only tools for that are the ones any other scoring problem uses: `score.set`
+for a raw number, or `score.status` to bench somebody for the activity. Said
+plainly here because a host who believes in a re-ask button will go looking for
+it at the worst possible moment.
 
 **What is not durable.** Socket-level state (who is connected) is rebuilt
 from reconnects. Rate-limit counters reset. That is fine.
@@ -434,7 +561,7 @@ from reconnects. Rate-limit counters reset. That is fine.
 | ECR | One repository, images tagged `sha-<short>`, lifecycle rule keeps the last 20 | |
 | DynamoDB | One table, on-demand, TTL enabled, PITR on | On-demand because the traffic is two hours of writes then nothing |
 | SSM Parameter Store | `/quorum/<env>/admin_key` SecureString | Injected into the task via the task definition's `secrets` — the container sees an env var, the value never enters Terraform state |
-| CloudWatch | Log group, 30-day retention; metrics for open sockets and event-loop lag; one alarm on `RunningTaskCount < 1` | |
+| CloudWatch | Log group, 30-day retention; Container Insights at `enabled` (standard, not enhanced); one alarm on `RunningTaskCount < 1` | No custom metrics are emitted. Open sockets and store health are on `/healthz` and `/status`, which is where somebody standing in front of a room actually looks; a dashboard nobody opens during the two hours that matter was not worth the code |
 | IAM | Task execution role (pull image, read SSM, write logs); task role (DynamoDB on the one table) | Least privilege is cheap here because there are two roles |
 
 Not in the design: CloudFront (the static bundle is 200 KB and served by the
@@ -443,24 +570,41 @@ same process), WAF, Auto Scaling, a second region.
 ### Terraform layout
 
 ```
-services/quorum/
-├── app/                      # the service (later)
-├── infra/
-│   ├── bootstrap/            # OIDC providers + IAM roles for HCP Terraform and GitHub.
-│   │                         # CLI-driven, applied once by a human with their own credentials.
-│   ├── modules/
-│   │   ├── network/          # VPC, subnets, security groups
-│   │   ├── service/          # ECS cluster, task definition, service, ALB, ACM, Route 53
-│   │   └── data/             # DynamoDB table, SSM parameters (value ignored after create)
-│   └── envs/
-│       ├── staging/          # cloud { workspaces { name = "quorum-staging" } }
-│       └── prod/             # cloud { workspaces { name = "quorum-prod" } }
+quorum/
+├── app/                      # the service
+├── infra/                    # the root, and the whole of it
+│   ├── main.tf               # the three module calls
+│   ├── ecr.tf                # the one repository and its lifecycle policy
+│   ├── variables.tf · outputs.tf · versions.tf
+│   └── modules/
+│       ├── network/          # VPC, two public subnets, security groups
+│       ├── service/          # ECS cluster, task definition, service, ALB, ACM, Route 53, logs, alarm
+│       └── data/             # DynamoDB table, SSM parameter (value ignored after create)
 ├── SPEC.md · ARCHITECTURE.md · DESIGN.md · README.md
 ```
 
-Each `envs/<env>` is an HCP Terraform workspace with that directory as its
-working directory and `modules/**` in its trigger patterns, so a module change
-plans in both and a staging-only change plans in staging only.
+**One environment, one workspace, one apply.** `infra/` is the root and is the
+HCP Terraform workspace `quorum`, CLI-driven: a human runs `make deploy` or
+`make up` and HCP Terraform executes the apply.
+
+There was a second workspace for the registry and the OIDC providers. The
+providers are gone — see below — and a registry alone did not justify a second
+apply, a second variable set and a cross-workspace lookup, so the repository
+moved into `infra/ecr.tf`. The trade is that `terraform destroy` now takes the
+images with it; since the service is parked at zero rather than destroyed, that
+cost rarely comes due.
+
+There is likewise no staging environment. It appeared in this document as
+`envs/staging` with its own workspace, and it was never built: one event a
+month does not have a release train to rehearse, and a second always-on ALB is
+the same $20 a month as the real one. Rehearsal is `npm run dev` and the bot
+harness.
+
+The workspace is deliberately **not** VCS-connected, and `versions.tf` sets out
+why at length — the short version is that the CLI uploads a gitignored
+`terraform.tfvars` that a VCS run would not have, `image_tag` has no default on
+purpose, and `desired_count` defaults to 1, so a VCS run would quietly raise a
+parked service.
 
 ## Delivery: a person with a session
 
@@ -505,27 +649,41 @@ See [infra/README.md](infra/README.md) for the commands.
 ## Local development
 
 ```
-services/quorum/app$ docker compose up        # DynamoDB Local on :8000
-services/quorum/app$ npm run dev              # server on :3000 with hot reload, clients via Vite
-                                              # prints the three URLs and a fresh admin key
-services/quorum/app$ npm run seed             # creates a session from the repo's launch content,
-                                              # prints join code, host and screen links
-services/quorum/app$ npm run bots -- 30       # 30 fake participants that join, answer at random
-                                              # speeds, tap during red lights, and back players
+quorum/app$ docker compose up -d       # DynamoDB Local on :8000
+quorum/app$ npm run build:client       # tsc emits the three clients into dist/client
+quorum/app$ npm run dev                # server on :3000, QUORUM_ENV=local, --watch
+quorum/app$ npm run bots -- 30         # 30 simulated participants through a whole session
+quorum/app$ npm test                   # the rules, under node --test
+quorum/app$ npm run typecheck          # tsc --noEmit — the only thing that reads the types
 ```
 
-No AWS credentials are needed locally; the DynamoDB client points at the
-local endpoint when `QUORUM_ENV=local`. The reducers run under `vitest` with a
-fake clock, which is where the game rules are actually developed — the
-browser is for the feel, not the logic.
+No AWS credentials are needed locally; the DynamoDB client points at the local
+endpoint when `QUORUM_ENV=local`, and `npm run dev:memory` skips the container
+entirely. A store that will not answer at boot is logged and the process falls
+back to memory rather than refusing to start.
+
+**`npm run build:client` is not optional.** The server serves `dist/client`,
+and without it the process starts, answers `/healthz`, and returns
+`client_not_built` for every page. `npm run dev` watches the server, not the
+clients; `npm run watch:client` is the other half, and `npm run client:dev`
+builds them and serves them on their own.
+
+Tests run under **`node --test`**, with `--experimental-strip-types` so Node
+reads the TypeScript directly. There is no test framework here and no `vitest`,
+for the reason there is no bundler: the runtime already does it. A fake clock is
+a number passed to `reduce`, because `reduce` cannot read one.
 
 The bots matter more than they sound. The failure modes that hurt in a live
-room (thirty reconnects at once, a tap flood, the count that never reaches
-"27 of 27") do not appear with two browser tabs, and a bot swarm is the only
-rehearsal a host can run alone.
+room (thirty joins at once, a duplicate nickname, a late arrival, a facilitator
+on bench credit) do not appear with two browser tabs, and a bot swarm is the
+only rehearsal a host can run alone.
 
-**Staging** is the same Terraform with `desired_count = 0` between uses. Set
-it to 1 for a rehearsal, run the bots against it, set it back.
+**The bots are not a load test and cannot be pointed at a deployment.** They
+have no network layer at all: events go straight into `reduce`, the clock is a
+counter, and the whole run is in one process. They prove the engine behaves at
+real headcount. Thirty concurrent WebSockets, thirty reconnects during a deploy,
+a tap flood arriving over a real link — none of that is exercised anywhere, and
+that gap is worth knowing about rather than assuming the harness covers it.
 
 ## Cost
 

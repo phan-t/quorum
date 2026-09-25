@@ -1,10 +1,10 @@
 variable "name_prefix" {
-  description = "Prefix for every resource name, e.g. quorum-staging."
+  description = "Prefix for every resource name. The root passes \"quorum\"."
   type        = string
 }
 
 variable "environment" {
-  description = "staging or prod. Reaches the container as QUORUM_ENV."
+  description = "Reaches the container as QUORUM_ENV and names the SSM parameter path. There is one environment and the root passes \"prod\"; this stays a variable because the modules should not have to change if a second one is ever wanted."
   type        = string
 }
 
@@ -16,7 +16,7 @@ variable "aws_region" {
 # --- DNS and TLS -------------------------------------------------------------
 
 variable "domain_name" {
-  description = "Fully qualified hostname for this environment, e.g. quorum.example.com. The certificate is issued for it and the A/AAAA records point at the ALB."
+  description = "Fully qualified hostname, e.g. quorum.example.com. The certificate is issued for it and the A/AAAA records point at the ALB."
   type        = string
 }
 
@@ -47,12 +47,12 @@ variable "task_security_group_id" {
 # --- Image -------------------------------------------------------------------
 
 variable "image_repository_url" {
-  description = "ECR repository URL from the bootstrap workspace."
+  description = "ECR repository URL. The root creates the repository in ecr.tf and passes it in."
   type        = string
 }
 
 variable "image_tag" {
-  description = "The tag to run, e.g. sha-a1b2c3d. Set on the workspace by the deploy workflow; this is the one input that changes on a normal deploy."
+  description = "The tag to run, e.g. sha-a1b2c3d. Passed on the command line by `make deploy`; this is the one input that changes on a normal deploy."
   type        = string
 }
 
@@ -64,7 +64,7 @@ variable "container_port" {
 }
 
 variable "desired_count" {
-  description = "0 or 1. Never more: the session state is in the process's memory, so a second task is a second, disagreeing truth. Staging sits at 0 between rehearsals."
+  description = "0 or 1. Never more: the session state is in the process's memory, so a second task is a second, disagreeing truth. It sits at 0 between events; `make up` and `make down` are what move it."
   type        = number
 
   validation {

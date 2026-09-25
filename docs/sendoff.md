@@ -90,10 +90,10 @@ still reading.
 
 **Music across the run, or not at all.** The track plays for the whole run and
 stops at the closing card. This replaces an earlier rule that scoped it to the
-photographs before the first message; see the music section, which still holds
-that a track under somebody *reading aloud* is the failure to avoid. Playing it
-across the run is therefore a decision about how the room is run — the messages
-are read in silence by the people they are for, not performed by the host.
+photographs before the first message, which stopped meaning anything once the
+photographs and the messages became one sequence. See the music section: the
+rule it still keeps is that a track under somebody *reading aloud* is the
+failure to avoid, and it is kept by nobody reading aloud.
 
 ---
 
@@ -135,10 +135,25 @@ who cannot is finding out at the same moment as the person it is about.
 }
 ```
 
-`photo` and `music` are filenames resolved against the event directory, the
-same convention `questions` and `promo` already use in `session.json`. Every
-field except `kudos` is optional: a send-off with no photos and no music is a
-list of messages, which is still the thing.
+The entries in `photos` — both lists — and `music` are filenames resolved
+against the event directory, the same convention `questions` and `promo`
+already use in `session.json`.
+
+**`for` is required**; everything else is optional, with one floor. A send-off
+is about somebody, and a file that does not say who is a file nobody can draw
+the first card from — so the importer refuses one without a `for.name` rather
+than showing a blank Farewell card. `opening`, `closing` and `kudos` may each
+be left out, but not all of them: a file with no messages *and* no opening
+photos has nothing to show, and is refused with those words.
+
+So a send-off with no photos and no music is a list of messages, which is still
+the thing; a send-off with photos and no messages is a montage, which is also
+still the thing; a send-off with neither is a mistake, and being told so at
+staging is the point.
+
+Unknown keys are errors, here as in the question file. `"music"` at the top
+level instead of inside `opening` is a file whose author believes they chose a
+track, and silently ignoring it is how a send-off runs in silence.
 
 ---
 
@@ -149,24 +164,52 @@ and a DynamoDB item stops at 400KB, so the question file's storage is not an
 option and neither is engine state — the snapshot is replayed and broadcast,
 and nobody should be shipping a JPEG through a reducer.
 
-**One asset row per photo**, generalising the row the promo card uses.
-Staging downscales each to about 1200px wide as JPEG, which lands around 150KB
-— comfortably inside the row, and more resolution than a shared video call can
-carry anyway. The alternative is a private S3 bucket served through the task
-role, which is the right answer for a product with many events and the wrong
-one to introduce the week you need it: new Terraform, new IAM, and a new way
-for the afternoon to fail.
+**One asset row per photo**, generalising the row the promo card uses. The
+ceiling is `MAX_ASSET_BYTES`, 300,000 bytes, which is what leaves room for the
+key, the content type and the item's own overhead under DynamoDB's 400KB. The
+alternative is a private S3 bucket served through the task role, which is the
+right answer for a product with many events and the wrong one to introduce the
+week you need it: new Terraform, new IAM, and a new way for the afternoon to
+fail.
 
-Downscaling happens at staging, on the host's machine, so the service never
-holds the original and a 12MB photo from somebody's phone cannot become a
-failed write at 3:40.
+**Downscaling is your job, not staging's.** `make stage` uploads each file
+exactly as it finds it on disk. It does not resize, re-encode or convert
+anything — there is no image library in this repository and adding one to the
+staging path would put a native dependency between an event and its photographs.
+
+So downscale to about 1200px wide before you stage, which lands around 150KB:
+half the ceiling, and more resolution than a shared video call can carry anyway.
+A photo straight off a phone is several megabytes and will be refused.
+
+What staging does instead is fail loudly and specifically. An oversized photo is
+named, with its byte count and the advice to downscale it, and the run carries
+on to the others rather than stopping at the first one — then prints the list of
+what did not go up, with the `curl` to retry exactly those. That matters because
+a missing photo is invisible afterwards: the montage preloads its keys and shows
+what decoded, so a hole in the run looks like a photograph that was never
+chosen.
 
 ---
 
 ## Music
 
-**Supported, scoped to the photographs before the first message, and off
-unless the file says otherwise.**
+**Supported, played across the whole run, and off unless the file says
+otherwise.**
+
+It was scoped to the photographs before the first message for as long as the
+run was a montage and then a list. Once the photographs and the messages were
+dealt into one sequence there was no "before the first message" to scope it to,
+and a track that faded up and down six times between photographs and quotations
+would be worse than either leaving it on or leaving it off. So it starts when
+the run starts and stops at the closing card: `music` is non-null in the view
+only while the phase is `run`, which is what makes that true rather than a
+convention a renderer has to keep.
+
+This changes how the room is run, and that is the part to get right. The rule
+below that a track under somebody *reading aloud* is the failure to avoid still
+holds — it is now kept by nobody reading aloud. The messages are read in
+silence by the people they are for; the host talks over the photographs, not
+over the quotations.
 
 Three things go wrong with music over a video call, and the first fails
 silently:
@@ -181,9 +224,7 @@ silently:
 3. **Music under a person reading aloud means neither is heard.** The room gets
    a muddy compromise instead of either thing.
 
-So the music runs under the whole segment or not at all, and the host does not
-talk over it: a track fading up and down between photographs and messages six
-times is worse than either leaving it on or leaving it off.
+So the music runs under the whole run or not at all.
 
 **It will be a loop, and a short one.** An asset is a DynamoDB row and the item
 limit is 400KB, so `MAX_ASSET_BYTES` is 300,000 — about 43 seconds at 56 kbps

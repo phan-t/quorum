@@ -1,8 +1,13 @@
-# Everything here is an HCP Terraform *Terraform variable* on the quorum-prod
-# workspace. Nothing in this file is a secret, and nothing in this file has a
-# default it should not have — the four identifiers at the top have no defaults
-# because guessing them would produce an apply against the wrong account or the
-# wrong domain.
+# The root's inputs. Nothing here is a secret, and nothing here has a default it
+# should not have — the four identifiers at the top have no defaults because
+# guessing them would produce an apply against the wrong account or the wrong
+# domain.
+#
+# They arrive from the gitignored `terraform.tfvars`, which the CLI uploads with
+# the rest of this directory when it queues a run in the `quorum` workspace.
+# That is why the workspace is CLI-driven and not VCS-connected: a VCS run
+# clones from GitHub, where that file does not exist, and fails before planning.
+# See versions.tf.
 
 variable "aws_account_id" {
   description = "The AWS account this runs in. Guards against applying to the wrong one."
@@ -30,20 +35,20 @@ variable "domain_name" {
 }
 
 variable "image_tag" {
-  description = "Container tag to run, e.g. sha-a1b2c3d. `make deploy` passes it. No default: the service should never quietly run whatever `latest` happens to mean."
+  description = "Container tag to run, e.g. sha-a1b2c3d. `make deploy` passes it on the command line; `make up` and `make down` pass back whatever is already in state. No default: the service should never quietly run whatever `latest` happens to mean."
   type        = string
 }
 
 # --- things with sensible defaults -------------------------------------------
 
 variable "ecr_repository_name" {
-  description = "The one repository, created by the bootstrap workspace and read here."
+  description = "The one repository. Created by this root, in ecr.tf — there is no separate bootstrap workspace that owns it."
   type        = string
   default     = "quorum"
 }
 
 variable "desired_count" {
-  description = "0 or 1. Prod runs one task. Never two: the session state is in the process's memory."
+  description = "0 or 1. Never two: the session state is in the process's memory. Defaults to 1 so an ordinary deploy raises the service; `make down` overrides it to 0, which is the resting state between events."
   type        = number
   default     = 1
 }

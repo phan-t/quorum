@@ -1,5 +1,5 @@
 variable "name_prefix" {
-  description = "Prefix for every resource name, e.g. quorum-staging."
+  description = "Prefix for every resource name. The root passes \"quorum\"."
   type        = string
 }
 

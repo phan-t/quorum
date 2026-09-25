@@ -148,7 +148,7 @@ page.
 
 | Segment | What it shows |
 | --- | --- |
-| Join | Code field (skipped via link), then nickname — or the roster chips, big, one tap |
+| Join | Code field (skipped via link), then nickname. The roster chips SPEC describes are **not built**, so this is free text with a two-character minimum |
 | Lobby | Session title in display type, "you're in" with the nickname, and a live count of who is here. A prize line was here too, read from the holding card's second line; that broke when holding cards became plural — the line is the card's, and it followed the room back into the lobby. Restoring it needs a field of its own |
 | Holding | Title, one line, optional countdown, points strip. Nothing to tap. The connected dot pulses slowly |
 | Trivia — open | Question at the top (body, ≤ 3 lines), timer as a bar and a number, four answer tiles |
@@ -223,8 +223,14 @@ seconds between sentences and knows what is happening and what to press.
 
 **Manual entry** is a grid: nickname, raw score field, bench toggle, computed
 points in the next column updating as you type, and the top scorer's row
-highlighted so the host sees it land on 100. Paste-mode shows a match list:
-`"A. Okafor" → Ade Okafor (92%) [✓] [pick…]`. Publish is two-step.
+highlighted so the host sees it land on 100.
+
+**Paste-mode and Publish are not built.** The design had a match list —
+`"A. Okafor" → Ade Okafor (92%) [✓] [pick…]` — behind a two-step Publish, so a
+fuzzy-matched paste could be reviewed before it moved the standings. Neither
+exists: each field is its own command and lands as it is typed. See
+[SPEC.md](SPEC.md#manual-entry-the-ttx-and-anything-off-platform) for what
+that costs and why sealing first is the answer for now.
 
 **Spot Award** is a small form: pick a person (typeahead, mono, like the
 existing award box), a required reason, grant. Participants on bench for

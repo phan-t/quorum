@@ -1,13 +1,18 @@
-# One repository, in bootstrap rather than in either environment.
+# One repository, in the root beside everything else.
 #
-# ARCHITECTURE.md says "one repository" and also gives staging and prod separate
-# workspaces. Both cannot own the same repository, and the deploy flow — build
-# once, promote the same digest from staging to prod — is the reason there is
-# only one. So it lives here, with the other things that exist before any
-# environment can be applied, and the environments read it with a data source.
+# It used to be argued into a bootstrap workspace of its own, on the grounds
+# that two environments cannot both own the same repository. There is one
+# environment and one workspace, so that argument has no subject: a registry
+# alone did not justify a second apply, a second variable set and a
+# cross-workspace data source.
 #
-# It is also what lets the GitHub role's policy below name an exact ARN instead
-# of a guessed one.
+# The cost is that `terraform destroy` now takes the images with it, so a
+# destroy is followed by `make deploy` rather than `make up`. Since the service
+# is parked at zero rather than destroyed, that rarely comes due.
+#
+# Nothing else in this repository references the repository's ARN: there is no
+# CI role to scope, because the account permits no machine identity at all.
+# `make push` logs in with the operator's own session.
 
 resource "aws_ecr_repository" "quorum" {
   name = var.ecr_repository_name

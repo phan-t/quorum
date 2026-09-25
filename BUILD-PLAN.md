@@ -14,8 +14,9 @@ spine — build the spine first and the rest is additive.
 
 Nothing deployed. Everything after this depends on it.
 
-- Repo scaffolding under `services/quorum/app`: TypeScript, one process,
-  server + three clients built by Vite
+- Repo scaffolding under `app/`: TypeScript, one process, server plus three
+  clients. *Built without Vite in the end — the server runs its TypeScript
+  directly and `tsc` alone emits the clients, so there is no bundler anywhere.*
 - The **game engine as a pure reducer** — `(state, event) => state`, no I/O.
   This is the single most important structural decision in the build: it is what
   makes restart-mid-game recoverable and what makes the rules testable without
@@ -89,21 +90,17 @@ spreadsheet.
 That is a genuine milestone, not a notional one. If the project stalled here it
 would still have been worth building.
 
-> **Status.** Everything on the list above is built, tested and merged. The
-> acceptance criterion is *not* met yet, and the distinction matters: it is a
-> claim about running a real event, and the service has never been in front of
-> anyone. Two things stand between here and true:
+> **Status: met.** Everything on the list above is built, tested and merged,
+> and the acceptance criterion is no longer a claim about the future — the
+> service has been deployed and has run a full session with a live room.
 >
-> - **A deploy.** Code on `main` is not code on the URL.
-> - **A rehearsal with real people.** See the sequencing note below — the
->   failure modes that matter do not appear in a bot run.
->
-> A single-handed smoke test against the live service is the smaller first
-> step and is listed under Phase 5. Deferred on purpose on 19 Sep 2026, not
-> forgotten.
->
-> The 25 September huddle is deliberately *not* the first outing. It runs on
-> Kahoot and the existing arcade artifacts; Quorum targets the huddle after it.
+> This note used to say the opposite, at length: that the criterion was not met
+> because the service had never been in front of anyone, and that two things
+> stood between here and true — a deploy, and a rehearsal with real people.
+> Both have happened. It is left here rather than deleted because the
+> distinction it was drawing is the useful part of this plan: *built, tested and
+> merged* was never the same as *it worked in front of thirty people*, and
+> every phase below should be read with that gap in mind.
 
 ## Phase 3 — Trivia
 
@@ -323,7 +320,7 @@ survive contact with that — see the note below the table.*
 
 | | Today | After |
 | --- | --- | --- |
-| Trivia questions | `question-bank.md` + a Kahoot CSV | Ships in this repo as the launch trivia set in `trivia-questions.json`, loaded into `CONTENT#` at session create |
+| Trivia questions | `question-bank.md` + a Kahoot CSV | Ships in this repo as the example set in `config/event.example/`. *In the end it is staged per event over REST rather than copied into a `CONTENT#` row, which does not exist — see ARCHITECTURE.md.* |
 | Arcade items | A `ROUNDS` array inside a host-driven HTML page | Ships here as structured round content |
 | Facilitator guides | Activity READMEs | **Stay in the library.** They are about running a session with humans, which is true whatever software is underneath |
 | The existing HTML boards and Kahoot import | Activity folders | **Stay, as the fallback.** Retire them only after this service has run a real session without incident |

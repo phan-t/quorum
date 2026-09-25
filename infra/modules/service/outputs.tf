@@ -4,7 +4,7 @@ output "url" {
 }
 
 output "healthz_url" {
-  description = "Queried by the deploy workflow, both to confirm the new version is answering and to refuse to deploy over a live session."
+  description = "Where to look after an apply. `make up` polls it until it answers, and `sessionsLive` in the body is how a person checks nobody is mid-session before deploying."
   value       = "https://${var.domain_name}/healthz"
 }
 

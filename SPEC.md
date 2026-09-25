@@ -1,11 +1,18 @@
 # Quorum — product spec
 
-One URL that runs a team-building session end to end. Participants open it on
-a phone, type a nickname and a four-letter code, and never navigate again: the
-host decides what the page shows, from the lobby to the winner.
+One URL that runs a team-building session end to end. Participants open it,
+paste a join code, type a nickname, and never navigate again: the host decides
+what the page shows, from the lobby to the winner.
 
 This document is the *what* and the *why*. [ARCHITECTURE.md](ARCHITECTURE.md)
 is the how; [DESIGN.md](DESIGN.md) is what it looks like.
+
+**A note on what is built.** Quorum has run a real event, and this document
+still describes some things that were designed and never built. Those are
+marked **Not built** where they appear, with what actually happens instead.
+The design reasoning is kept rather than deleted: it is why the feature was
+wanted, and it is the starting point for anyone who builds it. A claim without
+that marker is a claim about the running service.
 
 ## The problem
 
@@ -121,20 +128,41 @@ arena.
 
 ## Identity: nickname + join code
 
-A session has a **join code**: four letters drawn from a HashiCorp-flavoured
-wordlist (`RAFT`, `PLAN`, `SEAL`, `MESH`, `LOCK`, `NODE`…). Not a six-digit
-PIN, because over video "the code is RAFT" survives a bad microphone and
-"four-seven-one-three-nine-two" does not. Codes are unique among *active*
-sessions only, so the list can be short and the words good.
+A session has a **join code**: `hvs.` followed by 24 base62 characters, shaped
+like a Vault root token. It is **case-sensitive**, and nothing may fold it.
+
+It was four letters from a HashiCorp-flavoured wordlist — `RAFT`, `PLAN`,
+`SEAL` — for as long as the plan was to read it to a room, because over video
+"the code is RAFT" survives a bad microphone and "four-seven-one-three-nine-two"
+does not. That stopped being the plan when the events became virtual: the code
+is pasted into Slack or Teams, where length costs nothing and nobody transcribes
+anything, so it can look like the thing it is standing in for.
+
+The consequences are worth stating, because they run the other way from the
+wordlist's:
+
+- **It is not readable aloud, and must not be.** Post the join link; do not
+  read out the code and do not retype it.
+- **It cannot be guessed**, so the join code is no longer a thing that leaks by
+  being overheard. Locking the lobby is still right, but it is about people
+  forwarding a link, not about the code being short.
+- **Case sensitivity is the sharp edge.** The old codes were folded to upper
+  case everywhere they were compared. Anything that upper-cases one of these —
+  a chat client, a spreadsheet, a helpful autocorrect — breaks it.
 
 A **nickname** is unique within the session, case-insensitively, with
 whitespace collapsed. "Kenji", "kenji" and "Kenji " are the same person.
 
-**Roster pick.** The host can paste a roster before the session. If one is
-loaded, the join screen shows the names as tappable chips, with "I'm not
-listed" underneath. This is the single biggest fix for the `asdf` problem: the
-path of least resistance produces the right name. Without a roster, the
-nickname field is free text with a two-character minimum.
+**Roster pick. Not built.** The design was that the host pastes a roster before
+the session, and the join screen then offers the names as chips with "I'm not
+listed" underneath — the single biggest fix for the `asdf` problem, because the
+path of least resistance produces the right name.
+
+There is no roster anywhere in the service: nothing accepts one, stores one or
+renders one. The nickname field is free text with a two-character minimum, and
+the `asdf` problem is handled by the host asking twice and putting it in chat.
+Worth building; it is the one unbuilt thing here that removes work on the day
+rather than adding polish.
 
 **Rejoin.** The browser keeps a session token. Reload the page, switch from
 Wi-Fi to 4G, close the tab by accident — you come back as yourself with your
@@ -154,8 +182,20 @@ question 10. For the activity they missed, the host marks them **bench** (see
 Scoring) — the same treatment as a facilitator, decided in advance as the
 virtual playbook already says.
 
-**Kick and rename.** Host-only. Kicked participants can rejoin under a
-different nickname unless the lobby is locked.
+**Kick.** Host-only. Kicked participants can rejoin under a different nickname
+unless the lobby is locked.
+
+**Rename. Not built.** There is no rename, for the host or for anyone: no
+command on the wire and no event in the engine. What exists is **release**,
+above, which frees a nickname so its owner can retake it, and **kick**, which
+sends somebody back to the join screen where they type a new one. A name that
+is a problem is therefore two host actions and one participant action, not one
+host action.
+
+The engine does guard against self-renaming — a rejoin keeps the participant's
+stored nickname rather than whatever is in their text box — which is a rule
+written for a host rename that does not exist yet. It is the right rule
+regardless: without it, anyone could rename themselves by reconnecting.
 
 ## Session lifecycle
 
@@ -173,7 +213,7 @@ draft ──open──▶ lobby ──start──▶ running ──seal/reveal�
 | `closed` | No | Final standings, frozen. The page stays up so people can screenshot |
 
 While `running`, the host moves between **segments**. A segment is what the
-participant page renders. There are exactly six:
+participant page renders. There are seven:
 
 | Segment | Purpose |
 | --- | --- |
@@ -182,7 +222,14 @@ participant page renders. There are exactly six:
 | `trivia` | The Kahoot-like activity |
 | `arcade` | Hashi Arcade |
 | `standings` | Top five, or "sealed" |
+| `sendoff` | Kudos, photographs and one person they are all about |
 | `final` | The reveal: 5 → 1, then the winner |
+
+**`sendoff` was added after this document was first written**, which is why the
+rest of it barely mentions it. It is a segment rather than an activity on
+purpose: it scores nothing, nobody competes at it, and an activity with a zero
+bucket would show up on the scoreboard as a column of dashes that somebody came
+last in. [docs/sendoff.md](docs/sendoff.md) is the design.
 
 Segments are not a fixed sequence. The host's run of show is a list they can
 reorder, but the console will start any segment at any time. Real sessions go
@@ -213,8 +260,14 @@ after every activity are already in Huddle Points.
 reason**, which the Desktop shows as a toast: *Spot Award — Kenji — best
 recovery of the afternoon*. The reason is mandatory because the existing
 design says to announce it with one, and a field that may be blank will be
-blank. The default cap is two per activity; the host can raise it, and the
-console shows how many are left.
+blank. The cap is two per activity and the console shows how many are left.
+
+**Raising the cap is not built.** The cap is set per activity when the session
+is created — it is a field on the activity in `session.json` — and a session's
+activities cannot be changed afterwards, so there is no command that raises it
+mid-session and could not be one without making activities mutable. An event
+that wants a bigger budget sets it in the file. The console's counter is
+`spotsLeft`, and when it reaches zero it stays there.
 
 **Bench Credit.** Per participant, per activity, the status is `played`,
 `bench` or `unset`. A `bench` participant is credited the mean of their
@@ -253,9 +306,18 @@ The seal is a session-level state with three values:
 | `revealed` | The final reveal, 5 → 1, then the winner |
 
 The host seals before the last activity. From then on no surface shows
-cumulative standings — not the Desktop, not the phones, not the participant's
-own total strip (it shows the last value before sealing, frozen, with a lock
-icon). The console still shows everything, because the host needs to know.
+cumulative standings — not the Desktop, not a participant's page, not their own
+total strip. The console still shows everything, because the host needs to know.
+
+**The strip loses its numbers; it does not freeze them.** It keeps its place,
+because a strip that vanishes reads as a bug, and shows a lock and *points
+sealed* and nothing else. An earlier draft of this document said it showed the
+last value before sealing, frozen — that is exactly wrong, and both the code and
+[DESIGN.md](DESIGN.md) say so: a frozen strip leaks what the seal exists to
+hide, since the last value plus a known activity is most of the way to a rank.
+Nothing is cached, and `own` is omitted from the wire entirely while sealed
+rather than nulled, so the numbers are not on the participant's machine to be
+recovered. They come back at reveal.
 
 The seal is a real feature and not a display toggle because the single prize
 creates the problem the existing design names: by the last activity only a
@@ -265,8 +327,14 @@ it.
 
 **Activity podiums still show while sealed.** The trivia's own top five after
 each question is the trivia; it says who is winning *this activity*, not the
-session. A per-activity toggle turns even that off, for a host who wants the
-last activity completely blind. Default on.
+session.
+
+**Turning that off is not built.** The design had a per-activity toggle for a
+host who wants the last activity completely blind, defaulting on. There is no
+such toggle: the podium is part of the trivia reveal and shows on every surface
+at the reveal, sealed or not. A host who wants the last activity blind does not
+reveal the question — which costs the room the answer as well, so it is a worse
+trade than the toggle would have been, and that is the argument for building it.
 
 ## Trivia
 
@@ -467,9 +535,17 @@ behind.
 
 ### The rounds
 
-Six are designed. A standard eighteen-minute run is round 0 and four of the
-rest; the host picks in setup and the order is theirs. Timings include the
-round card (20 s) and the reveal (20 s).
+Six are designed and **five are built**. A standard eighteen-minute run is
+round 0 and four of the rest; the host picks in setup and the order is theirs.
+Timings include the round card (20 s) and the reveal (20 s).
+
+**Gganbu is not built.** Its scoring and pairing are in the engine, and it is
+reachable from nowhere: `arcade.round` has no variant for it, so the wire
+refuses one, and the console lists it disabled — visible in the run of show,
+impossible to start. That was the right call at the time and remains one: SPEC
+already says to drop Gganbu first if the slot is tight, because its joke depends
+most on everyone knowing the show. The table below marks it, and the scoring
+summary is the design rather than a description of a round anyone has played.
 
 | # | Round | The game | Content | Time | Drains? |
 | --- | --- | --- | --- | --- | --- |
@@ -477,7 +553,7 @@ round card (20 s) and the reveal (20 s).
 | 1 | **Plan / Apply** | Red Light, Green Light | — | 3 min | Yes |
 | 2 | **Unseal** | Dalgona | 6 existing Scrambled items + 4 | 3 min | Yes |
 | 3 | **Tug of Raft** | Tug of War | — | 3 min | No |
-| 4 | **Gganbu** | Marbles | 6 new Over/Under items | 3.5 min | Yes |
+| 4 | **Gganbu** *(not built)* | Marbles | 6 new Over/Under items | 3.5 min | Yes |
 | 5 | **The Glass Bridge** | Glass Bridge | 6 Real-or-Fake pairs (3 existing) | 3.5 min | Yes |
 
 #### Round 0 — Recruitment (Emoji Decode)
@@ -583,7 +659,12 @@ The heartbeat is also the reason this works over video: a raw tap race
 rewards whoever's phone registers taps fastest, and the beat means everyone
 is capped at the same rate, so the skill is rhythm, not hardware.
 
-#### Round 4 — Gganbu (Marbles)
+#### Round 4 — Gganbu (Marbles) — not built
+
+**Designed, half-built, and unreachable.** The pairing and the scoring are
+in the engine; the wire has no way to start it and the console will not
+offer it. What follows is the design, kept because finishing it is a
+day's work and the argument for the round is still good.
 
 *You are paired with a gganbu. You each hold ten Vault tokens. Tokens have a
 TTL — the round ends when they expire. Wager them.*
@@ -691,7 +772,7 @@ one. Ties go to whoever crossed first.
 | Plan / Apply | 40 | 15 |
 | Unseal | 60 | 8 |
 | Tug of Raft | 45 | — |
-| Gganbu | 50 | 8 |
+| Gganbu *(not built)* | 50 | 8 |
 | Glass Bridge | 63 | 15 |
 
 The raw arcade score is the sum. It is normalised like any other activity, so
@@ -711,8 +792,8 @@ It also means the Lounge awards do not stack. Backing a runner who crosses pays
 two rather than their sum. Adding them made 25, which tied the 25 a player
 scores for crossing the line in fourth place, and let a player drained at 90
 resources who backed the winner finish on 40 — dead level with the player who
-actually won the Floor. The rounds still to be built should be tuned against
-the same rule.
+actually won the Floor. Gganbu, the one round not yet built, should be tuned
+against the same rule.
 
 The Front-End Man's lines, the round cards and every piece of copy are in
 [DESIGN.md](DESIGN.md#the-arcade-register), because how they are said is most
@@ -725,26 +806,53 @@ gameplay. The Agentic Security TTX is one. So is anything a future event runs
 on a whiteboard.
 
 From the console, the host opens the activity and sees the roster with a raw
-score field per person and a bench toggle. Two ways in:
+score field per person and a bench toggle. **Type them.** The normalised points
+preview updates as you go, so the host can see the top scorer land on 100.
 
-1. **Type them.** Tab moves down the list; the normalised points preview
-   updates as you go, so the host can see that the top scorer is on 100 before
-   publishing.
-2. **Paste them.** Two columns, name and number, from the facilitator's
-   spreadsheet. Names are fuzzy-matched to nicknames and every match under
-   full confidence is shown for confirmation — the scorekeeper's detective
-   work, done once, with the software making the suggestions.
+Each field is its own `score.set`, and each one lands immediately. There is no
+draft, no Publish and no paste.
 
-Scores are held as a draft until **Publish**, which is the moment the
-standings change. Publishing is a two-step confirm; re-publishing overwrites.
+**Paste with fuzzy matching is not built.** The design was two columns of name
+and number from the facilitator's spreadsheet, fuzzy-matched to nicknames, with
+every match under full confidence shown for confirmation — the scorekeeper's
+detective work, done once, with the software making the suggestions. Nothing
+parses two columns and nothing matches a name to a nickname. The scores are
+typed.
+
+**Draft-until-publish is not built either**, and the two are one decision: the
+draft existed so a paste could be reviewed before it moved the standings, and
+with no paste there is much less to review. A typed score changes the board as
+it is typed.
+
+That is a real cost while the session is unsealed, and it is the reason to seal
+before manual entry rather than after: a mistyped number is visible on the
+Desktop for as long as it takes to notice, and the fix is to type the right one
+over it. Sealed, nobody sees either. Worth building if an event ever has a
+manual activity with more than a handful of scores.
+
 The facilitator of a manual activity is on bench for it, like any other.
 
 ## Holding page
 
 A card the host puts up when the room's attention should be on a person, not
-the screen. It carries a **title**, **one line of context**, and optionally a
-**time** ("back at 2:40") that renders as a countdown. Presets: *TTX in
-progress*, *Break*, *One more thing* (the send-off), and free text.
+the screen. It carries a **title** and **one line of context**.
+
+**No presets, and no countdown.** The design listed *TTX in progress*, *Break*
+and *One more thing* as presets alongside free text, and an optional time that
+rendered as a countdown. A card is a title and a line; there is no `until`
+field on the command or in the state.
+
+What replaced presets is better suited to the way the day actually runs: the
+host writes **every** card they might want during setup, and the console keeps
+them in that browser's local storage, where they survive a reload and are still
+there next time. Once the session is running a card can be put up, jumped to
+from the rail or raised with `SHIFT+H` — but not written. Editing a card
+mid-session is editing something thirty people may be looking at in a minute,
+and a preset would have been the one card nobody proofread.
+
+The cost is that the deck is per machine: a co-host's console has its own, and
+a card nobody wrote shows "Back shortly". See
+[docs/running-an-event.md](docs/running-an-event.md).
 
 It is not blank because a blank screen on a phone means "it's broken" and
 thirty people refreshing during the TTX is a support call the host cannot
@@ -755,15 +863,22 @@ alive without saying anything.
 ## Failure modes that matter at a live event
 
 **Someone joins late.** Covered above: they land on the current segment and
-play from the next question or round; the host marks them bench for what
-they missed. The console flags anyone who joined after an activity started so
-the host does not have to remember.
+play from the next question or round; the host marks them bench for what they
+missed.
+
+**The console does not flag them.** This said it did, and nothing records when
+somebody joined relative to an activity or surfaces it anywhere. The host has to
+remember, which is a real thing to get wrong — an unbenched late joiner is a
+zero in an activity they were never in, and it drags their normalised score down
+without anyone noticing until the export. The scoring grid shows `unset` for
+them, which is the signal there is, and it looks identical to a score nobody has
+typed yet.
 
 **A connection drops mid-question.** The answer they submitted before the
 drop counts (it was on the server). A question that closed while they were
-gone scores 0 for that question, with no do-over: a re-ask would need the
-whole room to wait, and the person next to them heard the answer. The phone
-shows a reconnect banner and resumes wherever the session is. In the arcade,
+gone scores 0 for that question, with no do-over: asking it again would need
+the whole room to wait, and anyone they are sitting with heard the answer. The
+page shows a reconnect banner and resumes wherever the session is. In the arcade,
 a player who drops mid-round is marked **away** — not drained — and rejoins
 the Lounge for the rest of that round, back on the Floor for the next.
 
@@ -777,8 +892,13 @@ any session with more than fifteen people, which is what the playbook's
 
 **The server restarts mid-game.** Every state transition is persisted, so the
 service comes back with the session intact within about twenty seconds and
-every phone reconnects by itself. Answers that arrived in the gap are lost;
-the console offers **re-ask** on the affected question. Details in
+every surface reconnects by itself. Answers that arrived in the gap are lost.
+
+**There is no re-ask. Not built.** This said the console offered one on the
+affected question; there is no such command, no event for it, and nothing that
+counts how many answers a gap swallowed. A host left holding a question that
+scored some of the room and not the rest has the ordinary scoring tools: a raw
+score typed in by hand, or bench for the activity. Details in
 [ARCHITECTURE.md](ARCHITECTURE.md#durability-and-restart).
 
 **Two people pick the same nickname.** The second is refused with a message
@@ -791,12 +911,14 @@ is locked, which it should be once the first activity starts.
 **The Desktop tab dies.** Reopen the screen link. It is a pure output and
 has no state of its own.
 
-**The join code leaks.** It is four letters; it will. Lock the lobby after the
-lobby. Locked means no new nicknames, but rejoin still works for everyone
-already in.
+**The join code leaks.** Not by being overheard — it is 24 random characters —
+but by being forwarded, which is the same outcome. Lock the lobby once the
+first activity starts. Locked means no new nicknames, but rejoin still works
+for everyone already in.
 
-**Someone's phone cannot do it.** A laptop browser tab works identically. The
-participant view is phone-first, not phone-only.
+**Someone's browser cannot do it.** The participant view is one responsive web
+page with no framework and no bundler; a phone works, a laptop works, and an
+old browser that fails is failing at plain DOM.
 
 **Everything is down.** The activity content is still plain text in this repo,
 and the playbook's fallback stands: read it out, score in chat, keep going.
@@ -836,9 +958,11 @@ decision from someone else.
    whose joke depends most on everyone knowing the show.
 
 5. **A single stateful process means a deploy is an outage.** Accepted in the
-   brief and handled with a freeze in [ARCHITECTURE.md](ARCHITECTURE.md#deploying-around-a-live-session);
-   worth knowing that "properly" here does not mean "highly available" and
-   should not.
+   brief. It was to be handled by a freeze check in the deploy pipeline; there
+   is no pipeline — the account permits no machine identity — so it is handled
+   by a person checking `sessionsLive` on `/healthz` before deploying. See
+   [infra/README.md](infra/README.md). Worth knowing that "properly"
+   here does not mean "highly available" and should not.
 
 6. **The Lounge's "back a player" is one mechanic for every round.** It could
    be richer — per-round side games — but one mechanic that everyone learns

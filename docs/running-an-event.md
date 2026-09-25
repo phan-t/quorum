@@ -159,9 +159,9 @@ is progression, since the next question does not open itself.
 **Everyone joins under their real name**, as it appears on the call. Say it
 twice, and put it in chat. The export is a list of the names people typed, and
 `xXx_terraform_xXx` at the bottom of it is five minutes of detective work
-during a three-minute break. If you have a roster, paste it into the console
-before the session: the join screen then offers the names as chips, and the
-path of least resistance produces the right name.
+during a three-minute break. Asking is the only tool here — the nickname field
+is free text, and there is no roster to pick from — so ask before the join link
+goes out, not after.
 
 **The join code is case-sensitive.** It is `hvs.` and twenty-four base62
 characters, shaped like a Vault token on purpose. Paste it into chat; do not
@@ -215,12 +215,17 @@ It will. None of these is a reason to stop the session.
   the score from the console by hand — manual entry is a host action and works
   while any segment is up. Do not stop thirty people to debug one laptop.
 - **Somebody joins twenty minutes late.** They play what is left and are marked
-  bench for the activity they missed, exactly like a facilitator. The console
-  flags anyone who joined after an activity started. Decide this before it
+  bench for the activity they missed, exactly like a facilitator. **Nothing
+  flags them for you** — mark the bench yourself, as they arrive, because an
+  unbenched late joiner is a zero in an activity they were never in and it
+  looks identical to a score nobody has typed yet. Decide this before it
   happens rather than in front of them.
 - **The server restarts.** It comes back with the session intact in about
   twenty seconds and everyone reconnects by themselves. Answers that arrived in
-  the gap are lost, and the console offers a re-ask on the affected question.
+  the gap are lost, and there is no way to ask the question again: score the
+  people it cost by hand, or bench them for the activity. Say "we'll sort it"
+  and keep moving — stopping the room to reconstruct one question costs more
+  than the question is worth.
 - **Everything is down.** The activity content is plain text in this
   repository. Read it out, score it in chat, keep going.
 

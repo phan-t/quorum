@@ -3,12 +3,12 @@ output "url" {
 }
 
 output "healthz_url" {
-  description = "The deploy workflow reads this to confirm the new version is answering and to refuse to deploy over a live session."
+  description = "Where to look after an apply. `make up` polls it until it answers, and `sessionsLive` in the body is how you check nobody is mid-session before deploying."
   value       = module.service.healthz_url
 }
 
 output "image" {
-  description = "Exactly what is deployed. This is the answer to 'what is running right now', and it is in run history with who changed it."
+  description = "Exactly what is deployed. This is the answer to 'what is running right now', and it is in run history with who changed it. `make up` and `make down` read it back so raising a parked service cannot also change the image."
   value       = module.service.image
 }
 
@@ -26,6 +26,6 @@ output "log_group_name" {
 }
 
 output "desired_count" {
-  description = "Read by the deploy workflow: a parked environment (0) has no /healthz to assert against, and that is not a failed deploy."
+  description = "0 when parked, 1 when raised. Worth printing because a parked service has no /healthz to answer, and that is the resting state rather than a fault."
   value       = var.desired_count
 }

@@ -24,7 +24,8 @@ config/events/2026-09-25-sa-apj-huddle/
   trivia-questions.json     the set uploaded to the session
   promo-card.html           the poster the Desktop shows in the lobby, if there is one
   sendoff.json              the send-off's messages, and the photos it names
-  photos/                   the photos, downscaled to about 1200px wide
+  photos/                   the photos, downscaled to about 1200px wide by you —
+                            staging uploads them as it finds them
   run-of-show.md            timings, who does what, what to say
   quorum-setup.md           the commands, run on the morning
   round-s.md                the round about one person, and where each fact came from
@@ -64,9 +65,15 @@ directory.** They are other people's words about a colleague, and pictures of a
 team. That is the sharpest case for why `config/events/` is gitignored, and the
 reason nothing in this repository's tests or fixtures quotes any of it.
 
-Nothing reads this directory. The service takes its questions over HTTP, not
-from disk — these files are what a *host* opens, kept next to the service they
-are about rather than in a second repository that then has to be kept in step.
+**The running service never reads this directory; `make stage` does.** Staging
+runs on the host's machine, reads the files above, and pushes them to the
+service over HTTPS — so the service takes its content over the wire and has no
+idea a `config/` exists, while the files still live next to the service they
+are about rather than in a second repository that has to be kept in step.
+
+That is the distinction worth holding on to. A file changed here changes nothing
+until somebody stages it, and a session already running is unaffected by an edit
+to the file it was staged from.
 
 Starting an event is a copy of the example:
 

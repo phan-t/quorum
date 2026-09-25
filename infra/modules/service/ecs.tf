@@ -44,10 +44,12 @@ resource "aws_ecs_task_definition" "this" {
       name = "quorum"
 
       # The image tag is a Terraform variable, which is the deploy decision in
-      # ARCHITECTURE.md: Actions pushes the image and sets the variable,
-      # Terraform is the only thing that ever writes an ECS resource. There is
-      # no `ignore_changes = [task_definition]` on the service below, and there
-      # is exactly one renderer of this task definition — this block.
+      # ARCHITECTURE.md: a person builds and pushes the image with `make
+      # deploy` and the same command applies it, so Terraform stays the only
+      # thing that ever writes an ECS resource. There is no
+      # `ignore_changes = [task_definition]` on the service below, and there is
+      # exactly one renderer of this task definition — this block. The apply is
+      # the deploy, and its plan is a reviewable diff.
       image = "${var.image_repository_url}:${var.image_tag}"
 
       essential = true
@@ -67,8 +69,11 @@ resource "aws_ecs_task_definition" "this" {
         { name = "AWS_REGION", value = var.aws_region },
         { name = "LOG_LEVEL", value = var.log_level },
         { name = "PORT", value = tostring(var.container_port) },
-        # So /healthz can report which build is answering, which is what the
-        # deploy workflow asserts against after a staging release.
+        # So /healthz and /status can report which build is answering. With no
+        # deploy pipeline to assert it, this is how a person checks that the
+        # apply they just ran is the process now serving — `make url` prints
+        # it, and it is the difference between a deploy that landed and one
+        # that rolled itself back.
         { name = "QUORUM_VERSION", value = var.image_tag },
         # The task only ever hears from the ALB in alb.tf, so the socket's peer
         # address is one ENI for the entire room. The join limit is ten hellos
