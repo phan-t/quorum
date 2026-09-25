@@ -162,31 +162,61 @@ export async function recoverSessions(
   }
 
   const out: RecoveredSession[] = [];
+  const failed: { sid: string; why: string }[] = [];
   for (const session of loaded) {
-    const built = rehydrate(session);
-    if (!built) {
-      log(`  recovery: ${session.meta.sid} has no snapshot and no events — skipped`);
-      continue;
+    // One row must not be able to take down the service.
+    //
+    // This loop runs inside `main.ts` *before* the server listens, so anything
+    // thrown here is not a failed recovery — it is a process that exits, an
+    // ECS task that dies, and a replacement that dies the same way on the same
+    // row. A deploy in September 2026 did exactly that: a send-off migration
+    // read `.plan` off a session created before send-offs existed, and a
+    // four-day-old smoke test took the whole service down three hours before
+    // an event.
+    //
+    // A session that cannot be rebuilt is one session lost, which is bad and
+    // recoverable. Every session lost plus no service is neither. So the walk
+    // is per-session, the failure is named with its sid, and the rest come up.
+    try {
+      const built = rehydrate(session);
+      if (!built) {
+        log(`  recovery: ${session.meta.sid} has no snapshot and no events — skipped`);
+        continue;
+      }
+      const state = markEveryoneDisconnected(built.state, now);
+      const runtime = registry.restore(session, state);
+
+      // Write the corrected state straight back. Until someone reconnects, the
+      // stored snapshot would otherwise still claim a room full of people, and
+      // a second restart would recover that claim all over again.
+      runtime.persistence.snapshot(state, now);
+      runtime.persistence.meta(runtime.meta(now));
+
+      out.push({
+        sid: session.meta.sid,
+        runtime,
+        from: built.from,
+        replayed: built.replayed,
+        participants: Object.keys(state.participants).length,
+      });
+    } catch (err) {
+      // Logged loudly rather than swallowed: a session that was live and did
+      // not come back is something the host has to be told about, and the sid
+      // is what makes it findable in the table afterwards.
+      failed.push({ sid: session.meta.sid, why: String(err) });
     }
-    const state = markEveryoneDisconnected(built.state, now);
-    const runtime = registry.restore(session, state);
-
-    // Write the corrected state straight back. Until someone reconnects, the
-    // stored snapshot would otherwise still claim a room full of people, and
-    // a second restart would recover that claim all over again.
-    runtime.persistence.snapshot(state, now);
-    runtime.persistence.meta(runtime.meta(now));
-
-    out.push({
-      sid: session.meta.sid,
-      runtime,
-      from: built.from,
-      replayed: built.replayed,
-      participants: Object.keys(state.participants).length,
-    });
   }
 
-  if (out.length === 0) log("  recovery: no live sessions to restore");
+  for (const f of failed) {
+    log(`  recovery: ${f.sid} COULD NOT BE REBUILT and was skipped — ${f.why}`);
+  }
+  if (failed.length > 0) {
+    log(
+      `  recovery: ${failed.length} session(s) failed to rebuild. The service is up ` +
+        `without them; the rows are still in the table and nothing was deleted.`,
+    );
+  }
+  if (out.length === 0 && failed.length === 0) log("  recovery: no live sessions to restore");
   for (const r of out) {
     log(
       `  recovery: ${r.sid} restored from ${r.from}` +

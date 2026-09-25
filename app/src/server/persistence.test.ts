@@ -451,3 +451,71 @@ describe("restarting a session, durably", () => {
     assert.deepEqual(rebuilt.state, fresh.snapshot?.state);
   });
 });
+
+describe("a row that cannot be rebuilt", () => {
+  /**
+   * The failure this guards against is not "one session is lost".
+   *
+   * `recoverSessions` runs before the server listens, so a throw in the walk
+   * is a process that exits, an ECS task that dies, and a replacement that
+   * dies on the same row. A deploy in September 2026 did exactly that: a
+   * send-off migration read `.plan` off a session created before send-offs
+   * existed, and one four-day-old smoke test took the service down for nine
+   * minutes three hours before an event.
+   */
+  it("is skipped, and every other session still comes up", async () => {
+    const store = new MemoryStore();
+    const good = await playAnAfternoon(store);
+
+    // A row the rebuild cannot survive. `state` is not a session at all, which
+    // is the shape of the real failure: something the code of the day did not
+    // expect, reached into without checking.
+    const poisoned = await store.loadRecoverable();
+    const original = store.loadRecoverable.bind(store);
+    store.loadRecoverable = async () => [
+      {
+        meta: { sid: "ses_poison", title: "t", joinCode: "hvs.x" },
+        snapshot: { seq: 1, state: { participants: null } as never },
+        events: [],
+      } as never,
+      ...(await original()),
+    ];
+    assert.equal(poisoned.length, 1, "fixture should start with one session");
+
+    const lines: string[] = [];
+    const registry2 = new SessionRegistry(new Persister(store, () => {}));
+    const recovered = await recoverSessions(store, registry2, (l) => lines.push(l));
+
+    // The healthy session is up.
+    assert.equal(recovered.length, 1);
+    assert.equal(recovered[0]?.sid, good.sid);
+    assert.ok(registry2.bySessionId(good.sid), "the good session did not come back");
+
+    // The poisoned one is not, and said so with its sid.
+    assert.equal(registry2.bySessionId("ses_poison"), undefined);
+    const shout = lines.find((l) => l.includes("ses_poison"));
+    assert.ok(shout, `the failure was not logged: ${lines.join(" | ")}`);
+    assert.match(shout, /COULD NOT BE REBUILT/);
+  });
+
+  it("comes up with no sessions at all rather than not coming up", async () => {
+    const store = new MemoryStore();
+    store.loadRecoverable = async () =>
+      [
+        {
+          meta: { sid: "ses_poison", title: "t", joinCode: "hvs.x" },
+          snapshot: { seq: 1, state: { participants: null } as never },
+          events: [],
+        },
+      ] as never;
+
+    const lines: string[] = [];
+    const registry2 = new SessionRegistry(new Persister(store, () => {}));
+    const recovered = await recoverSessions(store, registry2, (l) => lines.push(l));
+    assert.deepEqual(recovered, [], "nothing should have been recovered");
+    assert.ok(
+      lines.some((l) => l.includes("failed to rebuild")),
+      "the summary line is what tells an operator to go looking",
+    );
+  });
+});
