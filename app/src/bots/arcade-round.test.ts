@@ -956,7 +956,7 @@ function play(): Played {
   const registry = new SessionRegistry();
   const initial = newSession({
     sid: "ses-arcade-acceptance",
-    title: "SA APJ huddle",
+    title: "Example Team Offsite",
     joinCode: "RAFT",
     activities: ACTIVITIES,
   });

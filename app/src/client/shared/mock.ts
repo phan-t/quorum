@@ -484,7 +484,7 @@ interface MockSendoff {
  */
 const MOCK_SENDOFF: MockSendoff = {
   name: "Alex Rivera",
-  subtitle: "Last day 30 September 2026",
+  subtitle: "Last day 20 March 2026",
   opening: {
     photos: [
       mockPhoto("#1d3b53", "#f6f5f3", "Sydney offsite, 2024"),
@@ -878,8 +878,8 @@ const SERVER_SKEW_MS = 1_237;
 
 class MockSession {
   sid = "mock-session";
-  title = "SA APJ Quorum";
-  sessionSubtitle: string | null = "Friday 25 September 2026";
+  title = "Example Team Offsite";
+  sessionSubtitle: string | null = "Thursday 12 March 2026";
   joinCode = sampleJoinCode();
   phase: SessionPhase = "draft";
   segment: Segment = "lobby";

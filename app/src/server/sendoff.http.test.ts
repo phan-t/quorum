@@ -58,7 +58,7 @@ function makeSession() {
 }
 
 const FILE = {
-  for: { name: "Alex Rivera", subtitle: "Last day 30 September 2026" },
+  for: { name: "Alex Rivera", subtitle: "Last day 20 March 2026" },
   opening: { photos: ["photos/a.jpg", "photos/b.jpg"], music: "send-off.mp3", seconds: 40 },
   kudos: [{ from: "Sam", message: "Thanks for every review you left on my first PRs." }],
   closing: { photos: [], line: "See you around." },

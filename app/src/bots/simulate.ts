@@ -311,7 +311,7 @@ function runSession(n: number, seed: number): RunOutput {
   const run = new Run(
     newSession({
       sid: `ses-${seed}`,
-      title: "SA APJ huddle",
+      title: "Example Team Offsite",
       joinCode: "RAFT",
       activities: ACTIVITIES,
       tiebreakOrder: TIEBREAK_ORDER,

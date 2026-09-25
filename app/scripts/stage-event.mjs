@@ -22,7 +22,7 @@ function die(msg) {
 }
 
 const event = process.env["EVENT"];
-if (!event) die("Set EVENT. For example: make stage EVENT=2026-09-25-sa-apj-huddle");
+if (!event) die("Set EVENT. For example: make stage EVENT=2026-03-12-example-offsite");
 
 const url = (process.env["QUORUM_URL"] ?? "").replace(/\/$/, "");
 if (!url) die("Set QUORUM_URL — `make stage` reads it from the Terraform output.");

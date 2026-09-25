@@ -5,8 +5,9 @@ dist/
 !.env.example
 
 # One directory per event: its question set, its run of show, its roster. All
-# of it is content about real people — the September 2026 huddle closes on five
-# questions about a named colleague — and this repository is public. Only
+# of it is content about real people — a Round S is questions about a named
+# colleague, and a send-off is other people's words about them — and this
+# repository is public. Only
 # config/event.example/ is committed, as the format's worked example. The
 # events themselves are unversioned and unbacked-up, which is the cost of that,
 # and config/README.md says so rather than leaving it to be found.

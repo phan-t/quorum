@@ -8,18 +8,19 @@
 ## Why the events are not in git
 
 This repository is public, and an event's material is content about the people
-in the room. The September 2026 huddle closes on five questions about a
-colleague who was leaving, naming his previous employer, a role he used to hold
-and what he spent on a home lab. He agreed to five quiz questions read to his
-own team. He did not agree to a public repository that is indexed, forkable,
-and keeps the file in its history after a delete.
+in the room. A Round S is a handful of questions about one colleague, drawn
+from things that colleague told their team. Somebody agreeing to be the
+subject of a quiz in a room of people they know is not the same as agreeing to
+a public repository that is indexed, forkable, and keeps the file in its
+history after a delete. The send-off carries other people's words about them,
+which is not the author's to publish either.
 
 So the example is the thing that ships, and the events stay on the machine.
 
 ## An event directory
 
 ```
-config/events/2026-09-25-sa-apj-huddle/
+config/events/2026-03-12-example-offsite/
   session.json              the title, what the event scores, the console's setup
   trivia-questions.json     the set uploaded to the session
   promo-card.html           the poster the Desktop shows in the lobby, if there is one
@@ -98,18 +99,16 @@ That is the accepted trade for keeping real people out of a public repository,
 but it is worth knowing before the morning of an event rather than during one.
 Copy an event directory somewhere before you rely on it.
 
-The 25 September 2026 set is also recoverable from the archive of the activity
-library it came from, which sits outside this repository:
-
-```bash
-git clone ~/Developer/HashiCorp/team-building-archive.bundle /tmp/tb
-git -C /tmp/tb show 3fa324e:config/trivia-questions.json
-```
+An event whose questions came from the activity library that preceded this
+service may also be recoverable from that library's own archive, which lives
+outside this repository. Where that archive is, and which commit holds a
+given set, is not written down here — a public file that tells anyone how to
+reconstruct an event's real questions undoes the point of gitignoring them.
 
 ## Staging
 
 ```bash
-make stage EVENT=2026-09-25-sa-apj-huddle
+make stage EVENT=2026-03-12-example-offsite
 ```
 
 One command: creates the session, loads the questions, uploads the promo card

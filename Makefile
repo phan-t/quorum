@@ -112,7 +112,7 @@ down: check
 ## setup, and print the tokens. Run it the morning of, from a terminal, with
 ## AWS credentials — the admin key is read from SSM and never stored here.
 stage: aws-check
-	@test -n "$(EVENT)" || { echo "Set EVENT, e.g. make stage EVENT=2026-09-25-sa-apj-huddle"; exit 1; }
+	@test -n "$(EVENT)" || { echo "Set EVENT, e.g. make stage EVENT=2026-03-12-example-offsite"; exit 1; }
 	@test -d config/events/$(EVENT) || { echo "No config/events/$(EVENT)"; exit 1; }
 	@cd app && QUORUM_URL="https://$(HOST)" \
 	  QUORUM_ADMIN_KEY="$$(aws ssm get-parameter --name /quorum/prod/admin_key \

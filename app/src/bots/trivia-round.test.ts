@@ -414,7 +414,7 @@ function playRound(questions: readonly Question[]): Played {
   const registry = new SessionRegistry();
   const initial = newSession({
     sid: "ses-acceptance",
-    title: "SA APJ huddle",
+    title: "Example Team Offsite",
     joinCode: "RAFT",
     activities: ACTIVITIES,
   });

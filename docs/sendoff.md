@@ -118,7 +118,7 @@ who cannot is finding out at the same moment as the person it is about.
 {
   "for": {
     "name": "…",
-    "subtitle": "Last day 30 September 2026"
+    "subtitle": "Last day 20 March 2026"
   },
   "opening": {
     "photos": ["arrival.jpg", "offsite.jpg", "the-whiteboard.jpg"],

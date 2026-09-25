@@ -169,7 +169,7 @@ seconds between sentences and knows what is happening and what to press.
 
 ```
 ┌─────────────────────────────────────────────────────────────────────┐
-│ ⚠ DO NOT SHARE   SA APJ Quorum · RAFT · 27 on · 2 away   ● LIVE     │  status bar (top)
+│ ⚠ DO NOT SHARE   Team Offsite · RAFT · 27 on · 2 away    ● LIVE     │  status bar (top)
 ├───────────────┬─────────────────────────────────────────────────────┤
 │ RUN OF SHOW   │  TRIVIA · Q7 of 20 · OPEN · 00:14                   │
 │               │                                                     │

@@ -5,7 +5,7 @@ the room arrives.
 
 ```bash
 awscreds
-make stage EVENT=2026-09-25-sa-apj-huddle
+make stage EVENT=2026-03-12-example-offsite
 ```
 
 That creates the session, loads its questions, puts up the promo card if the
@@ -18,7 +18,7 @@ endpoint to return. Nothing else has to happen before 2:00pm.
 ## The directory
 
 ```
-config/events/2026-09-25-sa-apj-huddle/
+config/events/2026-03-12-example-offsite/
   session.json            title, what the session scores, the console's setup
   trivia-questions.json   the question set
   promo-card.html         optional: the poster shown in the Desktop's lobby
@@ -37,8 +37,8 @@ content about the people in the room and this repository is public. See
 
 ```json
 {
-  "title": "SA APJ Team Huddle",
-  "subtitle": "Friday 25 September 2026",
+  "title": "Example Team Offsite",
+  "subtitle": "Thursday 12 March 2026",
   "questions": "trivia-questions.json",
   "promo": "promo-card.html",
   "sendoff": "sendoff.json",
@@ -204,7 +204,7 @@ this way; this section is about the files and what staging does with them.
 {
   "for": {
     "name": "Alex Rivera",
-    "subtitle": "Last day 30 September 2026"
+    "subtitle": "Last day 20 March 2026"
   },
   "opening": {
     "photos": ["photos/p01.jpg", "photos/p02.jpg"],

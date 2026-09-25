@@ -23,7 +23,7 @@ const ACT: Activity[] = [{ id: "trivia", title: "t", kind: "trivia", spotCap: 2 
 function content(over: Partial<SendoffContent> = {}): SendoffContent {
   return {
     name: "Sai Linn Thu",
-    subtitle: "Last day 30 September 2026",
+    subtitle: "Last day 20 March 2026",
     opening: { photos: ["p01.jpg", "p02.jpg"], seconds: 40, music: null },
     kudos: [
       { from: "Jessica Ang", message: "one" },

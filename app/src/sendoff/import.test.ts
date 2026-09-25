@@ -39,7 +39,7 @@ function errs(text: string): string[] {
 const KUDO = { from: "Sam", message: "Thanks for every review you left on my terrible first PRs." };
 
 const BASE = {
-  for: { name: "Alex Rivera", subtitle: "Last day 30 September 2026" },
+  for: { name: "Alex Rivera", subtitle: "Last day 20 March 2026" },
   opening: { photos: ["photos/a.jpg", "photos/b.jpg"], music: "send-off.mp3", seconds: 40 },
   kudos: [KUDO],
   closing: { photos: ["photos/c.jpg"], line: "See you around." },
@@ -54,7 +54,7 @@ describe("what loads", () => {
   it("reads the documented shape", () => {
     const c = ok(file());
     assert.equal(c.name, "Alex Rivera");
-    assert.equal(c.subtitle, "Last day 30 September 2026");
+    assert.equal(c.subtitle, "Last day 20 March 2026");
     assert.deepEqual(c.opening.photos, ["photos/a.jpg", "photos/b.jpg"]);
     assert.equal(c.opening.music, "send-off.mp3");
     assert.equal(c.opening.seconds, 40);

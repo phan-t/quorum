@@ -16,7 +16,8 @@ that marker is a claim about the running service.
 
 ## The problem
 
-The SA APJ huddle runs today on three things that do not know about each other:
+The huddle these sessions replace ran on three things that did not know about
+each other:
 Kahoot for trivia, a host-driven browser board for the arcade, and a
 spreadsheet for the scores. They work. What they cost is the seams between
 them.
@@ -283,7 +284,8 @@ activity's Spot Awards; the console will not offer them.
 Awards. Three activities: 300 plus up to 60.
 
 **Tiebreak for first.** The session config lists activities in tiebreak
-order (for the SA APJ huddle: TTX first, as the design says). If still tied, the
+order (for the first huddle: the tabletop exercise first, as the design says).
+If still tied, the
 host has a **Sudden death** button in trivia: one question, first correct
 answer wins, no points. Never a coin flip; the software does not have one.
 
@@ -938,9 +940,9 @@ no host.
 Where the brief is followed but disagreed with, or where something needs a
 decision from someone else.
 
-1. **This will not exist for 25 September 2026.** The brief says build it
+1. **This will not exist for the first huddle.** The brief says build it
    properly with no deadline, and the first event it could serve is a week
-   away. The SA APJ huddle should run on Kahoot, the existing board and the
+   away. The first huddle should run on Kahoot, the existing board and the
    spreadsheet as planned. Quorum's first outing is the next one, and that
    should be said out loud so nobody plans around it.
 
