@@ -134,9 +134,10 @@ like a Vault root token. It is **case-sensitive**, and nothing may fold it.
 It was four letters from a HashiCorp-flavoured wordlist — `RAFT`, `PLAN`,
 `SEAL` — for as long as the plan was to read it to a room, because over video
 "the code is RAFT" survives a bad microphone and "four-seven-one-three-nine-two"
-does not. That stopped being the plan when the events became virtual: the code
-is pasted into Slack or Teams, where length costs nothing and nobody transcribes
-anything, so it can look like the thing it is standing in for.
+does not. That is not how the code is handed over now. The events are virtual
+(above) and the code is pasted into a chat client, where length costs nothing
+and nobody transcribes anything, so it can look like the thing it is standing
+in for. Why it changed is not recorded anywhere in this repository.
 
 The consequences are worth stating, because they run the other way from the
 wordlist's:

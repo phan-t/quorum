@@ -1,9 +1,12 @@
 # Quorum — the service
 
-The TypeScript service behind [SPEC.md](../SPEC.md). All five phases of
+The TypeScript service behind [SPEC.md](../SPEC.md). Phases 0–4 of
 [BUILD-PLAN.md](../BUILD-PLAN.md) are built: the game engine, the server, the
 three browser clients, the store, and the staging and operations scripts. It
-has been deployed and has run a live session.
+has been deployed and has run a live session. Phase 5 is operations rather than
+code, and is not finished — the load test at twice headcount, the rehearsal
+with people who are not the author, and the participant-facing explanation of
+how scoring works are all still open there.
 
 ## Prerequisites
 

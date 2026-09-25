@@ -150,7 +150,7 @@ page.
 | --- | --- |
 | Join | Code field (skipped via link), then nickname. The roster chips SPEC describes are **not built**, so this is free text with a two-character minimum |
 | Lobby | Session title in display type, "you're in" with the nickname, and a live count of who is here. A prize line was here too, read from the holding card's second line; that broke when holding cards became plural — the line is the card's, and it followed the room back into the lobby. Restoring it needs a field of its own |
-| Holding | Title, one line, optional countdown, points strip. Nothing to tap. The connected dot pulses slowly |
+| Holding | Title, one line, points strip. Nothing to tap. The connected dot pulses slowly. The countdown described here is **not built** — a card is a title and a line, and there is no `until` field on the command or in the state |
 | Trivia — open | Question at the top (body, ≤ 3 lines), timer as a bar and a number, four answer tiles |
 | Trivia — locked | The tile you chose, outlined, the other three dimmed. "Locked in." No colour change, no tick, until the reveal |
 | Trivia — reveal | Correct tile fills in `--hit`; yours if wrong outlines in `--miss`; your points for the question count up in mono; the note; then the trivia top five |
@@ -198,10 +198,11 @@ seconds between sentences and knows what is happening and what to press.
   be able to run the whole session with the space bar and their eyes on the
   video call, like the existing board's `enter`.
 - **Destructive or irreversible actions are two-step and never on space.**
-  Seal, reveal, publish manual scores, kick, end activity. The confirm is
-  inline — the button turns into "Really seal? [Yes] [No]" — never a modal,
-  because a modal that steals focus during a live question is how a host
-  presses the wrong thing.
+  Seal, reveal, kick, end activity. Publishing manual scores belonged on this
+  list and is not on it, because Publish was never built — see below. The
+  confirm is inline — the button turns into "Really seal? [Yes] [No]" — never
+  a modal, because a modal that steals focus during a live question is how a
+  host presses the wrong thing.
 - **Refusals are inline, in the button.** If the server refuses a command the
   button shows why for three seconds ("can't reveal — question still open")
   and returns.
@@ -229,7 +230,7 @@ highlighted so the host sees it land on 100.
 `"A. Okafor" → Ade Okafor (92%) [✓] [pick…]` — behind a two-step Publish, so a
 fuzzy-matched paste could be reviewed before it moved the standings. Neither
 exists: each field is its own command and lands as it is typed. See
-[SPEC.md](SPEC.md#manual-entry-the-ttx-and-anything-off-platform) for what
+[SPEC.md](SPEC.md#manual-entry--the-ttx-and-anything-off-platform) for what
 that costs and why sealing first is the answer for now.
 
 **Spot Award** is a small form: pick a person (typeahead, mono, like the
@@ -265,7 +266,7 @@ is about surviving that.
 | Segment | What it shows |
 | --- | --- |
 | Lobby | Title, join URL in mono at 48 px, QR code (≥ 360 px — QR codes survive compression surprisingly well if large), "27 joined" ticking up, a grid of nicknames as they arrive |
-| Holding | The card, centred, huge. Countdown if set. The connected dot |
+| Holding | The card, centred, huge. The connected dot. No countdown: it is **not built**, for the reason under the phone's table |
 | Trivia | Question in display type; answers as four tiles with shapes; timer; answer count as a bar filling toward "27 of 27" |
 | Trivia reveal | Correct tile stays lit, others dim; distribution bars; the note; then the trivia top five |
 | Standings | Top five, ranks and totals, activity contributions as a stacked bar under each name in the activity hues — the live scoreboard already does this well; keep it |

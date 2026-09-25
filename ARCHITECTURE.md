@@ -341,15 +341,31 @@ exists, and the client timestamp in particular should not: the server times the
 tap itself, as it does a trivia answer, because a client timestamp is a number
 the player's own device chooses about whether they beat the lock.
 
-What is built: one `arcade.tap` per tap, and **an ordinary tap produces no
-broadcast and no write at all**. Only a milestone — a checkpoint, a crossing, a
-drain, a light turn — moves points or the room's state, and only those fan out.
-The client counts optimistically in between, so the button answers the finger
-rather than the link. There is no periodic broadcast anywhere.
+What is built: one `arcade.tap` per tap, and in Plan/Apply **an ordinary tap
+produces no broadcast and no write at all**. Only a milestone — a checkpoint, a
+crossing, a drain, a light turn — moves points or the room's state, and only
+those fan out. The client counts optimistically in between, so the button
+answers the finger rather than the link.
 
 Sixty players tapping flat out is therefore ~600 inbound messages a second and
 close to nothing outbound, which is the opposite way round from the design
 above and the reason it was abandoned.
+
+**Tug of Raft is the exception, and it is a tick rather than a clock.** A beat
+that is credited — on the beat, one per beat, outside an election — is a state
+change the rope has to show, so `tapBeat` does return broadcasts, to the player
+who tapped, the host and the screen, and never `to: "all"`. Thirty players at
+100 bpm is around fifty credits a second and a fan-out each would be some
+fifteen hundred frames a second to move a rope by a pixel, so `SessionRuntime`
+holds those audiences and sends each of them at most one frame per
+`BEAT_FLUSH_MS` (120 ms, about a fifth of a beat). The window opens on the
+first beat it holds and is not re-armed, so a room that never stops tapping
+still gets a frame every tick rather than starving. The engine credits the beat
+the instant it lands either way — the tick decides only when the *picture* goes
+out, which is why it lives at the boundary and not in the reducer. A credited
+beat also appends an event row; the snapshot behind it coalesces in
+the `Persister`, so the rope writes one snapshot at a time and not one per
+beat.
 
 ### Host
 
