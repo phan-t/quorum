@@ -4,8 +4,9 @@
 **20**. Suggested set at the bottom.
 
 This is the writing surface; it is not what the service reads. Quorum loads
-JSON — `config/trivia-questions.json`, with the committed worked example in
-`config/event.example/trivia-questions.json` and the format documented in
+JSON — `config/events/<event>/trivia-questions.json`, with the committed worked
+example in `config/event.example/trivia-questions.json` and the format
+documented in
 [`config/README.md`](../config/README.md) and
 [SPEC.md](../SPEC.md#question-file). Swapping a question in means editing the
 JSON, not this file.
@@ -313,7 +314,7 @@ last activity.
 
 ### Into the question file
 
-Add the five to `config/trivia-questions.json`, each with the same `round`
+Add the five to `config/events/<event>/trivia-questions.json`, each with the same `round`
 value, so Quorum puts a round card up before the first one:
 
 ```json
