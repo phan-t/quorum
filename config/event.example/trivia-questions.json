@@ -1,48 +1,245 @@
 {
-  "title": "Example offsite trivia",
+  "title": "HashiCorp & IBM trivia",
   "questions": [
     {
-      "text": "Which Terraform command previews changes without applying them?",
-      "answers": ["terraform show", "terraform plan", "terraform diff", "terraform preview"],
+      "text": "In what year was HashiCorp founded?",
+      "answers": ["2008", "2010", "2012", "2015"],
+      "correct": "C",
+      "timeLimitSec": 20
+    },
+    {
+      "text": "Which was HashiCorp's first product?",
+      "answers": ["Terraform", "Vagrant", "Vault", "Consul"],
       "correct": "B",
       "timeLimitSec": 20
+    },
+    {
+      "text": "Who co-founded HashiCorp with Armon Dadgar?",
+      "answers": ["Mitchell Hashimoto", "Solomon Hykes", "Kelsey Hightower", "Adam Jacob"],
+      "correct": "A",
+      "timeLimitSec": 20
+    },
+    {
+      "text": "Which HashiCorp product was released first?",
+      "answers": ["Vault", "Consul", "Nomad", "Boundary"],
+      "correct": "B",
+      "timeLimitSec": 30
+    },
+    {
+      "text": "Which two products were announced together at HashiConf Digital 2020?",
+      "answers": ["Vault & Consul", "Boundary & Waypoint", "Nomad & Packer", "Terraform & Sentinel"],
+      "correct": "B",
+      "timeLimitSec": 30
+    },
+    {
+      "text": "What is HashiCorp's published product design philosophy called?",
+      "answers": ["The HashiCorp Way", "The Tao of HashiCorp", "The Blue Book", "Infrastructure Manifesto"],
+      "correct": "B",
+      "timeLimitSec": 20
+    },
+    {
+      "text": "Which product does secrets management, encryption as a service and dynamic credentials?",
+      "answers": ["Consul", "Boundary", "Vault", "Nomad"],
+      "correct": "C",
+      "timeLimitSec": 20
+    },
+    {
+      "text": "Which product gives secure remote access to hosts without distributing SSH keys or VPNs?",
+      "answers": ["Consul", "Boundary", "Vault", "Packer"],
+      "correct": "B",
+      "timeLimitSec": 20
+    },
+    {
+      "text": "Which product schedules containers, raw binaries, Java and VMs as workloads?",
+      "answers": ["Nomad", "Consul", "Waypoint", "Terraform"],
+      "correct": "A",
+      "timeLimitSec": 20
+    },
+    {
+      "text": "Which product does service discovery, health checking and service mesh?",
+      "answers": ["Nomad", "Boundary", "Consul", "Terraform"],
+      "correct": "C",
+      "timeLimitSec": 20
+    },
+    {
+      "text": "Which product builds identical machine images for many platforms from one config?",
+      "answers": ["Vagrant", "Packer", "Waypoint", "Terraform"],
+      "correct": "B",
+      "timeLimitSec": 20
+    },
+    {
+      "text": "Which product creates reproducible dev environments, driven by a Vagrantfile?",
+      "answers": ["Packer", "Waypoint", "Vagrant", "Nomad"],
+      "correct": "C",
+      "timeLimitSec": 20
+    },
+    {
+      "text": "What is HashiCorp's policy-as-code framework called?",
+      "answers": ["Rego", "Gatekeeper", "Sentinel", "Guardrail"],
+      "correct": "C",
+      "timeLimitSec": 20
+    },
+    {
+      "text": "Which product scans code and systems for leaked secrets?",
+      "answers": ["Vault Sentinel", "Vault Radar", "Consul Watch", "Vault Scout"],
+      "correct": "B",
+      "timeLimitSec": 30
+    },
+    {
+      "text": "Which Terraform command previews changes without applying them?",
+      "answers": ["terraform preview", "terraform plan", "terraform dry-run", "terraform diff"],
+      "correct": "B",
+      "timeLimitSec": 20
+    },
+    {
+      "text": "By default, what is Terraform's state file called?",
+      "answers": ["state.json", "terraform.tfstate", "tfstate.lock", "main.tfstate"],
+      "correct": "B",
+      "timeLimitSec": 20
+    },
+    {
+      "text": "What best describes a Vault dynamic secret?",
+      "answers": ["A secret that rotates yearly", "A credential generated on demand, with a lease", "An encrypted static value", "A secret shared between two apps"],
+      "correct": "B",
+      "timeLimitSec": 30
     },
     {
       "text": "Which consensus protocol backs integrated storage in Vault, Consul and Nomad?",
       "answers": ["Paxos", "Raft", "Zab", "Two-phase commit"],
       "correct": "B",
-      "timeLimitSec": 20,
-      "note": "An optional note. It is shown on the reveal, and it is the part people learn from."
+      "timeLimitSec": 20
     },
     {
-      "text": "Warm-up: what does HCL stand for?",
-      "answers": ["HashiCorp Control Language", "HashiCorp Configuration Language"],
+      "text": "What is IBM's long-standing nickname?",
+      "answers": ["Big Iron", "Big Blue", "The Blue Giant", "Blue Sky"],
       "correct": "B",
-      "timeLimitSec": 15,
-      "basePoints": 0,
-      "note": "basePoints 0 makes a question a warm-up that scores nothing. Two answers is legal; four is not required."
+      "timeLimitSec": 10
     },
     {
-      "text": "Round card: which product does service discovery and service mesh?",
-      "answers": ["Nomad", "Consul", "Packer", "Boundary"],
-      "correct": "B",
-      "timeLimitSec": 20,
-      "round": "Round 2 — The Products"
-    },
-    {
-      "text": "Which product builds identical machine images for many platforms from one config?",
-      "answers": ["Vagrant", "Packer", "Waypoint", "Nomad"],
-      "correct": "B",
-      "timeLimitSec": 20,
-      "round": "Round 2 — The Products"
-    },
-    {
-      "text": "Tiebreak: in what year was HashiCorp founded?",
-      "answers": ["2008", "2010", "2012", "2015"],
+      "text": "IBM's Deep Blue defeated which world chess champion in 1997?",
+      "answers": ["Anatoly Karpov", "Magnus Carlsen", "Garry Kasparov", "Vladimir Kramnik"],
       "correct": "C",
-      "timeLimitSec": 15,
-      "tiebreak": true,
-      "note": "A tiebreak question is lifted out of the scored set and kept for sudden death. It is not one of the questions the room plays."
+      "timeLimitSec": 20
+    },
+    {
+      "text": "What does HCL, the language Terraform configurations are written in, stand for?",
+      "answers": ["HashiCorp Control Language", "HashiCorp Configuration Language", "Hybrid Cloud Language", "HashiCorp Cluster Language"],
+      "correct": "B",
+      "timeLimitSec": 20
+    },
+    {
+      "text": "Which Terraform command downloads providers and prepares a working directory?",
+      "answers": ["terraform get", "terraform setup", "terraform init", "terraform build"],
+      "correct": "C",
+      "timeLimitSec": 20
+    },
+    {
+      "text": "In Terraform, what is a reusable, self-contained package of configuration called?",
+      "answers": ["A module", "A bundle", "A blueprint", "A chart"],
+      "correct": "A",
+      "timeLimitSec": 20
+    },
+    {
+      "text": "Which Terraform block declares a value that is passed in from outside the configuration?",
+      "answers": ["parameter", "input", "variable", "argument"],
+      "correct": "C",
+      "timeLimitSec": 20
+    },
+    {
+      "text": "Which language are Terraform, Vault, Consul and Nomad written in?",
+      "answers": ["Rust", "Go", "Java", "Python"],
+      "correct": "B",
+      "timeLimitSec": 20
+    },
+    {
+      "text": "By default, Vault splits its unseal key using which scheme?",
+      "answers": ["RSA key splitting", "Diffie-Hellman exchange", "Shamir's Secret Sharing", "AES key wrapping"],
+      "correct": "C",
+      "timeLimitSec": 30
+    },
+    {
+      "text": "Which port does Vault's HTTP API listen on by default?",
+      "answers": ["8080", "8200", "8500", "4646"],
+      "correct": "B",
+      "timeLimitSec": 20
+    },
+    {
+      "text": "Consul's key-value store is most commonly used for what?",
+      "answers": ["Storing container images", "Distributed configuration", "Aggregating metrics", "Long-term log storage"],
+      "correct": "B",
+      "timeLimitSec": 20
+    },
+    {
+      "text": "In Nomad, what is the set of tasks that are always placed together on one client called?",
+      "answers": ["A pod", "A task group", "A batch", "A cluster"],
+      "correct": "B",
+      "timeLimitSec": 30
+    },
+    {
+      "text": "In Vagrant, what is a packaged base image called?",
+      "answers": ["A crate", "An image", "A box", "A template"],
+      "correct": "C",
+      "timeLimitSec": 15
+    },
+    {
+      "text": "Which licence did HashiCorp adopt for its products in August 2023?",
+      "answers": ["Apache 2.0", "Mozilla Public License 2.0", "Business Source License", "GNU AGPL"],
+      "correct": "C",
+      "timeLimitSec": 30
+    },
+    {
+      "text": "Which open-source fork of Terraform was created in response to that licence change?",
+      "answers": ["Terragrunt", "OpenTofu", "Terrakube", "Terraspace"],
+      "correct": "B",
+      "timeLimitSec": 20
+    },
+    {
+      "text": "What does HCP stand for?",
+      "answers": ["HashiCorp Control Plane", "HashiCorp Cloud Platform", "Hybrid Cloud Provisioner", "HashiCorp Certified Platform"],
+      "correct": "B",
+      "timeLimitSec": 20
+    },
+    {
+      "text": "In 2023, Terraform Cloud was renamed to what?",
+      "answers": ["Terraform Enterprise", "HCP Terraform", "Terraform Online", "HashiCorp Terraform Cloud"],
+      "correct": "B",
+      "timeLimitSec": 20
+    },
+    {
+      "text": "IBM was founded in 1911 as CTR. In what year did it take the name International Business Machines?",
+      "answers": ["1911", "1924", "1936", "1945"],
+      "correct": "B",
+      "timeLimitSec": 20
+    },
+    {
+      "text": "IBM's Watson famously won which television quiz show in 2011?",
+      "answers": ["Wheel of Fortune", "Who Wants to Be a Millionaire", "Jeopardy!", "The Chase"],
+      "correct": "C",
+      "timeLimitSec": 20
+    },
+    {
+      "text": "In which year did IBM complete its acquisition of HashiCorp?",
+      "answers": ["2023", "2024", "2025", "2026"],
+      "correct": "C",
+      "timeLimitSec": 20
+    },
+    {
+      "text": "Which company did IBM acquire for about $34 billion in 2019?",
+      "answers": ["SUSE", "Red Hat", "VMware", "Canonical"],
+      "correct": "B",
+      "timeLimitSec": 20
+    },
+    {
+      "text": "Where is IBM's corporate headquarters?",
+      "answers": ["Austin, Texas", "Armonk, New York", "Raleigh, North Carolina", "San Jose, California"],
+      "correct": "B",
+      "timeLimitSec": 20
+    },
+    {
+      "text": "Which programming language was developed at IBM in the 1950s?",
+      "answers": ["COBOL", "LISP", "Fortran", "ALGOL"],
+      "correct": "C",
+      "timeLimitSec": 20
     }
   ]
 }
