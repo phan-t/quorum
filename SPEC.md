@@ -249,7 +249,7 @@ The seal is a session-level state with three values:
 | State | Desktop and phones show |
 | --- | --- |
 | `live` | Top five, updated as activities complete |
-| `sealed` | "Standings are sealed" — nothing else, on every surface |
+| `sealed` | *Scores are hidden*, and one fixed line — *Revealed at the end.* — on every surface |
 | `revealed` | The final reveal, 5 → 1, then the winner |
 
 The host seals before the last activity. From then on no surface shows

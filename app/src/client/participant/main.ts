@@ -374,6 +374,30 @@ function showConnecting(explain: boolean): void {
             text: "The session's server is not answering yet — it may be restarting. This page keeps trying on its own.",
           })
         : null,
+      // A fresh join is the one case where this card is covering something
+      // the person could still act on: the form they just submitted, with the
+      // code they typed still in it. Somebody who mistyped the code against a
+      // server that is not answering waits on a refusal that cannot arrive,
+      // and the socket's backoff never gives up, so without this the only way
+      // back to the form is a reload. The rejoin path has no form behind it
+      // and gets no button.
+      explain && !rejoining
+        ? h("button", {
+            class: "v-linky connecting-back",
+            type: "button",
+            text: "Use a different code",
+            on: {
+              click: () => {
+                // Stop retrying first. A welcome arriving after the form is
+                // back would replace it with the follow view underneath the
+                // person's hands.
+                client?.stop();
+                client = null;
+                showJoin(null);
+              },
+            },
+          })
+        : null,
     ]),
   ]);
 }

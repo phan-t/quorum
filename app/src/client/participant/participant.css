@@ -151,6 +151,14 @@ body.phone #app {
   margin-top: 24px;
   padding: 0 24px;
 }
+/* The same idea on the connecting card, quieter: the primary action there is
+   to keep waiting, which happens by itself, so the way back to the form is a
+   link rather than a button competing with it. `.v-linky` is right-aligned
+   for the join form's code chip; here it sits under centred text. */
+.connecting-back {
+  margin: 20px auto 0;
+  display: block;
+}
 
 /* -------------------------------------------------------------- follow -- */
 

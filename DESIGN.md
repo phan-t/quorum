@@ -137,9 +137,12 @@ the server restarts. So the page paints a *Joining…* card the moment it
 starts connecting, and after two seconds of silence the card says the server
 may be restarting and that it keeps trying — because somebody who does not
 know a page is retrying reloads it, and reloading mid-deploy achieves
-nothing. A card that ends the session, *You were removed* or a dead link,
-carries a button back to the join screen; a dead end with no control on it
-reads as a broken page.
+nothing. On a fresh join that card is covering the form the person just
+submitted, so it also offers *Use a different code* — a mistyped code against
+a server that is not answering waits on a refusal that cannot arrive. A card
+that ends the session, *You were removed* or a dead link, carries a button
+back to the join screen; a dead end with no control on it reads as a broken
+page.
 
 **Segments on the phone:**
 
