@@ -137,7 +137,8 @@ It was four letters from a HashiCorp-flavoured wordlist — `RAFT`, `PLAN`,
 does not. That is not how the code is handed over now. The events are virtual
 (above) and the code is pasted into a chat client, where length costs nothing
 and nobody transcribes anything, so it can look like the thing it is standing
-in for. Why it changed is not recorded anywhere in this repository.
+in for. The reason is written down beside the generator, in
+`app/src/server/tokens.ts`.
 
 The consequences are worth stating, because they run the other way from the
 wordlist's:

@@ -23,10 +23,8 @@ data "aws_iam_policy_document" "ecs_tasks_assume" {
 # --- execution role ----------------------------------------------------------
 
 resource "aws_iam_role" "execution" {
-  # Named from var.name_prefix like everything else in the stack, so the roles
-  # sort next to the cluster and the table in a console that shows the whole
-  # account. Whether anything outside this repository also requires the prefix
-  # is not recorded here.
+  # Named from var.name_prefix, like the cluster, the log group and the load
+  # balancer. Why the prefix is required is not recorded in this repository.
   name               = "${var.name_prefix}-task-execution"
   description        = "ECS agent: pull the image, read the admin key, open the log stream."
   assume_role_policy = data.aws_iam_policy_document.ecs_tasks_assume.json
