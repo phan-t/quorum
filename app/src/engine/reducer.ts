@@ -2734,8 +2734,12 @@ export function reduce(
         // bpm is fifty credits a second, and a fan-out each would be fifteen
         // hundred frames a second to move a rope by a pixel. The big screen is
         // the rope of record and the console is the room; a phone animates its
-        // own side and picks the rope up on the next frame it is sent. A
-        // throttled tick for the phones belongs at the boundary, not here.
+        // own side and picks the rope up on the next frame it is sent. The
+        // throttled tick that collapses these into one fan-out per fifth of a
+        // beat lives at the boundary, in `SessionRuntime` — see
+        // `BEAT_FLUSH_MS` — because *when* a picture is sent is not a rule of
+        // the game, and the credit above still happens the instant the tap
+        // lands.
         credited
           ? [
               { kind: "broadcast", to: { pid: event.pid }, what: "state" },

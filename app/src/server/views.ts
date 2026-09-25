@@ -1094,22 +1094,41 @@ export function sendoffViewFor(
 }
 
 
-export function renderStateFor(
-  state: SessionState,
-  opts: ViewOptions,
-): RenderState {
-  const all = computeStandings(state);
-  const roster = rosterOf(state, opts.lastSeen, opts.now);
+/**
+ * One broadcast's worth of projection, prepared once and handed to every
+ * socket.
+ *
+ * Standings, the roster, the activity list and the trivia, arcade and
+ * send-off views are functions of `(state, role)` and of nothing else. Only
+ * `own`, `triviaMine` and `arcadeMine` differ between two phones. Projecting
+ * straight per socket therefore recomputed the same standings once per
+ * client: at a hundred phones that is a hundred passes over the same scores
+ * to produce a hundred byte-identical top fives, on the one path — a credited
+ * beat in Tug of Raft — that already runs several times a second. Prepared
+ * once, the role-level work happens at most three times per broadcast and the
+ * per-phone work is the three fields that are genuinely per-phone.
+ *
+ * Deliberately not cached *across* broadcasts. `now` is an input — the away
+ * flag, the send-off's slide clock and the arcade's timers all read it — so a
+ * projection that outlived the instant it was taken at would quietly hand a
+ * phone a frame from the past.
+ */
+export interface PreparedViews {
+  /** The console's frame. The host sees everything; they cannot run blind. */
+  host(): RenderState;
+  /** The big screen's frame. */
+  screen(): RenderState;
+  /** One phone's frame. `pid` is absent only on a socket still joining. */
+  participant(pid?: ParticipantId): RenderState;
+}
 
-  // The host sees everything: they cannot run the session blind, and sealing
-  // is about what the *room* sees.
-  const rows =
-    opts.role === "host"
-      ? topFive(all) // the console may see an expanded tie
-      : state.seal === "sealed"
-        ? []
-        : publicStandings(all); // the wire never carries more than five
-  const visible: StandingRow[] = rows.map((s) => toRow(state, s));
+export function prepareViews(
+  state: SessionState,
+  lastSeen: ReadonlyMap<ParticipantId, number>,
+  now: number,
+): PreparedViews {
+  const all = computeStandings(state);
+  const roster = rosterOf(state, lastSeen, now);
 
   const activities: ActivitySummary[] = state.activities.map((a) => ({
     id: a.id,
@@ -1119,87 +1138,132 @@ export function renderStateFor(
     spotsLeft: spotsRemaining(state, a),
   }));
 
-  let own: OwnPoints | undefined;
-  if (opts.role === "participant" && opts.pid && state.seal !== "sealed") {
-    const mine = all.find((s) => s.pid === opts.pid);
-    if (mine) {
-      own = {
-        total: mine.total,
-        byActivity: Object.fromEntries(
-          state.activities.map((a) => [
-            a.id,
-            mine.perActivity[a.id]?.points ?? null,
-          ]),
-        ),
-      };
-    }
-  }
-
   const trivia = triviaStateOf(state);
-  const triviaView = trivia ? triviaViewFor(state, trivia, opts.role) : undefined;
   const arcade = arcadeStateOf(state);
-  const arcadeView = arcade ? arcadeViewFor(state, arcade, opts.role) : undefined;
 
-  const sendoffView = sendoffViewFor(state, opts.role);
+  function baseFor(role: Role): RenderState {
+    // The host sees everything: they cannot run the session blind, and sealing
+    // is about what the *room* sees.
+    const rows =
+      role === "host"
+        ? topFive(all) // the console may see an expanded tie
+        : state.seal === "sealed"
+          ? []
+          : publicStandings(all); // the wire never carries more than five
+    const visible: StandingRow[] = rows.map((s) => toRow(state, s));
 
-  const base: RenderState = {
-    sid: state.sid,
-    title: state.title,
-    subtitle: state.subtitle,
-    phase: state.phase,
-    segment: state.segment,
-    seal: state.seal,
-    practice: state.practice,
-    ...(sendoffView === undefined ? {} : { sendoff: sendoffView }),
-    holding: state.holding,
-    roster,
-    joinsLocked: state.joinsLocked,
-    standings: visible,
-    activities,
-    ...(triviaView ? { trivia: triviaView } : {}),
-    ...(arcadeView ? { arcade: arcadeView } : {}),
-  };
+    const triviaView = trivia ? triviaViewFor(state, trivia, role) : undefined;
+    const arcadeView = arcade ? arcadeViewFor(state, arcade, role) : undefined;
+    const sendoffView = sendoffViewFor(state, role);
 
-  if (opts.role === "screen") {
-    return { ...base, joinCode: state.joinCode };
-  }
-  if (opts.role === "host") {
     return {
-      ...base,
-      joinCode: state.joinCode,
-      hostExtras: {
-        joinCode: state.joinCode,
-        participantCount: roster.length,
-        awayCount: roster.filter((r) => r.conn === "away").length,
-        scores: scoreRows(state, all),
-        spots: state.spots.map((sp) => ({
-          seq: sp.seq,
-          pid: sp.pid,
-          activityId: sp.activityId,
-          reason: sp.reason,
-        })),
-        ...(trivia
-          ? {
-              trivia: {
-                answeredBy: Object.keys(trivia.answers),
-                loaded: trivia.questions.length,
-              },
-            }
-          : {}),
-        ...(arcade ? { arcade: hostArcade(arcade) } : {}),
-      },
+      sid: state.sid,
+      title: state.title,
+      subtitle: state.subtitle,
+      phase: state.phase,
+      segment: state.segment,
+      seal: state.seal,
+      practice: state.practice,
+      ...(sendoffView === undefined ? {} : { sendoff: sendoffView }),
+      holding: state.holding,
+      roster,
+      joinsLocked: state.joinsLocked,
+      standings: visible,
+      activities,
+      ...(triviaView ? { trivia: triviaView } : {}),
+      ...(arcadeView ? { arcade: arcadeView } : {}),
     };
   }
-  const mine =
-    trivia && opts.pid ? triviaMineFor(trivia, opts.pid) : undefined;
-  const arcadeMine =
-    arcade && opts.pid ? arcadeMineFor(state, arcade, opts.pid) : undefined;
+
+  let hostFrame: RenderState | null = null;
+  let screenFrame: RenderState | null = null;
+  let phoneBase: RenderState | null = null;
+  // Built on first use rather than always: the linear scan it replaces was
+  // once per phone, and a room that is all screen and console never pays for
+  // either.
+  let standingByPid: Map<ParticipantId, Standing> | null = null;
+
   return {
-    ...base,
-    ...(own ? { own } : {}),
-    ...(mine ? { triviaMine: mine } : {}),
-    ...(arcadeMine ? { arcadeMine } : {}),
+    host(): RenderState {
+      return (hostFrame ??= {
+        ...baseFor("host"),
+        joinCode: state.joinCode,
+        hostExtras: {
+          joinCode: state.joinCode,
+          participantCount: roster.length,
+          awayCount: roster.filter((r) => r.conn === "away").length,
+          scores: scoreRows(state, all),
+          spots: state.spots.map((sp) => ({
+            seq: sp.seq,
+            pid: sp.pid,
+            activityId: sp.activityId,
+            reason: sp.reason,
+          })),
+          ...(trivia
+            ? {
+                trivia: {
+                  answeredBy: Object.keys(trivia.answers),
+                  loaded: trivia.questions.length,
+                },
+              }
+            : {}),
+          ...(arcade ? { arcade: hostArcade(arcade) } : {}),
+        },
+      });
+    },
+
+    screen(): RenderState {
+      // The screen puts the join URL and a QR on the lobby, so it needs the
+      // code; a participant has already used it.
+      return (screenFrame ??= { ...baseFor("screen"), joinCode: state.joinCode });
+    },
+
+    participant(pid?: ParticipantId): RenderState {
+      const base = (phoneBase ??= baseFor("participant"));
+      let own: OwnPoints | undefined;
+      if (pid && state.seal !== "sealed") {
+        standingByPid ??= new Map(all.map((s) => [s.pid, s]));
+        const mine = standingByPid.get(pid);
+        if (mine) {
+          own = {
+            total: mine.total,
+            byActivity: Object.fromEntries(
+              state.activities.map((a) => [
+                a.id,
+                mine.perActivity[a.id]?.points ?? null,
+              ]),
+            ),
+          };
+        }
+      }
+      const mine = trivia && pid ? triviaMineFor(trivia, pid) : undefined;
+      const arcadeMine =
+        arcade && pid ? arcadeMineFor(state, arcade, pid) : undefined;
+      return {
+        ...base,
+        ...(own ? { own } : {}),
+        ...(mine ? { triviaMine: mine } : {}),
+        ...(arcadeMine ? { arcadeMine } : {}),
+      };
+    },
   };
+}
+
+/**
+ * One socket's frame, prepared and taken in a single step.
+ *
+ * The shape every caller outside a broadcast wants — a reconnect, a test, an
+ * export. A fan-out uses {@link prepareViews} directly and shares the
+ * role-level half.
+ */
+export function renderStateFor(
+  state: SessionState,
+  opts: ViewOptions,
+): RenderState {
+  const views = prepareViews(state, opts.lastSeen, opts.now);
+  if (opts.role === "host") return views.host();
+  if (opts.role === "screen") return views.screen();
+  return views.participant(opts.pid);
 }
 
 /**

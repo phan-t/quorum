@@ -28,9 +28,11 @@ import type {
 } from "../protocol.ts";
 import {
   arcadeStateOf,
+  prepareViews,
   renderStateFor,
   rosterOf,
   triviaStateOf,
+  type PreparedViews,
 } from "./views.ts";
 import { hashToken, newToken } from "./tokens.ts";
 import {
@@ -170,6 +172,26 @@ export function latencyCorrection(rttMs: number | null): number {
  */
 export const LOCK_GRACE_MS = 250;
 
+/**
+ * How long the boundary may hold Tug of Raft's frames before sending them.
+ *
+ * The rope is the one round where the engine emits a broadcast per accepted
+ * tap, and SPEC.md's 100 bpm means a hundred players credit roughly 167 beats
+ * a second between them. Sent as they land that is a full `RenderState` to
+ * the console 167 times a second, which measured at ten megabytes a second
+ * and half the container's CPU — and with no backpressure anywhere, a laptop
+ * that cannot drain it queues frames until the rope it draws is behind the
+ * drum everyone can hear.
+ *
+ * So the boundary holds them. One beat at 100 bpm is 600 ms and the rope
+ * moves smoothly at well under that; 120 ms is roughly a fifth of a beat, far
+ * below what anyone can see, and it collapses those 167 frames into eight.
+ * The engine still decides every credit the instant it arrives — this only
+ * changes when the *picture* of it goes out, which is exactly what the
+ * reducer's "a throttled tick for the phones belongs at the boundary" meant.
+ */
+export const BEAT_FLUSH_MS = 120;
+
 /** SPEC.md: "Phases alternate on random durations between 2 and 6 seconds." */
 export const LIGHT_MIN_MS = 2_000;
 export const LIGHT_MAX_MS = 6_000;
@@ -278,6 +300,18 @@ export class SessionRuntime {
   } | null = null;
   #pullTimer: ReturnType<typeof setTimeout> | null = null;
   #pullTimerFor: { round: number; pull: number; at: number } | null = null;
+  /**
+   * The coalescing tick, and who it owes a frame to. See {@link BEAT_FLUSH_MS}.
+   *
+   * Audiences rather than clients because that is what the engine names, and
+   * because a phone that reconnects between a beat and the flush must not be
+   * sent a frame addressed to the socket it arrived on before it existed.
+   */
+  #flushTimer: ReturnType<typeof setTimeout> | null = null;
+  #dirtyRoom = false;
+  #dirtyHost = false;
+  #dirtyScreen = false;
+  readonly #dirtyPids = new Set<ParticipantId>();
   /**
    * Where the light durations come from. A field rather than a parameter so a
    * test can make the round deterministic without the production path growing
@@ -472,7 +506,21 @@ export class SessionRuntime {
       if ("pid" in event) this.persistParticipant(event.pid);
     }
 
-    if (stateTo.length > 0) this.sendStateTo(stateTo, now);
+    if (event.type === "tapBeat") {
+      // The rope's frames are the ones the tick exists for: marked dirty here
+      // and sent on the next flush, coalesced with every other beat in the
+      // window. Nothing else in the session is emitted often enough to be
+      // worth delaying, and delaying anything else would be a lie about when
+      // it happened.
+      this.#markDirty(stateTo);
+    } else if (stateTo.length > 0 || this.heldFrames > 0) {
+      // Anything that is not a beat sends what the beats are holding along
+      // with its own frame. That is what makes a round ending immediate:
+      // `endRound` and `nextPull` come through here, so the last credits of a
+      // pull go out with the result rather than sitting in the tick until
+      // after the rope has already been settled on screen.
+      this.sendStateTo([...this.#takeDirty(), ...stateTo], now);
+    }
     if (sendRoster) this.broadcastRosterIfChanged(now);
     // Every transition, not just the trivia ones: the timer is a function of
     // the state, so deriving it here means there is no path — open, close,
@@ -1020,6 +1068,12 @@ export class SessionRuntime {
   }
 
   clearArcadeTimers(): void {
+    // The coalescing tick is one of the arcade's clocks, so it goes with
+    // them. Whatever it was holding is dropped rather than sent: this runs on
+    // the way out of the process and on a round the caller is abandoning, and
+    // in both cases at most one beat of rope is lost on sockets that are
+    // about to be told to reconnect anyway.
+    this.#takeDirty();
     this.#clearLightTimer();
     this.#clearItemTimer();
     this.#clearStepTimer();
@@ -1412,6 +1466,10 @@ export class SessionRuntime {
 
   /* ---------------- sending ---------------- */
 
+  /**
+   * One socket's frame. A fan-out prepares the projection once instead — see
+   * {@link prepareViews} and {@link #sendPrepared}.
+   */
   viewFor(client: Client, now: number): RenderState {
     return renderStateFor(this.state, {
       role: client.role,
@@ -1445,8 +1503,25 @@ export class SessionRuntime {
     });
   }
 
+  /** The frame this socket's role and pid take out of a prepared projection. */
+  private static frameOf(views: PreparedViews, client: Client): RenderState {
+    if (client.role === "host") return views.host();
+    if (client.role === "screen") return views.screen();
+    return views.participant(client.pid);
+  }
+
+  private sendPrepared(client: Client, views: PreparedViews): void {
+    this.send(client, {
+      t: "state",
+      seq: 0, // replaced per-client in send()
+      state: SessionRuntime.frameOf(views, client),
+    });
+  }
+
   broadcastState(now: number): void {
-    for (const c of this.clients) this.sendState(c, now);
+    if (this.clients.size === 0) return;
+    const views = prepareViews(this.state, this.lastSeenMap(), now);
+    for (const c of this.clients) this.sendPrepared(c, views);
   }
 
   /** Whether one engine audience covers this socket. */
@@ -1462,11 +1537,82 @@ export class SessionRuntime {
    * one: a participant who is also named by `all` must not get two.
    */
   sendStateTo(audiences: readonly Audience[], now: number): void {
+    if (audiences.length === 0) return;
+    // Prepared once for the whole fan-out. Standings, the roster, the grid
+    // and the round views are a function of `(state, role)` — projecting per
+    // socket recomputed all of that once per client, so a hundred phones
+    // meant a hundred identical sorts of the same scores. See
+    // {@link prepareViews}.
+    let views: PreparedViews | null = null;
     for (const c of this.clients) {
-      if (audiences.some((to) => SessionRuntime.addressed(to, c))) {
-        this.sendState(c, now);
-      }
+      if (!audiences.some((to) => SessionRuntime.addressed(to, c))) continue;
+      views ??= prepareViews(this.state, this.lastSeenMap(), now);
+      this.sendPrepared(c, views);
     }
+  }
+
+  /* ---------------- the coalescing tick ---------------- */
+
+  /**
+   * How many audiences the tick owes a frame to.
+   *
+   * Public because it is the only way to assert the thing the tick is for —
+   * that a credited beat has been counted and *not* yet put on the wire.
+   */
+  get heldFrames(): number {
+    return (
+      (this.#dirtyRoom ? 1 : 0) +
+      (this.#dirtyHost ? 1 : 0) +
+      (this.#dirtyScreen ? 1 : 0) +
+      this.#dirtyPids.size
+    );
+  }
+
+  #markDirty(audiences: readonly Audience[]): void {
+    if (audiences.length === 0) return; // an off-beat tap broadcasts nothing
+    for (const to of audiences) {
+      if (to === "all") this.#dirtyRoom = true;
+      else if (to === "host") this.#dirtyHost = true;
+      else if (to === "screen") this.#dirtyScreen = true;
+      else this.#dirtyPids.add(to.pid);
+    }
+    // Not re-armed on every beat: the window starts at the first beat it
+    // holds and closes `BEAT_FLUSH_MS` later, so a room that never stops
+    // tapping still gets a frame on every tick. Re-arming would let a busy
+    // rope starve itself indefinitely.
+    if (this.#flushTimer !== null) return;
+    const timer = setTimeout(() => {
+      this.#flushTimer = null;
+      this.flushFrames(Date.now());
+    }, BEAT_FLUSH_MS);
+    timer.unref?.();
+    this.#flushTimer = timer;
+  }
+
+  /** Empties the tick and returns what it was holding, as audiences. */
+  #takeDirty(): Audience[] {
+    const out: Audience[] = [];
+    if (this.#dirtyRoom) out.push("all");
+    if (this.#dirtyHost) out.push("host");
+    if (this.#dirtyScreen) out.push("screen");
+    for (const pid of this.#dirtyPids) out.push({ pid });
+    this.#dirtyRoom = false;
+    this.#dirtyHost = false;
+    this.#dirtyScreen = false;
+    this.#dirtyPids.clear();
+    if (this.#flushTimer !== null) clearTimeout(this.#flushTimer);
+    this.#flushTimer = null;
+    return out;
+  }
+
+  /**
+   * Send whatever the tick is holding, now.
+   *
+   * The timer's own callback, and the way a test gets a deterministic flush
+   * without waiting on a real clock.
+   */
+  flushFrames(now: number): void {
+    this.sendStateTo(this.#takeDirty(), now);
   }
 
   /** `except` is the client that has just been sent a full state already. */
