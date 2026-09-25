@@ -1,0 +1,31 @@
+{
+  "title": "Example Team Offsite",
+  "subtitle": "Thursday 12 March",
+  "questions": "trivia-questions.json",
+  "sendoff": "sendoff.json",
+  "promo": "promo-card.html",
+  "activities": [
+    { "id": "trivia", "title": "Trivia", "kind": "trivia" },
+    { "id": "arcade", "title": "Hashi Arcade", "kind": "arcade" },
+    { "id": "tabletop", "title": "Tabletop Exercise", "kind": "manual", "spotCap": 3 }
+  ],
+  "console": {
+    "cards": {
+      "cards": [
+        { "id": "card-1", "title": "Tabletop Exercise", "line": "Run by the security guild" }
+      ]
+    },
+    "_runbook": "Lobby and Final are always there and are not listed. Order the rest.",
+    "runbook": [
+      { "kind": "holding", "included": true, "id": "holding", "card": "card-1" },
+      { "kind": "trivia", "included": true, "id": "trivia" },
+      { "kind": "arcade", "included": true, "id": "arcade" },
+      { "kind": "standings", "included": true, "id": "standings" },
+      { "kind": "sendoff", "included": true, "id": "sendoff" }
+    ],
+    "arcade": {
+      "plan": ["recruitment", "plan_apply", "glass_bridge"],
+      "timings": {}
+    }
+  }
+}

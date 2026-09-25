@@ -1,0 +1,38 @@
+<!doctype html>
+<!--
+  The poster the Desktop frames beside the join link while the room arrives.
+
+  Two constraints, both because of how the Desktop embeds this: the frame runs
+  no scripts and loads no webfonts. Everything has to be inline and self
+  contained, and the whole file has a 300,000 character ceiling. A card that
+  reaches for a Google font gets the system stack instead, which is fine, but
+  a card that needs JavaScript to lay itself out gets nothing.
+-->
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Tabletop Exercise</title>
+    <style>
+      :root { color-scheme: dark; }
+      html, body { height: 100%; margin: 0; }
+      body {
+        display: grid;
+        place-content: center;
+        gap: 1.5rem;
+        padding: 6vh 6vw;
+        background: #0f1115;
+        color: #f2f3f5;
+        font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+        text-align: center;
+      }
+      .kicker { margin: 0; font-size: 1.1rem; letter-spacing: 0.22em; text-transform: uppercase; color: #9aa3ad; }
+      h1 { margin: 0; font-size: clamp(2.5rem, 7vw, 5rem); line-height: 1.05; font-weight: 650; }
+      .line { margin: 0; font-size: clamp(1.1rem, 2.2vw, 1.6rem); color: #c7ccd3; }
+    </style>
+  </head>
+  <body>
+    <p class="kicker">Up next</p>
+    <h1>Tabletop Exercise</h1>
+    <p class="line">Run by the security guild. Bring a laptop, not a plan.</p>
+  </body>
+</html>

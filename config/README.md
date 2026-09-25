@@ -2,7 +2,8 @@
 
 | | |
 | --- | --- |
-| `trivia-questions.example.json` | **Committed.** The twenty HashiCorp and IBM questions: the format's worked example, and what the test suite loads — so if it stops being valid, the build says so. |
+| `trivia-questions.example.json` | **Committed.** Forty HashiCorp and IBM questions: the format's worked example, and what the test suite loads — so if it stops being valid, the build says so. |
+| `event.example/` | **Committed.** A whole event directory, invented end to end. Copy it to start a real one. See [its README](event.example/README.md). |
 | `events/<date>-<name>/` | **Gitignored.** One directory per event: its question set, its run of show, its roster, whatever else that event needs. |
 
 ## Why the events are not in git
@@ -67,7 +68,19 @@ reason nothing in this repository's tests or fixtures quotes any of it.
 Nothing reads this directory. The service takes its questions over HTTP, not
 from disk — these files are what a *host* opens, kept next to the service they
 are about rather than in a second repository that then has to be kept in step.
-Starting an event is `mkdir` and a copy of the example.
+
+Starting an event is a copy of the example:
+
+```bash
+cp -r config/event.example config/events/2026-03-12-example-offsite
+make stage EVENT=2026-03-12-example-offsite
+```
+
+`event.example/` is committed and `events/` is not, which is the whole reason
+the example is a separate directory rather than one event among the real ones:
+re-including a path inside an ignored directory means ignoring its *contents*
+instead of the directory, and that is the edit that later leaks an event
+somebody forgot to name carefully.
 
 ## It is not backed up
 

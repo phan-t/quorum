@@ -1,0 +1,48 @@
+{
+  "title": "Example offsite trivia",
+  "questions": [
+    {
+      "text": "Which Terraform command previews changes without applying them?",
+      "answers": ["terraform show", "terraform plan", "terraform diff", "terraform preview"],
+      "correct": "B",
+      "timeLimitSec": 20
+    },
+    {
+      "text": "Which consensus protocol backs integrated storage in Vault, Consul and Nomad?",
+      "answers": ["Paxos", "Raft", "Zab", "Two-phase commit"],
+      "correct": "B",
+      "timeLimitSec": 20,
+      "note": "An optional note. It is shown on the reveal, and it is the part people learn from."
+    },
+    {
+      "text": "Warm-up: what does HCL stand for?",
+      "answers": ["HashiCorp Control Language", "HashiCorp Configuration Language"],
+      "correct": "B",
+      "timeLimitSec": 15,
+      "basePoints": 0,
+      "note": "basePoints 0 makes a question a warm-up that scores nothing. Two answers is legal; four is not required."
+    },
+    {
+      "text": "Round card: which product does service discovery and service mesh?",
+      "answers": ["Nomad", "Consul", "Packer", "Boundary"],
+      "correct": "B",
+      "timeLimitSec": 20,
+      "round": "Round 2 — The Products"
+    },
+    {
+      "text": "Which product builds identical machine images for many platforms from one config?",
+      "answers": ["Vagrant", "Packer", "Waypoint", "Nomad"],
+      "correct": "B",
+      "timeLimitSec": 20,
+      "round": "Round 2 — The Products"
+    },
+    {
+      "text": "Tiebreak: in what year was HashiCorp founded?",
+      "answers": ["2008", "2010", "2012", "2015"],
+      "correct": "C",
+      "timeLimitSec": 15,
+      "tiebreak": true,
+      "note": "A tiebreak question is lifted out of the scored set and kept for sudden death. It is not one of the questions the room plays."
+    }
+  ]
+}

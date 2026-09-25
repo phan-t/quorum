@@ -1,0 +1,29 @@
+{
+  "for": {
+    "name": "Alex Rivera",
+    "subtitle": "Last day 20 March"
+  },
+  "opening": {
+    "seconds": 40,
+    "music": null,
+    "photos": []
+  },
+  "kudos": [
+    {
+      "from": "Sam Okonkwo",
+      "message": "Thank you for every time you picked up a question that was not yours to answer. The team is better at its job because you were patient with us."
+    },
+    {
+      "from": "Priya Raman",
+      "message": "You joined the week everything was on fire and somehow made the standup calmer. I still use the checklist you wrote in your second month. It has outlived two reorgs and one rewrite, which is more than most documents manage. Whoever you work with next is getting someone who leaves the place tidier than they found it, and I hope they notice."
+    },
+    {
+      "from": "Jordan Blake",
+      "message": "Good luck. Come back and tell us whether the grass is actually greener."
+    }
+  ],
+  "closing": {
+    "photos": [],
+    "line": "Thank you, Alex."
+  }
+}
