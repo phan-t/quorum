@@ -372,3 +372,37 @@ describe("a send-off written by the old engine", () => {
     assert.equal(view.sendoff?.kudo?.from, "Yong Wen");
   });
 });
+
+describe("a session from before the send-off existed", () => {
+  test("restores rather than killing the process on boot", async () => {
+    const { rehydrate } = await import("../server/recovery.ts");
+    const started = ready();
+    // No `sendoff` key at all — not null, absent. This is what a row written
+    // before the feature shipped actually looks like, and reading `.plan` off
+    // it threw inside recoverSessions, before the server could listen: every
+    // task died on boot and the service never came up.
+    const legacy: Record<string, unknown> = { ...started };
+    delete legacy["sendoff"];
+    const out = rehydrate({
+      meta: { sid: "s", title: "t", joinCode: "hvs.a" },
+      snapshot: { seq: started.seq, state: legacy },
+      events: [],
+    } as never);
+    assert.ok(out, "the session did not come back");
+    assert.ok(
+      out.state.sendoff === null || out.state.sendoff === undefined,
+      "a send-off was invented for a session that never had one",
+    );
+  });
+
+  test("an explicitly null send-off is left alone", async () => {
+    const { rehydrate } = await import("../server/recovery.ts");
+    const started = ready();
+    const out = rehydrate({
+      meta: { sid: "s", title: "t", joinCode: "hvs.a" },
+      snapshot: { seq: started.seq, state: { ...started, sendoff: null } },
+      events: [],
+    } as never);
+    assert.equal(out?.state.sendoff, null);
+  });
+});

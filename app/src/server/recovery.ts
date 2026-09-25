@@ -89,8 +89,18 @@ export function rehydrate(loaded: LoadedSession): {
  * Deletable once nothing older than this deploy is still in the table.
  */
 function migrateSendoff(state: SessionState): SessionState {
-  const so = state.sendoff as (SessionState["sendoff"] & { openingStartedAt?: unknown }) | null;
-  if (so === null || Array.isArray(so.plan)) return state;
+  const so = state.sendoff as
+    | (SessionState["sendoff"] & { openingStartedAt?: unknown })
+    | null
+    | undefined;
+  // `== null` on purpose: a session created before the send-off existed has
+  // no `sendoff` key at all, so this is `undefined` rather than `null`, and
+  // `=== null` let it through to read `.plan` off nothing. That threw on the
+  // first boot after the deploy — in `recoverSessions`, before the server
+  // could listen, so every task died and the service never came up. A
+  // migration runs against rows written by code that did not know it was
+  // coming; it has to treat absent and empty as the same thing.
+  if (so == null || Array.isArray(so.plan)) return state;
 
   const legacy = so as unknown as { phase: string; at: number };
   const plan = buildPlan(so.content, 0);
