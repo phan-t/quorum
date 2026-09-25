@@ -653,11 +653,38 @@ export type WaveSeconds = readonly [number, number, number];
  */
 export type ArcadeStanding = "floor" | "drained";
 
+/**
+ * One person's bet on somebody else's round.
+ *
+ * Every drained player has a seat, with or without a bet in it. On the Glass
+ * Bridge a player who is still on the Floor can hold one too — a wave waiting
+ * its turn backs the wave in front of it — which is why the seat records
+ * where the bet was placed from as well as who it names.
+ */
 export interface LoungeSeat {
   /** Who they are backing, changeable until the Floor locks. */
   readonly backing: ParticipantId | null;
-  /** The instant they were drained, for the big screen's ordering. */
-  readonly at: number;
+  /**
+   * The instant they were drained, for the big screen's ordering. Null for a
+   * seat taken from the Floor by a wave that has not crossed yet, because
+   * they have not been drained and may never be.
+   */
+  readonly at: number | null;
+  /**
+   * When the bet now held was placed. Null while there is no bet.
+   *
+   * A bet is only paid if it predates the outcome it names: the Floor of a
+   * round is a public surface, and without this a player drained early can
+   * read who crossed off the big screen and back them for a certainty. See
+   * `betStands` in arcade.ts.
+   */
+  readonly placedAt: number | null;
+  /**
+   * Where the backer stood when they placed it. `floor` is a waiting wave on
+   * the Bridge, which is paid at the lower rate — they are being paid for
+   * this round twice, once by their own crossing.
+   */
+  readonly placedFrom: ArcadeStanding;
 }
 
 export type ArcadePhase = "idle" | "card" | "running" | "reveal";
@@ -739,6 +766,14 @@ export type ArcadePlay =
       readonly seconds: number;
       /** Who has crossed, in order, for the +15/+10/+5. */
       readonly finishOrder: readonly ParticipantId[];
+      /**
+       * When each crossing landed. Absolute epoch, never a duration.
+       *
+       * The order is what the bonuses are paid from; the instants are what
+       * the Lounge is judged against, because a bet placed after its runner
+       * was already across is not a bet. See `betStands` in arcade.ts.
+       */
+      readonly finishedAt: Readonly<Record<ParticipantId, number>>;
     }
   | {
       readonly kind: "unseal";
@@ -1185,6 +1220,16 @@ export type RejectCode =
   | "wrong_step"
   /** SPEC: drained players back someone in a **later** wave. */
   | "must_back_a_later_wave"
+  /**
+   * A waiting wave bets on the wave in front of it, and on nobody else.
+   *
+   * The mirror image of `must_back_a_later_wave`: a player who is still on
+   * the Floor is backing the wave they are watching, which is the one
+   * crossing now. A later wave is one they will be walking beside.
+   */
+  | "must_back_the_crossing_wave"
+  /** A wave is past its first step. A waiting wave's bet is placed before it. */
+  | "wave_already_stepped"
   /** Your runner's wave has started. The bet was placed before they stepped. */
   | "backing_locked"
   /**

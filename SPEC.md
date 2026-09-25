@@ -441,6 +441,13 @@ your player wins the round, you score more. The Desktop shows who has
 backed whom, so being backed by six people is its own small pressure, and the
 Lounge is the loudest part of the room.
 
+**A bet has to be placed before the thing it is betting on.** Change it as
+often as you like; what does not pay is watching somebody cross the line on
+the Desktop and then naming them. Every Floor is a public surface — the finish
+order in Plan / Apply, the tins coming open in Unseal — and without this the
+Lounge pays its maximum for reading a screen, which is not a bet and is worth
+more than several honest ways off the Floor.
+
 Lounge points are real points that count toward the arcade raw score, capped
 so a perfect Lounge round is worth less than surviving the Floor. Someone
 drained in the first ten seconds of every round who backs well ends the arcade
@@ -633,6 +640,18 @@ crosses **+10**, fastest full crossing **+15** — the better of the two, not
 their sum, as in Plan / Apply. A backer is never paid twice for one runner,
 and the Lounge rule should not change between rounds: it is hard enough to
 explain once.
+
+**A wave that is waiting bets too**, and this is the only round where that is
+so. Two of the three waves are on the Floor with nothing to press for up to
+two minutes, which is "nobody sits out" failing in the one round that most
+needs it: watching intently is what waves 2 and 3 are *for*. So a player who
+is on the Floor and cannot act — waiting for their wave, or already across —
+backs a runner in the wave that is crossing, placed before that wave takes its
+first step and standing from then on, exactly as the drained side's bet does.
+It pays **+5** for a crossing and **+8** for the fastest crossing: half the
+Lounge's pair, because a waiting wave is being paid for this round twice, once
+by their own crossing. The cheapest way across the bridge is 45, so watching
+is never worth more than walking.
 
 Launch content: the existing three real and three fake Real-or-Fake items,
 re-paired **within a product** and made up to six pairs. That needs six

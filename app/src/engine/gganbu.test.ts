@@ -474,6 +474,8 @@ describe("settling a prompt", () => {
     assert.deepEqual(arcadeOf(s).lounge["p1"], {
       backing: null,
       at: T0 + 2 * PROMPT,
+      placedAt: null,
+      placedFrom: "drained",
     });
     assertRefused(
       s,

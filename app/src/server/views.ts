@@ -597,10 +597,18 @@ export function arcadeUnsealFor(
       score: UNSEAL_SHAPE_SCORE[shape],
       picked: floor.picks[shape],
       unsealed: floor.unsealed[shape],
-      // The +10 board, which is the big screen's reveal and the console's
-      // running read. Omitted rather than nulled where nobody qualified, so
-      // the key is not in the bytes.
-      ...(privileged && fastest !== null
+      // The +10 board: the console's running read, and the big screen's
+      // *reveal* — never the big screen while the Floor is open. Who is
+      // fastest in a shape is a result, and a result on a screen the room can
+      // see is a result the Lounge can bet on: back the number the screen has
+      // just named and the 8 is a certainty rather than a bet. The engine
+      // refuses that bet as well (see betStands), and neither half is
+      // sufficient on its own — the rule is that a result does not reach the
+      // room before the reveal, and this is where the room is served.
+      //
+      // Omitted rather than nulled where nobody qualified, so the key is not
+      // in the bytes.
+      ...((isHost || revealed) && fastest !== null
         ? { fastest: numbersOf(arcade, state, [fastest])[0] ?? 0 }
         : {}),
     };
@@ -965,7 +973,10 @@ export function arcadeMineFor(
     banked: arcade.banked[pid] ?? 0,
     total: arcade.totals[pid] ?? 0,
     ...(seat?.backing ? { backing: seat.backing } : {}),
-    ...(seat ? { drainedAt: seat.at } : {}),
+    // A seat is not always a drain any more — a waiting wave on the Bridge
+    // takes one to place a bet from the Floor — and a `drainedAt` on a player
+    // who has not been drained would be a lie a surface could draw.
+    ...(seat && seat.at !== null ? { drainedAt: seat.at } : {}),
     ...(recruitment ? { recruitment } : {}),
     ...(planApply ? { planApply } : {}),
     ...(unseal ? { unseal } : {}),

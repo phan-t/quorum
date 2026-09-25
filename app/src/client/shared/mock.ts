@@ -280,7 +280,10 @@ interface MockAnswer {
  */
 interface MockLounge {
   backing: string | null;
-  at: number;
+  /** The drain, or null for a bet a waiting wave placed from the Floor. */
+  at: number | null;
+  /** Placed from the Floor by a wave waiting to cross: paid at half rate. */
+  fromFloor: boolean;
 }
 
 interface MockRecruitPlay {
@@ -1007,7 +1010,12 @@ class MockSession {
 
   drain(pid: string, at: number): void {
     this.arcadeStanding[pid] = "drained";
-    this.arcadeLounge[pid] = { backing: null, at };
+    // A seat may already be there: on the Bridge a waiting wave can bet from
+    // the Floor and then fall at its own first step. The bet stands.
+    const seat = this.arcadeLounge[pid];
+    this.arcadeLounge[pid] = seat
+      ? { ...seat, at }
+      : { backing: null, at, fromFloor: false };
   }
 
   bank(pid: string, points: number): void {
@@ -1146,7 +1154,11 @@ class MockSession {
           score: UNSEAL_SCORES[shape],
           picked,
           unsealed: opened,
-          ...(privileged && best !== null
+          // The +10 board is the console's throughout and the room's only at
+          // the reveal: who is fastest in a shape is a result, and a result
+          // on the big screen is one the Lounge can bet on. See
+          // `arcadeUnsealFor` in server/views.ts.
+          ...((host || revealed) && best !== null
             ? { fastest: this.arcadeNumber(best) }
             : {}),
         };
@@ -1328,7 +1340,7 @@ class MockSession {
       banked: this.arcadeBanked[pid] ?? 0,
       total: this.arcadeTotals[pid] ?? 0,
       ...(seat?.backing ? { backing: seat.backing } : {}),
-      ...(seat ? { drainedAt: seat.at } : {}),
+      ...(seat && seat.at !== null ? { drainedAt: seat.at } : {}),
       ...(play?.kind === "recruitment"
         ? {
             recruitment:
@@ -3339,8 +3351,12 @@ class MockHub {
         const backing = seat.backing;
         if (backing === null) continue;
         if (s.arcadeStanding[backing] !== "floor") continue;
-        if (backing === winner) s.bank(pid, 15);
-        else if (crossers.includes(backing)) s.bank(pid, 10);
+        // Halved for a bet placed from the Floor: a waiting wave is paid for
+        // this round twice, once by their own crossing. See
+        // GLASS_WAITING_CROSSES in engine/arcade.ts.
+        const [won, crossed] = seat.fromFloor ? [8, 5] : [15, 10];
+        if (backing === winner) s.bank(pid, won);
+        else if (crossers.includes(backing)) s.bank(pid, crossed);
       }
     }
     for (const p of s.participants) {
@@ -3735,8 +3751,20 @@ class MockHub {
     if (conn.role !== "participant" || pid === null) {
       return refuse("forbidden", "Only a participant plays the arcade.");
     }
-    const seat = s.arcadeLounge[pid];
-    if (!seat) return refuse("not_in_the_lounge", "You are on the Floor.");
+    // On the Bridge a wave that is waiting its turn may bet on the wave in
+    // front of it, which is the only way two thirds of the room have
+    // anything to press for two minutes. It is a seat without a drain.
+    const waitingBridge =
+      s.arcadePlay?.kind === "glass_bridge" ? s.arcadePlay : null;
+    const waiting =
+      waitingBridge !== null &&
+      s.arcadeStanding[pid] === "floor" &&
+      mockWaveOf(s.arcadeNumber(pid), waitingBridge.waveCuts) !==
+        waitingBridge.wave;
+    const held = s.arcadeLounge[pid];
+    if (!held && !waiting) {
+      return refuse("not_in_the_lounge", "You are on the Floor.");
+    }
     if (backing === pid) return refuse("cannot_back_yourself", "Back somebody else.");
     if (s.arcadeStanding[backing] !== "floor") {
       return refuse("cannot_back_a_drained_player", "They are in the Lounge too.");
@@ -3751,18 +3779,37 @@ class MockHub {
     // which is the same certainty wearing a hat.
     const bridge = s.arcadePlay;
     if (bridge?.kind === "glass_bridge") {
-      const held = seat.backing;
-      if (held && mockWaveOf(s.arcadeNumber(held), bridge.waveCuts) <= bridge.wave) {
+      const on = held?.backing;
+      if (on && mockWaveOf(s.arcadeNumber(on), bridge.waveCuts) <= bridge.wave) {
         return refuse("backing_locked", "Your runner is on the bridge. The bet stands.");
       }
       const target = mockWaveOf(s.arcadeNumber(backing), bridge.waveCuts);
-      if (target <= bridge.wave) {
+      // A waiting wave bets the other way round: on the wave crossing now,
+      // and only before it has stepped anywhere.
+      if (waiting) {
+        if (target !== bridge.wave) {
+          return refuse(
+            "must_back_the_crossing_wave",
+            `Wave ${bridge.wave} is on the bridge. Back one of them.`,
+          );
+        }
+        if (bridge.step > 0) {
+          return refuse(
+            "wave_already_stepped",
+            `Wave ${bridge.wave} is already across step 1. Watch.`,
+          );
+        }
+      } else if (target <= bridge.wave) {
         return refuse(
           "must_back_a_later_wave",
           `Wave ${target} is already on the bridge. Back a later wave.`,
         );
       }
     }
+    // The seat is taken here and not a line earlier: a refused bet must not
+    // leave a waiting player sitting in a Lounge they were never drained to.
+    const seat =
+      held ?? (s.arcadeLounge[pid] = { backing: null, at: null, fromFloor: true });
     seat.backing = backing;
     this.#send(conn, { t: "ack", cid, applied: true });
     this.#broadcastState();

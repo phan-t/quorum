@@ -20,6 +20,7 @@ import {
   floorEntries,
   formatCountdown,
   glassBackable,
+  glassCrossing,
   gridEntries,
   isTapKey,
   itemEndsAt,
@@ -627,6 +628,17 @@ describe("the Lounge on the bridge", () => {
   it("offers nobody once the last wave is on the bridge", () => {
     const g = glass({ wave: 3 });
     assert.deepEqual(glassBackable(bridgeArcade(g), BRIDGE_ROSTER, g, "p2"), []);
+  });
+
+  it("offers a waiting wave the runners in front of them, and nobody else", () => {
+    // The other side of the same list: wave 3 is watching wave 2 cross, and
+    // the people they may bet on are the ones actually on the bridge — not
+    // the player already across, not the drained one, and not each other.
+    const crossing = glassCrossing(bridgeArcade(), BRIDGE_ROSTER, glass());
+    assert.deepEqual(
+      crossing.map((e) => e.tag),
+      ["003", "004"],
+    );
   });
 });
 

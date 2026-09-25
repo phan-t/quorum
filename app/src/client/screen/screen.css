@@ -920,6 +920,18 @@ body {
   content: "\2605 ";
 }
 
+/* The +10 board, at the reveal: gold, like every other Lounge-adjacent
+   number on this screen, and one line so it never competes with the words. */
+.s-unseal-fastest {
+  margin: 0;
+  flex: none;
+  font-size: clamp(16px, 1.3vw, 26px);
+  letter-spacing: 0.1em;
+  color: var(--arc-lounge);
+}
+.s-unseal-fastest[hidden] {
+  display: none;
+}
 .s-unseal-recap {
   flex: 1;
   min-height: 0;

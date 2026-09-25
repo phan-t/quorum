@@ -1048,8 +1048,12 @@ export interface ArcadeMine {
   readonly banked: number;
   /** The arcade raw score so far, across rounds. */
   readonly total: number;
-  /** Lounge only. */
+  /**
+   * Who they are backing. The Lounge, and on the Bridge a wave that is
+   * waiting to cross and has bet on the wave in front of it.
+   */
   readonly backing?: ParticipantId;
+  /** Lounge only: absent for a bet placed from the Floor. */
   readonly drainedAt?: number;
   readonly recruitment?: ArcadeMineRecruitment;
   readonly planApply?: ArcadeMinePlanApply;

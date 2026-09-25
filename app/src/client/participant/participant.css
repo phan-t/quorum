@@ -2148,6 +2148,34 @@ body.phone:has(.v-splash) {
   letter-spacing: 0.06em;
 }
 
+/* The waiting wave's bet. The chips are the Lounge's, but they are drawn on
+   the bridge's dark surface rather than on the gold card, so the ink and the
+   border have to come from the page — and the one that is backed goes gold,
+   because that is what a bet looks like everywhere else in this round. */
+.a-glass-backing {
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  border-top: 1px solid var(--line);
+  padding-top: 0.5rem;
+}
+.a-glass-backing[hidden] {
+  display: none;
+}
+.a-glass-backing .a-lounge-list {
+  flex: none;
+  max-height: 30vh;
+}
+.a-glass-backing .a-chip {
+  color: var(--ink);
+  border-color: var(--line);
+}
+.a-glass-backing .a-lounge-backed {
+  background: rgba(255, 207, 37, 0.12);
+  color: var(--arc-lounge);
+}
+
 /* The reveal: both notes per step, with the real pane marked by a glyph as
    well as by weight. SPEC.md wants the note to say why the fake was fake. */
 .a-glass-recap {

@@ -1295,6 +1295,17 @@ function sceneArcade(): Scene {
   const unsealTiles = h("div", { class: "s-tins", role: "list" });
   const unsealRecap = h("ol", { class: "s-unseal-recap", attrs: { hidden: true } });
   /**
+   * The +10 board, which is a *reveal*.
+   *
+   * It used to live on the tiles and fill in as tins came open, and that was
+   * the round's one leak: who is fastest in a shape is a result, and a result
+   * on the screen the whole room is reading is a result the Lounge can bet on
+   * for a certainty. The server no longer sends it to this surface before the
+   * reveal (see `arcadeUnsealFor`), and the tiles step aside at the reveal —
+   * so the board needs a line of its own, here, where the words are.
+   */
+  const unsealFastest = h("p", { class: "mono s-unseal-fastest", attrs: { hidden: true } });
+  /**
    * The four tins, as the room may see them.
    *
    * Counts, never people: SPEC.md's conceit is that you pick before you know
@@ -1310,6 +1321,7 @@ function sceneArcade(): Scene {
   const unseal = h("section", { class: "s-unseal", attrs: { hidden: true } }, [
     unsealHead,
     unsealTiles,
+    unsealFastest,
     unsealRecap,
   ]);
 
@@ -1728,6 +1740,19 @@ function sceneArcade(): Scene {
         );
       }),
     );
+    // The +10 board: four glyphs and four player numbers, and only at the
+    // reveal, because that is the first frame on which this surface has them.
+    const fastest = u.shapes.filter((sh) => sh.fastest !== undefined);
+    unsealFastest.hidden = fastest.length === 0;
+    setText(
+      unsealFastest,
+      fastest.length === 0
+        ? ""
+        : `+10 · ${fastest
+            .map((sh) => `${UNSEAL_FACE[sh.shape].glyph} ${playerTag(sh.fastest ?? 0)}`)
+            .join("  ·  ")}`,
+    );
+
     const recap = u.recap ?? [];
     unsealRecap.hidden = recap.length === 0;
     if (recap.length > 0) {

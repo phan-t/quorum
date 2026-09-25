@@ -556,7 +556,12 @@ describe("plan / apply on the Floor", () => {
     s = accept(s, [{ type: "tap", pid: "p1", at: T0 + 6000 }], T0 + 6000);
 
     assert.equal(arcadeOf(s).standing["p1"], "drained");
-    assert.deepEqual(arcadeOf(s).lounge["p1"], { backing: null, at: T0 + 6000 });
+    assert.deepEqual(arcadeOf(s).lounge["p1"], {
+      backing: null,
+      at: T0 + 6000,
+      placedAt: null,
+      placedFrom: "drained",
+    });
     // "Getting caught at 75% keeps what you banked at 50%."
     assert.equal(banked(s, "p1"), 10);
     // And the drain does not move anybody else.
@@ -722,9 +727,21 @@ describe("the Lounge", () => {
   test("backing is free until the Floor locks, and keeps the seat's arrival time", () => {
     let s = drained();
     s = accept(s, [{ type: "backPlayer", pid: "p1", backing: "p2" }], T0 + 4000);
-    assert.deepEqual(arcadeOf(s).lounge["p1"], { backing: "p2", at: T0 + 2000 });
+    assert.deepEqual(arcadeOf(s).lounge["p1"], {
+      backing: "p2",
+      at: T0 + 2000,
+      placedAt: T0 + 4000,
+      placedFrom: "drained",
+    });
     s = accept(s, [{ type: "backPlayer", pid: "p1", backing: "p3" }], T0 + 5000);
-    assert.deepEqual(arcadeOf(s).lounge["p1"], { backing: "p3", at: T0 + 2000 });
+    // The seat keeps its arrival time and the bet takes a new one: what the
+    // Lounge is paid on is when the bet was placed, not when they sat down.
+    assert.deepEqual(arcadeOf(s).lounge["p1"], {
+      backing: "p3",
+      at: T0 + 2000,
+      placedAt: T0 + 5000,
+      placedFrom: "drained",
+    });
     // Backing the same person twice is a no-op, not an event.
     const same = run(s, { type: "backPlayer", pid: "p1", backing: "p3" }, T0 + 6000);
     assert.equal(same.applied, false);
@@ -794,6 +811,31 @@ describe("the Lounge", () => {
     assert.equal(total(s, "p4"), 10);
     assert.equal(total(s, "p2"), 40);
     assert.equal(total(s, "p3"), 35);
+  });
+
+  test("a bet placed after your runner crossed pays nothing", () => {
+    // The finish order is on the big screen as it happens — that is the
+    // round's theatre and it is not going to stop being — so a bet that may
+    // be changed until the Floor locks is a bet that can be placed on a
+    // result that has already happened. Drained at 90, watch the screen,
+    // back whoever crossed: 15 for a certainty, on top of 15 banked, which
+    // beats the 25 an honest third-place crossing pays.
+    let s = drained();
+    s = taps(s, "p2", 120, T0 + 5000);
+    s = accept(s, [{ type: "backPlayer", pid: "p1", backing: "p2" }], T0 + 6000);
+    assert.equal(arcadeOf(s).lounge["p1"]?.backing, "p2", "the bet is allowed");
+    s = accept(s, [{ type: "endRound" }], T0 + 75_000);
+    assert.equal(total(s, "p1"), 10, "…and it is not paid");
+  });
+
+  test("the same bet a second earlier is paid in full", () => {
+    // The other half of the rule: the Lounge is still a bet, and a bet on a
+    // runner who has not finished is exactly what it is supposed to be.
+    let s = drained();
+    s = accept(s, [{ type: "backPlayer", pid: "p1", backing: "p2" }], T0 + 4999);
+    s = taps(s, "p2", 120, T0 + 5000);
+    s = accept(s, [{ type: "endRound" }], T0 + 75_000);
+    assert.equal(total(s, "p1"), 10 + PLAN_APPLY_BACKED_WINS);
   });
 
   test("backing someone who never crosses pays nothing", () => {

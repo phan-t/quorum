@@ -38,6 +38,7 @@ import {
   floorEntries,
   formatCountdown,
   glassBackable,
+  glassCrossing,
   gridEntries,
   isTapKey,
   itemEndsAt,
@@ -1244,6 +1245,8 @@ function sceneArcade(ctx: SceneCtx): Scene {
   let glassOpen = false;
   /** How this phone left the bridge, latched at the transition — see paint(). */
   let glassExit: string | null = null;
+  /** The waiting wave's chips as last drawn, so a frame does not rebuild them. */
+  let glassBackSignature = "";
   /**
    * The last frame this scene drew.
    *
@@ -1341,6 +1344,7 @@ function sceneArcade(ctx: SceneCtx): Scene {
     glassOpen = false;
     bridgeSignature = "";
     glassExit = null;
+    glassBackSignature = "";
   };
 
   /** A new round banks nothing yet, so last round's line must not linger. */
@@ -1465,6 +1469,25 @@ function sceneArcade(ctx: SceneCtx): Scene {
   const glassPanes = h("div", { class: "a-panes" });
   const glassKeys = keyHint(KEY_HINT.glass);
   const glassStatus = h("p", { class: "a-glass-status" });
+  /**
+   * The waiting wave's bet.
+   *
+   * SPEC.md's design constraint is "nobody sits out", and this bridge was the
+   * round that broke it: with three waves, two thirds of the room are on the
+   * Floor with nothing to press for up to two minutes. So a wave that is
+   * waiting backs a runner in the wave in front of them — the one they are
+   * already watching — for half the Lounge's award. It is drawn above the
+   * banked line because for those two minutes it is the only control on the
+   * screen.
+   */
+  const glassBackHeld = h("div", { class: "a-lounge-backed", attrs: { hidden: true } });
+  const glassBackList = h("div", { class: "a-lounge-list" });
+  const glassBackPrompt = h("p", { class: "label a-lounge-prompt" });
+  const glassBackNode = h(
+    "div",
+    { class: "a-glass-backing", attrs: { hidden: true } },
+    [glassBackPrompt, glassBackHeld, glassBackList],
+  );
   const glassBanked = h("p", { class: "mono a-glass-banked" });
   const glassNode = h("div", { class: "a-glass" }, [
     glassWave,
@@ -1479,6 +1502,7 @@ function sceneArcade(ctx: SceneCtx): Scene {
     glassPanes,
     glassKeys,
     glassStatus,
+    glassBackNode,
     glassBanked,
   ]);
 
@@ -1733,6 +1757,86 @@ function sceneArcade(ctx: SceneCtx): Scene {
     setText(
       glassBanked,
       `Step ${Math.min((me?.step ?? 0) + (me?.across ? 0 : 1), g.of)} of ${g.of} · banked ${mine.banked}`,
+    );
+    paintGlassBacking(state, arcade, mine, g);
+  };
+
+  /**
+   * The bet a wave places while it waits, and the record of it afterwards.
+   *
+   * Two states and they are the same two the Lounge has: chips while the bet
+   * can still be placed, and a line naming the runner once it cannot. The
+   * window is the crossing wave's first step, because that is the only moment
+   * on this bridge at which the wave being bet on has learned nothing — one
+   * step in, the pane that broke is public and the bet would be a reading of
+   * the answer rather than a bet. It is the same lock the drained side has,
+   * read from the other end.
+   */
+  const paintGlassBacking = (
+    state: RenderState,
+    arcade: ArcadeView,
+    mine: ArcadeMine,
+    g: NonNullable<ArcadeView["glass"]>,
+  ): void => {
+    const me = mine.glass;
+    // Drained players are in the Lounge, which is a screen of its own. This
+    // is for the ones still on the Floor who cannot act: a wave that has not
+    // walked on yet, and a wave that is already across.
+    const waiting =
+      arcade.phase === "running" &&
+      mine.standing === "floor" &&
+      me !== undefined &&
+      me.wave !== g.wave;
+    glassBackNode.hidden = !waiting;
+    if (!waiting) {
+      glassBackSignature = "";
+      return;
+    }
+    const backing = mine.backing ?? null;
+    const runners = glassCrossing(arcade, state.roster, g);
+    const firstStep = (g.step ?? 0) === 0;
+    const open = backing === null && firstStep && ctx.live;
+    const held = gridEntries(arcade, state.roster).find((e) => e.pid === backing);
+    setText(
+      glassBackPrompt,
+      backing !== null
+        ? "Your bet"
+        : firstStep
+          ? `Back a runner in wave ${g.wave}`
+          : `Wave ${g.wave} has stepped. Bets are closed.`,
+    );
+    const signature = `${open}:${backing ?? ""}:${g.wave}:${g.step ?? 0}:${runners
+      .map((e) => `${e.pid}/${e.standing}/${e.backers}/${e.away}`)
+      .join(",")}`;
+    if (signature === glassBackSignature) return;
+    glassBackSignature = signature;
+    glassBackHeld.hidden = held === undefined;
+    if (held) {
+      replace(glassBackHeld, [
+        h("span", { class: "mono a-chip-num", text: held.tag }),
+        h("span", { class: "a-chip-name", text: held.nickname }),
+        h("span", { class: "a-chip-backers", text: "the bet stands" }),
+      ]);
+    }
+    replace(
+      glassBackList,
+      backing !== null
+        ? []
+        : runners.map((e) => {
+            const chip = h(
+              "button",
+              { class: "a-chip", type: "button", disabled: !open },
+              [
+                h("span", { class: "mono a-chip-num", text: e.tag }),
+                h("span", { class: "a-chip-name", text: e.nickname }),
+                e.backers > 0
+                  ? h("span", { class: "mono a-chip-backers", text: `×${e.backers}` })
+                  : null,
+              ],
+            );
+            chip.addEventListener("click", () => ctx.arcadeBack(e.pid));
+            return chip;
+          }),
     );
   };
 

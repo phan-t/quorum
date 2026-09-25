@@ -322,8 +322,11 @@ const SPECIAL: readonly Bot[] = [
     backs: () => [],
   },
   {
-    // Third correct on Vault and Consul, fourth on Terraform. Reaches exactly 90 resources,
-    // taps into the next lock, backs the winner: 15 banked + 15 = 30.
+    // Third correct on Vault and Consul, fourth on Terraform. Reaches exactly
+    // 90 resources, taps into the next lock, and backs the winner — who is
+    // already across by then, so the bet pays nothing and the round is the
+    // 15 they banked. This is the room's arithmetic on the exploit: the same
+    // bet placed before Priya crossed would have been worth 15.
     pid: "p005", nickname: "Zoë", rtt: [],
     recruit: (item) => (item < 3 ? correctAt(3_000)(item) : null),
     ...slipper([], 6, 90, 400, WINNER),
@@ -741,6 +744,10 @@ function expectPlanApply(): ExpectedPlanApply {
   const drained = new Set<ParticipantId>();
   const finishOrder: ParticipantId[] = [];
   const backing = new Map<ParticipantId, ParticipantId>();
+  /** When each bet now standing was placed, which is what pays it. */
+  const betAt = new Map<ParticipantId, number>();
+  /** When each crossing landed, which is what a bet is judged against. */
+  const crossedAt = new Map<ParticipantId, number>();
   const taps: ExpectedTap[] = [];
   const backs: ExpectedBack[] = [];
   let milestones = 0;
@@ -767,6 +774,7 @@ function expectPlanApply(): ExpectedPlanApply {
           if (n === PA_TARGET) {
             gained += PA_CROSS + (PA_FINISH[finishOrder.length] ?? 0);
             finishOrder.push(m.pid);
+            crossedAt.set(m.pid, m.at);
           }
           if (gained > 0) {
             milestones += 1;
@@ -785,14 +793,20 @@ function expectPlanApply(): ExpectedPlanApply {
       else {
         outcome = "ok";
         backing.set(m.pid, m.backing);
+        betAt.set(m.pid, m.at);
       }
       backs.push({ pid: m.pid, at: m.at, backing: m.backing, outcome });
     }
   }
 
   // The Lounge settles when the Floor stops: crossed 10, won 15, the larger.
+  // And only for a bet that was down before its runner crossed — the crossing
+  // is on the big screen the moment it happens, so a later bet is a reading
+  // of the result rather than a bet on it.
   for (const [pid, backed] of backing) {
     if (drained.has(backed)) continue;
+    const finished = crossedAt.get(backed);
+    if (finished !== undefined && (betAt.get(pid) ?? 0) >= finished) continue;
     const won = finishOrder[0] === backed;
     const crossed = finishOrder.includes(backed);
     const pay = won ? PA_BACKED_WINS : crossed ? PA_BACKED_CROSSES : 0;
@@ -1171,13 +1185,17 @@ const KENJI = 110;
 /**
  * Zoë: third correct on Vault (Priya, Kenji, Zoë) and on Consul (Kenji sits
  * it out) → 15 each; *fourth* on Terraform, behind Survivor's "tf" at 2.5 s →
- * 10. Recruitment 40. Ninety resources exactly (15 banked), then drained,
- * then backs the winner: +15, not +25 — the two Lounge awards do not stack.
- * 30 in the round, which is less than Priya's 40.
- *   15 + 10 + 15 + 15 + 15
+ * 10. Recruitment 40. Ninety resources exactly (15 banked), then drained —
+ * and the bet she then places on Priya is placed after Priya is across, so it
+ * pays nothing. 15 in the round.
+ *
+ * She is the reason the Lounge is timed at all. With the bet paid she
+ * finished on 30: more than Sam's honest 25 for a fifth-place crossing, and
+ * bought by reading the finish off the big screen.
+ *   15 + 10 + 15 + 15
  */
-const ZOE = 70;
-const ZOE_PLAN_APPLY = 30;
+const ZOE = 55;
+const ZOE_PLAN_APPLY = 15;
 
 /**
  * Sam: nothing typed; fifth across the line — three checkpoints and the
@@ -1460,7 +1478,7 @@ describe("sixty bots play Recruitment and Plan / Apply", () => {
     assert.equal(totals[WINNER], PRIYA, "Priya");
     assert.equal(totals["p002"], KENJI, "Kenji");
     assert.equal(totals["p005"], ZOE, "Zoë");
-    assert.equal(played.planApplyEnded.arcade?.banked["p005"], ZOE_PLAN_APPLY, "Zoë's round: 15 banked + 15 backing the winner, not 25");
+    assert.equal(played.planApplyEnded.arcade?.banked["p005"], ZOE_PLAN_APPLY, "Zoë's round: the 15 she banked, and nothing for a bet placed after the winner was across");
     assert.equal(totals[FIFTH], SAM, "Sam");
     assert.equal(totals[ZERO], LATE, "Late");
     assert.equal(totals["p013"], SNAIL, "Snail");

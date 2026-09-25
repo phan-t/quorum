@@ -32,6 +32,8 @@ import {
   GLASS_BLIND_BONUS,
   GLASS_FAR_SIDE,
   GLASS_STEP_BANK,
+  GLASS_WAITING_CROSSES,
+  GLASS_WAITING_FASTEST,
   glassFloorView,
   glassMeView,
   glassRemainingMs,
@@ -1105,6 +1107,126 @@ describe("the Lounge", () => {
 });
 
 /* ------------------------------------------------------------------ */
+/* The waiting wave                                                     */
+/* ------------------------------------------------------------------ */
+
+describe("the waiting wave's bet", () => {
+  // Waves are by player number: with nine players the cuts are 3 and 6, so
+  // p1–p3 cross first, p4–p6 second and p7–p9 last.
+  test("a wave that is waiting backs the wave in front of it", () => {
+    // SPEC's "nobody sits out" against SPEC's three waves: while wave 1 is on
+    // the bridge, six of the nine are on the Floor with nothing to press.
+    let s = bridging(9);
+    s = accept(s, { type: "backPlayer", pid: "p4", backing: "p2" }, T0 + 400);
+    const seat = arcadeOf(s).lounge["p4"];
+    assert.equal(seat?.backing, "p2");
+    assert.equal(seat?.placedFrom, "floor");
+    assert.equal(seat?.at, null, "they have not been drained");
+    assert.equal(standing(s, "p4"), "floor", "and betting does not drain them");
+  });
+
+  test("a player already across may back the wave behind them", () => {
+    let s = crossWave(bridging(9), ["p1"]);
+    s = accept(s, { type: "nextWave" }, T0 + 80_000);
+    s = accept(s, { type: "backPlayer", pid: "p1", backing: "p4" }, T0 + 80_100);
+    assert.equal(arcadeOf(s).lounge["p1"]?.placedFrom, "floor");
+  });
+
+  test("and nobody else: not a later wave, and not themselves", () => {
+    const s = bridging(9);
+    assertRefused(
+      s,
+      run(s, { type: "backPlayer", pid: "p4", backing: "p7" }, T0 + 400),
+      "must_back_the_crossing_wave",
+    );
+    assertRefused(
+      s,
+      run(s, { type: "backPlayer", pid: "p4", backing: "p5" }, T0 + 400),
+      "must_back_the_crossing_wave",
+    );
+    assertRefused(
+      s,
+      run(s, { type: "backPlayer", pid: "p4", backing: "p4" }, T0 + 400),
+      "cannot_back_yourself",
+    );
+  });
+
+  test("the window is the first step, and nothing after it", () => {
+    // One step in, the pane that broke is published — which is most of the
+    // answer to whether a runner gets across. A bet placed then is a reading
+    // of the bridge, not a bet on a runner.
+    let s = stepOn(bridging(9), "p1", realAt(0), T0 + 500);
+    s = accept(s, { type: "nextStep" }, T0 + 12_000);
+    assertRefused(
+      s,
+      run(s, { type: "backPlayer", pid: "p4", backing: "p1" }, T0 + 12_500),
+      "wave_already_stepped",
+    );
+  });
+
+  test("once placed it stands, exactly as the drained side's does", () => {
+    let s = bridging(9);
+    s = accept(s, { type: "backPlayer", pid: "p4", backing: "p2" }, T0 + 400);
+    assertRefused(
+      s,
+      run(s, { type: "backPlayer", pid: "p4", backing: "p3" }, T0 + 500),
+      "backing_locked",
+    );
+  });
+
+  test("crossing pays 5 and the fastest crossing 8 — half the Lounge's", () => {
+    assert.equal(GLASS_WAITING_CROSSES, 5);
+    assert.equal(GLASS_WAITING_FASTEST, 8);
+    let s = bridging(9);
+    // p5 backs the runner who will be fastest, p6 one who merely crosses.
+    s = accept(s, { type: "backPlayer", pid: "p5", backing: "p1" }, T0 + 300);
+    s = accept(s, { type: "backPlayer", pid: "p6", backing: "p2" }, T0 + 300);
+    s = crossWave(s, ["p1", "p2"], { p1: 200, p2: 3_000 });
+    s = accept(s, { type: "nextWave" }, T0 + 80_000);
+    // Wave 2 falls at its own first step, which is what makes the arithmetic
+    // below only the bet.
+    s = stepOn(s, "p5", fakeAt(0), T0 + 80_500);
+    s = stepOn(s, "p6", fakeAt(0), T0 + 80_600);
+    s = accept(s, { type: "endRound" }, T0 + 90_000);
+    assert.equal(fastestCrossing(bridge(s)), "p1");
+    assert.equal(banked(s, "p5"), GLASS_WAITING_FASTEST);
+    assert.equal(banked(s, "p6"), GLASS_WAITING_CROSSES);
+    // The same two bets from the Lounge would have paid 15 and 10: the
+    // waiting rate is half, because a waiting wave is also being paid for
+    // walking across.
+    assert.ok(GLASS_WAITING_FASTEST < GLASS_BACKED_FASTEST);
+    assert.ok(GLASS_WAITING_CROSSES < GLASS_BACKED_CROSSES);
+  });
+
+  test("falling does not take the bet back", () => {
+    // The bet was placed before the wave it names walked on, which is the
+    // only thing the round asks of it. Being drained afterwards changes
+    // nothing — and it does not promote the bet to the Lounge's rate either.
+    let s = bridging(9);
+    s = accept(s, { type: "backPlayer", pid: "p4", backing: "p1" }, T0 + 300);
+    s = crossWave(s, ["p1"], { p1: 200 });
+    s = accept(s, { type: "nextWave" }, T0 + 80_000);
+    s = stepOn(s, "p4", fakeAt(0), T0 + 80_500);
+    assert.equal(standing(s, "p4"), "drained");
+    const seat = arcadeOf(s).lounge["p4"];
+    assert.equal(seat?.backing, "p1");
+    assert.equal(seat?.placedFrom, "floor");
+    assert.equal(seat?.at, T0 + 80_500, "the seat learns when they were drained");
+    s = accept(s, { type: "endRound" }, T0 + 90_000);
+    assert.equal(banked(s, "p4"), GLASS_WAITING_FASTEST);
+  });
+
+  test("a wave on the bridge is playing, not betting", () => {
+    const s = bridging(9);
+    assertRefused(
+      s,
+      run(s, { type: "backPlayer", pid: "p1", backing: "p2" }, T0 + 400),
+      "not_in_the_lounge",
+    );
+  });
+});
+
+/* ------------------------------------------------------------------ */
 /* The scoring table, and the tuning rule                               */
 /* ------------------------------------------------------------------ */
 
@@ -1130,6 +1252,20 @@ describe("SPEC's arcade scoring summary", () => {
     assert.ok(floorMax(glassBridgeRound()) > loungeMax("glass_bridge"));
     // And a perfect Lounge is always worth having.
     assert.ok(loungeMax("glass_bridge") > 0);
+  });
+
+  test("a waiting wave can never be better off watching than stepping", () => {
+    // The rule the waiting bet has to satisfy, and the reason it is halved.
+    // The most it can pay is 8; the least a crossing pays is 45, and the
+    // least *any* step pays is 5, so there is no arrangement of the two in
+    // which a player would rather watch. It is a bonus on a round they are
+    // also playing, never a substitute for playing it.
+    const worstCrossing =
+      GLASS_BRIDGE_STEPS.length * GLASS_STEP_BANK + GLASS_FAR_SIDE;
+    assert.equal(GLASS_WAITING_FASTEST, 8);
+    assert.ok(GLASS_WAITING_FASTEST < worstCrossing);
+    assert.ok(GLASS_WAITING_FASTEST < loungeMax("glass_bridge"));
+    assert.ok(GLASS_WAITING_CROSSES >= GLASS_STEP_BANK, "and still worth pressing");
   });
 
   test("the Lounge cannot lift a drained player past a crossing in their own wave", () => {

@@ -498,7 +498,12 @@ describe("unsealing", () => {
     assert.ok(r.applied);
     assert.equal(r.state.arcade?.standing["p1"], "drained");
     assert.equal(r.state.arcade?.banked["p1"], 4, "2 a letter, up to the crack");
-    assert.deepEqual(r.state.arcade?.lounge["p1"], { backing: null, at: T0 + 300 });
+    assert.deepEqual(r.state.arcade?.lounge["p1"], {
+      backing: null,
+      at: T0 + 300,
+      placedAt: null,
+      placedFrom: "drained",
+    });
     // A crack moves the dormitory grid, so it goes to everybody.
     assert.ok(
       r.effects.some((e) => e.kind === "broadcast" && e.to === "all"),
@@ -802,6 +807,19 @@ describe("the Lounge", () => {
     );
     // And it is still worth having: SPEC asks for both halves.
     assert.ok(loungeMax("unseal") > 0);
+  });
+
+  test("a bet placed after the tin came open pays nothing", () => {
+    // The Desktop counts the open tins as they open, and the Front-End Man
+    // reads the numbers out. Without a time on the bet, the Lounge's whole
+    // 8 is available to anybody who waits for somebody else's tin to open
+    // and then names them — which is the maximum this round's Lounge can pay,
+    // for no risk at all.
+    let s = cracked();
+    s = unsealWord(s, "p3", T0 + 1_000);
+    s = accept(s, { type: "backPlayer", pid: "p1", backing: "p3" }, T0 + 1_500);
+    s = accept(s, { type: "endRound" }, T0 + 60_000);
+    assert.equal(banked(s, "p1"), 0);
   });
 
   test("a backed tin pays the Lounge at the end of the round", () => {

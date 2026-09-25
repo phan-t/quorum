@@ -1043,6 +1043,28 @@ export const GLASS_BACKED_CROSSES = 10;
  */
 export const GLASS_BACKED_FASTEST = 15;
 
+/**
+ * The Floor's own bet: a wave waiting its turn backs the wave in front of it.
+ *
+ * SPEC.md's "nobody sits out" is the arcade's design constraint, and on this
+ * bridge it was the one round that broke it: with three waves and thirty
+ * people, two thirds of the room are on the Floor with nothing to press for
+ * up to two minutes. The Lounge is not open to them — they have not been
+ * drained — so "watching intently" had no mechanic under it at all.
+ *
+ * Half of the Lounge's pair, by the precedent Unseal and Gganbu already set
+ * for a halved pair, and for a reason neither of those has: a waiting wave is
+ * paid for this round twice, once by their own crossing and once by the bet.
+ * At 5 and 8 the bet is worth having and is nowhere near what walking across
+ * is worth — the cheapest full crossing is six steps and the far side, 45 —
+ * so nobody is ever better off watching than stepping, which is the tuning
+ * rule the whole scoring table is held to.
+ */
+export const GLASS_WAITING_CROSSES = 5;
+
+/** As {@link GLASS_WAITING_CROSSES}: the better of the two, never their sum. */
+export const GLASS_WAITING_FASTEST = 8;
+
 /** One committed step, for a player in `wave`. */
 export function glassStepBank(wave: GlassWave): number {
   return GLASS_STEP_BANK + (wave === 1 ? GLASS_BLIND_BONUS : 0);
@@ -1217,7 +1239,7 @@ export function closeGlassStep(
   const lounge: Record<ParticipantId, LoungeSeat> = { ...arcade.lounge };
   for (const pid of drained) {
     standing[pid] = "drained";
-    lounge[pid] = arcade.lounge[pid] ?? { backing: null, at: now };
+    lounge[pid] = drainSeat(arcade.lounge[pid], now);
   }
 
   const answer = play.key[play.step];
@@ -1441,6 +1463,75 @@ export function matchesItem(item: EmojiItem, answer: string): boolean {
 /* ------------------------------------------------------------------ */
 
 /**
+ * The seat a drain puts somebody in.
+ *
+ * Written as one function because a drain can find a seat already there: on
+ * the Bridge a wave waiting to cross may have placed a bet from the Floor and
+ * then fallen at its own first step. The bet stands — it was placed before
+ * the wave it names walked on, which is the only thing the round asks of it —
+ * and `placedFrom` keeps it paid at the rate it was placed at.
+ */
+export function drainSeat(
+  seat: LoungeSeat | undefined,
+  now: number,
+): LoungeSeat {
+  if (seat) return { ...seat, at: now };
+  return { backing: null, at: now, placedAt: null, placedFrom: "drained" };
+}
+
+/**
+ * Whether a bet was placed before the outcome it is betting on.
+ *
+ * A round's Floor is a public surface — the big screen draws who has crossed,
+ * whose tin is open and who is fastest, because that is the round's theatre —
+ * so a bet that may be changed until the Floor locks can be placed on a
+ * result that has already happened. Drained at 90 resources in Plan / Apply,
+ * watch the screen until somebody crosses and then name them: 15 banked and
+ * 15 for a certainty, which is level with an honest third-place crossing and
+ * more than every crossing after it. That is not a bet, and the Lounge is
+ * only worth having if it is one.
+ *
+ * Only two rounds can leak an outcome this way and they are the two with a
+ * per-player finish: Plan / Apply's crossings and Unseal's open tins. The
+ * Bridge is already covered by a rule of its own — a bet there may only name
+ * a later wave, and locks when that wave walks on — and Gganbu's outcome is
+ * the token count at the buzzer, which is after the Floor has locked and
+ * nobody can still be betting.
+ */
+export function betStands(
+  play: ArcadePlay,
+  seat: LoungeSeat,
+  startedAt: number | null,
+): boolean {
+  const backing = seat.backing;
+  if (backing === null) return false;
+  // A bet with no placement came out of a snapshot written before bets were
+  // timed, which is one process restart inside one round. Paying it is the
+  // better of the two failures: the alternative drops a bet somebody really
+  // did place, in front of them, with nothing to show why.
+  if (seat.placedAt === null) return true;
+  const placedAt = seat.placedAt;
+  switch (play.kind) {
+    case "plan_apply": {
+      const crossedAt = play.finishedAt[backing];
+      return crossedAt === undefined || placedAt < crossedAt;
+    }
+    case "unseal": {
+      const ms = play.unsealedMs[backing];
+      // Measured from the Floor opening, as `unsealedMs` is. A round with no
+      // `startedAt` has not opened, so nothing has been unsealed in it.
+      if (ms === undefined || startedAt === null) return true;
+      return placedAt < startedAt + ms;
+    }
+    case "recruitment":
+    case "tug_of_raft":
+    case "gganbu":
+    case "glass_bridge":
+      return true;
+  }
+}
+
+/**
  * What the Lounge pays a backer, given how the player they backed ended up.
  *
  * SPEC.md's frame is "score if they survive, score more if they win"; each
@@ -1497,6 +1588,45 @@ export function loungePoints(
       return play.crossOrder.includes(backing) ? GLASS_BACKED_CROSSES : 0;
     }
   }
+}
+
+/**
+ * What a bet placed from the Floor pays: the Lounge's awards, halved.
+ *
+ * Only the Bridge has such a bet — it is the only round where being on the
+ * Floor and being able to play are different things — so every other round
+ * pays nothing here rather than pretending to have a waiting wave.
+ */
+export function waitingPoints(
+  play: ArcadePlay,
+  backing: ParticipantId,
+  backedStanding: ArcadeStanding | undefined,
+): number {
+  if (play.kind !== "glass_bridge") return 0;
+  if (backedStanding !== "floor") return 0;
+  if (fastestCrossing(play) === backing) return GLASS_WAITING_FASTEST;
+  return play.crossOrder.includes(backing) ? GLASS_WAITING_CROSSES : 0;
+}
+
+/**
+ * What one seat is paid when the round settles.
+ *
+ * The three rules in the order they apply: a bet that was placed after the
+ * result it names is not a bet, a bet placed from the Floor pays the waiting
+ * rate, and everything else is the Lounge's own table.
+ */
+export function betPoints(
+  play: ArcadePlay,
+  seat: LoungeSeat,
+  backedStanding: ArcadeStanding | undefined,
+  startedAt: number | null,
+): number {
+  const backing = seat.backing;
+  if (backing === null) return 0;
+  if (!betStands(play, seat, startedAt)) return 0;
+  return seat.placedFrom === "floor"
+    ? waitingPoints(play, backing, backedStanding)
+    : loungePoints(play, backing, backedStanding);
 }
 
 /**
@@ -1661,7 +1791,7 @@ export function closeRound(
       const lounge: Record<ParticipantId, LoungeSeat> = { ...arcade.lounge };
       for (const pid of settled.revoked) {
         standing[pid] = "drained";
-        lounge[pid] = arcade.lounge[pid] ?? { backing: null, at: now };
+        lounge[pid] = drainSeat(arcade.lounge[pid], now);
       }
       const closed: GganbuPlay = {
         ...play,
@@ -1711,10 +1841,11 @@ export function settleRound(arcade: ArcadeState): RoundSettlement {
 
   for (const [pid, seat] of Object.entries(arcade.lounge)) {
     if (seat.backing === null || !arcade.play) continue;
-    const points = loungePoints(
+    const points = betPoints(
       arcade.play,
-      seat.backing,
+      seat,
       arcade.standing[seat.backing],
+      arcade.startedAt,
     );
     if (points > 0) banked[pid] = (banked[pid] ?? 0) + points;
   }

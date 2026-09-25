@@ -40,6 +40,7 @@ import {
   closeGlassStep,
   closePull,
   closeRound,
+  drainSeat,
   finishBonus,
   GGANBU_MAX_WAGER,
   GGANBU_MIN_WAGER,
@@ -1834,6 +1835,7 @@ export function reduce(
           target: config.target,
           seconds: config.seconds,
           finishOrder: [],
+          finishedAt: {},
         };
       } else if (config.kind === "unseal") {
         // The word is separated from the letters once, here, and never put
@@ -2306,7 +2308,7 @@ export function reduce(
               standing: { ...arcade.standing, [event.pid]: "drained" },
               lounge: {
                 ...arcade.lounge,
-                [event.pid]: { backing: null, at: now },
+                [event.pid]: drainSeat(arcade.lounge[event.pid], now),
               },
             },
           },
@@ -2339,6 +2341,13 @@ export function reduce(
               finishOrder: crossed
                 ? [...play.finishOrder, event.pid]
                 : play.finishOrder,
+              // `now` rather than the tap's corrected instant: the Lounge is
+              // the only reader, and what it needs is the moment the room
+              // could see the crossing — which is the moment this frame
+              // reaches the big screen, not the moment the thumb moved.
+              finishedAt: crossed
+                ? { ...play.finishedAt, [event.pid]: now }
+                : play.finishedAt,
             },
           },
         },
@@ -2577,10 +2586,7 @@ export function reduce(
               standing: { ...arcade.standing, [event.pid]: "drained" },
               lounge: {
                 ...arcade.lounge,
-                [event.pid]: arcade.lounge[event.pid] ?? {
-                  backing: null,
-                  at: now,
-                },
+                [event.pid]: drainSeat(arcade.lounge[event.pid], now),
               },
               banked: {
                 ...arcade.banked,
@@ -2955,7 +2961,7 @@ export function reduce(
       const lounge: Record<ParticipantId, LoungeSeat> = { ...arcade.lounge };
       for (const pid of settled.revoked) {
         standing[pid] = "drained";
-        lounge[pid] = arcade.lounge[pid] ?? { backing: null, at: now };
+        lounge[pid] = drainSeat(arcade.lounge[pid], now);
       }
       const promptEndsAt = now + play.secondsPerPrompt * 1000;
       const nextPlay: GganbuPlay = {
@@ -3106,7 +3112,13 @@ export function reduce(
               : { ...arcade.standing, [event.pid]: "drained" },
             lounge: held
               ? arcade.lounge
-              : { ...arcade.lounge, [event.pid]: { backing: null, at: now } },
+              : {
+                  ...arcade.lounge,
+                  // A waiting wave may already hold a bet placed from the
+                  // Floor, and falling at their own first step does not take
+                  // it back. See drainSeat().
+                  [event.pid]: drainSeat(arcade.lounge[event.pid], now),
+                },
             banked:
               gained > 0
                 ? {
@@ -3249,7 +3261,21 @@ export function reduce(
           ),
         );
       }
-      if (arcade.standing[event.pid] !== "drained") {
+      // The Bridge is the one round where being on the Floor and being able
+      // to play are different things: two of the three waves are standing at
+      // the near side with nothing to press for up to two minutes. SPEC.md
+      // says waiting "turns waiting for your wave into watching intently",
+      // and this is the mechanic that sentence was missing — a waiting wave
+      // bets on the wave in front of it, at half the Lounge's rate. See
+      // GLASS_WAITING_CROSSES.
+      const bridge =
+        arcade.play?.kind === "glass_bridge" ? arcade.play : undefined;
+      const waiting =
+        bridge !== undefined &&
+        arcade.standing[event.pid] === "floor" &&
+        waveOf(arcade.playerNumbers[event.pid], bridge.waveCuts) !==
+          bridge.wave;
+      if (arcade.standing[event.pid] !== "drained" && !waiting) {
         return unchanged(
           reject(
             { pid: event.pid },
@@ -3305,8 +3331,7 @@ export function reduce(
       // a backer watches their wave-2 runner fall and switches to a wave-3
       // one, which is the same certainty wearing a hat. A bet is placed
       // before the runner steps onto the bridge, and then it stands.
-      const bridge = arcade.play;
-      if (bridge?.kind === "glass_bridge") {
+      if (bridge !== undefined) {
         const held = arcade.lounge[event.pid]?.backing;
         if (
           held &&
@@ -3324,7 +3349,31 @@ export function reduce(
           arcade.playerNumbers[event.backing],
           bridge.waveCuts,
         );
-        if (targetWave <= bridge.wave) {
+        // A waiting wave bets the other way round, and under the same lock
+        // read from the other end: the wave they are watching is the one
+        // crossing now, and the bet has to be down before it has learned
+        // anything — which is its first step, the only moment on this bridge
+        // at which a wave has stepped nowhere.
+        if (waiting) {
+          if (targetWave !== bridge.wave) {
+            return unchanged(
+              reject(
+                { pid: event.pid },
+                "must_back_the_crossing_wave",
+                `Wave ${bridge.wave} is on the bridge. Back one of them.`,
+              ),
+            );
+          }
+          if (bridge.step > 0) {
+            return unchanged(
+              reject(
+                { pid: event.pid },
+                "wave_already_stepped",
+                `Wave ${bridge.wave} is already across step 1. Watch.`,
+              ),
+            );
+          }
+        } else if (targetWave <= bridge.wave) {
           return unchanged(
             reject(
               { pid: event.pid },
@@ -3343,9 +3392,18 @@ export function reduce(
             ...arcade,
             lounge: {
               ...arcade.lounge,
-              // `at` is when they were drained, not when they last changed
-              // their mind: the big screen orders the Lounge by arrival.
-              [event.pid]: { backing: event.backing, at: seat?.at ?? now },
+              [event.pid]: {
+                backing: event.backing,
+                // `at` is when they were drained, not when they last changed
+                // their mind: the big screen orders the Lounge by arrival.
+                // Null for a bet placed from the Floor, because nothing has
+                // happened to this player yet.
+                at: seat?.at ?? (waiting ? null : now),
+                // …and this is when they last changed it, which is the half
+                // the Lounge is judged on. See betStands().
+                placedAt: now,
+                placedFrom: waiting ? "floor" : "drained",
+              },
             },
           },
         },

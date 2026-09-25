@@ -438,11 +438,34 @@ describe("the Floor's results", () => {
     );
     const screen = view(opened, "screen").arcade?.unseal;
     assert.deepEqual(screen?.unsealOrder, [1]);
-    assert.equal(screen?.shapes.find((s) => s.shape === "circle")?.fastest, 1);
 
     const phone = view(opened, "participant", "p4").arcade?.unseal;
     assert.equal(phone?.unsealOrder, undefined);
     assert.ok(phone?.shapes.every((s) => s.fastest === undefined));
+  });
+
+  it("keeps the +10 board off the Desktop until the reveal", () => {
+    // The fastest in a shape is a *result*, and a result on the screen while
+    // the Floor is open is a result the Lounge can bet on: back the number
+    // the Desktop has just named and the 8 is a certainty. The engine refuses
+    // that bet as well — see betStands — and this is the other half of it.
+    const opened = unsealing(
+      [..."XENON"].map((letter, i) => ({
+        event: { type: "tapLetter", pid: "p1", letter } as Event,
+        at: T0 + 1_000 + i * 200,
+      })),
+    );
+    const circle = (state: SessionState, role: "screen" | "host") =>
+      view(state, role).arcade?.unseal?.shapes.find((s) => s.shape === "circle");
+    assert.equal(circle(opened, "screen")?.fastest, undefined);
+    // The console has it throughout, because the host is not in the room.
+    assert.equal(circle(opened, "host")?.fastest, 1);
+
+    const revealed = replay(opened, [
+      { event: { type: "endRound" }, at: T0 + 70_000 },
+      { event: { type: "revealRound" }, at: T0 + 71_000 },
+    ]);
+    assert.equal(circle(revealed, "screen")?.fastest, 1);
   });
 
   it("puts the four scores on every surface, because the score is the bet", () => {

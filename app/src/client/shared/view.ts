@@ -1115,6 +1115,25 @@ export function glassBackable(
 }
 
 /**
+ * Who a wave that is *waiting* may back: the wave on the bridge now.
+ *
+ * The mirror of {@link glassBackable}, and the same argument for drawing it
+ * here. A waiting wave bets on the runners in front of them and on nobody
+ * else, because betting on a later wave would be betting on people they are
+ * about to walk beside — and a player already across is not a bet at all.
+ */
+export function glassCrossing(
+  arcade: ArcadeView,
+  roster: readonly RosterEntry[],
+  glass: ArcadeGlassView,
+  exclude?: string,
+): BridgeEntry[] {
+  return bridgeEntries(arcade, roster, glass).filter(
+    (e) => e.onBridge && e.pid !== exclude,
+  );
+}
+
+/**
  * How much of the step's time is left, 0–1, for the draining bar.
  *
  * Off the two absolute epochs the server sent, never off `waveSeconds`: a
