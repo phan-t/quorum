@@ -282,6 +282,27 @@ describe("nothing on the wire says which pane anybody chose", () => {
     }
   });
 
+  it("counts who is standing on a pane, and names none of them", () => {
+    // `onPanes` is the size of `stepped`, and the waiting wave's phone needs
+    // it: the bet it draws is open only until the crossing wave puts its
+    // first foot down, and a phone that guessed at that would draw a button
+    // the engine then refuses. A count names nobody, and it discloses
+    // nothing new — every commit either raises that player's `position` or
+    // drains them, and both are already in the same frame.
+    const mid = crossing([
+      { event: { type: "stepPane", pid: "p1", step: 0, choice: 0 }, at: T0 + 2_000 },
+      { event: { type: "stepPane", pid: "p2", step: 0, choice: 1 }, at: T0 + 3_000 },
+    ]);
+    assert.equal(view(crossing(), "participant", "p3").arcade?.glass?.onPanes, 0);
+    for (const role of ["participant", "screen", "host"] as const) {
+      assert.equal(view(mid, role, "p3").arcade?.glass?.onPanes, 2, role);
+    }
+    // And it waits for the Floor to open, exactly as `step` does: while the
+    // round card is up there is no bridge to be standing on.
+    assert.equal(view(carded(), "participant", "p3").arcade?.glass?.onPanes, undefined);
+    assert.equal(view(carded(), "screen").arcade?.glass?.onPanes, undefined);
+  });
+
   it("tells the host who has committed and never what they committed to", () => {
     // `hostExtras.arcade.answeredBy` is the keys of `stepped`, never its
     // values: the value is whether their pane held, and "X survived this

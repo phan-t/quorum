@@ -1766,11 +1766,13 @@ function sceneArcade(ctx: SceneCtx): Scene {
    *
    * Two states and they are the same two the Lounge has: chips while the bet
    * can still be placed, and a line naming the runner once it cannot. The
-   * window is the crossing wave's first step, because that is the only moment
-   * on this bridge at which the wave being bet on has learned nothing — one
-   * step in, the pane that broke is public and the bet would be a reading of
-   * the answer rather than a bet. It is the same lock the drained side has,
-   * read from the other end.
+   * window closes the moment anybody in the crossing wave stands on a pane,
+   * because that is the moment the wave being bet on stops having learned
+   * nothing: a fall is published as it happens, so one runner down is already
+   * half the answer and the bet would be a reading of it. It is the same lock
+   * the drained side has, read from the other end, and it is the engine's —
+   * `onPanes` is carried on the wire so this draws no chip that backPlayer
+   * would refuse.
    */
   const paintGlassBacking = (
     state: RenderState,
@@ -1794,18 +1796,18 @@ function sceneArcade(ctx: SceneCtx): Scene {
     }
     const backing = mine.backing ?? null;
     const runners = glassCrossing(arcade, state.roster, g);
-    const firstStep = (g.step ?? 0) === 0;
-    const open = backing === null && firstStep && ctx.live;
+    const untouched = (g.step ?? 0) === 0 && (g.onPanes ?? 0) === 0;
+    const open = backing === null && untouched && ctx.live;
     const held = gridEntries(arcade, state.roster).find((e) => e.pid === backing);
     setText(
       glassBackPrompt,
       backing !== null
         ? "Your bet"
-        : firstStep
+        : untouched
           ? `Back a runner in wave ${g.wave}`
           : `Wave ${g.wave} has stepped. Bets are closed.`,
     );
-    const signature = `${open}:${backing ?? ""}:${g.wave}:${g.step ?? 0}:${runners
+    const signature = `${open}:${backing ?? ""}:${g.wave}:${g.step ?? 0}:${g.onPanes ?? 0}:${runners
       .map((e) => `${e.pid}/${e.standing}/${e.backers}/${e.away}`)
       .join(",")}`;
     if (signature === glassBackSignature) return;

@@ -646,12 +646,15 @@ so. Two of the three waves are on the Floor with nothing to press for up to
 two minutes, which is "nobody sits out" failing in the one round that most
 needs it: watching intently is what waves 2 and 3 are *for*. So a player who
 is on the Floor and cannot act — waiting for their wave, or already across —
-backs a runner in the wave that is crossing, placed before that wave takes its
-first step and standing from then on, exactly as the drained side's bet does.
-It pays **+5** for a crossing and **+8** for the fastest crossing: half the
-Lounge's pair, because a waiting wave is being paid for this round twice, once
-by their own crossing. The cheapest way across the bridge is 45, so watching
-is never worth more than walking.
+backs a runner in the wave that is crossing, placed before anybody in that
+wave has stood on a pane and standing from then on, exactly as the drained
+side's bet does. Before *anybody* has stepped, not merely before step 2: a
+fall is public the moment it happens, so one runner down already tells the
+watchers half of what they would be betting on. It pays **+5** for a crossing
+and **+8** for the fastest crossing: half the Lounge's pair, because a waiting
+wave is being paid for this round twice, once by their own crossing. The
+cheapest way across the bridge is 45, so watching is never worth more than
+walking.
 
 Launch content: the existing three real and three fake Real-or-Fake items,
 re-paired **within a product** and made up to six pairs. That needs six

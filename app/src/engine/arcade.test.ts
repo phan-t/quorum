@@ -860,6 +860,43 @@ describe("the Lounge", () => {
     const s = accept(drained(), [{ type: "endRound" }], T0 + 75_000);
     assert.equal(total(s, "p1"), 10);
   });
+
+  test("a seat written before bets were timed is paid, not thrown over", async () => {
+    // One process restart inside one Plan / Apply round, on the deploy that
+    // introduced the timing. `rehydrate` runs no arcade migration, so what
+    // comes back is the old shape exactly: `placedAt` and `placedFrom`
+    // *absent* from the seat, and `finishedAt` absent from the play. Not
+    // null — absent, which is why the fallback tests for it loosely.
+    //
+    // Reading either one unguarded throws inside `endRound`, which settles
+    // the whole round for everybody, so the cost of getting this wrong is
+    // not one unpaid bet. The seat is paid: dropping a bet somebody really
+    // did place, in front of them, with nothing to show why, is the worse of
+    // the two failures.
+    const { rehydrate } = await import("../server/recovery.ts");
+    let s = drained();
+    s = accept(s, [{ type: "backPlayer", pid: "p1", backing: "p2" }], T0 + 4000);
+    s = taps(s, "p2", 120, T0 + 5000);
+
+    const legacy = structuredClone(s) as unknown as Record<string, never>;
+    const arcade = legacy["arcade"] as unknown as Record<string, never>;
+    const seat = (arcade["lounge"] as unknown as Record<string, never>)["p1"]!;
+    delete (seat as unknown as Record<string, unknown>)["placedAt"];
+    delete (seat as unknown as Record<string, unknown>)["placedFrom"];
+    delete (arcade["play"] as unknown as Record<string, unknown>)["finishedAt"];
+
+    const out = rehydrate({
+      meta: { sid: "s", title: "t", joinCode: "hvs.a" },
+      snapshot: { seq: s.seq, state: legacy },
+      events: [],
+    } as never);
+    assert.ok(out, "the session did not come back");
+    const back = out.state.arcade?.lounge["p1"] as unknown as Record<string, unknown>;
+    assert.ok(back && !("placedAt" in back), "something migrated the seat after all");
+
+    const ended = accept(out.state, [{ type: "endRound" }], T0 + 75_000);
+    assert.equal(total(ended, "p1"), 10 + PLAN_APPLY_BACKED_WINS);
+  });
 });
 
 describe("the Lounge cap", () => {

@@ -1238,8 +1238,11 @@ class MockSession {
       //   but the host until the reveal. Not the big screen either: the big
       //   screen is in the room, and the room contains two waves who have not
       //   crossed.
-      // - `stepped` is not projected at all. It says whether somebody's pane
-      //   held, and with two panes that is the answer to the step.
+      // - the per-player `stepped` map is not projected. It says whether
+      //   somebody's pane held, and with two panes that is the answer to the
+      //   step. Its size goes out as `onPanes`, which names nobody and which
+      //   the room can already count off the grid — the phone needs it to
+      //   draw a waiting wave's bet under the lock the engine enforces.
       // - `broken` goes to everybody, because the play state only ever writes
       //   an entry when a step *closes* — by then everyone who could use it
       //   has walked past it. That is what waves 2 and 3 are promised.
@@ -1268,7 +1271,9 @@ class MockSession {
         // out. The three clocks do not follow it: the play state carries
         // zeroes until the Floor opens, and a surface handed a zero draws
         // `00:00` at a room that is looking at a round card.
-        ...(host || running ? { step: play.step } : {}),
+        ...(host || running
+          ? { step: play.step, onPanes: Object.keys(play.stepped).length }
+          : {}),
         ...(running
           ? {
               waveStartedAt: play.waveStartedAt,
@@ -3785,7 +3790,9 @@ class MockHub {
       }
       const target = mockWaveOf(s.arcadeNumber(backing), bridge.waveCuts);
       // A waiting wave bets the other way round: on the wave crossing now,
-      // and only before it has stepped anywhere.
+      // and only before anybody in it has stood on a pane. Not merely before
+      // step 1 — a fall is public the instant it happens, so a window open
+      // for all of step 0 would let a watcher bet on who is still up.
       if (waiting) {
         if (target !== bridge.wave) {
           return refuse(
@@ -3793,10 +3800,10 @@ class MockHub {
             `Wave ${bridge.wave} is on the bridge. Back one of them.`,
           );
         }
-        if (bridge.step > 0) {
+        if (bridge.step > 0 || Object.keys(bridge.stepped).length > 0) {
           return refuse(
             "wave_already_stepped",
-            `Wave ${bridge.wave} is already across step 1. Watch.`,
+            `Wave ${bridge.wave} has stepped. Watch.`,
           );
         }
       } else if (target <= bridge.wave) {

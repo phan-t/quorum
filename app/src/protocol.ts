@@ -867,6 +867,17 @@ export interface ArcadeGlassView {
   readonly board?: readonly ArcadeGlassStep[];
   /** 0-based index into `board`, for the wave that is crossing. */
   readonly step?: number;
+  /**
+   * How many of the crossing wave have committed to a pane at this step.
+   *
+   * A count, never a list: who has stepped is not projected anywhere, and a
+   * number names nobody. It is carried so the phone can draw a waiting wave's
+   * bet under the lock the engine actually enforces — the bet is open until
+   * the crossing wave puts its first foot down, because a fall is public the
+   * instant it happens. Everything it discloses is disclosed twice over
+   * already: a commit either raises that player's `position` or drains them.
+   */
+  readonly onPanes?: number;
   /** Absolute server epochs, never durations. Absent unless a step is open. */
   readonly waveStartedAt?: number;
   readonly stepStartedAt?: number;

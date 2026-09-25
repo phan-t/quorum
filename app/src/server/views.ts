@@ -745,8 +745,11 @@ export function arcadeTugFor(
  *   field to the play state. The reveal is the one read of it in this file.
  * - **which pane anybody chose.** The engine does not store it, because with
  *   two panes a pane that *held* identifies the real pane exactly as well as
- *   one that broke. Nothing here puts it back: `stepped` is not projected at
- *   all, and there is no per-player field that a break can be joined against.
+ *   one that broke. Nothing here puts it back: the per-player `stepped` map is
+ *   not projected, and there is no per-player field that a break can be joined
+ *   against. Its size goes out as `onPanes`, which names nobody and says
+ *   nothing the room cannot count off the grid — the phone needs it to draw a
+ *   waiting wave's bet under the same lock the engine enforces.
  *
  * `broken` is public on every surface and that is safe because of *when* the
  * engine writes it — only as a step closes, never as a player falls — so by
@@ -795,6 +798,7 @@ export function arcadeGlassFor(
   const extra: {
     board?: readonly ArcadeGlassStep[];
     step?: number;
+    onPanes?: number;
     waveStartedAt?: number;
     stepStartedAt?: number;
     stepEndsAt?: number;
@@ -811,7 +815,10 @@ export function arcadeGlassFor(
   }
   // Which step the bridge is on is a fact the host wants while the round card
   // is up — it is what they are about to read out — so it follows `board`.
-  if (isHost || running) extra.step = floor.step;
+  if (isHost || running) {
+    extra.step = floor.step;
+    extra.onPanes = floor.onPanes;
+  }
   // The three clocks are omitted rather than nulled when no step is open, and
   // that includes for the host. The play state carries zeroes until
   // `beginPlay`, and a surface handed a zero draws `00:00` at a room that is

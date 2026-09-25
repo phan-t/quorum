@@ -1164,6 +1164,43 @@ describe("the waiting wave's bet", () => {
     );
   });
 
+  test("and it closes when the wave steps, not when the step does", () => {
+    // A step is a whole timer long, so "before step 2" is not the same thing
+    // as "before the wave has learned anything": the first runner to put
+    // their weight down settles the step for everybody watching. The bet has
+    // to be down before that, with the wave still standing on the near side.
+    let s = bridging(9);
+    s = stepOn(s, "p2", realAt(0), T0 + 500);
+    assert.equal(bridge(s).step, 0, "the same step, still open");
+    assert.ok(T0 + 600 < bridge(s).stepEndsAt, "with time left on its clock");
+    assertRefused(
+      s,
+      run(s, { type: "backPlayer", pid: "p4", backing: "p1" }, T0 + 600),
+      "wave_already_stepped",
+    );
+  });
+
+  test("so nobody bets on who is left standing after the first fall", () => {
+    // The leak the step index alone left open, and the reason the window is
+    // where it is. A fall is published the instant it happens — `standing`
+    // goes drained and the bridge positions move — so with p1 down on the
+    // fake pane and p2 up on the real one, wave 2 knows which pane broke and
+    // which of the two runners is still on the bridge. Backing p2 there is
+    // the certainty wearing a hat that the drained side's lock refuses,
+    // arriving through the other door.
+    let s = bridging(9);
+    s = stepOn(s, "p1", fakeAt(0), T0 + 400);
+    s = stepOn(s, "p2", realAt(0), T0 + 500);
+    assert.equal(standing(s, "p1"), "drained");
+    assert.equal(bridge(s).position["p2"], 1);
+    assert.equal(bridge(s).step, 0, "and the step has not turned over");
+    assertRefused(
+      s,
+      run(s, { type: "backPlayer", pid: "p4", backing: "p2" }, T0 + 600),
+      "wave_already_stepped",
+    );
+  });
+
   test("once placed it stands, exactly as the drained side's does", () => {
     let s = bridging(9);
     s = accept(s, { type: "backPlayer", pid: "p4", backing: "p2" }, T0 + 400);

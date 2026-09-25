@@ -1312,6 +1312,14 @@ export function fastestCrossing(play: GlassPlay): ParticipantId | null {
  * grid do not already show, and a field that says "X survived this step" is
  * one accidental join away from the field that says which pane X chose —
  * which is why that field does not exist at all.
+ *
+ * Its *size* is here as `onPanes`, and that is a different thing: a number
+ * names nobody. It is also already public twice over, because every commit
+ * either raises that player's `position` or drains them and both are drawn in
+ * the room a beat later. It is carried because the phone has to draw the
+ * waiting wave's bet under exactly the lock the engine enforces — open until
+ * the crossing wave puts its first foot down — and a phone that has to guess
+ * at that draws a button the engine then refuses.
  */
 export interface GlassFloorView {
   readonly board: readonly GlassBoardStep[];
@@ -1322,6 +1330,8 @@ export interface GlassFloorView {
   readonly stepStartedAt: number;
   readonly stepEndsAt: number;
   readonly broken: readonly (0 | 1 | null)[];
+  /** How many of the crossing wave have committed to a pane at this step. */
+  readonly onPanes: number;
   readonly position: Readonly<Record<ParticipantId, number>>;
   readonly elapsedMs: Readonly<Record<ParticipantId, number>>;
   readonly crossed: readonly ParticipantId[];
@@ -1338,6 +1348,7 @@ export function glassFloorView(play: GlassPlay): GlassFloorView {
     stepStartedAt: play.stepStartedAt,
     stepEndsAt: play.stepEndsAt,
     broken: play.broken,
+    onPanes: Object.keys(play.stepped).length,
     position: play.position,
     elapsedMs: play.elapsedMs,
     crossed: play.crossOrder,
@@ -1509,11 +1520,20 @@ export function betStands(
   // timed, which is one process restart inside one round. Paying it is the
   // better of the two failures: the alternative drops a bet somebody really
   // did place, in front of them, with nothing to show why.
-  if (seat.placedAt === null) return true;
+  //
+  // `== null` rather than `=== null`, and it is not a style choice: a seat
+  // restored from such a snapshot has the key *absent*, not null, because
+  // rehydrate() runs no arcade migration. The types say the field is there
+  // and for every seat this build writes it is; the one shape that reaches
+  // here without it is the one shape this branch exists for.
+  if (seat.placedAt == null) return true;
   const placedAt = seat.placedAt;
   switch (play.kind) {
     case "plan_apply": {
-      const crossedAt = play.finishedAt[backing];
+      // Same reasoning one field along: a pre-change `plan_apply` play has no
+      // `finishedAt` at all, and an unguarded index on it throws inside
+      // endRound — which settles the whole round, not just this seat.
+      const crossedAt = play.finishedAt?.[backing];
       return crossedAt === undefined || placedAt < crossedAt;
     }
     case "unseal": {

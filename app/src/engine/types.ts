@@ -1228,7 +1228,10 @@ export type RejectCode =
    * crossing now. A later wave is one they will be walking beside.
    */
   | "must_back_the_crossing_wave"
-  /** A wave is past its first step. A waiting wave's bet is placed before it. */
+  /**
+   * Somebody in the crossing wave has stood on a pane. A waiting wave's bet is
+   * placed before that, because a fall is public the moment it happens.
+   */
   | "wave_already_stepped"
   /** Your runner's wave has started. The bet was placed before they stepped. */
   | "backing_locked"

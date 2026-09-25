@@ -3351,9 +3351,17 @@ export function reduce(
         );
         // A waiting wave bets the other way round, and under the same lock
         // read from the other end: the wave they are watching is the one
-        // crossing now, and the bet has to be down before it has learned
-        // anything — which is its first step, the only moment on this bridge
-        // at which a wave has stepped nowhere.
+        // crossing now, and the bet has to be down before that wave has
+        // learned anything.
+        //
+        // Which is before *anybody in it has put their weight on a pane*, not
+        // merely before step 1. A step is a whole timer long and a fall is
+        // published the instant it happens — `standing` goes drained and
+        // `glassFloorView` carries `position` live — so a window that stayed
+        // open for all of step 0 let a watcher see the first runner fall,
+        // read which pane broke off who is still standing, and only then name
+        // somebody. That is the certainty-wearing-a-hat this round's other
+        // lock exists to refuse, arriving through the other door.
         if (waiting) {
           if (targetWave !== bridge.wave) {
             return unchanged(
@@ -3364,12 +3372,12 @@ export function reduce(
               ),
             );
           }
-          if (bridge.step > 0) {
+          if (bridge.step > 0 || Object.keys(bridge.stepped).length > 0) {
             return unchanged(
               reject(
                 { pid: event.pid },
                 "wave_already_stepped",
-                `Wave ${bridge.wave} is already across step 1. Watch.`,
+                `Wave ${bridge.wave} has stepped. Watch.`,
               ),
             );
           }
