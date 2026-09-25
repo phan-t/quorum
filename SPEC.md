@@ -17,7 +17,7 @@ that marker is a claim about the running service.
 ## The problem
 
 The SA APJ huddle runs today on three things that do not know about each other:
-a Kahoot for trivia, a host-driven browser board for the arcade, and a
+Kahoot for trivia, a host-driven browser board for the arcade, and a
 spreadsheet for the scores. They work. What they cost is the seams between
 them.
 

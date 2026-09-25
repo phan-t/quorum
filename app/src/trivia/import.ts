@@ -2,7 +2,7 @@
  * `trivia-questions.json` -> `Question[]`. See SPEC.md "Trivia > question file".
  *
  * This replaced a Kahoot CSV importer. The CSV was the format because the
- * questions used to live in a Kahoot; once the game moved into Quorum the
+ * questions used to live in Kahoot; once the game moved into Quorum the
  * spreadsheet stopped earning its constraints — no comments, no nesting, no
  * way to mark a tiebreak question without inventing a thirteenth column, and
  * a `Correct answer(s)` cell whose 1-based numbers had to be read against

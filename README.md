@@ -5,7 +5,7 @@ with a nickname and a code, stay on the same page all afternoon, and the host
 drives what it shows: the lobby, trivia, the Hashi Arcade, the sealed
 standings and the reveal.
 
-These sessions used to run on a Kahoot, a host-driven browser board and a
+These sessions used to run on Kahoot, a host-driven browser board and a
 spreadsheet. Every seam between those tools was a name match done by hand
 during a three-minute break. Quorum replaces the seams. The activities are
 the same ones that were already being run.
@@ -56,6 +56,15 @@ design out.
 
 [BUILD-PLAN.md](BUILD-PLAN.md) has the order it was built in, and what had to
 exist before the first deploy.
+
+---
+
+## Licence
+
+[Business Source License 1.1](LICENSE), the licence HashiCorp's own products
+use. In short: read it, change it, run it for your own team's events. You may
+not offer it to other people as a hosted service. On 18 September 2030 it
+becomes Mozilla Public License 2.0 and those restrictions fall away.
 
 ---
 
