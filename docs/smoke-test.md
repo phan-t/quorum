@@ -153,20 +153,23 @@ session you are about to run. `make sessions` lists what exists and
 
 ## The join limit, which this found on its first run
 
-The server admits **ten hellos a minute per IP** (`main.ts`, `rateLimited`).
-Every bot in a swarm shares one address, so a run of more than ten from one
-machine is refused unless `--stagger 6500` spaces them past the window — which
-takes two minutes for twenty bots and is not what a room does.
+The server admits **120 hellos a minute per IP**, and **5 failed ones**
+(`limits.ts`). Every socket that says hello counts toward the first: the bots,
+the host, the Desktop, and every reconnect and late arrival. The swarm works
+that budget out and warns before the run when it cannot fit.
 
-That is not only a harness problem. A team joining from one office shares one
-public IP, and cannot stagger. Before `QUORUM_TRUST_PROXY` was set the whole
-room shared the load balancer's address and the eleventh person to scan the QR
-code was refused for a minute; with it set, the limit is per real client, which
-is right for a distributed team and unchanged for a room behind one NAT.
+It used to be ten of everything, checked before the code was read — and that
+is what this harness found on its first run. Eleven bots from one machine
+could not all join, and neither could a room behind one office NAT, which
+cannot stagger. The limit now separates an attempt from a failed attempt: a
+join code is 143 bits and nobody guesses one, so code-guessing was never the
+threat, and what distinguishes an attacker from a room is that the attacker
+fails.
 
-Whether ten a minute is the right number is a decision nobody has made
-deliberately. The swarm's job here is to make the number visible before a room
-does.
+Verified against the deployed service after the change: 25 bots, a host, a
+Desktop, three late arrivals and three reconnects, all admitted from one
+address, every check green. Under the old limit that run was 10 joined and 15
+refused.
 
 Sixty bots is a few megabytes of traffic and a couple of minutes. The service
 is a single task by design, so a swarm large enough to hurt it is also large

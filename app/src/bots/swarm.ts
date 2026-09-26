@@ -22,6 +22,7 @@
 import { WebSocket } from "ws";
 
 import type { ClientMessage, HostCommand, RenderState, ServerMessage } from "../protocol.ts";
+import { HELLO_FLOOD_LIMIT } from "../server/limits.ts";
 
 /* ------------------------------------------------------------------ */
 /* Arguments                                                           */
@@ -946,14 +947,18 @@ async function main(): Promise<void> {
   // cannot fit inside ten a minute will report refusals that are the limit,
   // not the server failing, and it is better to say so before the run than to
   // explain it in the report afterwards.
+  // Read from the server's own constant rather than written down here, so a
+  // change to the limit cannot leave this warning quoting a number the server
+  // stopped using — which it did, within an hour of the limit being raised.
   const hellos = opts.count + 1 + (opts.screenToken !== null ? 1 : 0) + opts.churnCount;
   log(`  ${opts.count} bots against ${wsUrl}`);
-  if (opts.staggerMs === 0 && hellos > 10) {
+  if (opts.staggerMs === 0 && hellos > HELLO_FLOOD_LIMIT) {
+    const overhead = hellos - opts.count;
     log(
       `  warning: this run needs ${hellos} hellos (bots + host${opts.screenToken !== null ? " + Desktop" : ""}${opts.churnCount > 0 ? " + reconnects" : ""}) ` +
-        `and the server admits 10 a minute per IP.`,
+        `and the server admits ${HELLO_FLOOD_LIMIT} a minute per IP.`,
     );
-    log(`           expect refusals. Use --stagger, or ${10 - (hellos - opts.count)} bots or fewer.`);
+    log(`           expect refusals. Use --stagger, or ${HELLO_FLOOD_LIMIT - overhead} bots or fewer.`);
   }
 
   const hostConn = new Conn("host");
