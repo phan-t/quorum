@@ -30,6 +30,7 @@ npm run swarm -- 60 --url https://quorum.example.com --code … --host-token …
 
 | Flag | |
 | --- | --- |
+| `--from-session` | play the staged event's own plan and timings |
 | `--questions N` | how many trivia questions to play (default 5) |
 | `--screen-token` | connect a Desktop and measure it |
 | `--late N` | N bots arrive after the session has started |
@@ -55,12 +56,40 @@ the reducer. The swarm is the only thing that exercises that gap.
 
 ## What it does
 
-**One socket per bot, plus one for the host.** The host socket issues the same
-`host.cmd` frames the console does, so a run is unattended: open the lobby,
-start, walk the trivia, enter the arcade, run each round, reveal, finish. There
-is no separate driving mode and no test-only endpoint — if the console can do
-it, the swarm does it the same way, and if the protocol changes underneath, the
-swarm breaks the way a client would.
+**The host is a bot too, not a script.** It issues the same `host.cmd` frames
+the console does — no driving mode, no test-only endpoint — and it waits on the
+room rather than a clock: it closes a question when everyone who could answer
+has, and leaves a round when the round has ended itself. A list of commands
+with sleeps between them tests the server's willingness to accept commands in
+an order somebody wrote down, which is not what a host does.
+
+**It runs a whole event.** Lobby, a holding card, trivia, every arcade round,
+sealed standings, Spot Awards, the reveal, the send-off and the final frame.
+Every round plays because the point is that every round's *code* runs; a sample
+leaves branches that typecheck and have never once executed.
+
+**Or the event you are about to run.** `--from-session` reads the staged
+console setup — the same blob the console loads — and plays that plan, at those
+timings, with that holding card. The two modes answer different questions. The
+default asks "does this build work" and sweeps every round fast. Rehearsing
+asks "will Thursday work", and needs your three rounds at your clock rather
+than five at somebody else's.
+
+The setup is the console's own and the server never looks inside it, so the
+swarm is the only thing asserting its shape. It treats every field as unknown
+and falls back to the sweep, saying so, rather than quietly rehearsing a
+different event from the one staged. A round it cannot drive — Gganbu, or
+something a later console offers — is named and skipped, not passed over in
+silence.
+
+**Three surfaces.** A socket per bot, one for the host, and one for the Desktop
+when `--screen-token` is given. The Desktop and the console both receive a full
+state on every roster change, so they carry the heaviest frames — which is why
+they are worth measuring and why leaving them out understates the load.
+
+**People behave like people.** `--late` brings bots in after the session has
+started, which is the Bench Credit path. `--churn` drops bots and reconnects
+them on their `rejoinToken`, the path every event hits when a phone sleeps.
 
 **Bots play by reacting to `state`.** No script of expected frames: a bot reads
 the segment, the trivia phase, the arcade round and its own `arcadeMine`, and
@@ -89,8 +118,8 @@ bot refused, with the reason. Any bot that never arrived.
 **Frames.** Count and bytes received, per bot socket and for the host socket,
 and the largest single frame seen. These are the numbers that decide whether a
 host laptop on a video call can keep up, and they are per-socket because that
-is what a laptop has to drain. No Desktop socket is opened, so the surface with
-the heaviest frames is not measured — see what it does not do.
+is what a laptop has to drain. The Desktop is measured too when
+`--screen-token` is given, and reported separately.
 
 **Gaps.** Every `seq` gap seen by any bot, and whether the resync that follows
 recovers it. A gap that is never closed is a phone that has silently stopped

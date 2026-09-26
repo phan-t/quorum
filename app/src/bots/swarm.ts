@@ -51,6 +51,8 @@ interface Opts {
   readonly lateCount: number;
   /** Bots that drop and come back on their rejoin token, as phones do. */
   readonly churnCount: number;
+  /** Play the staged event's own plan and timings, not the built-in sweep. */
+  readonly fromSession: boolean;
 }
 
 /** A progress line, so a long run is not silent. */
@@ -102,6 +104,7 @@ function parseArgs(argv: readonly string[]): Opts {
     screenToken: flag("screen-token") ?? null,
     lateCount,
     churnCount,
+    fromSession: argv.includes("--from-session"),
   };
 }
 
@@ -547,6 +550,76 @@ function sleep(ms: number): Promise<void> {
 }
 
 /**
+ * The staged plan, as the console would read it.
+ *
+ * `GET /api/sessions/:sid/setup` returns the blob `make stage` put there. The
+ * server stores it and never looks inside — it is the console's own — so this
+ * is the only thing asserting its shape, and it has to treat every field as
+ * unknown. Anything missing or the wrong type falls back to the sweep, and
+ * says so, because a rehearsal that silently played a different event from
+ * the one being rehearsed would be worse than no rehearsal.
+ */
+interface StagedPlan {
+  readonly rounds: readonly string[];
+  readonly timings: Readonly<Record<string, number>>;
+  readonly holding: { title: string; line: string } | null;
+}
+
+async function fetchStagedPlan(
+  baseUrl: string,
+  sid: string,
+  hostToken: string,
+): Promise<StagedPlan | null> {
+  let raw: unknown;
+  try {
+    const res = await fetch(`${baseUrl.replace(/\/$/, "")}/api/sessions/${encodeURIComponent(sid)}/setup`, {
+      headers: { authorization: `Bearer ${hostToken}` },
+    });
+    if (!res.ok) {
+      log(`  --from-session: the setup endpoint answered ${res.status}; playing the built-in sweep`);
+      return null;
+    }
+    raw = await res.json();
+  } catch (err) {
+    log(`  --from-session: could not read the staged setup (${String(err)}); playing the built-in sweep`);
+    return null;
+  }
+  if (typeof raw !== "object" || raw === null) {
+    log("  --from-session: this session was staged without a console setup; playing the built-in sweep");
+    return null;
+  }
+
+  const o = raw as Record<string, unknown>;
+  const arcade = (o["arcade"] ?? {}) as Record<string, unknown>;
+  const rawPlan = arcade["plan"];
+  const rounds = Array.isArray(rawPlan) ? rawPlan.filter((k): k is string => typeof k === "string") : [];
+
+  const timings: Record<string, number> = {};
+  const t = arcade["timings"];
+  if (typeof t === "object" && t !== null) {
+    for (const [k, v] of Object.entries(t as Record<string, unknown>)) {
+      if (typeof v === "number" && Number.isFinite(v) && v > 0) timings[k] = Math.round(v);
+    }
+  }
+
+  // The first holding card, which is what the runbook's holding step shows.
+  let holding: { title: string; line: string } | null = null;
+  const cards = ((o["cards"] ?? {}) as Record<string, unknown>)["cards"];
+  if (Array.isArray(cards) && cards.length > 0) {
+    const first = cards[0] as Record<string, unknown>;
+    if (typeof first["title"] === "string") {
+      holding = { title: first["title"], line: typeof first["line"] === "string" ? first["line"] : "" };
+    }
+  }
+
+  if (rounds.length === 0) {
+    log("  --from-session: the staged setup names no arcade rounds; playing the built-in sweep");
+    return null;
+  }
+  return { rounds, timings, holding };
+}
+
+/**
  * The host, as a bot rather than a script.
  *
  * The first version was a list of commands with sleeps between them, which
@@ -563,10 +636,12 @@ function sleep(ms: number): Promise<void> {
 class HostBot {
   readonly conn: Conn;
   private readonly opts: Opts;
+  private readonly staged: StagedPlan | null;
 
-  constructor(conn: Conn, opts: Opts) {
+  constructor(conn: Conn, opts: Opts, staged: StagedPlan | null = null) {
     this.conn = conn;
     this.opts = opts;
+    this.staged = staged;
   }
 
   private get state(): RenderState | null {
@@ -615,7 +690,8 @@ class HostBot {
 
     // A holding card while the off-platform thing happens. Every real run of
     // show has one, and it is the segment the phone sits on longest.
-    await this.press({ name: "holding", title: "Tabletop Exercise", line: "Back shortly" }, "holding");
+    const card = this.staged?.holding ?? { title: "Tabletop Exercise", line: "Back shortly" };
+    await this.press({ name: "holding", title: card.title, line: card.line }, "holding");
     await this.press({ name: "segment", kind: "holding" }, "seg-holding", 1_500);
 
     await this.trivia();
@@ -667,13 +743,7 @@ class HostBot {
     await this.press({ name: "segment", kind: "arcade" }, "seg-arcade", 900);
     await this.press({ name: "arcade.enter" }, "enter", 1_500);
 
-    const rounds: { round: HostCommand; note: string; budgetMs: number }[] = [
-      { round: { name: "arcade.round", kind: "recruitment", secondsPerItem: 6 }, note: "rec", budgetMs: 70_000 },
-      { round: { name: "arcade.round", kind: "plan_apply", target: 120, seconds: 20 }, note: "pa", budgetMs: 45_000 },
-      { round: { name: "arcade.round", kind: "unseal", seconds: 20 }, note: "unseal", budgetMs: 45_000 },
-      { round: { name: "arcade.round", kind: "tug_of_raft", pulls: 2, pullSeconds: 12, bpm: 100 }, note: "tug", budgetMs: 60_000 },
-      { round: { name: "arcade.round", kind: "glass_bridge", waveSeconds: [8, 7, 6] }, note: "glass", budgetMs: 90_000 },
-    ];
+    const rounds = this.roundsToPlay();
 
     for (const r of rounds) {
       await this.press(r.round, `r-${r.note}`, 900);
@@ -687,6 +757,93 @@ class HostBot {
       if (!over) await this.press({ name: "arcade.end" }, `${r.note}-end-overrun`, 1_200);
       await this.press({ name: "arcade.reveal" }, `${r.note}-reveal`, 1_500);
     }
+  }
+
+  /**
+   * Which rounds to play, and how long to give each.
+   *
+   * Without `--from-session` this is the sweep: every round, fast, so nothing
+   * goes unexercised. With it, it is the event's own plan at the event's own
+   * timings — a rehearsal of the afternoon rather than a test of the build.
+   * The two answer different questions and the default is the first, because
+   * a smoke test that skipped three rounds would be quiet about them.
+   *
+   * The budget is derived from the timings rather than fixed: a round given
+   * ninety seconds in the console needs longer than the sweep's twenty, and a
+   * budget that did not follow would end it by hand and call that a finding.
+   */
+  private roundsToPlay(): { round: HostCommand; note: string; budgetMs: number }[] {
+    const t = this.staged?.timings ?? {};
+    const n = (key: string, fallback: number): number => t[key] ?? fallback;
+    const slack = 25_000; // the card, the reveal, and a round that overruns
+
+    const build = (kind: string): { round: HostCommand; note: string; budgetMs: number } | null => {
+      switch (kind) {
+        case "recruitment": {
+          const secondsPerItem = n("secondsPerItem", 6);
+          return {
+            round: { name: "arcade.round", kind: "recruitment", secondsPerItem },
+            note: "rec",
+            // Six items, so the round is six times the per-item clock.
+            budgetMs: secondsPerItem * 6 * 1_000 + slack,
+          };
+        }
+        case "plan_apply": {
+          const seconds = n("seconds", 20);
+          return {
+            round: { name: "arcade.round", kind: "plan_apply", target: n("target", 120), seconds },
+            note: "pa",
+            budgetMs: seconds * 1_000 + slack,
+          };
+        }
+        case "unseal": {
+          const seconds = n("unsealSeconds", 20);
+          return {
+            round: { name: "arcade.round", kind: "unseal", seconds },
+            note: "unseal",
+            budgetMs: seconds * 1_000 + slack,
+          };
+        }
+        case "tug_of_raft": {
+          const pulls = n("tugPulls", 2);
+          const pullSeconds = n("tugPullSeconds", 12);
+          return {
+            round: {
+              name: "arcade.round",
+              kind: "tug_of_raft",
+              pulls,
+              pullSeconds,
+              bpm: n("tugBpm", 100),
+            },
+            note: "tug",
+            budgetMs: pulls * pullSeconds * 1_000 + slack,
+          };
+        }
+        case "glass_bridge": {
+          const waves: [number, number, number] = [n("wave1", 8), n("wave2", 7), n("wave3", 6)];
+          return {
+            round: { name: "arcade.round", kind: "glass_bridge", waveSeconds: waves },
+            note: "glass",
+            // Six steps a wave, three waves.
+            budgetMs: (waves[0] + waves[1] + waves[2]) * 6 * 1_000 + slack,
+          };
+        }
+        default:
+          // Gganbu, or something a future console offers that this does not
+          // know. Named rather than skipped silently.
+          log(`  the staged plan names a round this harness cannot drive: ${kind}`);
+          return null;
+      }
+    };
+
+    const kinds = this.staged?.rounds ?? [
+      "recruitment",
+      "plan_apply",
+      "unseal",
+      "tug_of_raft",
+      "glass_bridge",
+    ];
+    return kinds.map(build).filter((r): r is NonNullable<typeof r> => r !== null);
   }
 
   /** Seal, grant a couple of Spot Awards, then reveal — the real ending. */
@@ -968,6 +1125,7 @@ async function main(): Promise<void> {
   if (hostConn.joinedAt === null) {
     die(`  the host socket did not connect: ${hostConn.refused ?? hostConn.error ?? "silent"}`);
   }
+  await waitFor(() => hostConn.state !== null, 5_000);
 
   // The Desktop, when a token is given. It is the surface with the heaviest
   // frames — the host console and the big screen both receive a full state on
@@ -1006,7 +1164,22 @@ async function main(): Promise<void> {
     );
   };
 
-  const host = new HostBot(hostConn, opts);
+  // The staged plan, if asked for. The sid comes from `welcome`, which is why
+  // this happens after the host socket is up rather than from the arguments.
+  let staged: StagedPlan | null = null;
+  if (opts.fromSession) {
+    const sid = hostConn.state?.sid ?? null;
+    if (sid === null) {
+      log("  --from-session: no sid yet; playing the built-in sweep");
+    } else {
+      staged = await fetchStagedPlan(opts.url, sid, opts.hostToken);
+      if (staged !== null) {
+        log(`  playing the staged plan: ${staged.rounds.join(", ")}`);
+      }
+    }
+  }
+
+  const host = new HostBot(hostConn, opts, staged);
   await host.openLobby();
 
   // Everyone but the late arrivals, all at once: a QR code on a screen makes
