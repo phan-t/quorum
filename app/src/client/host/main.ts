@@ -2738,14 +2738,22 @@ const ARCADE_ROUNDS: readonly ArcadeRoundKind[] = [
  * are the joke. But a picker of six in-jokes is a picker nobody can choose
  * from, so every pill carries the game underneath its name. Each line is the
  * mechanic from SPEC.md's round table, said as the thing the player does.
+ *
+ * **Nobody is out here either.** Three of these ended "and you are out", for
+ * the reason {@link HOW_TO_PLAY} did: it is the shortest way to say what a
+ * wrong tap costs and it is not true. A drained player goes to the Lounge,
+ * backs somebody still running and can finish ahead of a cautious survivor —
+ * and the facilitator reading this pill is the one person who has to know that
+ * before the room asks them. The Lounge is named rather than explained because
+ * the console counts it two lines away: *N on the Floor · N in the Lounge*.
  */
 const ARCADE_ROUND_WHAT: Readonly<Record<ArcadeRoundKind, string>> = {
   recruitment: "Two emoji, one product name. Type it. Seven items, nobody is knocked out.",
-  plan_apply: "Tap fast while the light is green. Stop the moment it turns. Tapping on red knocks you out.",
-  unseal: "Pick a shape, then tap the scrambled letters in order. One wrong tap and you are out.",
+  plan_apply: "Tap fast while the light is green. Stop the moment it turns. Tapping on red drains you to the Lounge.",
+  unseal: "Pick a shape, then tap the scrambled letters in order. One wrong tap drains you to the Lounge.",
   tug_of_raft: "Tug of war. Two teams, one rope. Tap on the beat, and nobody is knocked out.",
   gganbu: "Paired off. Six over-or-under questions, and you bet tokens against your partner.",
-  glass_bridge: "Pick the real product feature, twice per step. Pick the fake one and you are out.",
+  glass_bridge: "Pick the real product feature, twice per step. Pick the fake one and you are drained to the Lounge.",
 };
 
 /** The round's state, as the thing that is happening in the room. */
@@ -3680,7 +3688,7 @@ function renderArcade(s: RenderState): void {
       [
         LIGHT_FACE[pa.light].sign === "PLAN"
           ? "GREEN (PLAN): taps count"
-          : "RED (APPLY): tapping knocks you out",
+          : "RED (APPLY): tapping drains you to the Lounge",
         `${pa.crossed ?? 0} finished`,
         `${pa.target} taps to finish`,
         `points banked at ${pa.checkpoints.join(" / ")}`,

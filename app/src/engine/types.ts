@@ -494,8 +494,8 @@ export type UnsealShape = "circle" | "triangle" | "star" | "umbrella";
  * One tin, as content: the scrambled letters, the word inside, and the line
  * the reveal reads out.
  *
- * `cue` is a permutation of `answer` with the letters spaced — "N E A L U S"
- * for UNSEAL — and is the only half a player ever sees. `answer` is the
+ * `cue` is a permutation of `answer` with the letters spaced — "S I P G O S"
+ * for GOSSIP — and is the only half a player ever sees. `answer` is the
  * answer, and is split away from `cue` at `startRound` for the same reason a
  * glass pane's `real` is: see {@link UnsealTin} and {@link UnsealAnswer}.
  */
@@ -732,8 +732,9 @@ export type ArcadePlay =
       readonly itemEndsAt: number;
       /**
        * Correct answers to the *current item*, in order, for the "first three"
-       * bonus — which is per item, not per round: three bonuses on each of six
-       * items is what makes the Floor max 6 × 15 = 90. Cleared by `nextItem`.
+       * bonus — which is per item, not per round: three bonuses on each of
+       * seven items is what makes the Floor max 7 × 15 = 105. Cleared by
+       * `nextItem`.
        */
       readonly solvedOrder: readonly ParticipantId[];
       /** Who has answered the current item, and whether they got it. */

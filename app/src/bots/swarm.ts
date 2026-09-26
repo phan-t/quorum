@@ -21,6 +21,7 @@
 
 import { WebSocket } from "ws";
 
+import { RECRUITMENT_ITEMS } from "../arcade/recruitment.ts";
 import type { ClientMessage, HostCommand, RenderState, ServerMessage } from "../protocol.ts";
 import { HELLO_FLOOD_LIMIT } from "../server/limits.ts";
 
@@ -934,8 +935,12 @@ class HostBot {
           return {
             round: { name: "arcade.round", kind: "recruitment", secondsPerItem },
             note: "rec",
-            // Six items, so the round is six times the per-item clock.
-            budgetMs: secondsPerItem * 6 * 1_000 + slack,
+            // Recruitment's clock is per *item*, so the round is the item
+            // clock times however many items the board has. Counted off the
+            // content rather than written down: the board went from six items
+            // to seven and a literal six here would have quietly budgeted the
+            // sweep one item short, then reported the overrun as a finding.
+            budgetMs: secondsPerItem * RECRUITMENT_ITEMS.length * 1_000 + slack,
           };
         }
         case "plan_apply": {

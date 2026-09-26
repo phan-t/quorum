@@ -468,10 +468,10 @@ export function arcadeRecruitmentFor(
   const base: ArcadeRecruitmentView = {
     at: play.at,
     of: play.items.length,
-    // SPEC: "Six items, 20 seconds each". The item has its own deadline and
-    // it is not the round's — the round's is the *last* item's — so a surface
-    // that drew `endsAt` in the item-timer slot was counting down two minutes
-    // at somebody who has twenty seconds. Absolute, like every other instant
+    // SPEC: "Six items, 20 seconds each", and the board ships seven. The item
+    // has its own deadline and it is not the round's — the round's is the *last*
+    // item's — so a surface that drew `endsAt` in the item-timer slot was
+    // counting down the whole round at somebody who has twenty seconds. Absolute, like every other instant
     // on this wire, so a frame that arrived late still lines up. Omitted
     // rather than nulled while the round card is up or at the reveal: there is
     // no item running then, and the key is simply not in the bytes.

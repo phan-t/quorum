@@ -47,9 +47,23 @@ describe("recruitment content", () => {
   });
 
   test("a cue is two emoji and no letters", () => {
-    // The answer is typed, so a letter anywhere in a cue is the answer being
-    // handed over. "tf" in a Terraform cue would be the whole item.
+    // Two, and the count was the half of this test that was missing. The round
+    // is two emoji for one product: a third picture is a third clue, and a cue
+    // that can grow is a cue that gets easier every time somebody looks at a
+    // weak one and adds to it rather than replacing it.
+    //
+    // Counted in graphemes rather than code points, because four of the seven
+    // carry a variation selector — `🛠️` is two code points and one picture, so
+    // `[...cue].length` would read 3 and be right about nothing.
+    const graphemes = new Intl.Segmenter("en", { granularity: "grapheme" });
     for (const item of RECRUITMENT_ITEMS) {
+      assert.equal(
+        Array.from(graphemes.segment(item.cue)).length,
+        2,
+        `${item.answer}'s cue is ${item.cue}, which is not two emoji`,
+      );
+      // The answer is typed, so a letter anywhere in a cue is the answer being
+      // handed over. "tf" in a Terraform cue would be the whole item.
       assert.ok(!/\p{L}/u.test(item.cue), `${item.answer}'s cue contains a letter`);
     }
   });

@@ -1925,7 +1925,8 @@ body.phone:has(.v-splash) {
 .a-tug[data-election="yes"] .a-tug-tap {
   border-color: var(--arc-staff);
 }
-.a-tug-election[hidden] {
+.a-tug-election[hidden],
+.a-tug-pull[hidden] {
   display: none;
 }
 

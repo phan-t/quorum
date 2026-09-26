@@ -532,16 +532,29 @@ export const HOUSE = {
    * the heartbeat timeout — and exactly one way to win, the Plan / Apply
    * crossing. An announcer who only speaks when somebody loses is a different
    * game from the one DESIGN.md is describing, and Unseal is where the gap was
-   * widest: cracking a tin had a line and opening one had silence.
+   * widest: cracking a tin had a line and opening one had silence. The phone
+   * says this one in its own House slot the frame the server agrees the tin is
+   * open — see `paintUnseal` in the participant's view.ts.
    *
-   * `Sealed: false` is `vault status` with the seal off. It is the joke and it
-   * is also exactly what has happened, which is the register — nothing here is
-   * invented. Split the way the crack is, and for the same reason: the phone
-   * says the half about the tin, because whoever is reading it knows whose tin
-   * it was, and the Desktop says both halves because the room does not.
+   * `Sealed: false` is what `vault status` says with the seal off, near enough
+   * to be the joke: the command lays it out as two columns — `Sealed` on the
+   * left and `false` on the right, no colon — and the colon here is this file's,
+   * because a House line is a sentence and not a table. The field and the value
+   * are Vault's, and that is the register: the line says what has happened to
+   * the tin, and no part of it is invented.
+   *
+   * **Not split the way the crack is, and that is a decision about the
+   * Desktop.** `unsealCracked` / `unsealCrack` are a pair because the big
+   * screen says who was drained; there is no `unsealOpen(n)` to match, because
+   * on that surface this round is counts and never people until the reveal —
+   * see the tins in the screen's main.ts, and `arcadeUnsealFor`, which will not
+   * send it who is fastest in a shape before the reveal either. "Player 017
+   * opened the tin", on a screen three metres from Player 017, is a result the
+   * Lounge can bet on for a certainty. The Desktop's half of this beat needs a
+   * surface that does not exist yet and a decision this line cannot make for
+   * it, so it is not written here waiting to be wired up wrongly.
    */
   unsealOpened: "Sealed: false.",
-  unsealOpen: (n: number) => `Sealed: false. ${playerName(n)} opened the tin.`,
   /**
    * DESIGN.md, verbatim, and the line the whole button is for.
    *
@@ -564,6 +577,10 @@ export const HOUSE = {
    * that committed, and in the one round where nobody is drained the entry is
    * all that was ever at stake. That is the same joke as "Elections achieve
    * nothing", told from the winning end.
+   *
+   * The phone reads it off `wins` changing, in its own slot beside the election
+   * line — see `paintTug` in the participant's view.ts. A pull that ends level
+   * moves neither number and is announced as nothing: there is no side to name.
    */
   tugPullWon: (side: 0 | 1) =>
     `Side ${side === 0 ? "A" : "B"} has the rope. The entry is committed.`,
@@ -1231,10 +1248,10 @@ export function latestCheckpoint(
 /**
  * When the *current Recruitment item* closes, as an absolute epoch.
  *
- * SPEC.md gives Recruitment "six items, 20 seconds each", and an item timer
- * means the item: the round's `endsAt` is the *last* item's deadline, so
- * drawing it in this slot counted two and a half minutes down at somebody who
- * had twenty seconds, six times in a row.
+ * SPEC.md gives Recruitment "six items, 20 seconds each" and the board ships
+ * seven of them, and an item timer means the item: the round's `endsAt` is the
+ * *last* item's deadline, so drawing it in this slot counted the whole round
+ * down at somebody who had twenty seconds, once for every item.
  *
  * Null when no item is running — the round card and the reveal — because the
  * server omits the key there rather than nulling it, and a timer with nothing

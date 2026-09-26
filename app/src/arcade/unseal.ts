@@ -70,11 +70,21 @@
  *
  * Eleven words with almost nothing to verify in them: each is a term of art or
  * a product name rather than a fact, so there is no date, no branding and no
- * acquisition to be wrong about. The two that do make a claim make a small
- * one — SERF is the library Consul and Nomad build membership on, and
- * `terraform taint` really is deprecated in favour of `-replace` — and neither
+ * acquisition to be wrong about. The claims that are made are small ones —
+ * SERF is the library Consul and Nomad build membership on, and
+ * `terraform taint` really is deprecated in favour of `-replace` — and none
  * names a version, because a version number is a second fact to be wrong about
  * in front of a room that would know.
+ *
+ * A product name is not as safe as it looks, though, and two of these proved
+ * it. WAYPOINT's note said "one command from source to a running URL", which
+ * describes Waypoint Community Edition — archived in January 2024 and no longer
+ * actively maintained — rather than the HCP Waypoint that ships, whose shape is
+ * templates, add-ons and actions. BOUNDARY's said "no key changes hands", which
+ * is true of credential injection and not of credential brokering, where a
+ * credential is fetched and handed to the user. Both read perfectly well aloud,
+ * which is the problem with both: a word whose note is a sentence about a
+ * product needs the same check as a word whose note is a date.
  *
  * The notes are the same shape as the existing six: one line, what the thing
  * is, with the joke where the word has one.
@@ -189,13 +199,13 @@ export const UNSEAL_ITEMS: readonly UnsealItem[] = [
     shape: "star",
     cue: "R D Y N A O U B",
     answer: "BOUNDARY",
-    note: "A target, a host set, and a session with a beginning and an end. No key changes hands.",
+    note: "A target, a host set, and a session with a beginning and an end. With credentials injected, the user never sees the one that let them in.",
   },
   {
     shape: "star",
     cue: "P T W O N Y I A",
     answer: "WAYPOINT",
-    note: "One command from source to a running URL. The part of the platform the developer is meant to see.",
+    note: "Templates, add-ons and actions a platform team publishes. The part of the platform the developer is meant to see.",
   },
   {
     shape: "star",

@@ -655,8 +655,8 @@ export class SessionRuntime {
    *
    * - **the light**, because the durations are random and the engine has no
    *   randomness;
-   * - **the item**, because Recruitment's six items are twenty seconds each,
-   *   nobody should have to press a button six times to run them, and an item
+   * - **the item**, because Recruitment's seven items are twenty seconds each,
+   *   nobody should have to press a button seven times to run them, and an item
    *   everybody has already answered is over before its twenty seconds are;
    * - **the step**, because the Glass Bridge is eighteen deadlines — six
    *   steps for each of three waves — and a host pressing a button eighteen
@@ -842,7 +842,7 @@ export class SessionRuntime {
     const eligible = arcadeEligible(this.state);
     // Nobody is not everybody: a host who opens Recruitment before the room has
     // joined is waiting for people, not watching them finish, and zero of zero
-    // would run all six items out in twelve seconds. `>=` rather than `===`
+    // would run the whole board out in a couple of seconds. `>=` rather than `===`
     // because kicking someone who had already answered takes them out of the
     // total without taking them out of `answered`.
     const everybody = eligible > 0 && Object.keys(play.answered).length >= eligible;
@@ -1075,10 +1075,11 @@ export class SessionRuntime {
    * The Floor's close — for the rounds the Floor's clock actually owns.
    *
    * Recruitment's is owned by the item timer instead, and only one of them may
-   * own it. Six items are twenty seconds *each*, and each one opens a little
+   * own it. Seven items are twenty seconds *each*, and each one opens a little
    * after its predecessor's deadline because the timer that opened it ran
-   * late; the round therefore ends a little after `beginPlay + 6 × 20 s`, by
-   * the accumulated lag. Armed as well, the Floor timer fired at the nominal
+   * late; the round therefore ends a little after `beginPlay + 7 × 20 s`, by
+   * the accumulated lag — sooner than that whenever an item closed early
+   * because the room had finished it. Armed as well, the Floor timer fired at the nominal
    * instant and ended the round while the last item still had its tail to run
    * — the last item, every time, and only the last item. The item timer ends
    * the round on the last item (see {@link #armItemTimer}) and `nextItem`

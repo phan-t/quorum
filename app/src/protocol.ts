@@ -277,7 +277,7 @@ export type HostCommand =
    * `{ kind: "plan_apply", secondsPerItem: 20 }` should not be a thing the
    * wire can express.
    *
-   * The content — the six emoji items — is *not* on this command. It lives on
+   * The content — the seven emoji items — is *not* on this command. It lives on
    * the server and is attached when the event is built, so a console cannot
    * choose what the answers are and the answers never travel towards a phone.
    */
@@ -287,7 +287,7 @@ export type HostCommand =
    * The Glass Bridge. Only the three step timers are the host's to set.
    *
    * The eighteen panes are *not* on this command, for the reason Recruitment's
-   * six items are not: the content lives on the server, is attached when the
+   * seven items are not: the content lives on the server, is attached when the
    * event is built, and therefore never travels towards a browser. Here that
    * is not merely tidy — the steps carry `real` and both reveal notes, so a
    * round config on the wire would be the answer key leaving the server on a

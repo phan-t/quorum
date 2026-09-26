@@ -1624,10 +1624,20 @@ describe("sixty bots play Recruitment and Plan / Apply", () => {
     // Every milestone used to be `to: "all"` as well, and every `to: "all"`
     // state broadcast also forced a roster resend — a second full frame on
     // every socket, and for the host a second whole RenderState rather than a
-    // delta. These four numbers are the measurement this change was made
-    // against: 11 600 state frames and 11 580 roster frames to the phones over
-    // a 75 s Floor with sixty players, about 118 MB at the frame size below,
-    // roughly 300 frames a second.
+    // delta. These four numbers are what that costs on *this* Floor: 11 600
+    // state frames and 11 580 roster frames to the phones over a 75 s Floor
+    // with sixty players, about 118 MB at the frame size below, roughly 300
+    // frames a second.
+    //
+    // They are re-measured rather than inherited, and it is worth saying why so
+    // that nobody reads them as the original observation. The roster-resend fix
+    // was argued against a Floor of a slightly different shape: Recruitment had
+    // six items, and this file drew its whole arcade from one PRNG stream in
+    // round order, so the number of emoji items decided where Plan / Apply's
+    // taps, slips and bets began. Seven items and a stream of Plan / Apply's own
+    // moved every absolute count in this test. The claim is the ratio at the
+    // bottom, which did not move; these four are only good for the Floor
+    // `SCHEDULE` and `PLAN_SEED` describe, and they change when it does.
     const wasAll = roomWide + pa.milestones;
     const before = {
       participantState: wasAll * n + ownBets,

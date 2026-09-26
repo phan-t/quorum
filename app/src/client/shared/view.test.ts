@@ -685,13 +685,17 @@ describe("the House when somebody wins", () => {
    */
   it("has a line for the tin coming open", () => {
     assert.equal(HOUSE.unsealOpened, "Sealed: false.");
-    assert.equal(HOUSE.unsealOpen(17), "Sealed: false. Player 017 opened the tin.");
     // `vault status` with the seal off, which is the joke and is also literally
-    // what happened. Split the way the crack is: the half without a player
-    // number in it is the phone's, because whoever reads it knows whose tin it
-    // was, and the Desktop says both halves because the room does not.
+    // what happened.
+    //
+    // *Not* split the way the crack is. The crack has a named half because the
+    // big screen says who was drained; this round's Desktop is counts and never
+    // people until the reveal, so there is no `unsealOpen(n)` to pair with, and
+    // a "Player 017 opened the tin" catalogued here with nowhere to go is a line
+    // that gets wired onto that surface by somebody who did not read why it
+    // must not be. The phone says this one; see `paintUnseal`.
     assert.ok(!HOUSE.unsealOpened.includes("Player"));
-    assert.ok(HOUSE.unsealOpen(17).startsWith(HOUSE.unsealOpened));
+    assert.ok(!("unsealOpen" in HOUSE), "the Desktop's half needs a surface first");
     assert.ok(HOUSE.unsealCrack(17).startsWith(HOUSE.unsealCracked));
   });
 

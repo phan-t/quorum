@@ -276,7 +276,7 @@ interface MockAnswer {
  * projection could never find it.
  *
  * The *content* is imported, though, because content is not a rule: a second
- * copy of the same six emoji items is how one of them silently rots.
+ * copy of the same seven emoji items is how one of them silently rots.
  */
 interface MockLounge {
   backing: string | null;
@@ -4337,9 +4337,23 @@ class MockHub {
       this.#beginPlay();
       this.#broadcastState();
     });
-    // Six items at four seconds each; the item timer walks them and ends the
-    // round on its own, exactly as the server's does.
-    this.#at(100, () => {
+    // Seven items at four seconds each, so the Floor that opened at 75 runs to
+    // 103 and the item timer walks it and ends the round on its own, exactly as
+    // the server's does.
+    //
+    // This is only the net for an item timer that never fired, which is why it
+    // has to sit *after* the last item rather than near it: at 100 it ran while
+    // the round was still live, found a phase that was not idle, and returned —
+    // a guard that could not fire on the one occasion it exists for.
+    //
+    // It also leaves the reveal two seconds before Plan / Apply's card at 106,
+    // where six items left it six, and two seconds is under DESIGN.md's four
+    // second dwell floor. Not fixed by moving this line, which would only put
+    // the net back inside the round: the whole block from 106 on would have to
+    // shift, and the demo's timings are one chain. Left as it is deliberately,
+    // because a demo that hurries one reveal is a smaller thing than nineteen
+    // re-timed beats in the file another session is working in.
+    this.#at(104, () => {
       if (this.session.arcadePhase !== "idle") return;
       this.session.arcadePhase = "reveal";
       this.#broadcastState();

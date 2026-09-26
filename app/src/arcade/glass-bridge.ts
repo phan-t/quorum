@@ -71,6 +71,15 @@
  * about, read out to the room as confidently as the first, and the round does
  * not need it to be funny or to teach anything.
  *
+ * Nor does a note say more about the feature than its page does, which is a
+ * separate failure and the one a real pane invites: Autopilot's note said that
+ * new servers are "introduced one at a time", which sounds like the thing a
+ * feature called Autopilot would do and is not on the page. What the page
+ * documents is a stabilization period — a new server has to stay healthy for
+ * it before it becomes a voter — so that is what the note says now. A real
+ * pane is read out to the room as the fact, and an embellishment on the true
+ * pane is worth as little as a wrong pane.
+ *
  * ## The fakes
  *
  * Each invented name is built out of vocabulary that *is* real for that
@@ -173,7 +182,7 @@ export const GLASS_BRIDGE_STEPS: readonly GlassStep[] = [
       },
       {
         label: "Consul Autopilot",
-        note: "Dead servers cleaned out of the Raft peer set, and new ones introduced one at a time: consul operator autopilot.",
+        note: "Dead servers cleaned out of the Raft peer set, and a new server that has not stayed healthy for its stabilization time is not a voter yet: consul operator autopilot.",
       },
     ],
     real: 1,

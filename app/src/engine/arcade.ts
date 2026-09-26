@@ -46,13 +46,14 @@ import type {
  * SPEC.md: "Every correct answer within the timer scores 10".
  *
  * **This is the largest number in the arcade, and it is a decision rather than
- * an accident.** Six items at 10 + 5 is a Floor max of 90. On the running
- * order the event actually uses — Recruitment, Plan / Apply, the Bridge — the
- * Floor can pay 90 + 40 + 63 = 193, so Recruitment is 47% of it, and it is the
- * round that asks the least: six product names an SA knows cold, with the +5
- * going to the first three in the room *per item*. That makes it a typing race
- * rather than a quiz, and two or three emoji typed quickly outweigh a whole
- * honest tin in Unseal.
+ * an accident.** Seven items at 10 + 5 is a Floor max of 105 — SPEC.md's table
+ * counts six and therefore says 90, and arcade/recruitment.ts argues the
+ * seventh. On the running order the event actually uses — Recruitment,
+ * Plan / Apply, the Bridge — the Floor can pay 105 + 40 + 63 = 208, so
+ * Recruitment is 50% of it, and it is the round that asks the least: seven
+ * product names, six of which an SA knows cold, with the +5 going to the first
+ * three in the room *per item*. That makes it a typing race rather than a quiz,
+ * and two or three emoji typed quickly outweigh a whole honest tin in Unseal.
  *
  * The case for leaving it there is SPEC.md's own: "round one sets whether
  * people think they can win", it is the round that hands out the player
@@ -62,7 +63,7 @@ import type {
  *
  * Nobody has chosen between those, so the pair is named and asserted rather
  * than quietly tuned. The retune is this line: at 5 the round is
- * 6 × (5 + 5) = 60 and its share of the same three falls to 60 / 163 = 37%.
+ * 7 × (5 + 5) = 70 and its share of the same three falls to 70 / 173 = 40%.
  * arcade.test.ts holds the ceilings and the ratio, so either number moving
  * fails a test that prints the arithmetic instead of passing in silence.
  */

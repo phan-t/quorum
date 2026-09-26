@@ -56,6 +56,26 @@
  * encryption as a service" is a slide, and it was the only copy in the arcade
  * not in voice. They now say the true thing about the product and then the dry
  * thing about it, which is what every other note in the arcade does.
+ *
+ * A note is a fact read out to a room that would know, so the true half of each
+ * one is checked against the product's current documentation and not against
+ * what the product used to be. Two of them failed that on the first pass and
+ * are worth naming, because both failures are the kind a fluent sentence hides:
+ *
+ * - Waypoint's said "build, deploy and release from one command", which is
+ *   Waypoint Community Edition — a repository archived in January 2024 and
+ *   described by its own README as no longer actively maintained. HCP Waypoint
+ *   is the product that ships, and it is a different shape: a platform team
+ *   defines templates, add-on definitions and actions, and an application team
+ *   helps itself. The seventh item is the one item on the board whose product
+ *   the room may not use daily, which is exactly why its note had to be the
+ *   most careful rather than the least.
+ * - Boundary's said "nothing is handed out, so there is nothing to rotate".
+ *   That is credential *injection*, where the worker authenticates to the
+ *   target and "the user never sees the credential". Boundary also brokers,
+ *   which fetches a credential and returns it to the user, so the note was a
+ *   good line about half the product stated as though it were the whole of it.
+ *   What survives is the part that is true either way: the address.
  */
 
 import type { ArcadeRoundConfig, EmojiItem } from "../engine/types.ts";
@@ -94,7 +114,7 @@ export const RECRUITMENT_ITEMS: readonly EmojiItem[] = [
     cue: "🗺️🚩",
     answer: "Waypoint",
     accept: [],
-    note: "Build, deploy and release from one command. Somewhere you pass through, not somewhere you stop.",
+    note: "Templates and add-ons a platform team publishes so that nobody has to ask them for an environment. Somewhere you pass through, not somewhere you stop.",
   },
   {
     cue: "🎒📦",
@@ -106,7 +126,7 @@ export const RECRUITMENT_ITEMS: readonly EmojiItem[] = [
     cue: "🚧📍",
     answer: "Boundary",
     accept: [],
-    note: "Access to hosts you are never given the address of. Nothing is handed out, so there is nothing to rotate.",
+    note: "Access to hosts you are never given the address of. You ask for the target by name, and the network stays none of your business.",
   },
   {
     cue: "🏕️🐪",

@@ -1314,8 +1314,9 @@ function sceneArcade(ctx: SceneCtx): Scene {
   /**
    * The item clock, counted to the instant the server named.
    *
-   * SPEC.md gives Recruitment six items at twenty seconds each, and this slot
-   * used to draw `arcade.endsAt` — the whole round — so it read 00:17, 00:15,
+   * SPEC.md gives Recruitment six items at twenty seconds each and the board
+   * ships seven, and this slot used to draw `arcade.endsAt` — the whole round
+   * — so it read 00:17, 00:15,
    * 00:12 straight through an item change and told nobody how long they had
    * to type. Always an absolute epoch against the corrected clock, never a
    * duration: a phone that got the frame late still stops at the same instant.
@@ -1383,6 +1384,7 @@ function sceneArcade(ctx: SceneCtx): Scene {
     unsealOpen = false;
     unsealExit = null;
     docsSaid = false;
+    openedSaid = false;
     unsealHouse.node.hidden = true;
     unsealPicker.dataset["sig"] = "";
     unsealSolved.dataset["sig"] = "";
@@ -1395,6 +1397,8 @@ function sceneArcade(ctx: SceneCtx): Scene {
     tugLocalBeat = -1;
     tugElectionSaid = 0;
     tugElectionLine.node.hidden = true;
+    tugWins = [0, 0];
+    tugPullLine.node.hidden = true;
   };
   const planNode = h("div", { class: "a-plan" }, [
     bar,
@@ -1954,6 +1958,8 @@ function sceneArcade(ctx: SceneCtx): Scene {
   let unsealExit: string | null = null;
   /** The docs line, said once per round rather than on every repaint. */
   let docsSaid = false;
+  /** …and the same for the line that says the tin came open. */
+  let openedSaid = false;
 
   const unsealRound = (): number =>
     Number(unsealNode.dataset["round"] ?? "-1");
@@ -2164,6 +2170,26 @@ function sceneArcade(ctx: SceneCtx): Scene {
       setText(announce, HOUSE.unsealDocs);
     }
 
+    // The tin came open: *Sealed: false.*
+    //
+    // The round narrated one of its two endings. Cracking a tin put a line on
+    // this screen and on the big one; getting a word out put a number in a
+    // total and said nothing at all, which is a House that only speaks when
+    // somebody loses. So it goes in the same slot the docs line uses, and it
+    // goes in second on purpose: a player who read the docs and then finished
+    // has had the halving said to them once already, and the last thing this
+    // slot holds should be the thing that just happened.
+    //
+    // Said once and left up. By the time it appears the letters are gone and
+    // there is nothing underneath it to be in the way of, and a repaint that
+    // re-set it would re-announce it to a screen reader on every frame.
+    if (unsealed && !openedSaid) {
+      openedSaid = true;
+      unsealHouse.node.hidden = false;
+      unsealHouse.set(HOUSE.unsealOpened);
+      setText(announce, HOUSE.unsealOpened);
+    }
+
     setText(
       unsealStatus,
       cue === null
@@ -2218,10 +2244,22 @@ function sceneArcade(ctx: SceneCtx): Scene {
   const tugStatus = h("p", { class: "a-tug-status" });
   const tugElectionLine = houseSlot("a-tug-election");
   tugElectionLine.node.hidden = true;
+  /**
+   * The pull that just closed, which the round had no line for at all.
+   *
+   * Its own slot rather than the election's, because the two are about
+   * different things and both can be true at once: a node can be sitting out
+   * an election it called on the beat the rope came down. The election line is
+   * driven from the animation frame and is hidden the instant the election
+   * ends; a result stays up until there is another one.
+   */
+  const tugPullLine = houseSlot("a-tug-pull");
+  tugPullLine.node.hidden = true;
   const tugNode = h("div", { class: "a-tug" }, [
     tugHead,
     playRule(PLAY_RULE.tug_of_raft),
     tugRopeBar,
+    tugPullLine.node,
     tugElectionLine.node,
     tugButton,
     keyHint(KEY_HINT.tug),
@@ -2238,6 +2276,8 @@ function sceneArcade(ctx: SceneCtx): Scene {
   let tugPull = -1;
   /** Whether the election line has been said for the election in force. */
   let tugElectionSaid = 0;
+  /** Pulls won per side as of the last frame, so a change is a result. */
+  let tugWins: readonly [number, number] = [0, 0];
   let swallowTugClick = false;
 
   const pullOnce = (): void => {
@@ -2343,6 +2383,26 @@ function sceneArcade(ctx: SceneCtx): Scene {
       tugLocalBeat = -1;
       tugElectionSaid = 0;
     }
+    // *Side A has the rope. The entry is committed.*
+    //
+    // Read off `wins` and not off the rope: the rope is a running difference
+    // inside a pull, and the thing worth saying is the pull that closed. The
+    // frame that carries the result is the one that starts the next pull, or
+    // for the last pull the one that ends the round, so this is the same
+    // reading either way and needs no notion of "between pulls".
+    //
+    // A pull that ended level increments neither side and is announced as
+    // nothing. The House does not narrate a draw: there is no side to name,
+    // and "nobody has the rope" is a joke about the round rather than the
+    // round's own voice.
+    if (t.wins[0] > tugWins[0] || t.wins[1] > tugWins[1]) {
+      const won: 0 | 1 = t.wins[0] > tugWins[0] ? 0 : 1;
+      const line = HOUSE.tugPullWon(won);
+      tugPullLine.node.hidden = false;
+      tugPullLine.set(line);
+      setText(announce, line);
+    }
+    tugWins = t.wins;
     const left = remainingMs(t.pullEndsAt ?? null, ctx.now());
     setText(
       tugHead,
