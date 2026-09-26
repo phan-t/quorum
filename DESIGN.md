@@ -345,12 +345,15 @@ lucky part of this whole exercise.
   those 75 seconds — the light covers the grid, and without the ticker the only
   public reads of the longest Floor round are `PLAN`, `LOCKED` and *N of M
   across*, none of which says who is on 90 and who is on 30. It carries no
-  background of its own, sits clear of the centred sign and out of the drain
-  log's way at the bottom, and drops a runner the moment they are drained: the
-  wipe and the word are the round's safety signal and nothing may be laid over
-  them. SPEC.md already treats the finish order here as a public surface, and
-  progress is that surface a few seconds earlier — a runner on 119 has not
-  crossed.
+  background of its own and sits clear of the centred sign and out of the drain
+  log's way at the bottom, because the wipe and the word are the round's safety
+  signal and nothing may be laid over them. Separately, it drops a runner the
+  moment they are drained: their count froze when they were caught, and a frozen
+  90 at the top of a live list is a lie about who is about to cross. The phone's
+  Lounge card keeps the same rule from the other end, in the past tense —
+  *Drained at pane 3 of 3* — because it is drawn under a chip that stays.
+  SPEC.md already treats the finish order here as a public surface, and progress
+  is that surface a few seconds earlier — a runner on 119 has not crossed.
 - **The Front-End Man.** All announcer copy is set in Plex Mono, purple,
   with a `>` prompt, on the Desktop and the phone, like a terminal
   speaking. No face, no figure. The prompt is the character.
@@ -455,7 +458,7 @@ Every round has a single interaction and the phone shows only that:
 | Tug of Raft | A pulsing ring at 100 bpm, the whole lower half is the tap target, a strip showing your side's colour and the rope position |
 | Gganbu | Prompt in body type, `OVER` / `UNDER` as two tall tiles, a 1–5 wager stepper under them, your rival's name and tokens as a mono line at the top |
 | Glass Bridge | Two tall panes with the two names, `LEFT` / `RIGHT`; a six-step track at the top showing where you are and which panes broke for earlier waves |
-| Lounge | Gold. The list of the Floor as tappable chips with player number and nickname, your backed player pinned at the top **with their progress under it** — resources against the target in Plan / Apply, the pane they are standing on the Bridge — and the Desktop's grid mirrored small underneath so you can watch without looking up |
+| Lounge | Gold. The list of the Floor as tappable chips with player number and nickname, your backed player pinned at the top **with their progress under it** — resources against the target in Plan / Apply, the pane they are standing on the Bridge, and the past tense once they are drained, because the bet stands and so does the chip — and the Desktop's grid mirrored small underneath so you can watch without looking up |
 
 The Lounge screen is designed with more care than any Floor screen, because
 by the end of the arcade more people will have spent time in it than in any

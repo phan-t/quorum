@@ -707,6 +707,66 @@ describe("the backed runner's line on the Lounge card", () => {
     assert.deepEqual(got, { line: "Across · 3 of 3 panes", fraction: 1 });
   });
 
+  it("says the backed runner fell, rather than leaving them standing on a pane", () => {
+    // The engine does not clear the seat when its runner drains — the bet has
+    // to stand to be settled — and the chip is drawn from the whole grid, so
+    // before this the phone told a backer their runner was standing on a pane
+    // for the rest of a round they had fallen out of. p2 is drained on 0 steps,
+    // which is a fall at the first pane.
+    const got = backedProgress(bridgeArcade(), mine({ backing: "p2" }));
+    assert.deepEqual(got, { line: "Drained at pane 1 of 3", fraction: null });
+  });
+
+  it("drops the bar with the runner, because a stopped bar reads as a moving one", () => {
+    // The same rule the big screen's ticker follows when it drops a drained
+    // runner: a fraction is a live reading, and there is nothing live left.
+    const g = glass({ position: { p1: 3, p2: 0, p3: 2, p4: 0 } });
+    const grid = bridgeArcade(g).grid.map((c) =>
+      c.pid === "p3" ? { ...c, standing: "drained" as const, struck: true } : c,
+    );
+    const got = backedProgress({ ...bridgeArcade(g), grid }, mine({ backing: "p3" }));
+    assert.deepEqual(got, { line: "Drained at pane 3 of 3", fraction: null });
+  });
+
+  it("does not stand a waiting wave on pane 1 before they have walked on", () => {
+    // p5 is wave 3 with wave 2 crossing, so `position` has no entry for them
+    // yet — which is nought, which would have read as pane 1 of 3. The Lounge
+    // bets only on a later wave, so this is the state every Lounge bet on this
+    // bridge starts in.
+    const got = backedProgress(bridgeArcade(), mine({ backing: "p5" }));
+    assert.deepEqual(got, { line: "Wave 3 · not on the bridge yet", fraction: 0 });
+  });
+
+  it("stands the crossing wave on pane 1 at nought, because that one is true", () => {
+    // The other side of the same test: p4 is in the wave on the bridge and has
+    // completed no steps, so pane 1 is the pane they are deciding.
+    const got = backedProgress(bridgeArcade(), mine({ backing: "p4" }));
+    assert.deepEqual(got, { line: "Standing on pane 1 of 3", fraction: 0 });
+  });
+
+  it("says the backed runner was drained in Plan / Apply too", () => {
+    // The Lounge's chip list hides a drained runner during this round, so no
+    // phone reaches this today; the line is in the past tense anyway rather
+    // than resting on a filter two files away.
+    const a = arcade({ planApply });
+    const got = backedProgress(
+      a,
+      mine({ backing: "p2", planApply: { resources: 40, backedResources: 90 } }),
+    );
+    assert.deepEqual(got, { line: "Drained at 90 resources", fraction: null });
+  });
+
+  it("says nothing about a runner who has left the room", () => {
+    // A kicked or released player is out of the grid, and both chips that draw
+    // this line look their runner up there as well, so a line would be a line
+    // under nothing.
+    const got = backedProgress(
+      arcade({ planApply }),
+      mine({ backing: "gone", planApply: { resources: 40, backedResources: 90 } }),
+    );
+    assert.equal(got, null);
+  });
+
   it("says nothing while the round card is up, because the board is not on the wire yet", () => {
     // The server omits `position` until the Floor opens, and a zero drawn
     // against a card nobody has walked on is a zero presented as progress.

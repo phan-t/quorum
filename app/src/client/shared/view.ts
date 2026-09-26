@@ -1301,6 +1301,13 @@ export interface BackedProgress {
  * on a participant's frame, because a step only becomes an answer once the
  * break above it is published and by then it is public anyway.
  *
+ * Every line is checked against the runner's standing first, because a bet is
+ * not cleared when its runner is drained: it has to stand in order to be
+ * settled. A drained runner gets the past tense and loses the bar, which is the
+ * same rule the big screen's ticker follows when it drops them — a count or a
+ * pane that has stopped moving, drawn as though it had not, is a lie about
+ * somebody who is already in the Lounge.
+ *
  * Null for every other round, and for a phone that has not placed a bet. Unseal
  * is deliberately among them: how far into a word somebody has got is a prefix
  * of that word, and the server does not send it to the room for that reason.
@@ -1312,9 +1319,30 @@ export function backedProgress(
   const backing = mine.backing ?? null;
   if (backing === null) return null;
 
+  // The runner's own cell, because a bet outlives the runner. Nothing clears
+  // the seat when the person it names is drained — the bet has to stand in
+  // order to be settled at the reveal — so every line below is drawn about
+  // somebody who may already be out, and the standing is the only thing on the
+  // wire that says so. Without this read the phone tells a backer their runner
+  // is "standing on pane 2" for the rest of a round they fell out of, which is
+  // the one thing this line exists to stop happening.
+  //
+  // Null for a runner with no cell at all: they were kicked or released, both
+  // chips that draw this line find their runner in the grid too, and a line
+  // under a chip that is not there is a line about nobody.
+  const cell = arcade.grid.find((c) => c.pid === backing);
+  if (cell === undefined) return null;
+  const drained = cell.standing === "drained";
+
   const pa = arcade.planApply;
   const resources = mine.planApply?.backedResources;
   if (pa !== undefined && resources !== undefined) {
+    // The count froze when they were caught, so it is said in the past tense
+    // and the bar comes off: a fraction still sitting at three quarters is the
+    // same lie the big screen's ticker refuses to tell when it drops a drained
+    // runner. The Lounge's own chip list already hides a drained runner during
+    // this round, so this is the function declining to depend on that.
+    if (drained) return { line: `Drained at ${resources} resources`, fraction: null };
     const { fraction } = resourceBar(pa, resources);
     return {
       // Across is the news, so it is the word rather than "120 of 120" — which
@@ -1334,11 +1362,29 @@ export function backedProgress(
   // would be a zero presented as progress.
   if (glass !== undefined && glass.position !== undefined && glass.of > 0) {
     const done = glass.position[backing] ?? 0;
+    // `position` is steps *completed*, so a fall at the step they were facing
+    // leaves it where it was and the pane they went through is that plus one.
+    // Named rather than left blank because it is the one piece of news a backer
+    // is waiting for, and it is public already: the strike is on the grid and
+    // the drain log says the pane out loud over the light.
+    if (drained) {
+      return { line: `Drained at pane ${done + 1} of ${glass.of}`, fraction: null };
+    }
+    if (done >= glass.of) {
+      return { line: `Across · ${glass.of} of ${glass.of} panes`, fraction: 1 };
+    }
+    // A later wave has not walked on yet, and `position` has no entry for them
+    // until they do — which reads as nought, which would read as "standing on
+    // pane 1". The Lounge only ever bets on a later wave, so this is the state
+    // every one of those bets starts in and it lasts until their wave is
+    // called. The wave number is on the big screen beside the two cuts, so it
+    // is what the room is already using to work out whose turn is next.
+    const wave = waveOfNumber(cell.playerNumber, glass.waveCuts);
+    if (wave > glass.wave) {
+      return { line: `Wave ${wave} · not on the bridge yet`, fraction: 0 };
+    }
     return {
-      line:
-        done >= glass.of
-          ? `Across · ${glass.of} of ${glass.of} panes`
-          : `Standing on pane ${done + 1} of ${glass.of}`,
+      line: `Standing on pane ${done + 1} of ${glass.of}`,
       fraction: Math.min(1, done / glass.of),
     };
   }
