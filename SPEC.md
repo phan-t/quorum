@@ -760,16 +760,21 @@ The pairing is mostly presentation — everyone answers the same prompts — but
 named rival is what makes a wager feel like a wager, and the *gganbu* card on
 the round intro is the one Squid Game reference every single person will get.
 
-Six Over/Under items ship as launch content, each carrying a note, and three
-are flagged VERIFY with the same discipline the trivia bank applies to dates.
+Six Over/Under items ship as launch content, each carrying a note, and every
+one is flagged VERIFY with the same discipline the trivia bank applies to
+dates.
 
 **The flag marks what can move, not what is doubted.** In the trivia bank that
-is usually a date; here it is two config defaults — Vault's max lease TTL and
-Consul's maximum KV value size — and the one date whose recording is genuinely
-contested, Terraform 0.12's year, which has a public preview in one year and a
-release in the next. A release can change a default silently. Nomad's 2015 and
-Vault 1.0's 2018 are settled history a clear year from their thresholds, so
-nothing about them can move and neither carries a flag.
+is usually a date. Here every prompt is a product configuration default —
+Terraform's parallelism, Vault's max lease TTL and request deadline, Consul's
+check interval and KV value ceiling, Nomad's default task CPU — and a release
+can change any of them without announcing it. So all six carry the flag.
+
+It was three when half the bank was release years. Those are gone: a year is
+either known or guessed, and neither produces the hesitation a wager needs,
+which made them the weaker half. Flagging three of six now would mean choosing
+which three to stop checking, and there is no such three — a flag spent on a
+chosen few tells the next reader the rest are settled.
 
 **A certainty is a bug in this round, not a safe choice.** A prompt every
 player knows produces the minimum wager from both halves of the pair and a tie,

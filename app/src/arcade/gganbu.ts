@@ -13,7 +13,8 @@
  * most of these cold, so a prompt whose answer is wrong is not a small
  * failure: it is the one failure the round has. SPEC.md asks for six items
  * "each carrying a note", with "three flagged VERIFY exactly as the trivia
- * bank flags dates".
+ * bank flags dates" — see "Why all six carry the flag" below for why the
+ * count grew when the dates left.
  *
  * ## A certainty is a bug in this round, not a safe choice
  *
@@ -35,22 +36,20 @@
  *   carry "about twenty". The threshold sits between the two beliefs.
  * - **Max lease TTL, over/under 720.** 720 hours is thirty days, which is the
  *   round number everybody's mental model rounds to. The default is 768.
+ * - **check_update_interval, over/under 1 minute.** The name sounds like a
+ *   health-check interval, which would be seconds; it is the interval on the
+ *   *output* of an unchanged check, which is minutes.
+ * - **Nomad's default task CPU, over/under 250 MHz.** A room that has written
+ *   a job file remembers setting `cpu`, not what happens when you do not.
  * - **KV value size, over/under 1024.** The two candidate answers a room will
  *   offer are half a megabyte and a megabyte, and the threshold is exactly the
  *   second one.
- * - **Nomad's first release, over/under 2016.** Nomad reads as a reaction to
- *   the orchestrator era and is routinely placed a year or two later than it
- *   belongs.
- * - **Terraform 0.12, over/under 2018.** The HCL rewrite was public and
- *   heavily written about in 2018 and shipped in 2019, so the honest answer
- *   depends on which event you filed as the release.
- * - **Vault 1.0, over/under 2017.** Vault was in serious production use for
- *   years before it called itself 1.0, so an earlier year feels right; the
- *   1.0 announcement itself describes "nearly four years" of work behind it.
+ * - **max_request_duration, over/under 60.** A minute is the number people
+ *   reach for on any request deadline. It is ninety seconds.
  *
  * ## Verified
  *
- * Every answer below was checked against a published source on **26 September
+ * Every answer below was checked against a published source on **27 September
  * 2026**, the way the trivia bank records its ✅ Verified questions. Folklore
  * was not accepted for any of them:
  *
@@ -58,52 +57,40 @@
  *   reference, developer.hashicorp.com: "Limit the number of concurrent
  *   operations as Terraform walks the graph. Defaults to 10."
  * - Vault's `default_lease_ttl` and `max_lease_ttl` both default to
- *   **"768h"** — Vault server configuration reference,
- *   developer.hashicorp.com.
+ *   **"768h"** — Vault server configuration reference.
+ * - Consul's `check_update_interval` defaults to **"5m"** — Consul agent
+ *   configuration reference: the interval "controls how often check output
+ *   from checks in a steady state is synchronized with the server", and a
+ *   check that changes state syncs immediately regardless.
+ * - Nomad's `resources` block defaults to **`cpu = 100`** MHz and
+ *   **`memory = 300`** MB — Nomad job specification, `resources`.
  * - Consul's `kv_max_value_size` default is **512KB** — Consul agent
  *   configuration reference: the limit "defaults to raft's suggested max size
  *   (512KB)".
- * - Nomad was released publicly in **September 2015** — the announcement post
- *   "HashiCorp Nomad" on the HashiCorp blog, dated 28 September 2015; 0.1.0
- *   is the earliest build published at releases.hashicorp.com/nomad.
- * - Terraform **0.12** shipped **22 May 2019** — "Announcing Terraform 0.12",
- *   HashiCorp blog, dated 22 May 2019. Beta 1 is dated 28 February 2019, so
- *   the release and every beta are on the same side of the 2018 line; the only
- *   thing on the other side is the preview post, dated 28 June 2018, which is
- *   what makes this prompt a bet rather than a recall.
- * - Vault reached **1.0** in **December 2018** — "HashiCorp Vault 1.0",
- *   HashiCorp blog, dated 4 December 2018, which is also where "the fourth
- *   HashiCorp project to reach 1.0" and the batch token description come from.
+ * - Vault's listener `max_request_duration` defaults to **"90s"** — Vault TCP
+ *   listener configuration reference.
  *
- * Kubernetes reached 1.0 on **21 July 2015**, two months before Nomad's
- * announcement — the Google Cloud Platform blog's "Kubernetes V1 Released",
- * dated July 2015. Checked because the note says it out loud.
+ * ## Why all six carry the flag
  *
- * Batch tokens: Vault's tokens concept page — batch tokens are "encrypted
- * blobs that carry enough information for them to be used for Vault actions,
- * but they require no storage on disk to track them".
+ * The flag is not a confidence rating. It marks a prompt whose answer can
+ * *move*, or be recorded differently somewhere else, so that whoever reuses
+ * this bank for a later event knows what to check again.
  *
- * ## Which three carry the flag, and why those three
+ * Every prompt here is now a default in a configuration file, and a release
+ * can change any of them without announcing it. So the honest count is six.
  *
- * The flag is not a confidence rating. It marks the prompts whose answer can
- * *move*, or can be recorded differently somewhere else, so that whoever
- * reuses this bank for a later event knows which three to check again. SPEC
- * fixes the count at three, so the three go to the answers most likely to have
- * moved by then:
+ * It was three, when half the bank was release dates: Nomad's 2015 and
+ * Vault 1.0's 2018 are settled history that every source agrees on, sitting a
+ * clear year from their thresholds, so nothing about them could move and a
+ * flag on them would have meant nothing. Those dates are gone — they were the
+ * weaker half of the bank, because a year is either known or guessed and
+ * neither produces the hesitation a wager needs — and with them goes the
+ * reason the count was three.
  *
- * - **Vault's default max lease TTL** and **Consul's maximum KV value size**
- *   are defaults in a configuration file. A release can change either, and
- *   neither would announce itself.
- * - **Terraform 0.12's year** is the one date here that different sources
- *   record differently, because the preview, the betas and the release are
- *   not the same event.
- *
- * That is a change from the port-era bank, where the flags were on all three
- * dates. It is the same rule applied to different content: Nomad's 2015 and
- * Vault's 2018 are settled history that every source agrees on, and both
- * thresholds sit a clear year or more away, so neither can move. A default in
- * a config file can. If the count were not fixed at three, all six would
- * carry it; given three, they belong on the values.
+ * Flagging three of six now would mean choosing which three to stop checking,
+ * and there is no such three. A flag spent on a chosen few is worth less than
+ * no flag at all, because it tells the next reader the unflagged ones are
+ * settled.
  *
  * ## Why over/under, and not a date question
  *
@@ -126,24 +113,26 @@ import {
  * ten and twenty — so the very first wager is a judgement and the room learns
  * in fifteen seconds that reading the threshold is the game.
  *
- * The flagged prompts are no longer grouped at the end. In the port-era bank
- * they were, because the bank had two halves: three prompts nobody could get
- * wrong, then three that mattered. There are no halves now, and where the
- * dates sit is not information a player should be able to use.
+ * The rest is spread so that no two prompts about the same product sit next
+ * to each other. A pair who have just watched a Vault prompt settle should
+ * not be able to warm up for the next one.
  *
  * The answers do not alternate, and are not meant to: a player who works out
  * that the round alternates has stopped reading the prompts.
  */
 export const GGANBU_PROMPTS: readonly OverUnderItem[] = [
   {
+    // ⚠️ VERIFY — every prompt in this bank is a default a release can change.
+    // See "Which prompts carry the flag" above: the honest answer is all of
+    // them, and the flag is worth nothing if it is spent on a chosen few.
     cue: "Terraform's default parallelism",
     threshold: "15",
     answer: "under",
-    note: "10 — concurrent resource operations while Terraform walks the graph, not concurrent modules or providers. The same default applies to plan, apply and destroy.",
-    verify: false,
+    note: "10 — concurrent resource operations while Terraform walks the graph, not concurrent modules or providers. The same ceiling applies to plan, apply and destroy, and raising it moves the bottleneck to the provider's rate limit.",
+    verify: true,
   },
   {
-    // ⚠️ VERIFY — a default in a config file, which a release can change.
+    // ⚠️ VERIFY
     cue: "Vault's default max lease TTL, in hours",
     threshold: "720",
     answer: "over",
@@ -151,8 +140,24 @@ export const GGANBU_PROMPTS: readonly OverUnderItem[] = [
     verify: true,
   },
   {
-    // ⚠️ VERIFY — a default in a config file, and one tied to Raft's own
-    // suggested maximum rather than to a number Consul picked.
+    // ⚠️ VERIFY
+    cue: "Consul's default check_update_interval, in minutes",
+    threshold: "1",
+    answer: "over",
+    note: "5 — how long Consul sits on the *output* of a check that has not changed state, so a thousand checks writing a new timestamp every run do not become a thousand writes. A check that actually changes state syncs at once, which is the part people assume this delays.",
+    verify: true,
+  },
+  {
+    // ⚠️ VERIFY
+    cue: "Nomad's default task CPU, in MHz",
+    threshold: "250",
+    answer: "under",
+    note: "100 — beside a default of 300 MB of memory. Deliberately small: Nomad bin-packs, so a task that never says what it needs is sized like a sidecar rather than a service, and finds out under load.",
+    verify: true,
+  },
+  {
+    // ⚠️ VERIFY — and this one is Raft's number rather than Consul's, so it
+    // can move for a reason that has nothing to do with Consul.
     cue: "Consul's maximum KV value size, in kilobytes",
     threshold: "1024",
     answer: "under",
@@ -160,28 +165,12 @@ export const GGANBU_PROMPTS: readonly OverUnderItem[] = [
     verify: true,
   },
   {
-    cue: "Nomad's first public release",
-    threshold: "2016",
-    answer: "under",
-    note: "2015 — announced in September, three years after HashiCorp itself and about two months after Kubernetes reached 1.0. It reads as a later product than it is.",
-    verify: false,
-  },
-  {
-    // ⚠️ VERIFY — a date, and the one in this bank most likely to be recorded
-    // differently elsewhere: the preview, the betas and the release are three
-    // separate events.
-    cue: "The year Terraform 0.12 shipped",
-    threshold: "2018",
+    // ⚠️ VERIFY
+    cue: "Vault's default max_request_duration, in seconds",
+    threshold: "60",
     answer: "over",
-    note: "2019 — May. The preview came out in June of the year before, which is why this one splits a room: the HCL rewrite was public for eleven months before it was a release.",
+    note: "90 — per listener, and a deadline rather than a timeout: Vault cancels the request's context, so the work stops rather than finishing unwatched. A minute is the number most people reach for.",
     verify: true,
-  },
-  {
-    cue: "The year Vault reached 1.0",
-    threshold: "2017",
-    answer: "over",
-    note: "2018 — December, and the fourth HashiCorp project to reach 1.0. It introduced batch tokens: encrypted blobs carrying everything needed to act, and needing no write to storage to exist.",
-    verify: false,
   },
 ];
 

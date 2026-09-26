@@ -190,33 +190,30 @@ describe("the launch content", () => {
     });
   });
 
-  test("exactly three are flagged VERIFY, and they are the three that can move", () => {
-    // SPEC.md: "three are flagged VERIFY exactly as the trivia bank flags
-    // dates". The flag is not a confidence rating and not decoration: it marks
-    // the answers that can change under a future release, or that another
-    // source records differently, so that whoever reuses this bank knows which
-    // three to check again. Two are configuration defaults and one is the only
-    // date here whose recording is genuinely contested — see the reasoning in
-    // `arcade/gganbu.ts`.
+  test("every prompt is flagged VERIFY, because every answer can move", () => {
+    // SPEC.md asks for "three flagged VERIFY exactly as the trivia bank flags
+    // dates", and the count grew when the dates left. The flag is not a
+    // confidence rating: it marks an answer that can *move*, so whoever reuses
+    // this bank knows what to re-check. Every prompt here is a default in a
+    // configuration file now, and a release can change any of them without
+    // announcing it — so the honest count is six.
+    //
+    // Flagging a chosen three would be worse than flagging none: it would tell
+    // the next reader the other three are settled, and none of them is.
     const flagged = GGANBU_PROMPTS.filter((p) => p.verify);
-    assert.equal(flagged.length, 3);
-    assert.deepEqual(flagged.map((p) => p.cue), [
-      "Vault's default max lease TTL, in hours",
-      "Consul's maximum KV value size, in kilobytes",
-      "The year Terraform 0.12 shipped",
-    ]);
-    for (const p of flagged) {
+    assert.equal(flagged.length, GGANBU_PROMPTS.length);
+    for (const p of GGANBU_PROMPTS) {
       assert.match(p.threshold, /^\d+$/, "an over/under turns on a number");
     }
-    // And the two settled dates are deliberately *not* flagged: Nomad's 2015
-    // and Vault's 2018 are history every source agrees on, a clear year or more
-    // from their thresholds, so nothing about them can move.
-    const unflagged = GGANBU_PROMPTS.filter((p) => !p.verify).map((p) => p.cue);
-    assert.deepEqual(unflagged, [
-      "Terraform's default parallelism",
-      "Nomad's first public release",
-      "The year Vault reached 1.0",
-    ]);
+    // And no release dates: a year is either known or guessed, and neither
+    // produces the hesitation a wager needs. That was the weaker half of the
+    // bank this replaced.
+    for (const p of GGANBU_PROMPTS) {
+      assert.ok(
+        !/\b(19|20)\d{2}\b/.test(`${p.cue} ${p.threshold}`),
+        `${p.cue} turns on a year`,
+      );
+    }
   });
 
   test("no prompt is a certainty: each threshold sits away from its answer", () => {
@@ -227,9 +224,9 @@ describe("the launch content", () => {
     // cue may be the kind of fact the room can recite.
     const numeric = GGANBU_PROMPTS.map((p) => Number(p.threshold));
     for (const n of numeric) assert.ok(Number.isFinite(n), "a threshold is a number");
-    // The true figures, each verified against a published source on 26
-    // September 2026 and recorded in `arcade/gganbu.ts`.
-    const truth = [10, 768, 512, 2015, 2019, 2018];
+    // The true figures, each verified against a published source on 27
+    // September 2026 and recorded in `arcade/gganbu.ts`, in the bank's order.
+    const truth = [10, 768, 5, 100, 512, 90];
     GGANBU_PROMPTS.forEach((p, i) => {
       const threshold = numeric[i]!;
       const actual = truth[i]!;
@@ -278,7 +275,7 @@ describe("the launch content", () => {
     assert.deepEqual(key[0], {
       answer: "under",
       note: GGANBU_PROMPTS[0]!.note,
-      verify: false,
+      verify: true,
     });
     for (const shown of board) {
       assert.deepEqual(Object.keys(shown).sort(), ["cue", "threshold"]);
