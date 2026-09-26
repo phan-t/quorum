@@ -1184,6 +1184,11 @@ class MockSession {
           ? {
               progress: { ...play.progress },
               docs: Object.keys(play.docs).map((pid) => this.arcadeNumber(pid)),
+              // Both damage lists, for the reason the real projection sends
+              // both: the console's halved set is the union of them, and a
+              // demo console that showed a different set from the product's
+              // would be worse than a demo with no console at all.
+              cracked: Object.keys(play.cracked).map((pid) => this.arcadeNumber(pid)),
             }
           : {}),
         ...(host || revealed

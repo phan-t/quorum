@@ -353,15 +353,19 @@ describe("nothing on the wire says who picked what", () => {
     );
   });
 
-  it("keeps the per-player letter counts and the docs list on the console", () => {
+  it("keeps the letter counts and both damage lists on the console", () => {
     const mid = unsealing([
       { event: { type: "readDocs", pid: "p3" }, at: T0 + 2_000 },
       { event: { type: "tapLetter", pid: "p1", letter: "X" }, at: T0 + 2_400 },
+      // p2 holds RADON and taps its last letter first: one wrong letter, so
+      // the tin cracks and they keep playing a halved round.
+      { event: { type: "tapLetter", pid: "p2", letter: "N" }, at: T0 + 2_600 },
     ]);
     for (const role of ["participant", "screen"] as const) {
       const pub = view(mid, role, "p1").arcade?.unseal;
       assert.equal(pub?.progress, undefined, `${role}: the letter counts leaked`);
       assert.equal(pub?.docs, undefined, `${role}: the docs list leaked`);
+      assert.equal(pub?.cracked, undefined, `${role}: the cracked list leaked`);
     }
     // Counted in the bytes, because that is the claim that survives somebody
     // adding a second per-player map under another name: a phone's frame
@@ -369,10 +373,34 @@ describe("nothing on the wire says who picked what", () => {
     assert.equal(occurrences(wire(mid, "participant", "p1"), '"progress"'), 1);
     assert.equal(occurrences(wire(mid, "screen"), '"progress"'), 0);
     assert.ok(!wire(mid, "participant", "p1").includes('"docs":['));
+    // A phone is told about its own tin — `cracked` is a boolean on the
+    // me-view — so the claim here is that the *list* is not on it, and that
+    // the Desktop has neither. A big screen naming whoever is one tap from
+    // the Lounge would hand the Lounge a result to bet against.
+    assert.ok(!wire(mid, "participant", "p2").includes('"cracked":['));
+    assert.equal(occurrences(wire(mid, "screen"), '"cracked"'), 0);
 
     const host = view(mid, "host").arcade?.unseal;
     assert.deepEqual(host?.docs, [3]);
     assert.equal(host?.progress?.["p3"], 1);
+    // The console's other damage list, and the reason it exists: a crack is
+    // charged the same halving Read the docs is charged, so a console holding
+    // only `docs` tells the facilitator the wrong set of halved players.
+    assert.deepEqual(host?.cracked, [2]);
+  });
+
+  it("leaves a shattered player in the console's cracked list", () => {
+    // The halving outlives the drain: a shattered tin was cracked first, and
+    // its banked letters are halved for that. The console's cracked list is
+    // therefore every damaged tin and not only the live ones — who is out is
+    // the Lounge line, which the console draws from `standing`.
+    const mid = unsealing([
+      { event: { type: "tapLetter", pid: "p2", letter: "N" }, at: T0 + 2_500 },
+      { event: { type: "tapLetter", pid: "p2", letter: "N" }, at: T0 + 3_000 },
+    ]);
+    assert.equal(view(mid, "participant", "p2").arcadeMine?.standing, "drained");
+    assert.deepEqual(view(mid, "host").arcade?.unseal?.cracked, [2]);
+    assert.equal(occurrences(wire(mid, "screen"), '"cracked"'), 0);
   });
 
   it("does not put the length of anybody's word on a public surface", () => {

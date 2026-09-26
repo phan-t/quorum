@@ -645,7 +645,10 @@ opens the tin anyway takes half its shape score, and is still eligible for the
 +10 — a wrong letter costs a second of the sixty and buys nothing, so somebody
 who cracked and still got there first did it the hard way. And a shattered
 player's banked letters are halved too, because a tin can only shatter after it
-has cracked: what used to pay 4 for two letters and a wrong third now pays 2.
+has cracked: two correct letters and then two wrong taps bank 2, where the
+one-strike round paid 4 for two correct letters and the single wrong tap that
+ended it. The crack alone banks the same 2 — the halving is charged at the
+first wrong tap, and the second one only ends the round.
 **The Floor maximum is unchanged at 60** — an undamaged umbrella, opened fastest
 — and no other constant moved.
 

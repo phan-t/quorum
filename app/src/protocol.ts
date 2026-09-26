@@ -686,6 +686,7 @@ export interface ArcadeUnsealRecap {
  * | `unsealOrder` | never | always | always |
  * | `progress` (per player) | never | never | always |
  * | `docs` (who read them) | never | never | always |
+ * | `cracked` (who is one tap out) | never | never | always |
  * | `recap` (**the words**) | reveal | reveal | always |
  */
 export interface ArcadeUnsealView {
@@ -706,6 +707,20 @@ export interface ArcadeUnsealView {
   readonly progress?: Readonly<Record<ParticipantId, number>>;
   /** Host only: who pressed **Read the docs**, as player numbers. */
   readonly docs?: readonly number[];
+  /**
+   * Host only: who has cracked a tin, as player numbers.
+   *
+   * The console's other damage list. Both ways of damaging a tin are charged
+   * the same halving, once, so a console that names only the readers names the
+   * wrong set of halved players — which is what this field is here to stop.
+   * It also says who is one wrong letter from the Lounge, and a facilitator
+   * narrating the round out loud has nothing better to say.
+   *
+   * **The Desktop does not get it**, deliberately: `unsealFloorView` says
+   * nothing about the crack, because a big screen naming whoever is one tap
+   * from draining hands the Lounge a result to bet against for nothing.
+   */
+  readonly cracked?: readonly number[];
   /** The words, at the reveal. The host has them throughout: they read them out. */
   readonly recap?: readonly ArcadeUnsealRecap[];
 }
@@ -928,7 +943,7 @@ export interface ArcadeGlassView {
  * | `planApply.nextChangeAt` / `headTurnsAt` | **never** | always | always |
  * | `planApply.crossed` / `finishOrder` | never | always | always |
  * | `unseal.shapes` (glyph, score, counts) | always | always | always |
- * | `unseal.progress` / `docs` | never | never | always |
+ * | `unseal.progress` / `docs` / `cracked` | never | never | always |
  * | `unseal.recap` (**the words**) | reveal | reveal | always |
  * | `tug` beat grid and rope | always | always | always |
  * | `tug.sides` / `leaders` | never | always | always |

@@ -638,6 +638,7 @@ export function arcadeUnsealFor(
     unsealOrder?: readonly number[];
     progress?: Readonly<Record<ParticipantId, number>>;
     docs?: readonly number[];
+    cracked?: readonly number[];
     recap?: readonly ArcadeUnsealRecap[];
   } = {};
 
@@ -649,6 +650,13 @@ export function arcadeUnsealFor(
     // on the console because the host is the only reader not in the room.
     extra.progress = floor.progress;
     extra.docs = numbersOf(arcade, state, Object.keys(play.docs));
+    // The two damage lists travel together because they are charged together:
+    // a cracked tin is halved by the same rule Read the docs pays, so a
+    // console holding only the readers would tell the facilitator the wrong
+    // set of halved players. It stops at the host for the reason the crack
+    // stops before `unsealFloorView` — one tap from draining is a result the
+    // Lounge would otherwise get to bet against.
+    extra.cracked = numbersOf(arcade, state, Object.keys(play.cracked));
   }
   // The one read of the answer key in this function, and the only one outside
   // the engine. Everything above was built from the public view.

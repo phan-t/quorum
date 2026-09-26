@@ -3726,10 +3726,21 @@ function renderArcade(s: RenderState): void {
         .filter((x) => x !== null)
         .join(" · "),
     );
-    // Who read the docs, which is the one thing the host can see and nobody
-    // else can — the phone says "Nobody will know", and on every surface but
-    // this one that is true.
+    // Who read the docs and whose tin is cracked, which is the pair of things
+    // the host can see and nobody else can — the phone says "Nobody will
+    // know", and on every surface but this one that is true.
+    //
+    // Both damage lists are here because both are charged the same halving:
+    // a crack costs what Read the docs costs, so a console naming only the
+    // readers hands the facilitator the wrong set of halved players, and they
+    // narrate the round out loud off this line. The halved clause is the union
+    // of the two and is deduplicated, because a player who did both is halved
+    // once and the same number printed twice would say otherwise. A tin that
+    // went on to shatter stays in the cracked list — the halving outlived the
+    // drain — and who is actually out is the Lounge line further down.
     const readers = un.docs ?? [];
+    const crackers = un.cracked ?? [];
+    const halved = [...new Set([...readers, ...crackers])].sort((x, y) => x - y);
     arcadeNote.hidden = false;
     setText(
       arcadeNote,
@@ -3739,7 +3750,13 @@ function renderArcade(s: RenderState): void {
           : `Words: ${un.recap.map((t) => t.answer).join(" · ")}`,
         readers.length === 0
           ? "Nobody has read the docs."
-          : `Read the docs: ${readers.map((n) => playerTag(n)).join(" ")} — scores halved.`,
+          : `Read the docs: ${readers.map((n) => playerTag(n)).join(" ")}`,
+        crackers.length === 0
+          ? ""
+          : `Cracked: ${crackers.map((n) => playerTag(n)).join(" ")}`,
+        halved.length === 0
+          ? ""
+          : `Scores halved: ${halved.map((n) => playerTag(n)).join(" ")}`,
       ]
         .filter((x) => x !== "")
         .join("  |  "),
