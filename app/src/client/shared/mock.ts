@@ -4420,20 +4420,28 @@ class MockHub {
     // the round was still live, found a phase that was not idle, and returned —
     // a guard that could not fire on the one occasion it exists for.
     //
-    // It also leaves the reveal two seconds before Plan / Apply's card at 106,
-    // where six items left it six, and two seconds is under DESIGN.md's four
-    // second dwell floor. Not fixed by moving this line, which would only put
-    // the net back inside the round: the whole block from 106 on would have to
-    // shift, and the demo's timings are one chain. Left as it is deliberately,
-    // because a demo that hurries one reveal is a smaller thing than nineteen
-    // re-timed beats in the file another session is working in.
+    // Everything from Plan / Apply's card on sits four seconds later than six
+    // items left it, so the reveal between 103 and that card is six seconds
+    // again rather than two. Two is the number DESIGN.md's dwell floor names:
+    // video latency is one to two seconds, so a reveal shown for two was never
+    // seen, and a loop whose whole job is to let somebody watch every screen
+    // change cannot skip one. A uniform shift is nineteen numbers but no new
+    // arithmetic — every gap after this one is exactly what it was, which is
+    // the reason to move all of them rather than re-time the ones in between.
+    //
+    // Three seconds an item would have bought the same slack at the far end
+    // and spent more than it bought: seven cues under the floor to rescue one
+    // reveal, and the bots stagger at 500 + i * 260 ms, so four of the
+    // thirteen who answer could not reach a three-second item at all where
+    // one misses today. Moving this line earlier is not on the list either —
+    // that is the dead guard inside the live round it was just fixed for.
     this.#at(104, () => {
       if (this.session.arcadePhase !== "idle") return;
       this.session.arcadePhase = "reveal";
       this.#broadcastState();
     });
 
-    this.#at(106, () => {
+    this.#at(110, () => {
       this.#startRound({
         name: "arcade.round",
         kind: "plan_apply",
@@ -4444,11 +4452,11 @@ class MockHub {
       });
       this.#broadcastState();
     });
-    this.#at(109, () => {
+    this.#at(113, () => {
       this.#beginPlay();
       this.#broadcastState();
     });
-    this.#at(133, () => {
+    this.#at(137, () => {
       if (this.session.arcadePhase !== "idle") return;
       this.session.arcadePhase = "reveal";
       this.#broadcastState();
@@ -4464,15 +4472,15 @@ class MockHub {
      * few tins cracking and then shattering into the Lounge, and one bot
      * reading the docs, so the halved score has somewhere to show.
      */
-    this.#at(139, () => {
+    this.#at(143, () => {
       this.#startRound({ name: "arcade.round", kind: "unseal", seconds: 24 });
       this.#broadcastState();
     });
-    this.#at(142, () => {
+    this.#at(146, () => {
       this.#beginPlay();
       this.#broadcastState();
     });
-    this.#at(168, () => {
+    this.#at(172, () => {
       if (this.session.arcadePhase !== "idle") return;
       this.session.arcadePhase = "reveal";
       this.#broadcastState();
@@ -4487,7 +4495,7 @@ class MockHub {
      * and tell nobody whether the beat works. Three pulls still reshuffle the
      * sides, which is the other half of the round.
      */
-    this.#at(174, () => {
+    this.#at(178, () => {
       this.#startRound({
         name: "arcade.round",
         kind: "tug_of_raft",
@@ -4497,11 +4505,11 @@ class MockHub {
       });
       this.#broadcastState();
     });
-    this.#at(177, () => {
+    this.#at(181, () => {
       this.#beginPlay();
       this.#broadcastState();
     });
-    this.#at(203, () => {
+    this.#at(207, () => {
       if (this.session.arcadePhase !== "idle") return;
       this.session.arcadePhase = "reveal";
       this.#broadcastState();
@@ -4521,7 +4529,7 @@ class MockHub {
      * bots' own delays are divided by the speed and the server's timers are
      * not — so drive the arcade at `speed=1`.
      */
-    this.#at(209, () => {
+    this.#at(213, () => {
       this.#startRound({
         name: "arcade.round",
         kind: "glass_bridge",
@@ -4529,13 +4537,13 @@ class MockHub {
       });
       this.#broadcastState();
     });
-    this.#at(212, () => {
+    this.#at(216, () => {
       this.#beginPlay();
       this.#broadcastState();
     });
     // 6 × 6 + 6 × 4 + 6 × 3 = 78 s of bridge, walked by the step timer on its
     // own, exactly as the server's does.
-    this.#at(294, () => {
+    this.#at(298, () => {
       if (this.session.arcadePhase !== "idle") return;
       this.session.arcadePhase = "reveal";
       for (const p of this.session.participants) {
@@ -4546,12 +4554,12 @@ class MockHub {
       this.#broadcastState();
     });
 
-    this.#at(302, () => {
+    this.#at(306, () => {
       this.session.segment = "standings";
       this.#broadcastState();
     });
 
-    this.#at(304, () => {
+    this.#at(308, () => {
       const p = this.session.participants[4];
       if (!p) return;
       const spot = this.session.grantSpot(
@@ -4563,12 +4571,12 @@ class MockHub {
       this.#toast("spot", `Spot Award — ${p.nickname} — ${spot.reason}`);
     });
 
-    this.#at(306, () => {
+    this.#at(310, () => {
       this.session.seal = "sealed";
       this.#broadcastState();
     });
 
-    this.#at(318, () => {
+    this.#at(322, () => {
       this.session.seal = "revealed";
       this.session.segment = "final";
       this.#broadcastState();
@@ -4586,12 +4594,12 @@ class MockHub {
      * that forty seconds over three photos works out to — and a message holds
      * five seconds instead of however long it takes to read one out.
      */
-    this.#at(320, () => {
+    this.#at(324, () => {
       this.session.segment = "sendoff";
       this.#broadcastState();
     });
     for (let i = 0; i < 7; i += 1) {
-      this.#at(340 + i * 5, () => {
+      this.#at(344 + i * 5, () => {
         if (this.session.segment !== "sendoff") return;
         this.session.stepSendoff(1);
         this.#broadcastState();
@@ -4600,7 +4608,7 @@ class MockHub {
 
     // Long enough for the big screen's final reveal to actually finish: four
     // four-second dwells, then the hold on the empty first slot.
-    this.#at(382, () => {
+    this.#at(386, () => {
       this.#clearArcadeTimers();
       this.session.reset();
       this.#directorStarted = false;
