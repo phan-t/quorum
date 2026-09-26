@@ -577,7 +577,6 @@ function kudoSize(longest: number): string {
  * happened. Nothing here reads server state beyond the roster length the
  * lobby already had.
  */
-const RAFT_NODES = 5;
 /**
  * How long one commit takes, start to finish, over four equal stages: the
  * entry travels in, it replicates out, it is committed, and the committed
@@ -621,10 +620,19 @@ const RAFT_MAJORITY = 3;
  * Deliberately uneven and deliberately not sorted by position: a cluster
  * whose replicas answer in a neat top-to-bottom sweep reads as an animation,
  * and one where the near node is slow and the far node is quick reads as a
- * network. The commit fires on the second of these, so the first two are
- * what the majority is made of.
+ * network.
+ *
+ * It used to say that and then be sorted ascending anyway, which meant the
+ * sweep it was written to avoid, and — worse — that the commit's timing was
+ * silently relying on the sort. Anybody realising the stated intent would
+ * have moved the word to the wrong node. The order here is the drawing; the
+ * majority is computed from a sorted copy, so the two cannot disagree again.
  */
-const RAFT_LAG = [0.55, 0.75, 1.0, 1.3];
+const RAFT_LAG = [1.0, 0.55, 1.3, 0.75];
+
+/** When the majority has it: the (MAJORITY - 1)th follower to answer. */
+const RAFT_DECIDES =
+  [...RAFT_LAG].sort((a, b) => a - b)[RAFT_MAJORITY - 2] ?? 1;
 
 /**
  * Below this many pixels tall the drawing stops being a drawing.
@@ -676,7 +684,7 @@ function clipName(who: string): string {
  */
 function raftCluster(onCommitted: (pid: string) => void): {
   el: HTMLElement;
-  commit: (n: number, who: string | null, pid: string | null) => void;
+  commit: (who: string | null, pid: string | null) => void;
   flush: () => void;
   settle: () => void;
   fit: () => void;
@@ -776,12 +784,46 @@ function raftCluster(onCommitted: (pid: string) => void): {
 
   let running = false;
   /** Entries waiting their turn: the count after each, and who it was. */
-  const queue: { n: number; who: string | null; pid: string | null }[] = [];
+  const queue: { who: string | null; pid: string | null }[] = [];
   /** The pid of the entry on screen now, released when it commits. */
   let inFlight: string | null = null;
 
   function release(pid: string | null): void {
     if (pid !== null) onCommitted(pid);
+  }
+
+  /**
+   * Is there any point animating this one?
+   *
+   * Three ways there is not, and they are the same answer: nobody can see it,
+   * so there is no moment to wait for and holding the name costs a person
+   * their place in the list for nothing.
+   *
+   * The third — the cluster being off the screen — was the one missing. A
+   * window too short for the drawing hides it, and the commit went on running
+   * its full two and a half seconds behind the `display: none`, holding the
+   * name and the head count back for an animation that was not being drawn.
+   */
+  /** Everything waiting, into the list now. See `flush` on the returned API. */
+  function flushAll(): void {
+    release(inFlight);
+    inFlight = null;
+    while (queue.length > 0) release(queue.shift()?.pid ?? null);
+  }
+
+  function unseen(): boolean {
+    // A hidden tab, or a window with no room for the drawing. Both mean the
+    // same thing to a commit: it will not be watched.
+    if (typeof document !== "undefined" && document.hidden) return true;
+    return el.offsetParent === null;
+  }
+
+  /** Asked afresh every time, because a preference can change mid-session. */
+  function stillPref(): boolean {
+    return (
+      typeof matchMedia === "function" &&
+      matchMedia("(prefers-reduced-motion: reduce)").matches
+    );
   }
   /**
    * Which commit the timers belong to.
@@ -806,6 +848,44 @@ function raftCluster(onCommitted: (pid: string) => void): {
    * reference nobody can collect.
    */
   const timers = new Set<number>();
+
+  /**
+   * The name currently drawn, so it can be re-measured if it becomes visible
+   * part-way through its own commit.
+   *
+   * `getComputedTextLength` returns 0 inside a `display: none` subtree, so a
+   * commit that starts while the cluster is hidden and finishes after the
+   * window has grown would have drawn its name unsqueezed and let a wide one
+   * run off the edge. Cheap to close: `fit()` re-asks whenever it decides the
+   * cluster is visible.
+   */
+  let live: SVGTextElement | null = null;
+
+  /**
+   * Hold a name inside the box, by width rather than by character count.
+   *
+   * Characters are not widths. Thirteen capital W's measure 155 units in a
+   * 240-unit viewBox and cross the top link; thirteen CJK characters measure
+   * 150, and thirteen emoji 192. Measured in the document and squeezed if it
+   * is over, so the name stays whole and stays inside.
+   */
+  function squeeze(tag: SVGTextElement): void {
+    if (typeof tag.getComputedTextLength !== "function") return;
+    try {
+      tag.removeAttribute("textLength");
+      tag.removeAttribute("lengthAdjust");
+      // Zero means it is not being rendered, which is not the same as fitting.
+      const w = tag.getComputedTextLength();
+      if (w > RAFT_NAME_W) {
+        tag.setAttribute("textLength", String(RAFT_NAME_W));
+        tag.setAttribute("lengthAdjust", "spacingAndGlyphs");
+      }
+    } catch {
+      // Measuring needs a laid-out document; without one the grapheme cap is
+      // still in force and the worst case is a wide name clipped by the
+      // viewBox, which is what it did before.
+    }
+  }
   function later(fn: () => void, ms: number): void {
     const id = window.setTimeout(() => {
       timers.delete(id);
@@ -815,6 +895,7 @@ function raftCluster(onCommitted: (pid: string) => void): {
   }
 
   function cool(): void {
+    live = null;
     svg.classList.remove("is-committed");
     for (const d of dots) d.classList.remove("is-hot");
     for (const l of links) l.classList.remove("is-hot");
@@ -822,8 +903,86 @@ function raftCluster(onCommitted: (pid: string) => void): {
       stale.remove();
   }
 
+  /**
+   * Whatever is next, decided now rather than when it was queued.
+   *
+   * Both drains used to call `play` straight out, which meant a preference or
+   * a window that changed *during* a burst was ignored for everything already
+   * waiting: turning on reduced motion mid-rush still animated the three
+   * queued names in full, the last of them seven seconds later. The
+   * conditions are re-asked here, so a queue drains under the rules in force
+   * when it drains.
+   */
+  function nextUp(): void {
+    running = false;
+    if (unseen()) {
+      while (queue.length > 0) release(queue.shift()?.pid ?? null);
+      say("");
+      return;
+    }
+    // Reduced motion, decided now: everyone waiting arrives together and the
+    // last of them carries the one state change. Draining them one still
+    // commit at a time would trickle names out over seconds for a preference
+    // whose whole point is to stop making people wait on decoration.
+    if (stillPref()) {
+      while (queue.length > 1) release(queue.shift()?.pid ?? null);
+    }
+    const next = queue.shift();
+    if (next === undefined) {
+      say("");
+      return;
+    }
+    begin(next.who, next.pid);
+  }
+
+  /**
+   * Start one commit, under the rules in force right now.
+   *
+   * Shared by the queue drain and by `commit`, which is the point: the drain
+   * used to go straight to `play`, so a preference or a window that changed
+   * during a burst was honoured for the arrival that changed it and ignored
+   * for the three already waiting. Turning on reduced motion mid-rush still
+   * animated them in full, the last one seven seconds later.
+   */
+  function begin(who: string | null, pid: string | null): void {
+    if (unseen()) {
+      release(pid);
+      return;
+    }
+    if (stillPref()) {
+      stillCommit(who, pid);
+      return;
+    }
+    play(who, pid);
+  }
+
+  /**
+   * Reduced motion: the state, with nothing travelling.
+   *
+   * The nodes still fill, because a fill is a state and not a movement —
+   * which is what the stylesheet beside this has always claimed and what the
+   * code did not do. This used to return with five grey circles that never
+   * once did the thing they are for.
+   */
+  function stillCommit(who: string | null, pid: string | null): void {
+    release(pid);
+    gen += 1;
+    const mine = gen;
+    running = true;
+    cool();
+    for (const d of dots) d.classList.add("is-hot");
+    for (const l of links) l.classList.add("is-hot");
+    svg.classList.add("is-committed");
+    say("Committed", who);
+    later(() => {
+      if (mine !== gen) return;
+      cool();
+      nextUp();
+    }, COMMIT_MS / 2);
+  }
+
   /** One entry: in to the leader, out to the followers, then committed. */
-  function play(n: number, who: string | null, pid: string | null): void {
+  function play(who: string | null, pid: string | null): void {
     inFlight = pid;
     gen += 1;
     const mine = gen;
@@ -858,21 +1017,9 @@ function raftCluster(onCommitted: (pid: string) => void): {
     entry.append(tag, dot);
     svg.append(entry);
 
-    // Characters are not widths. Thirteen capital W's, or twelve CJK
-    // characters, clear the character cap and still run off the left edge and
-    // across the top link. Measured once, now that it is in the document, and
-    // squeezed if it is over — the name stays whole and stays inside the box.
-    if (who !== null && typeof tag.getComputedTextLength === "function") {
-      try {
-        if (tag.getComputedTextLength() > RAFT_NAME_W) {
-          tag.setAttribute("textLength", String(RAFT_NAME_W));
-          tag.setAttribute("lengthAdjust", "spacingAndGlyphs");
-        }
-      } catch {
-        // Measuring needs a laid-out document; if this is not one, the
-        // character cap is still in force and the worst case is a wide name
-        // clipped by the viewBox, which is what it did before.
-      }
+    if (who !== null) {
+      live = tag;
+      squeeze(tag);
     }
 
     const step = COMMIT_MS / 4;
@@ -924,108 +1071,79 @@ function raftCluster(onCommitted: (pid: string) => void): {
           links[i]?.classList.add("is-hot");
         }, flight);
       });
-    }, step);
 
-    // The majority moment: the leader plus however many followers it takes to
-    // make `RAFT_MAJORITY`. `RAFT_LAG` is the arrival of each follower, so the
-    // one that completes the majority is the (MAJORITY - 2)th of them —
-    // minus the leader, minus one for the index.
-    const decidingLag = RAFT_LAG[RAFT_MAJORITY - 2] ?? 1;
-    later(() => {
-      // Released before the generation guard, on purpose. This is the only
-      // place a pid becomes a name in the list, and a guard in front of it is
-      // a guard in front of somebody appearing at all. Nothing can bump `gen`
-      // between this being scheduled and it firing today — but the next stage
-      // added here might, and a duplicate release is a no-op while a missed
-      // one is a person who never arrived.
-      inFlight = null;
-      release(pid);
-      if (mine !== gen) return;
-      // A majority has it, so it is committed. That is the word, and it is
-      // the only moment the picture is making a claim worth making. Two
-      // followers are still in flight underneath it, which is not a glitch:
-      // it is the commit index moving past a straggler.
+      // The majority moment, scheduled here rather than at the start.
       //
-      // No number here. The head count above the names is the count, and it
-      // says "committed" itself, so a total in the caption was the same fact
-      // twice — and the two could disagree during a burst, because this `n`
-      // was fixed when the entry was queued while the count kept moving.
-      say("Committed");
-      svg.classList.add("is-committed");
-    }, step * (1 + decidingLag));
+      // The followers' timers are set in this callback, and this one used to
+      // be set a whole stage earlier alongside the travel. Two timers set at
+      // different times are ordered by the clock and not by the queue, so a
+      // busy main thread could put the word "Committed" on screen a frame
+      // before the node that made it true. Set from the same instant as the
+      // arrivals it is describing, the ordering is the timer queue's to keep.
+      later(() => {
+        // Released before the generation guard, on purpose. This is the only
+        // place a pid becomes a name in the list, and a guard in front of it
+        // is a guard in front of somebody appearing at all. Nothing can bump
+        // `gen` between this being scheduled and it firing today — but the
+        // next stage added here might, and a duplicate release is a no-op
+        // while a missed one is a person who never arrived.
+        inFlight = null;
+        release(pid);
+        if (mine !== gen) return;
+        // A majority has it, so it is committed. That is the word, and it is
+        // the only moment the picture is making a claim worth making. Two
+        // followers are still in flight underneath it, which is not a glitch:
+        // it is the commit index moving past a straggler.
+        //
+        // No number here. The head count above the names is the count, and it
+        // says "committed" itself, so a total in the caption was the same
+        // fact twice — and the two could disagree during a burst, because
+        // the number was fixed when the entry was queued while the count
+        // kept moving.
+        say("Committed");
+        svg.classList.add("is-committed");
+      }, step * RAFT_DECIDES);
+    }, step);
 
     later(() => {
       if (mine !== gen) return;
       cool();
-      running = false;
-      const next = queue.shift();
-      if (next !== undefined) play(next.n, next.who, next.pid);
-      else say("");
+      nextUp();
     }, COMMIT_MS);
   }
 
   return {
     el,
-    commit(n: number, who: string | null, pid: string | null): void {
-      // Nobody is watching a hidden tab, so there is no moment to wait for
-      // and holding the name costs something for nothing. `flush` covers what
-      // was already in the cluster when the tab went away; this covers
-      // everything that arrives while it stays away, which is the commoner
-      // ordering — a laptop is not locked mid-commit, it is locked and then
-      // the room fills up. Without this, coming back meant watching joins
-      // from minutes ago replay at 2.8 seconds each before the list caught up.
-      const away = typeof document !== "undefined" && document.hidden;
-      // Somebody who prefers less motion gets the state and no movement, and
-      // their name goes into the list at once.
-      const still =
-        typeof matchMedia === "function" &&
-        matchMedia("(prefers-reduced-motion: reduce)").matches;
-      if (away) {
+    commit(who: string | null, pid: string | null): void {
+      // `flush` covers what was already in the cluster when it went out of
+      // sight; this covers everything arriving while it stays out of sight,
+      // which is the commoner ordering — a laptop is not hidden mid-commit,
+      // it is hidden and then the room fills up.
+      if (unseen()) {
         release(pid);
         return;
       }
-      if (still) {
-        release(pid);
-        // The nodes still fill, because a fill is a state and not a movement
-        // — which is what the stylesheet beside this has always claimed and
-        // what the code did not do. Reduced motion used to return here with
-        // five grey circles that never once did the thing they are for.
-        gen += 1;
-        const mine = gen;
-        running = true;
-        cool();
-        for (const d of dots) d.classList.add("is-hot");
-        for (const l of links) l.classList.add("is-hot");
-        svg.classList.add("is-committed");
-        say("Committed", who);
-        later(() => {
-          if (mine !== gen) return;
-          cool();
-          running = false;
-          const next = queue.shift();
-          if (next !== undefined) play(next.n, next.who, next.pid);
-          else say("");
-        }, COMMIT_MS / 2);
+      // A queue is for keeping an animation readable. Reduced motion has no
+      // animation to keep readable, so it never waits in one — it restarts
+      // the state instead, and the name is in the list either way.
+      if (!running || stillPref()) {
+        begin(who, pid);
         return;
       }
-      if (running) {
-        // A room scanning a QR at once arrives in a burst. Queueing keeps each
-        // commit readable instead of drawing nine at once; the queue is capped
-        // because nobody watches the ninth. Now that a commit takes nearly
-        // three seconds the cap matters more, not less — a queue of nine would
-        // still be draining long after the room had stopped looking.
-        //
-        // Over the cap the *oldest* waiting entry is let through without its
-        // animation rather than the newest being dropped. Dropping was fine
-        // while this only drove a picture; now that it gates the list, a
-        // dropped entry is somebody who joined and whose name never arrived.
-        // Twenty people scanning at once get four animations and sixteen
-        // names, which is the right way round — the names are the promise.
-        if (queue.length >= 3) release(queue.shift()?.pid ?? null);
-        queue.push({ n, who, pid });
-        return;
-      }
-      play(n, who, pid);
+      // A room scanning a QR at once arrives in a burst. Queueing keeps each
+      // commit readable instead of drawing nine at once; the queue is capped
+      // because nobody watches the ninth. Now that a commit takes nearly
+      // three seconds the cap matters more, not less — a queue of nine would
+      // still be draining long after the room had stopped looking.
+      //
+      // Over the cap the *oldest* waiting entry is let through without its
+      // animation rather than the newest being dropped. Dropping was fine
+      // while this only drove a picture; now that it gates the list, a
+      // dropped entry is somebody who joined and whose name never arrived.
+      // Twenty people scanning at once get four animations and sixteen
+      // names, which is the right way round — the names are the promise.
+      if (queue.length >= 3) release(queue.shift()?.pid ?? null);
+      queue.push({ who, pid });
     },
     /**
      * Everything waiting, into the list now.
@@ -1036,9 +1154,7 @@ function raftCluster(onCommitted: (pid: string) => void): {
      * here is worth a name not arriving.
      */
     flush(): void {
-      release(inFlight);
-      inFlight = null;
-      while (queue.length > 0) release(queue.shift()?.pid ?? null);
+      flushAll();
     },
     /**
      * Back to resting: no caption, because nothing is happening.
@@ -1070,7 +1186,8 @@ function raftCluster(onCommitted: (pid: string) => void): {
      * resizing — and the measurement is taken with the drawing shown.
      */
     fit(): void {
-      el.classList.remove("is-cramped");
+      const was = el.classList.contains("is-cramped");
+      if (was) el.classList.remove("is-cramped");
       const box = el.getBoundingClientRect();
       // Width, not height, decides whether there is a measurement to read at
       // all. A zero *height* is a real answer — it is flexbox saying there is
@@ -1078,9 +1195,34 @@ function raftCluster(onCommitted: (pid: string) => void): {
       // drawing nominally shown at nought pixels with its caption orphaned
       // underneath. A zero *width* is the lobby not being on screen: not
       // rendered yet, or a container query has taken it off.
-      if (box.width === 0) return;
-      if (svg.getBoundingClientRect().height < RAFT_MIN_PX)
+      if (box.width === 0) {
+        if (was) el.classList.add("is-cramped");
+        return;
+      }
+      // Two ways to be too small, and the second is the one a threshold on
+      // the drawing's own height cannot see.
+      //
+      // Too short to read: the drawing shrinks under `max-height` until the
+      // name is four pixels tall.
+      //
+      // Too tall to fit: in the grid layout the cluster's row is `1fr` and
+      // the drawing is `align-self: start`, so when the chips row has taken
+      // the free space the drawing keeps its full height and simply hangs out
+      // of the bottom of the lobby, where the stage clips it. Its own height
+      // is a healthy 162px the whole time — the first version of this asked
+      // only that, and so could not see the case where what was on screen was
+      // the tops of three circles. Asking whether the box is *inside its
+      // parent* catches both that and the short-window case that prompted it,
+      // at every size, instead of at one guessed threshold.
+      const room = el.parentElement?.getBoundingClientRect();
+      const spills = room !== undefined && box.bottom > room.bottom + 1;
+      if (spills || svg.getBoundingClientRect().height < RAFT_MIN_PX) {
         el.classList.add("is-cramped");
+        // Anything mid-commit is now behind a `display: none`, so it is no
+        // longer holding a name back for something somebody can watch. The
+        // window shrinking must not cost a person their place in the list.
+        flushAll();
+      } else if (live !== null) squeeze(live);
     },
     /**
      * Cancel every pending stage. The scene is going away.
@@ -1120,7 +1262,17 @@ const welcomed = new Set<string>();
  */
 const CHIP_MAX = 24;
 
-/** The server's own nickname key, so "Sam " and "sam" find the same person. */
+/**
+ * Match a nickname to its owner, so "Sam " and "sam" find the same person.
+ *
+ * Deliberately *not* the engine's `nicknameKey`, which also normalises to
+ * NFKD, strips combining marks and drops everything non-alphanumeric. This
+ * is strictly finer than that one, which is the direction that is safe: two
+ * names equal here are necessarily equal there, so a collision here would
+ * already have been refused at the door as `nickname_taken`. Copying the
+ * engine's rule into the client would be a second copy to keep in step for
+ * no gain.
+ */
 function nickKey(s: string): string {
   return s.trim().replace(/\s+/g, " ").toLowerCase();
 }
@@ -1186,8 +1338,15 @@ function sceneLobby(): Scene {
       // what the word underneath the nodes used to repeat.
       h("span", { class: "label", text: "committed" }),
     ]),
-    chips,
-    cluster.el,
+    // One box, not two. The cluster used to be its own grid row under the
+    // chips' row, and a grid row's height comes from the tracks, not from the
+    // content beside it — so with ten people the chips sat at the top of a
+    // tall area and the cluster started 130 pixels below the last name, and
+    // in a short window the chips' row took the free space and left the
+    // cluster hanging out of the bottom of the stage. Stacked in one box the
+    // cluster is always directly under the last chip, at every roster size,
+    // because that is literally what it is now.
+    h("div", { class: "lobby-room" }, [chips, cluster.el]),
     h("p", { class: "label lobby-wait", text: "Waiting for the host" }),
   ]);
 
@@ -1232,36 +1391,34 @@ function sceneLobby(): Scene {
     // names into a list that had no room for them. Arrival order is kept
     // within the window; what falls off is the people who have been here
     // longest and have already seen themselves.
-    const over = Math.max(0, room.length - CHIP_MAX);
-    const shown = room.slice(over);
-    // Your own name is never what falls off, however long you have been here.
-    // It is the one name on this screen you are actually looking for.
     const self =
       mine === null
         ? undefined
         : room.find((r) => nickKey(r.nickname) === nickKey(mine ?? ""));
-    if (self !== undefined && !shown.includes(self)) {
-      shown.shift();
-      shown.unshift(self);
-    }
-    replace(
-      chips,
-      shown.map((r) =>
-        h("span", {
-          class:
-            self !== undefined && r.pid === self.pid ? "chip is-you" : "chip",
-          text: r.nickname,
-        }),
-      ),
-    );
+    const others = self === undefined ? room : room.filter((r) => r !== self);
+    const budget = self === undefined ? CHIP_MAX : CHIP_MAX - 1;
+    const over = Math.max(0, others.length - budget);
+    const shown = others.slice(over);
+    // Order matters as much as membership, because the box clips from the
+    // bottom. The two chips worth keeping are the count of who is missing and
+    // your own name, and both used to sit at the *end* of the flow — so in a
+    // short window they were the first two things cut, which is precisely
+    // backwards: the list lost its own truncation notice and you lost the one
+    // name you were looking for. Both go first now. "+N earlier" at the front
+    // is also where those people would have been.
+    replace(chips, []);
     if (over > 0) {
       append(chips, [
-        h("span", {
-          class: "chip chip-more label",
-          text: `+${over} earlier`,
-        }),
+        h("span", { class: "chip chip-more label", text: `+${over} earlier` }),
       ]);
     }
+    if (self !== undefined) {
+      append(chips, [h("span", { class: "chip is-you", text: self.nickname })]);
+    }
+    append(
+      chips,
+      shown.map((r) => h("span", { class: "chip", text: r.nickname })),
+    );
     cluster.fit();
   }
 
@@ -1313,6 +1470,16 @@ function sceneLobby(): Scene {
       // describes here needs a field of its own; until it has one, the lobby
       // says nothing rather than something that belongs to another screen.
       prize.hidden = true;
+      // A different session in the same scene starts over. The view is only
+      // rebuilt when the *kind* of view changes, so "use a different code"
+      // lands in another session's lobby holding the previous room's pids:
+      // everyone in the new room reads as a fresh arrival and the count sits
+      // three behind for ten seconds while the cluster animates strangers.
+      if (last !== null && last.sid !== state.sid) {
+        seen = null;
+        held.clear();
+        cluster.flush();
+      }
       last = state;
       const here = state.roster.length;
       const fresh =
@@ -1336,22 +1503,16 @@ function sceneLobby(): Scene {
         }
         if (own) {
           welcomed.add(state.sid);
-          cluster.commit(here, me.nickname, me.pid);
+          cluster.commit(me.nickname, me.pid);
         } else if (here > 0) {
           // The room, arriving as one. Not a person, so no name.
-          cluster.commit(here, null, null);
+          cluster.commit(null, null);
         }
         // An empty room has nothing to commit, and "appending" nobody into a
         // cluster of nobody is a sentence about nothing. The console's lobby
         // preview opens on exactly that.
       } else {
-        // Count them in from wherever the room was before this batch, so the
-        // committed line ends on the number the list beside it will show.
-        let n = here - fresh.length;
-        for (const r of fresh) {
-          n += 1;
-          cluster.commit(n, r.nickname, r.pid);
-        }
+        for (const r of fresh) cluster.commit(r.nickname, r.pid);
       }
       // Anyone who has left stops being held, so a name cannot be waiting on
       // a commit for somebody who is no longer in the room.

@@ -457,6 +457,17 @@ body.phone #app {
     transition: none;
   }
 }
+/* The room: the names, and the picture of them, as one block. Whatever
+   space this gets, the chips take what they need and the cluster takes the
+   rest — which is what makes the cluster sit against the last name instead
+   of against the bottom of whatever row it was given. */
+.lobby-room {
+  display: flex;
+  flex-direction: column;
+  flex: 0 1 auto;
+  min-height: 0;
+  gap: 4px;
+}
 .lobby-chips {
   /* Sized to its names, not to the slack. `flex: 1` here used to absorb the
      whole column, which was right while the chips were the last thing above
@@ -2799,28 +2810,21 @@ body.phone:has(.v-splash) {
   .v-lobby {
     display: grid;
     grid-template-columns: minmax(260px, 0.95fr) minmax(0, 1.05fr);
-    grid-template-rows: auto auto auto auto auto minmax(0, 1fr);
+    grid-template-rows: auto auto auto auto minmax(0, 1fr);
     grid-template-areas:
       "you      here"
       "title    chips"
       "subtitle chips"
       "prize    chips"
-      "wait     chips"
-      "wait     raft";
+      "wait     chips";
     column-gap: clamp(24px, 4cqw, 56px);
     row-gap: clamp(6px, 1.4cqh, 16px);
     align-content: start;
   }
-  /* Under the names, in the names' column. Without an area of its own it
-     auto-placed into an implicit row in the left column, which put the
-     picture under the session title — beside the room rather than about it.
-     The chips row is content-sized and this one takes the slack, so the
-     cluster sits against the last chip rather than against the bottom edge;
-     `min-height: 0` plus `max-height` lets it give that space back when the
-     roster is long enough to want it. */
-  .v-lobby .raft-wrap {
-    grid-area: raft;
-    align-self: start;
+  /* The names and the picture of them share one area, stacked, so the
+     cluster is under the last chip rather than at the foot of a grid row. */
+  .v-lobby .lobby-room {
+    grid-area: chips;
     min-height: 0;
   }
   /* Its own row under the title. Without a named area it auto-placed into
@@ -2846,7 +2850,6 @@ body.phone:has(.v-splash) {
     align-self: baseline;
   }
   .v-lobby .lobby-chips {
-    grid-area: chips;
     align-content: flex-start;
     gap: 8px;
   }
@@ -3348,32 +3351,6 @@ body.phone:has(.v-splash) {
   }
 }
 
-/* A wide, short window — a laptop window sharing the screen with a video
-   call, or a phone turned sideways.
-
-   The grid above triggers on width alone, and in a short window its chips
-   row — content-sized, and spanning four `auto` rows whose heights are set
-   by the title and the waiting line in the left column — takes the free
-   space before the cluster's row can have any. Measured at 844x390: the
-   cluster's row got four pixels, the drawing overflowed it, and `.p-stage`
-   clipped the overflow. What was on screen was the tops of three follower
-   circles and nothing else — no leader, no name, no caption. The animation
-   the list now waits on was invisible, which is the worst version of a
-   load-bearing animation.
-
-   There is no honest way to fit a 200px drawing into a 346px stage already
-   carrying a title, a room and a waiting line, so it does not try. The list
-   is unaffected: `paintRoom` never consults this. */
-@container pv (min-width: 700px) and (max-height: 520px) {
-  .v-lobby .raft-wrap {
-    display: none;
-  }
-}
-
-/*
- * Very wide, where the two-column splits have room to breathe rather than
- * just stretch. Nothing moves; the measure and the gutters grow.
- */
 @container pv (min-width: 1200px) {
   .v-trivia {
     grid-template-columns: minmax(320px, 0.85fr) minmax(0, 1.15fr);
