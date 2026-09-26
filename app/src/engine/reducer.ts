@@ -2119,8 +2119,8 @@ export function reduce(
       // not a normal case — and it scores nothing, because the alternative is
       // a timer that only applies to people whose network is fast.
       const correct = now <= play.itemEndsAt && matchesItem(item, event.answer);
-      // The first three correct *in the room*, per item: 10 + 5, six times
-      // over, is the Floor max of 90.
+      // The first three correct *in the room*, per item: 5 + 5, seven times
+      // over, is the Floor max of 70.
       const points = correct
         ? RECRUITMENT_CORRECT +
           (play.solvedOrder.length < RECRUITMENT_FIRST_PLACES

@@ -48,8 +48,8 @@ import { RECRUITMENT_ITEMS, recruitmentRound } from "../arcade/recruitment.ts";
 /* The oracle: SPEC.md, in integers                                     */
 /* ------------------------------------------------------------------ */
 
-/** Recruitment: "Every correct answer within the timer scores 10; the first three correct in the room score +5." */
-const R_CORRECT = 10;
+/** Recruitment: "Every correct answer within the timer scores 5; the first three correct in the room score +5." */
+const R_CORRECT = 5;
 const R_FIRST_BONUS = 5;
 const R_FIRST_PLACES = 3;
 const R_SECONDS_PER_ITEM = 20;
@@ -1212,32 +1212,32 @@ function play(): Played {
 /* ------------------------------------------------------------------ */
 
 /**
- * Priya: right and first on all seven items, 10 + 5 each → 105. First across
+ * Priya: right and first on all seven items, 5 + 5 each → 70. First across
  * the line: 30, 60, 90 bank 5 each (15), crossing 10, first place 15 → 40.
- *   105 + 40
+ *   70 + 40
  */
-const PRIYA = 145;
+const PRIYA = 110;
 
 /**
- * Kenji: right and second on six items (sits out Consul) → 6 × 15 = 90.
+ * Kenji: right and second on six items (sits out Consul) → 6 × 10 = 60.
  * Second across: 15 + 10 + 10 → 35.
- *   90 + 35
+ *   60 + 35
  */
-const KENJI = 125;
+const KENJI = 95;
 
 /**
  * Zoë: third correct on Vault (Priya, Kenji, Zoë) and on Consul (Kenji sits
- * it out) → 15 each; *fourth* on Terraform, behind Survivor's "tf" at 2.5 s →
- * 10. Recruitment 40. Ninety resources exactly (15 banked), then drained —
+ * it out) → 10 each; *fourth* on Terraform, behind Survivor's "tf" at 2.5 s →
+ * 5. Recruitment 25. Ninety resources exactly (15 banked), then drained —
  * and the bet she then places on Priya is placed after Priya is across, so it
  * pays nothing. 15 in the round.
  *
- * She is the reason the Lounge is timed at all. With the bet paid she
- * finished on 30: more than Sam's honest 25 for a fifth-place crossing, and
+ * She is the reason the Lounge is timed at all. With the bet paid she would
+ * have finished on 55, against Sam's honest 25 for a fifth-place crossing —
  * bought by reading the finish off the big screen.
- *   15 + 10 + 15 + 15
+ *   10 + 5 + 10 + 15
  */
-const ZOE = 55;
+const ZOE = 40;
 const ZOE_PLAN_APPLY = 15;
 
 /**
@@ -1249,8 +1249,8 @@ const SAM = 25;
 /** Late: drained in the first lock with nothing banked; backed the winner. */
 const LATE = 15;
 
-/** Snail: right at the buzzer on six items and with a second to spare on the seventh, 10 each; 29 resources banks nothing. */
-const SNAIL = 70;
+/** Snail: right at the buzzer on six items and with a second to spare on the seventh, 5 each; 29 resources banks nothing. */
+const SNAIL = 35;
 
 /** Hermit: nothing, and on the board for it. */
 const HERMIT = 0;
@@ -1376,10 +1376,12 @@ describe("sixty bots play Recruitment and Plan / Apply", () => {
       assert.equal(arcade.standing[pid], "floor");
     }
     assert.deepEqual(arcade.lounge, {});
-    // Seven items at 10 + 5 for a first-three finish: the Floor max moved with
-    // the seventh item, and SPEC's table of 90 counts six.
-    assert.equal(arcade.banked[WINNER], 105, "the Floor max");
-    assert.equal(Math.max(...Object.values(arcade.banked)), 105);
+    // Seven items at 5 + 5 for a first-three finish. SPEC's old table said 90:
+    // it counted six items and paid 10 for the answer, and both halves of that
+    // moved — the seventh item was added with the launch content, and the 10
+    // was halved to stop the round paying half of the whole Floor.
+    assert.equal(arcade.banked[WINNER], 70, "the Floor max");
+    assert.equal(Math.max(...Object.values(arcade.banked)), 70);
   });
 
   test("the latecomer is Player 060 and nobody was renumbered", () => {

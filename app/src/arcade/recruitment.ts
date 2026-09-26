@@ -22,16 +22,16 @@
  * out that the set is open, which is one item before the back half where
  * elimination would otherwise start.
  *
- * **What the seventh item costs, so that somebody can decide it is too much.**
- * Twenty seconds of Floor, which takes the round to 140 s and puts it about 20 s
- * past the 2.5 minutes SPEC's round table budgets for it. And fifteen points of
- * ceiling: the Floor max is `items × (10 + 5)`, so it goes from 90 to 105, which
- * is 50% of the three-round order the event actually runs and 34% of all five.
- * Recruitment was already the largest single round on the Floor and the only one
- * nobody can be knocked out of, and engine/arcade.test.ts prices the retune that
- * fixes it — 5 for a correct answer instead of 10 brings the round to 70 and its
- * share to 40%. That retune is a scoring decision and is not taken here; what is
- * taken here is that a round decided by elimination is not worth its 2.5 minutes
+ * **What the seventh item costs.** Twenty seconds of Floor, which takes the
+ * round to 140 s and puts it about 20 s past the 2.5 minutes SPEC's round table
+ * budgets for it. It no longer costs any share of the ceiling: the Floor max is
+ * `items × (5 + 5)`, so seven items is 70, which is 40% of the three-round order
+ * the event actually runs. It was 105 and 50% while the answer paid 10 — the
+ * round that paid half of everything being the one round nobody can be knocked
+ * out of was what got the answer halved. Recruitment is still the largest single
+ * round on the Floor, which is the part of the old argument that survived; what
+ * is taken here is that a round decided by elimination is not worth its 2.5
+ * minutes
  * either. SPEC.md's round table and its scoring summary both still say six items
  * and 90, and both are now behind this file.
  *

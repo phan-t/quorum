@@ -557,9 +557,9 @@ summary is the design rather than a description of a round anyone has played.
 
 | # | Round | The game | Content | Time | Drains? |
 | --- | --- | --- | --- | --- | --- |
-| 0 | **Recruitment** | Emoji Decode | 6 existing items | 2.5 min | No |
+| 0 | **Recruitment** | Emoji Decode | 7 existing items | 2.5 min | No |
 | 1 | **Plan / Apply** | Red Light, Green Light | — | 3 min | Yes |
-| 2 | **Unseal** | Dalgona | 6 existing Scrambled items + 4 | 3 min | Yes |
+| 2 | **Unseal** | Dalgona | 17 Scrambled tins | 3 min | Yes |
 | 3 | **Tug of Raft** | Tug of War | — | 3 min | No |
 | 4 | **Gganbu** *(not built)* | Marbles | 6 new Over/Under items | 3.5 min | Yes |
 | 5 | **The Glass Bridge** | Glass Bridge | 6 Real-or-Fake pairs (3 existing) | 3.5 min | Yes |
@@ -570,11 +570,23 @@ summary is the design rather than a description of a round anyone has played.
 slaps the ones who lose. Here the recruiter is very persistent and everyone
 gets in.*
 
-Two emoji, one product, type it. Six items, 20 seconds each, the existing
-Emoji Decode content (`🔐🏦` → Vault, `📡🐪` → Nomad). Text input, matched
-after lowercasing and stripping non-letters, with an accept list (`tf` for
-Terraform). Every correct answer within the timer scores **10**; the first
-three correct in the room score **+5**. No draining. An item closes two
+Two emoji, one product, type it. Seven items, 20 seconds each, the existing
+Emoji Decode content (`🔐🏦` → Vault, `🏕️🐪` → Nomad, `🔎🕸️` → Consul). Text
+input, matched after lowercasing and stripping non-letters, with an accept list
+(`tf` for Terraform). Every correct answer within the timer scores **5**; the
+first three correct in the room score **+5**.
+
+Seven items at 20 seconds is 140 s of Floor, about 20 s past the 2.5 minutes
+this table budgets. That is accepted: the seventh item is what stops the last
+two answers being reachable by elimination.
+
+The answer used to score **10**, which made the round's Floor max 105 — half of
+everything the Floor can pay across the three rounds the event actually runs,
+in the one round nobody can be knocked out of, settled before any round with a
+decision in it had started. Halving the answer and deliberately *not* the
+first-three bonus brings it to 70 and 40%. It is still the largest single
+round, which is the part of the argument for paying well that survived: it
+hands out the player numbers and it sets whether people think they can win. No draining. An item closes two
 seconds after the last person answers it rather than running out its twenty,
 for the reason trivia has a close button next to "24 of 27 answered": once the
 Desktop says "9 of 9 answered" the rest of the item is dead air, and it is
@@ -737,6 +749,11 @@ Six steps. At each step, two panes: one is a real HashiCorp feature (*Vault
 Transit Secrets Engine*), one is invented (*Vault Lease Broker Mesh*). Step on
 the real one. Wrong pane and you fall — drained, with everything banked so far.
 
+That pair is the shape, not the board. The shipped board pairs *Vault
+Cubbyhole* against *Vault Lockbox Engine*, because Transit is known to anyone
+who has used Vault and the round wants a real feature that *sounds* invented —
+see the reasoning at the top of `app/src/arcade/glass-bridge.ts`.
+
 Players cross in **three waves** by player number. Wave 1 goes blind, 12
 seconds per step. Wave 2 goes after, 9 seconds, and can see on the Desktop
 which panes broke under wave 1. Wave 3 goes last with 6 seconds and near-total
@@ -803,7 +820,7 @@ one. Ties go to whoever crossed first.
 
 | Round | Floor max | Lounge max |
 | --- | --- | --- |
-| Recruitment | 90 | — |
+| Recruitment | 70 | — |
 | Plan / Apply | 40 | 15 |
 | Unseal | 60 | 8 |
 | Tug of Raft | 45 | — |

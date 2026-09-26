@@ -43,31 +43,35 @@ import type {
 /* ------------------------------------------------------------------ */
 
 /**
- * SPEC.md: "Every correct answer within the timer scores 10".
+ * SPEC.md said "Every correct answer within the timer scores 10". It is 5,
+ * and this is the decision that changed it.
  *
- * **This is the largest number in the arcade, and it is a decision rather than
- * an accident.** Seven items at 10 + 5 is a Floor max of 105 — SPEC.md's table
- * counts six and therefore says 90, and arcade/recruitment.ts argues the
- * seventh. On the running order the event actually uses — Recruitment,
- * Plan / Apply, the Bridge — the Floor can pay 105 + 40 + 63 = 208, so
- * Recruitment is 50% of it, and it is the round that asks the least: seven
- * product names, six of which an SA knows cold, with the +5 going to the first
- * three in the room *per item*. That makes it a typing race rather than a quiz,
- * and two or three emoji typed quickly outweigh a whole honest tin in Unseal.
+ * At 10 the round paid 7 × (10 + 5) = 105. On the running order the event
+ * actually uses — Recruitment, Plan / Apply, the Bridge — the Floor can pay
+ * 105 + 40 + 63 = 208, so Recruitment was **half of everything**, in the round
+ * that asks the least: seven product names, six of which an SA knows cold,
+ * with the +5 going to the first three in the room *per item*. That is a
+ * typing race, and two or three emoji typed quickly outweighed a whole honest
+ * tin in Unseal. It was also the one round nobody can be knocked out of, so
+ * the half was paid out before any round with a decision in it had started.
  *
- * The case for leaving it there is SPEC.md's own: "round one sets whether
- * people think they can win", it is the round that hands out the player
- * numbers, and a round nobody can be knocked out of has to pay enough to be
- * worth playing. The case against is that a typing race settles the
- * leaderboard before the rounds with a decision in them have started.
+ * The case for leaving it was SPEC.md's own — "round one sets whether people
+ * think they can win", it hands out the player numbers, and a round with no
+ * elimination has to pay enough to be worth playing. That case survives at 5:
+ * the round still pays more than Plan / Apply and the Bridge individually, it
+ * is still the biggest single round, and it still cannot cost anybody their
+ * place. What it no longer does is settle the leaderboard on its own.
  *
- * Nobody has chosen between those, so the pair is named and asserted rather
- * than quietly tuned. The retune is this line: at 5 the round is
- * 7 × (5 + 5) = 70 and its share of the same three falls to 70 / 173 = 40%.
+ * At 5 the round is 7 × (5 + 5) = 70 and its share of the same three is
+ * 70 / 173 = 40%. The first-three bonus is deliberately left at 5: it is now
+ * half the round rather than a third, which is the part that rewards being
+ * quick *and* right rather than merely quick, and it is the part a person in
+ * the room can feel themselves earning.
+ *
  * arcade.test.ts holds the ceilings and the ratio, so either number moving
  * fails a test that prints the arithmetic instead of passing in silence.
  */
-export const RECRUITMENT_CORRECT = 10;
+export const RECRUITMENT_CORRECT = 5;
 
 /** "…the first three correct in the room score +5" — per item, not per round. */
 export const RECRUITMENT_FIRST_BONUS = 5;
@@ -234,7 +238,7 @@ export const UNSEAL_SHAPES: readonly UnsealShape[] = [
  * the per-letter banking. That is the reading SPEC.md's own scoring table
  * settles: it gives Unseal a Floor max of 60, which is 50 + the 10 for being
  * fastest in your shape and nothing else. Every other row in that table is
- * exactly derivable from its round's prose — Recruitment 6 × 15, Plan / Apply
+ * exactly derivable from its round's prose — Recruitment 7 × 10, Plan / Apply
  * 3 × 5 + 10 + 15, Tug of Raft 3 × 15, Gganbu 40 + 10, the Bridge 6 × 8 + 15 —
  * so it is a precise table rather than a decorative one, and 60 is a fact
  * about how the letters and the shape fit together.
@@ -1784,7 +1788,7 @@ export function betPoints(
 export function floorMax(config: ArcadeRoundConfig): number {
   switch (config.kind) {
     case "recruitment":
-      // 6 × (10 + 5) = 90.
+      // 7 × (5 + 5) = 70.
       return config.items.length * (RECRUITMENT_CORRECT + RECRUITMENT_FIRST_BONUS);
     case "plan_apply":
       // 3 × 5 + 10 + 15 = 40.

@@ -377,7 +377,7 @@ describe("recruitment answers", () => {
 });
 
 describe("recruitment scoring", () => {
-  test("10 for correct, +5 for each of the first three in the room, per item", () => {
+  test("5 for correct, +5 for each of the first three in the room, per item", () => {
     let s = recruiting(["p1", "p2", "p3", "p4", "p5"]);
     const say = (pid: ParticipantId, answer: string, at: number) =>
       accept(s, [{ type: "submitAnswer", pid, answer }], at);
@@ -388,11 +388,13 @@ describe("recruitment scoring", () => {
     s = say("p4", "vault", T0 + 4000);
     s = say("p5", "consul", T0 + 5000);
 
-    assert.equal(banked(s, "p1"), 15);
-    assert.equal(banked(s, "p2"), 15);
-    assert.equal(banked(s, "p3"), 15);
-    // Fourth correct: the 10 without the bonus.
-    assert.equal(banked(s, "p4"), 10);
+    assert.equal(banked(s, "p1"), 10);
+    assert.equal(banked(s, "p2"), 10);
+    assert.equal(banked(s, "p3"), 10);
+    // Fourth correct: the 5 without the bonus. The bonus is now half of what
+    // a fast correct answer is worth rather than a third, which is the whole
+    // point of halving the answer and not the bonus.
+    assert.equal(banked(s, "p4"), 5);
     // Wrong: nothing, and no entry at all.
     assert.equal(arcadeOf(s).banked["p5"], undefined);
     assert.deepEqual(recruitmentPlay(s), {
@@ -421,10 +423,10 @@ describe("recruitment scoring", () => {
     });
     // p2 was not first on item 0; they are first on item 1, and get the bonus.
     s = accept(s, [{ type: "submitAnswer", pid: "p2", answer: "tf" }], T0 + 21_000);
-    assert.equal(banked(s, "p2"), 15);
+    assert.equal(banked(s, "p2"), 10);
   });
 
-  test("a perfect Floor is 7 × 15 = 105, which is 15 past SPEC's Floor max", () => {
+  test("a perfect Floor is 7 × 10 = 70", () => {
     let s = recruiting(["p1"]);
     let at = T0;
     for (const [i, entry] of RECRUITMENT_ITEMS.entries()) {
@@ -434,13 +436,13 @@ describe("recruitment scoring", () => {
         s = accept(s, [{ type: "nextItem" }], at);
       }
     }
-    // ⚠️ SPEC's table says 90, and it counts six items. Recruitment has seven
-    // — the seventh is what stops the last two answers being reached by
-    // elimination — so the Floor max moved with the content. The arithmetic is
-    // asserted against the constants below rather than against the literal, so
-    // that the literal is the thing that has to be argued about.
-    assert.equal(banked(s, "p1"), 105);
-    assert.equal(floorMax(recruitmentRound()), 105);
+    // Seven items — the seventh is what stops the last two answers being
+    // reached by elimination — at 5 for the answer and 5 for a first-three
+    // finish. The arithmetic is asserted against the constants below rather
+    // than against the literal, so that the literal is the thing that has to
+    // be argued about.
+    assert.equal(banked(s, "p1"), 70);
+    assert.equal(floorMax(recruitmentRound()), 70);
     assert.equal(
       floorMax(recruitmentRound()),
       RECRUITMENT_ITEMS.length * (RECRUITMENT_CORRECT + RECRUITMENT_FIRST_BONUS),
@@ -915,11 +917,18 @@ describe("the Lounge", () => {
 });
 
 describe("the point ceiling", () => {
-  test("Recruitment is 50% of what the Floor can pay in the plan that is run", () => {
-    // A balance decision written down as a test, because nobody has taken it
-    // yet. The console's running order is the host's, but the one the event
-    // uses is three rounds — Recruitment, Plan / Apply, the Bridge — and on
-    // that order the easiest round pays nearly half of everything.
+  test("Recruitment is 40% of what the Floor can pay in the plan that is run", () => {
+    // A balance decision written down as a test. The console's running order
+    // is the host's, but the one the event uses is three rounds —
+    // Recruitment, Plan / Apply, the Bridge — and on that order this is how
+    // the points are spread.
+    //
+    // It was 47% at six items and 50% at seven, which is what took the
+    // decision out of the "someday" column: the round that paid half of
+    // everything was the round nobody can be knocked out of, and it paid out
+    // before any round with a decision in it had started. Halving the answer
+    // from 10 to 5 — and deliberately *not* the first-three bonus — brings it
+    // to 40%.
     //
     // SPEC's own figures, recomputed from the constants by floorMax.
     const floor = {
@@ -927,37 +936,32 @@ describe("the point ceiling", () => {
       plan_apply: floorMax({ kind: "plan_apply", target: 120, seconds: 75 }),
       glass_bridge: floorMax(glassBridgeRound()),
     };
-    assert.deepEqual(floor, { recruitment: 105, plan_apply: 40, glass_bridge: 63 });
+    assert.deepEqual(floor, { recruitment: 70, plan_apply: 40, glass_bridge: 63 });
 
     const played = floor.recruitment + floor.plan_apply + floor.glass_bridge;
-    assert.equal(played, 208);
+    assert.equal(played, 173);
     assert.equal(
       Math.round((floor.recruitment / played) * 100),
-      50,
+      40,
       "Recruitment's share of the Floor moved: that is a balance decision, not a refactor",
     );
-    // It was 47% at six items and it is 50% at seven, which makes the retune
-    // below overdue rather than hypothetical: the round that pays half of
-    // everything is the round nobody can be knocked out of.
 
-    // Where the 105 comes from, so a change to either number lands here with
-    // its arithmetic attached: seven emoji, 10 for the answer and 5 for being
+    // Where the 70 comes from, so a change to either number lands here with
+    // its arithmetic attached: seven emoji, 5 for the answer and 5 for being
     // in the first three on that item.
     assert.equal(
       floor.recruitment,
       RECRUITMENT_ITEMS.length * (RECRUITMENT_CORRECT + RECRUITMENT_FIRST_BONUS),
     );
-    // The retune arcade.ts describes, priced here rather than in a comment: at
-    // 5 + 5 the round is 70, and its share of the same three falls to 40%.
-    const halved = RECRUITMENT_ITEMS.length * (5 + RECRUITMENT_FIRST_BONUS);
-    assert.equal(halved, 70);
-    assert.equal(
-      Math.round((halved / (halved + floor.plan_apply + floor.glass_bridge)) * 100),
-      40,
-    );
+    // Still the biggest single round, which is the half of the old argument
+    // that survived: it hands out the player numbers, it sets whether people
+    // think they can win, and nobody can lose their place in it. What it no
+    // longer does is settle the leaderboard on its own.
+    assert.ok(floor.recruitment > floor.plan_apply);
+    assert.ok(floor.recruitment > floor.glass_bridge);
   });
 
-  test("and 34% of all five rounds, if a host runs every one of them", () => {
+  test("and 25% of all five rounds, if a host runs every one of them", () => {
     // The five rounds the console can offer — Gganbu is designed, not built.
     const all =
       floorMax(recruitmentRound()) +
@@ -965,8 +969,8 @@ describe("the point ceiling", () => {
       floorMax(unsealRound()) +
       floorMax(tugOfRaftRound(1)) +
       floorMax(glassBridgeRound());
-    assert.equal(all, 313);
-    assert.equal(Math.round((floorMax(recruitmentRound()) / all) * 100), 34);
+    assert.equal(all, 278);
+    assert.equal(Math.round((floorMax(recruitmentRound()) / all) * 100), 25);
     // Whichever way the order is cut, Recruitment is the largest single round
     // on the Floor, and it is the only one nobody can be knocked out of.
     const others = [
@@ -994,9 +998,10 @@ describe("the Lounge cap", () => {
     //
     // Every Floor figure is SPEC's, unchanged.
     const rounds = [
-      // ⚠️ Recruitment's Floor is 105 rather than SPEC's 90: the round has a
-      // seventh item. Every other Floor figure here is SPEC's, unchanged.
-      { round: "recruitment" as const, config: recruitmentRound(), floor: 105, lounge: 0 },
+      // Recruitment's Floor is 70: seven items rather than SPEC's six, and 5
+      // for the answer rather than 10. Every other Floor figure here is
+      // SPEC's, unchanged.
+      { round: "recruitment" as const, config: recruitmentRound(), floor: 70, lounge: 0 },
       {
         round: "plan_apply" as const,
         config: { kind: "plan_apply" as const, target: 120, seconds: 75 },
@@ -1119,7 +1124,7 @@ describe("draining lasts exactly one round", () => {
     let s = recruiting(["p1", "p2"]);
     s = accept(s, [{ type: "submitAnswer", pid: "p1", answer: "Vault" }], T0 + 1000);
     s = accept(s, [{ type: "endRound" }, { type: "revealRound" }], T0 + 30_000);
-    assert.equal(total(s, "p1"), 15);
+    assert.equal(total(s, "p1"), 10);
 
     s = accept(
       s,
@@ -1131,7 +1136,7 @@ describe("draining lasts exactly one round", () => {
     );
     s = taps(s, "p1", 120, T0 + 41_000);
     s = accept(s, [{ type: "endRound" }], T0 + 100_000);
-    assert.equal(total(s, "p1"), 55); // 15 + 40
+    assert.equal(total(s, "p1"), 50); // 10 + 40
     // Everybody who was in the round is on the board, at zero if they did nothing.
     assert.equal(total(s, "p2"), 0);
   });
@@ -1154,7 +1159,7 @@ describe("the arcade raw score", () => {
 
     s = accept(s, [{ type: "revealRound" }], T0 + 31_000);
     assert.deepEqual(s.scores["arcade"], {
-      p1: { raw: 15, status: "played" },
+      p1: { raw: 10, status: "played" },
       p2: { raw: 0, status: "played" },
     });
   });
@@ -1169,7 +1174,7 @@ describe("the arcade raw score", () => {
     const top = standings.find((r) => r.pid === "p1");
     const bottom = standings.find((r) => r.pid === "p2");
     assert.equal(top?.perActivity["arcade"]?.points, 100);
-    assert.equal(top?.perActivity["arcade"]?.raw, 15);
+    assert.equal(top?.perActivity["arcade"]?.raw, 10);
     assert.equal(top?.perActivity["arcade"]?.source, "normalised");
     assert.equal(bottom?.perActivity["arcade"]?.points, 0);
   });

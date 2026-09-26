@@ -733,7 +733,7 @@ export type ArcadePlay =
       /**
        * Correct answers to the *current item*, in order, for the "first three"
        * bonus — which is per item, not per round: three bonuses on each of
-       * seven items is what makes the Floor max 7 × 15 = 105. Cleared by
+       * seven items is what makes the Floor max 7 × 10 = 70. Cleared by
        * `nextItem`.
        */
       readonly solvedOrder: readonly ParticipantId[];
