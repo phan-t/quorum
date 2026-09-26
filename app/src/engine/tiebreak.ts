@@ -24,11 +24,25 @@
  *
  * A tiebreak question is asked to two people who are already tied at the top,
  * in front of a room, with no timer. It wants to be decidable rather than
- * clever: a fact an SA either knows or does not, with no rounding and no "well
- * it depends". These are all definitional or numeric, and none of them turns
- * on a date, a rebrand or an acquisition — the three things the trivia bank's
- * ⚠️ VERIFY flag exists for, and the three things most likely to have moved
- * since this was written.
+ * clever: a fact someone either knows or does not, with no rounding and no
+ * "well it depends". These are all definitional or numeric, and none of them
+ * turns on a date, a rebrand or an acquisition — the three things the trivia
+ * bank's ⚠️ VERIFY flag exists for, and the three things most likely to have
+ * moved since this was written.
+ *
+ * **None of them is about a product, and that is the constraint that matters
+ * most here.** This pool is what an event whose file flags nothing draws on,
+ * which means it is asked alongside a scored set it has never seen. It used to
+ * ask Raft, Vault's default API port and policy-as-code, and the committed
+ * example set asks all three of those in different words — so the tie the pool
+ * existed to settle would have been settled by two finalists racing to retype
+ * an answer the whole room heard twenty minutes earlier. Choosing less obvious
+ * products does not fix that, because any product question is one that some
+ * event's set may also ask; general knowledge is the only kind that cannot
+ * collide with a product quiz at all. It is the same instinct as the question
+ * bank's Round F, which is deliberately geography and culture rather than
+ * product trivia, and tiebreak.test.ts holds the line against the committed
+ * example.
  *
  * `basePoints: 0` is belt and braces. Sudden death settles to nothing anyway
  * — `settleQuestion` returns early on it — but a question that would score
@@ -47,56 +61,56 @@ import type { Question } from "./types.ts";
  */
 export const DEFAULT_TIEBREAKERS: readonly Question[] = [
   {
-    text: "Which consensus protocol backs Vault's, Consul's and Nomad's integrated storage?",
-    answers: ["Paxos", "Raft", "Zab", "Gossip"],
+    text: "What is the capital of Canada?",
+    answers: ["Toronto", "Vancouver", "Ottawa", "Montreal"],
+    timeLimitSec: 30,
+    correct: [2],
+    note: "Ottawa. Toronto is the largest city and takes most of the room, which is the whole reason the question works.",
+    round: null,
+    basePoints: 0,
+    tiebreak: true,
+  },
+  {
+    text: "Mount Fuji stands on which of Japan's main islands?",
+    answers: ["Hokkaido", "Honshu", "Kyushu", "Shikoku"],
     timeLimitSec: 30,
     correct: [1],
-    note: "Raft. Gossip is real in Consul, but it is membership and failure detection, not consensus.",
+    note: "Honshu, about 100km south-west of Tokyo. All four really are main islands, so there is nothing to rule out by elimination.",
     round: null,
     basePoints: 0,
     tiebreak: true,
   },
   {
-    text: "What is Vault's default API port?",
-    answers: ["8080", "8200", "8500", "4646"],
+    text: "The deepest known point in the sea lies in which ocean?",
+    answers: ["The Atlantic", "The Indian", "The Pacific", "The Southern"],
     timeLimitSec: 30,
-    correct: [1],
-    note: "8200 for the API, 8201 for cluster traffic. 8500 is Consul's HTTP API and 4646 is Nomad's.",
+    correct: [2],
+    note: "The Pacific — Challenger Deep, at the south end of the Mariana Trench, just under 11,000m. The depth itself is still argued over by a few metres, which is why the question asks for the ocean.",
     round: null,
     basePoints: 0,
     tiebreak: true,
   },
   {
-    text: "In Terraform, what is the plugin that talks to an actual API called?",
-    answers: ["A module", "A provider", "A provisioner", "A backend"],
+    text: "How many keys does a standard full-size piano have?",
+    answers: ["76", "85", "88", "92"],
     timeLimitSec: 30,
-    correct: [1],
-    note: "A provider. A module is reusable configuration, a provisioner runs something on a resource, and a backend is where state lives.",
+    correct: [2],
+    note: "88 — 52 white and 36 black, a little over seven octaves. 76 and 85 are both real keyboard sizes, which is what makes them fair to offer.",
     round: null,
     basePoints: 0,
     tiebreak: true,
   },
   {
-    text: "Which HashiCorp product is policy as code?",
-    answers: ["Sentinel", "Boundary", "Waypoint", "Consul"],
-    timeLimitSec: 30,
-    correct: [0],
-    note: "Sentinel, across the enterprise products.",
-    round: null,
-    basePoints: 0,
-    tiebreak: true,
-  },
-  {
-    text: "What does Packer produce?",
+    text: "The Ural Mountains are the conventional boundary between which two continents?",
     answers: [
-      "A container registry",
-      "A machine image",
-      "A Terraform module",
-      "A service mesh",
+      "Europe and Asia",
+      "Asia and Africa",
+      "Europe and Africa",
+      "Asia and North America",
     ],
     timeLimitSec: 30,
-    correct: [1],
-    note: "Machine images — identical ones for many platforms from one configuration. A builder is the plugin that makes one.",
+    correct: [0],
+    note: "Europe and Asia. Where one ends and the other begins is a convention rather than a geological fact, and the Urals are the line the convention settled on.",
     round: null,
     basePoints: 0,
     tiebreak: true,

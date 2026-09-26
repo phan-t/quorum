@@ -223,12 +223,14 @@ room can get. Never open on a deep cut and never close on one either.
 **Round F is in the JSON**, as four questions flagged `"tiebreak": true` — F1
 to F4. A flagged question is lifted out of the scored set and into the pool
 sudden death draws on, so those four cost the game nothing in length. Without
-them the engine falls back to a built-in pool that asks C7's Raft question
-again, and a tie would be settled by two people racing to retype an answer they
-heard twenty minutes earlier. Their `timeLimitSec` is this bank's suggestion
-and nothing more: sudden death has no clock, because it ends when someone is
-right rather than when time runs out, so the reducer never reads the field on a
-flagged question.
+them the engine falls back to a built-in pool, which used to ask C7's Raft
+question again — a tie settled by two people racing to retype an answer they
+heard twenty minutes earlier — and is general knowledge now for exactly that
+reason. Round F is still the better answer, because a tiebreaker written by
+whoever wrote the set is verified in the same pass as the set. Their
+`timeLimitSec` is this bank's suggestion and nothing more: sudden death has no
+clock, because it ends when someone is right rather than when time runs out, so
+the reducer never reads the field on a flagged question.
 
 ---
 
