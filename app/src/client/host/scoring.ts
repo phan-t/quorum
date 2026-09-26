@@ -37,7 +37,7 @@ import {
   setText,
   type KeyedList,
 } from "../shared/dom.ts";
-import { activityHue } from "../shared/view.ts";
+import { activityHue, stackedBar } from "../shared/view.ts";
 import { control, type Control } from "./controls.ts";
 
 const FLASH_MS = 3_000;
@@ -70,8 +70,30 @@ interface RowRefs {
   name: HTMLElement;
   cells: Map<string, CellRefs>;
   spot: HTMLElement;
+  mix: HTMLElement;
   total: HTMLElement;
   rank: HTMLElement;
+}
+
+/**
+ * A grid row in the shape the stacked bar reads.
+ *
+ * `stackedBar` was written for `StandingRow`, which carries the bench flags as
+ * a list of activity ids; the grid carries them as a status per activity,
+ * because that is what a cell has to draw. Same facts, two shapes, and the
+ * conversion belongs here rather than in a second bar function — the whole
+ * point of reusing it is that the console and the Desktop cannot drift.
+ */
+function barRow(row: ScoreRow, activities: readonly ActivitySummary[]): {
+  perActivity: Readonly<Record<string, number | null>>;
+  bench: readonly string[];
+  spot: number;
+} {
+  return {
+    perActivity: row.points,
+    bench: activities.filter((a) => row.status[a.id] === "bench").map((a) => a.id),
+    spot: row.spot,
+  };
 }
 
 /**
@@ -253,6 +275,7 @@ export function createScoringPanel(opts: Opts): ScoringPanel {
         ]),
       ),
       h("th", { class: "sc-th sc-th-spot", text: "Spot" }),
+      h("th", { class: "sc-th sc-th-mix", text: "Mix" }),
       h("th", { class: "sc-th sc-th-total", text: "Total" }),
       h("th", { class: "sc-th sc-th-rank", text: "Rank" }),
     ]);
@@ -428,6 +451,7 @@ export function createScoringPanel(opts: Opts): ScoringPanel {
       const name = h("span", { class: "sc-name" });
       const cells = new Map<string, CellRefs>();
       const spot = h("span", { class: "mono sc-spot-cell" });
+      const mix = h("div", { class: "sc-bar" });
       const total = h("span", { class: "mono sc-total" });
       const rank = h("span", { class: "mono sc-rank" });
       const tr = h("tr", { class: "sc-row" }, [
@@ -439,10 +463,13 @@ export function createScoringPanel(opts: Opts): ScoringPanel {
           return cell.td;
         }),
         h("td", { class: "sc-cell-spot" }, [spot]),
+        // Not focusable, so the tab order along the row is still exactly the
+        // editable cells and nothing else.
+        h("td", { class: "sc-cell-mix" }, [mix]),
         h("td", { class: "sc-cell-total" }, [total]),
         h("td", { class: "sc-cell-rank" }, [rank]),
       ]);
-      const refs: RowRefs = { tr, num, name, cells, spot, total, rank };
+      const refs: RowRefs = { tr, num, name, cells, spot, mix, total, rank };
       refsFor.set(tr, refs);
       return tr;
     },
@@ -458,6 +485,24 @@ export function createScoringPanel(opts: Opts): ScoringPanel {
       }
       setText(refs.spot, r.spot === 0 ? "—" : String(r.spot));
       refs.spot.classList.toggle("sc-has-spot", r.spot > 0);
+      // Where the total came from, drawn by the same function the Desktop
+      // uses. The numbers are already along this row; the bar is what makes a
+      // row readable at a glance and comparable to the one under it, which is
+      // the question a host is actually asked — not "what did they score in
+      // trivia" but "why are they third".
+      replace(
+        refs.mix,
+        stackedBar(barRow(r, activities), activities, barScale).map((seg) =>
+          h("div", {
+            class: seg.bench ? "sc-seg sc-seg-bench" : "sc-seg",
+            attrs: {
+              style: `flex-basis:${seg.percent}%;background-color:${seg.hue}`,
+              "data-activity": seg.key,
+              title: `${seg.label}: ${seg.points}${seg.bench ? " (bench credit)" : ""}`,
+            },
+          }),
+        ),
+      );
       setText(refs.total, String(r.total));
       setText(refs.rank, String(r.rank));
     },
@@ -470,6 +515,15 @@ export function createScoringPanel(opts: Opts): ScoringPanel {
   /* ---------------------------------------------------------------- */
 
   let lastRows: readonly ScoreRow[] = [];
+  /**
+   * The biggest total on the board, so every row's bar is drawn against the
+   * same width and two rows can be compared by eye.
+   *
+   * Set before the rows are reconciled, because the reconciler's update
+   * callback reads it. Zero while nobody has scored, which `stackedBar`
+   * already treats as "draw nothing".
+   */
+  let barScale = 0;
   let spotListSig = "";
 
   function renderActivities(): void {
@@ -592,6 +646,7 @@ export function createScoringPanel(opts: Opts): ScoringPanel {
       // the cursor while the host is typing into it. Nothing is filtered —
       // the rank the server computed is a column.
       lastRows = [...scores].sort((a, b) => a.playerNumber - b.playerNumber);
+      barScale = Math.max(0, ...lastRows.map((r) => r.total));
       rows.update(lastRows);
 
       gridWrap.hidden = lastRows.length === 0;

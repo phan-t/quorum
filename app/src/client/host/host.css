@@ -644,7 +644,10 @@ body {
   display: grid;
   grid-template-columns: 24px 1fr auto;
   gap: 10px;
-  align-items: baseline;
+  /* Was `baseline`, which lined the rank and the total up with the name. With
+     a bar under the name there is no shared baseline worth having, and
+     `center` keeps the numbers against the middle of the two-line block. */
+  align-items: center;
   padding: 4px 8px;
   margin-bottom: 2px;
   break-inside: avoid;
@@ -662,6 +665,36 @@ body {
 }
 .h-total {
   font-weight: 600;
+}
+
+/* The same stacked breakdown the Desktop draws, from the same function, so
+   this panel's note — "the room sees exactly this" — is true. Smaller here:
+   the Desktop's is read across a room and this is read at arm's length. */
+.h-row-main {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.h-bar {
+  display: flex;
+  height: 5px;
+  border-radius: 999px;
+  overflow: hidden;
+  background: var(--panel-2);
+}
+.h-seg {
+  min-width: 0;
+}
+/* Bench Credit, hatched as well as dimmed. Nothing here may be carried by
+   colour alone, and a credited block is not the same claim as a played one. */
+.h-seg-bench {
+  opacity: 0.55;
+  background-image: repeating-linear-gradient(
+    45deg,
+    rgb(0 0 0 / 0.35) 0 2px,
+    transparent 2px 4px
+  );
 }
 
 /* ------------------------------------------------------------ scoring -- */
@@ -966,6 +999,34 @@ body {
 .sc-cell-total,
 .sc-cell-rank {
   text-align: right;
+}
+/* Where the total came from, per row, for everybody — not just the five the
+   standings panel shows. The numbers are already along the row; this is what
+   makes two rows comparable without reading either of them. */
+.sc-cell-mix {
+  width: 84px;
+  padding-left: 10px;
+}
+.sc-th-mix {
+  padding-left: 10px;
+}
+.sc-bar {
+  display: flex;
+  height: 6px;
+  border-radius: 999px;
+  overflow: hidden;
+  background: var(--panel-2);
+}
+.sc-seg {
+  min-width: 0;
+}
+.sc-seg-bench {
+  opacity: 0.55;
+  background-image: repeating-linear-gradient(
+    45deg,
+    rgb(0 0 0 / 0.35) 0 2px,
+    transparent 2px 4px
+  );
 }
 .sc-spot-cell {
   color: var(--dim);

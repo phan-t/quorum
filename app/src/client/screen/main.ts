@@ -2257,7 +2257,7 @@ function standingRow(
           h("div", {
             class: seg.bench ? "s-seg s-seg-bench" : "s-seg",
             attrs: {
-              style: `flex-basis:${seg.percent}%;background:${seg.hue}`,
+              style: `flex-basis:${seg.percent}%;background-color:${seg.hue}`,
               // Not read aloud anywhere, but it keeps the DOM honest about
               // what each block is when someone inspects a recording.
               "data-activity": seg.key,
@@ -2408,7 +2408,7 @@ function sceneFinal(): Scene {
               h("div", {
                 class: seg.bench ? "s-seg s-seg-bench" : "s-seg",
                 attrs: {
-                  style: `flex-basis:${seg.percent}%;background:${seg.hue}`,
+                  style: `flex-basis:${seg.percent}%;background-color:${seg.hue}`,
                   "data-activity": seg.key,
                 },
               }),

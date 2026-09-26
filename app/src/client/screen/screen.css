@@ -332,7 +332,14 @@ body {
   box-shadow: inset -1px 0 0 var(--ground);
 }
 /* Bench Credit: hatched as well as dimmer. Never colour alone, and a credited
-   block is not the same claim as a played one. */
+   block is not the same claim as a played one.
+
+   This did nothing for as long as it has existed. The segment's hue is set
+   inline with the `background` *shorthand*, which resets `background-image`
+   to none, and an inline style beats a stylesheet — so the hatch below was
+   overwritten on every block it was meant to mark, and Bench Credit was
+   distinguished by opacity alone. The hue is set with `background-color` now.
+   Found while adding the same bar to the host console. */
 .s-seg-bench {
   opacity: 0.75;
   background-image: repeating-linear-gradient(

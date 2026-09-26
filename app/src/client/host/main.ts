@@ -40,6 +40,7 @@ import {
   playerTag,
   questionLabel,
   remainingMs,
+  stackedBar,
 } from "../shared/view.ts";
 import {
   bindEscape,
@@ -4212,12 +4213,41 @@ function render(s: RenderState): void {
   }
 
   if (body === bodyStandings) {
+    // The same stacked bar the Desktop draws, from the same function, so the
+    // note under this list is true. It said "the room sees exactly this"
+    // while showing a rank, a name and a total against the Desktop's rank,
+    // name, *bar* and total — the one part of the standings a host would be
+    // asked about ("why am I third?") was the part the preview left out.
+    //
+    // Scaled to the leader's total rather than to the widest row drawn, which
+    // is the same thing here and stays the same thing if this ever shows more
+    // than five.
+    const top = Math.max(0, ...s.standings.map((r) => r.total));
     replace(
       standingsRows,
       s.standings.map((row) =>
         h("li", { class: "h-row" }, [
           h("span", { class: "mono h-rank", text: String(row.rank) }),
-          h("span", { class: "h-name", text: row.nickname }),
+          h("div", { class: "h-row-main" }, [
+            h("span", { class: "h-name", text: row.nickname }),
+            h(
+              "div",
+              { class: "h-bar" },
+              stackedBar(row, s.activities, top).map((seg) =>
+                h("div", {
+                  class: seg.bench ? "h-seg h-seg-bench" : "h-seg",
+                  attrs: {
+                    style: `flex-basis:${seg.percent}%;background-color:${seg.hue}`,
+                    // Not announced — the total beside it is the fact — but it
+                    // makes the DOM legible to anyone inspecting a recording,
+                    // and it is what the Desktop does.
+                    "data-activity": seg.key,
+                    title: `${seg.label}: ${seg.points}${seg.bench ? " (bench credit)" : ""}`,
+                  },
+                }),
+              ),
+            ),
+          ]),
           h("span", { class: "mono h-total", text: String(row.total) }),
         ]),
       ),
@@ -4228,7 +4258,10 @@ function render(s: RenderState): void {
         ? "No scores yet. Type them into the grid below, or press G."
         : s.seal === "sealed"
           ? "Hidden from the room. This console is the only place it shows."
-          : "The room sees exactly this.",
+          // Precise, because a hover now shows more than the room gets. The
+          // list and the bars are the Desktop's; the numbers behind a bar are
+          // the host's, and they are what "why am I third?" is answered with.
+          : "The room sees this list and these bars. Hover one for the numbers behind it.",
     );
     standingsNote.classList.toggle("pb-warn", s.seal === "sealed");
   }
