@@ -292,9 +292,12 @@ body.phone #app {
   font-size: clamp(28px, 9vw, 44px);
 }
 .lobby-subtitle {
-  margin: 0.1rem 0 0;
+  margin: 0.15rem 0 0;
   color: var(--muted);
-  font-size: 11px;
+  /* Was 11px, under the 12px floor a review set for anything on this screen
+     and well under the 14px it set for anything carrying state. A date is not
+     state, but 11px is a size you squint at in a room. */
+  font-size: 14px;
 }
 .lobby-subtitle[hidden] {
   display: none;
@@ -314,8 +317,119 @@ body.phone #app {
   font-size: 30px;
   font-weight: 600;
 }
+
+/*
+ * The cluster: five nodes, and a join committed across them.
+ *
+ * Sized in the flow rather than given a fixed height, so a short phone gives
+ * it less and a tall one more; the head count above it is the information and
+ * this is the picture of it, so it is the thing that should shrink first.
+ */
+.raft-wrap {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  margin: 4px 0 2px;
+  /* Gives its space up four times as readily as anything else in the column.
+     A flex item's default `min-height: auto` made this unshrinkable while the
+     names beside it could shrink, so on a short phone a full room lost rows
+     of names to keep the diagram at full size — exactly backwards. The names
+     are what somebody is looking for; this is a picture of them. */
+  flex: 0 4 auto;
+  min-height: 0;
+}
+.raft {
+  width: 100%;
+  max-width: 260px;
+  height: auto;
+  /* Scales down with the box rather than overflowing it. The viewBox keeps
+     its aspect, so a short slot narrows the drawing instead of cropping it. */
+  max-height: 100%;
+}
+/* Below the interactive-border floor a recent review found elsewhere, but
+   these are decoration and never a tap target, so contrast here is about
+   being visible rather than being operable. */
+.raft-link {
+  stroke: var(--line);
+  stroke-width: 1.5;
+}
+.raft-node {
+  fill: var(--panel-2);
+  stroke: var(--dim);
+  stroke-width: 1.5;
+  transition: fill 180ms ease;
+}
+/* The leader is the one the entry arrives at, so it is the one with the
+   product's own ink rather than a brighter grey. */
+.raft-leader {
+  stroke: var(--nomad);
+  stroke-width: 2.5;
+}
+.raft-node.is-hot {
+  fill: var(--nomad);
+}
+.raft-dot {
+  fill: var(--nomad);
+}
+/* The joining name, riding in above the entry. Brighter than the LEADER tag
+   under it, because this is the thing the animation is about and that is a
+   caption on the diagram. */
+.raft-name {
+  fill: var(--nomad-ink);
+  font-size: 12px;
+  font-weight: 600;
+  font-family: inherit;
+}
+/* Committed: a majority has the entry, which is the only claim the picture
+   makes and the only moment it is allowed to flash. */
+.raft.is-committed .raft-node {
+  fill: var(--nomad);
+}
+.raft.is-committed .raft-link {
+  stroke: var(--nomad);
+}
+/* The word LEADER under the top node. Inside an aria-hidden svg, so it is
+   decoration for the eye only — the head count beside it is the fact. */
+.raft-tag {
+  fill: var(--muted);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.18em;
+  font-family: inherit;
+}
+.raft.is-committed .raft-tag {
+  fill: var(--nomad-ink);
+}
+
+.raft-label {
+  min-height: 1.2em;
+  color: var(--muted);
+  font-size: 12px;
+  letter-spacing: 0.1em;
+  text-align: center;
+}
+
+/* Reduced motion: the node fills still change, because that is a state and
+   not a movement, but nothing travels and nothing eases. The component also
+   checks the same query before it animates at all — this is the belt to that
+   brace, for a preference that changes mid-session. */
+@media (prefers-reduced-motion: reduce) {
+  .raft-entry {
+    display: none;
+  }
+  .raft-node {
+    transition: none;
+  }
+}
 .lobby-chips {
-  flex: 1;
+  /* Sized to its names, not to the slack. `flex: 1` here used to absorb the
+     whole column, which was right while the chips were the last thing above
+     the waiting line and wrong once the cluster came underneath them: it put
+     the picture at the foot of the screen with a hand's width of nothing
+     between it and the names it is about. The slack now goes to the waiting
+     line instead, which is what was holding the bottom anyway. */
+  flex: 0 1 auto;
   min-height: 0;
   display: flex;
   flex-wrap: wrap;
@@ -345,6 +459,9 @@ body.phone #app {
 }
 .lobby-wait {
   flex: none;
+  /* Takes the column's leftover, so it stays at the foot of the screen now
+     that the chips no longer push it there. */
+  margin-top: auto;
 }
 
 /* holding */
@@ -2640,16 +2757,29 @@ body.phone:has(.v-splash) {
   .v-lobby {
     display: grid;
     grid-template-columns: minmax(260px, 0.95fr) minmax(0, 1.05fr);
-    grid-template-rows: auto auto auto auto minmax(0, 1fr);
+    grid-template-rows: auto auto auto auto auto minmax(0, 1fr);
     grid-template-areas:
       "you      here"
       "title    chips"
       "subtitle chips"
       "prize    chips"
-      "wait     chips";
+      "wait     chips"
+      "wait     raft";
     column-gap: clamp(24px, 4cqw, 56px);
     row-gap: clamp(6px, 1.4cqh, 16px);
     align-content: start;
+  }
+  /* Under the names, in the names' column. Without an area of its own it
+     auto-placed into an implicit row in the left column, which put the
+     picture under the session title — beside the room rather than about it.
+     The chips row is content-sized and this one takes the slack, so the
+     cluster sits against the last chip rather than against the bottom edge;
+     `min-height: 0` plus `max-height` lets it give that space back when the
+     roster is long enough to want it. */
+  .v-lobby .raft-wrap {
+    grid-area: raft;
+    align-self: start;
+    min-height: 0;
   }
   /* Its own row under the title. Without a named area it auto-placed into
      whatever cell was free, which put the date beside the session name

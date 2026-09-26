@@ -556,6 +556,339 @@ function kudoSize(longest: number): string {
   return `clamp(15px, ${px.toFixed(1)}px, 26px)`;
 }
 
+/**
+ * Five nodes, and a join committed across them.
+ *
+ * The lobby is the longest stretch on a phone where nothing is happening and
+ * nothing is being asked of the person holding it — they have joined, and now
+ * they wait. It had a head count and a list of names, and the count moving
+ * from 11 to 12 is not a thing anybody watches.
+ *
+ * So the count is drawn as what it actually is. A join is an entry appended
+ * on the leader and replicated to the followers, and once a majority have it
+ * the entry is committed — which is the product's own name, and the one piece
+ * of distributed-systems theatre that is *true* rather than decorative.
+ *
+ * Deliberately not a real cluster. Quorum is one process; there are no five
+ * nodes and no election, and pretending otherwise on a screen an engineer is
+ * holding would be the kind of lie this repository avoids elsewhere. It is an
+ * illustration of what the word means, shown at the moment it applies, and
+ * the copy underneath says "joined" rather than claiming a replication
+ * happened. Nothing here reads server state beyond the roster length the
+ * lobby already had.
+ */
+const RAFT_NODES = 5;
+/**
+ * How long one commit takes, start to finish, over four equal stages: the
+ * entry travels in, it replicates out, it is committed, and the committed
+ * state is held.
+ *
+ * Was 1400ms, which was long enough to *see* and not long enough to read —
+ * the name arrived and was gone before anybody had finished looking at it,
+ * and the word "committed" showed for under half a second. The whole point
+ * of the picture is the moment it names, so the moment gets half the budget.
+ */
+const COMMIT_MS = 2_800;
+
+/**
+ * The longest name drawn on an arriving entry.
+ *
+ * Nicknames are capped well above this, and one that long centred over a
+ * 240-unit viewBox runs past both the leader and the links. Clipped with an
+ * ellipsis rather than shrunk to fit: the cluster is decoration and the chip
+ * with the full name is a few pixels away, so a name that does not fit loses
+ * its tail instead of costing everything else legibility.
+ */
+const RAFT_NAME_MAX = 13;
+
+/**
+ * @param onCommitted Called with a joiner's pid at the instant their entry is
+ *   committed. The lobby holds their name out of the list until this fires,
+ *   so the list is what the cluster has agreed on rather than a second,
+ *   faster answer to the same question sitting beside it.
+ *
+ *   It is the cluster's job to call this for *every* pid it is handed, on
+ *   every path — animated, queued, dropped from a full queue, or refused
+ *   outright by a reduced-motion preference. A pid this never reports is a
+ *   person who joined and never appeared, which is worse than any animation
+ *   is good, so each early return below releases before it returns.
+ */
+function raftCluster(onCommitted: (pid: string) => void): {
+  el: HTMLElement;
+  commit: (n: number, who: string | null, pid: string | null) => void;
+  flush: () => void;
+  settle: (n: number) => void;
+} {
+  const NS = "http://www.w3.org/2000/svg";
+  const svg = document.createElementNS(NS, "svg");
+  svg.setAttribute("viewBox", "0 0 240 150");
+  svg.setAttribute("class", "raft");
+  // Decorative: the head count beside it is the accessible fact, and a
+  // screen reader announcing five circles every time somebody joins would be
+  // noise in the one place the phone is meant to be quiet.
+  svg.setAttribute("aria-hidden", "true");
+
+  // Left to right: the entry arrives from off the left edge, lands on the
+  // leader, and goes out to a column of followers on the right.
+  //
+  // The first arrangement put the leader on top with the followers fanned
+  // beneath, which looked better and had nowhere to write LEADER — at any
+  // baseline under that node the two inner links cross exactly where the word
+  // wants to sit. Laid out this way the space directly below the leader is
+  // empty, because every link leaves to the right.
+  //
+  // It also reads as the sentence the picture is making. Top-down said
+  // "outward from the leader"; left-to-right says in, then across, which is
+  // the order the thing actually happens in.
+  const leader = { x: 48, y: 75 };
+  const followers = [
+    { x: 196, y: 24 },
+    { x: 196, y: 58 },
+    { x: 196, y: 92 },
+    { x: 196, y: 126 },
+  ];
+
+  for (const f of followers) {
+    const line = document.createElementNS(NS, "line");
+    line.setAttribute("x1", String(leader.x));
+    line.setAttribute("y1", String(leader.y));
+    line.setAttribute("x2", String(f.x));
+    line.setAttribute("y2", String(f.y));
+    line.setAttribute("class", "raft-link");
+    svg.append(line);
+  }
+
+  const dots: SVGCircleElement[] = [];
+  for (const [i, pos] of [leader, ...followers].entries()) {
+    const c = document.createElementNS(NS, "circle");
+    c.setAttribute("cx", String(pos.x));
+    c.setAttribute("cy", String(pos.y));
+    c.setAttribute("r", i === 0 ? "15" : "11");
+    c.setAttribute("class", i === 0 ? "raft-node raft-leader" : "raft-node");
+    svg.append(c);
+    dots.push(c);
+  }
+
+  // Which node is the leader, said rather than implied by it being bigger.
+  // Directly below it, which is clear background: every link leaves the
+  // leader to the right, and the entry arrives from the left.
+  const leaderTag = document.createElementNS(NS, "text");
+  leaderTag.setAttribute("x", String(leader.x));
+  leaderTag.setAttribute("y", String(leader.y + 34));
+  leaderTag.setAttribute("text-anchor", "middle");
+  leaderTag.setAttribute("class", "raft-tag");
+  leaderTag.textContent = "LEADER";
+  svg.append(leaderTag);
+
+  const label = h("p", { class: "label raft-label" });
+  const el = h("div", { class: "raft-wrap" }, [svg, label]);
+
+  let running = false;
+  /** Entries waiting their turn: the count after each, and who it was. */
+  const queue: { n: number; who: string | null; pid: string | null }[] = [];
+  /** The pid of the entry on screen now, released when it commits. */
+  let inFlight: string | null = null;
+
+  function release(pid: string | null): void {
+    if (pid !== null) onCommitted(pid);
+  }
+  /**
+   * Which commit the timers belong to.
+   *
+   * Every stage of a commit is its own `setTimeout` mutating the same five
+   * circles, so a timer from an earlier entry can fire after a later one has
+   * tidied up — and it did: after two joins in quick succession, four
+   * followers stayed lit for the rest of the session and the picture stopped
+   * meaning anything. Each stage now carries the generation it was scheduled
+   * for and does nothing if the cluster has moved on. Guarding the class of
+   * bug rather than the instance, because the next stage added here would
+   * reintroduce it.
+   */
+  let gen = 0;
+
+  function cool(): void {
+    svg.classList.remove("is-committed");
+    for (const d of dots) d.classList.remove("is-hot");
+    for (const stale of Array.from(svg.querySelectorAll(".raft-entry")))
+      stale.remove();
+  }
+
+  /** One entry: in to the leader, out to the followers, then committed. */
+  function play(n: number, who: string | null, pid: string | null): void {
+    inFlight = pid;
+    gen += 1;
+    const mine = gen;
+    running = true;
+    // Start from cold, so a commit never inherits the last one's lit nodes.
+    cool();
+    setText(label, who === null ? `Entry ${n} appended` : `Appending ${who}`);
+
+    // The entry is a group so the name travels with the dot rather than the
+    // dot arriving anonymously. A count going up is the thing the roster
+    // beside this already says; *whose* join it was is the thing this can
+    // say and the list cannot, because the list has no moment.
+    const START_X = -56;
+    const entry = document.createElementNS(NS, "g");
+    entry.setAttribute("class", "raft-entry");
+
+    // Above the dot, not beside it: beside it the name would be under the
+    // links on the way out, and at the leader it would sit on the circle.
+    const tag = document.createElementNS(NS, "text");
+    tag.setAttribute("x", String(START_X));
+    tag.setAttribute("y", String(leader.y - 26));
+    tag.setAttribute("text-anchor", "middle");
+    tag.setAttribute("class", "raft-name");
+    tag.textContent =
+      who === null
+        ? ""
+        : who.length > RAFT_NAME_MAX
+          ? `${who.slice(0, RAFT_NAME_MAX - 1)}…`
+          : who;
+
+    const dot = document.createElementNS(NS, "circle");
+    dot.setAttribute("r", "5");
+    dot.setAttribute("cx", String(START_X));
+    dot.setAttribute("cy", String(leader.y));
+    dot.setAttribute("class", "raft-dot");
+
+    entry.append(tag, dot);
+    svg.append(entry);
+
+    const step = COMMIT_MS / 4;
+    // Starts off the left edge, which the viewBox clips, so the name slides
+    // into the picture from outside the cluster — which is where it came
+    // from.
+    entry.animate(
+      [
+        { transform: "translateX(0)" },
+        { transform: `translateX(${leader.x - START_X}px)` },
+      ],
+      { duration: step, easing: "cubic-bezier(.4,0,.2,1)", fill: "forwards" },
+    );
+
+    window.setTimeout(() => {
+      if (mine !== gen) return;
+      // The dot is absorbed; the name stays on the leader for the rest of the
+      // commit, so what is being replicated is legible while it replicates.
+      dot.remove();
+      dots[0]?.classList.add("is-hot");
+      setText(label, who === null ? "Replicating" : `Replicating ${who}`);
+      followers.forEach((f, i) => {
+        const r = document.createElementNS(NS, "circle");
+        r.setAttribute("r", "4");
+        r.setAttribute("cx", String(leader.x));
+        r.setAttribute("cy", String(leader.y));
+        r.setAttribute("class", "raft-entry raft-dot");
+        svg.append(r);
+        r.animate(
+          [
+            { transform: "translate(0,0)" },
+            {
+              transform: `translate(${f.x - leader.x}px, ${f.y - leader.y}px)`,
+            },
+          ],
+          {
+            duration: step,
+            easing: "cubic-bezier(.4,0,.2,1)",
+            fill: "forwards",
+          },
+        );
+        window.setTimeout(() => {
+          r.remove();
+          if (mine !== gen) return;
+          dots[i + 1]?.classList.add("is-hot");
+        }, step);
+      });
+    }, step);
+
+    window.setTimeout(() => {
+      if (mine !== gen) return;
+      // A majority has it, so it is committed. That is the word, and it is
+      // the only moment the picture is making a claim worth making. Held for
+      // the last two stages rather than flashed, because this is the stage
+      // worth reading.
+      setText(label, `Committed · ${n} joined`);
+      svg.classList.add("is-committed");
+      // The moment the word appears is the moment the name appears in the
+      // list. That is the whole point of holding it back.
+      inFlight = null;
+      release(pid);
+    }, step * 2);
+
+    window.setTimeout(() => {
+      if (mine !== gen) return;
+      cool();
+      running = false;
+      const next = queue.shift();
+      if (next !== undefined) play(next.n, next.who, next.pid);
+      else setText(label, `${n} committed`);
+    }, COMMIT_MS);
+  }
+
+  return {
+    el,
+    commit(n: number, who: string | null, pid: string | null): void {
+      // Somebody who prefers less motion gets the count and no theatre. The
+      // picture is decoration; the number is the information — and the name
+      // goes into the list at once, because there is no moment to wait for.
+      const still =
+        typeof matchMedia === "function" &&
+        matchMedia("(prefers-reduced-motion: reduce)").matches;
+      if (still) {
+        setText(label, `${n} committed`);
+        release(pid);
+        return;
+      }
+      if (running) {
+        // A room scanning a QR at once arrives in a burst. Queueing keeps each
+        // commit readable instead of drawing nine at once; the queue is capped
+        // because nobody watches the ninth. Now that a commit takes nearly
+        // three seconds the cap matters more, not less — a queue of nine would
+        // still be draining long after the room had stopped looking.
+        //
+        // Over the cap the *oldest* waiting entry is let through without its
+        // animation rather than the newest being dropped. Dropping was fine
+        // while this only drove a picture; now that it gates the list, a
+        // dropped entry is somebody who joined and whose name never arrived.
+        // Twenty people scanning at once get four animations and sixteen
+        // names, which is the right way round — the names are the promise.
+        if (queue.length >= 3) release(queue.shift()?.pid ?? null);
+        queue.push({ n, who, pid });
+        return;
+      }
+      play(n, who, pid);
+    },
+    /**
+     * Everything waiting, into the list now.
+     *
+     * The animation runs on `setTimeout`, and a backgrounded tab throttles
+     * those to once a minute. Without this, locking a phone during the rush
+     * and unlocking it a minute later would show a room of four. Nothing
+     * here is worth a name not arriving.
+     */
+    flush(): void {
+      release(inFlight);
+      inFlight = null;
+      while (queue.length > 0) release(queue.shift()?.pid ?? null);
+    },
+    /**
+     * The resting caption, when the room's size did not come from an
+     * animation this drew.
+     *
+     * Entries let through a full queue, and everything a `flush` releases,
+     * never reach the stage that writes the caption — so after a burst it
+     * read "22 committed" beside a count of 24, which is the picture
+     * contradicting the list it is a picture of. The caller owns the number;
+     * this owns when it is safe to write it, which is only while nothing is
+     * mid-commit.
+     */
+    settle(n: number): void {
+      if (running || queue.length > 0) return;
+      setText(label, `${n} committed`);
+    },
+  };
+}
+
 function sceneLobby(): Scene {
   const nick = h("p", { class: "display lobby-nick" });
   const you = h("div", { class: "lobby-you" }, [
@@ -568,6 +901,30 @@ function sceneLobby(): Scene {
   const count = h("span", { class: "num lobby-count" });
   const chips = h("div", { class: "lobby-chips" });
 
+  /**
+   * Who the cluster has committed, and therefore who is drawn in the list.
+   *
+   * The roster says who the server has; this says who the picture has caught
+   * up with. They differ for one commit — about a second and a half — and in
+   * that gap the person's name is travelling into the leader instead of
+   * sitting in the list, which is the point: you watch yourself be committed,
+   * and then you are there. Everyone present at the first render is in here
+   * immediately, because arriving into a room of eleven is not eleven joins.
+   */
+  const held = new Set<string>();
+  /** The last state drawn, so the list can be repainted when a commit lands. */
+  let last: RenderState | null = null;
+
+  const cluster = raftCluster((pid) => {
+    held.add(pid);
+    if (last !== null) paintRoom(last);
+  });
+
+  // The cluster sits *under* the names, not above them. It is a picture of
+  // what the list of names means, so it reads as a caption to the list rather
+  // than as something the list is a caption to — and on a phone it puts the
+  // motion at the bottom of the screen instead of between the session title
+  // and the room.
   const node = h("section", { class: "v v-lobby" }, [
     you,
     title,
@@ -578,8 +935,66 @@ function sceneLobby(): Scene {
       h("span", { class: "label", text: "here" }),
     ]),
     chips,
+    cluster.el,
     h("p", { class: "label lobby-wait", text: "Waiting for the host" }),
   ]);
+
+  /**
+   * Who was in the roster last draw, so a commit plays on a join and not on
+   * every broadcast. The lobby is re-rendered whenever anything changes —
+   * somebody going away, the host locking joins — and animating those would
+   * make the picture mean "a frame arrived" rather than "somebody joined".
+   *
+   * Pids rather than a count, which is what this was. A count cannot say
+   * *who* arrived, and now that the entry carries a name it has to; a count
+   * also can't tell one person leaving as another joins from nothing
+   * happening, which is the one case where it would have named the wrong
+   * person on screen.
+   *
+   * Null until the first render: arriving into a room of eleven should not
+   * replay eleven commits, it should say eleven are committed.
+   */
+  let seen: Set<string> | null = null;
+
+  /**
+   * The head count and the names, drawn from the committed set rather than
+   * from the roster.
+   *
+   * Both, not just the names. A count that ran ahead of the list would be the
+   * one thing on the screen contradicting it — "12 here" over eleven chips —
+   * and somebody looking for their own name would be counting. The cluster's
+   * own caption says the same number at the same time.
+   */
+  function paintRoom(state: RenderState): void {
+    const room = state.roster.filter((r) => held.has(r.pid));
+    setText(count, String(room.length));
+    cluster.settle(room.length);
+    // Names, as text, clipped by the layout rather than by a slice: the
+    // phone must not scroll, and "+7 more" is more honest than a cut.
+    const shown = room.slice(0, 24);
+    replace(
+      chips,
+      shown.map((r) => h("span", { class: "chip", text: r.nickname })),
+    );
+    if (room.length > shown.length) {
+      append(chips, [
+        h("span", {
+          class: "chip chip-more label",
+          text: `+${room.length - shown.length} more`,
+        }),
+      ]);
+    }
+  }
+
+  // A locked phone throttles the timers the animation runs on, so anything
+  // still in the cluster when the tab goes away is let straight through.
+  // Coming back to a room of four because the rush happened behind a lock
+  // screen would be the animation costing the thing it decorates.
+  if (typeof document !== "undefined") {
+    document.addEventListener("visibilitychange", () => {
+      if (document.hidden) cluster.flush();
+    });
+  }
 
   return {
     node,
@@ -603,22 +1018,34 @@ function sceneLobby(): Scene {
       // describes here needs a field of its own; until it has one, the lobby
       // says nothing rather than something that belongs to another screen.
       prize.hidden = true;
-      setText(count, String(state.roster.length));
-      // Names, as text, clipped by the layout rather than by a slice: the
-      // phone must not scroll, and "+7 more" is more honest than a cut.
-      const shown = state.roster.slice(0, 24);
-      replace(
-        chips,
-        shown.map((r) => h("span", { class: "chip", text: r.nickname })),
-      );
-      if (state.roster.length > shown.length) {
-        append(chips, [
-          h("span", {
-            class: "chip chip-more label",
-            text: `+${state.roster.length - shown.length} more`,
-          }),
-        ]);
+      last = state;
+      const here = state.roster.length;
+      const fresh =
+        seen === null ? [] : state.roster.filter((r) => !seen?.has(r.pid));
+      const first = seen === null;
+      seen = new Set(state.roster.map((r) => r.pid));
+      if (first) {
+        // Everyone already here is already committed; the picture plays once
+        // for the room rather than once per person in it.
+        for (const r of state.roster) held.add(r.pid);
+        cluster.commit(here, null, null);
+      } else {
+        // Count them in from wherever the room was before this batch, so the
+        // committed line ends on the number the list beside it will show.
+        let n = here - fresh.length;
+        for (const r of fresh) {
+          n += 1;
+          cluster.commit(n, r.nickname, r.pid);
+        }
       }
+      // Anyone who has left stops being held, so a name cannot be waiting on
+      // a commit for somebody who is no longer in the room.
+      if (held.size > here) {
+        const present = seen;
+        for (const pid of Array.from(held))
+          if (!present.has(pid)) held.delete(pid);
+      }
+      paintRoom(state);
     },
   };
 }

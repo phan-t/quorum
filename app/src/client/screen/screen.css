@@ -105,9 +105,13 @@ body {
 /* The date, and anything else that is not the session's name. Muted and well
    under the title, so the title still reads as the title. */
 .s-subtitle {
-  margin: 0.15rem 0 0;
+  margin: 0.2rem 0 0;
   color: var(--muted);
-  font-size: 1.5vh;
+  /* Was 1.5vh, which is 16px on a 1080 screen — half DESIGN's floor for this
+     surface, on a line that is read over a compressed share from across a
+     room. Still clearly subordinate to the title above it and the join URL
+     below, which is the job; it just has to be legible while it does it. */
+  font-size: clamp(20px, 2.4vh, 32px);
 }
 .s-subtitle[hidden] {
   display: none;
