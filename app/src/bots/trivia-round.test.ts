@@ -3,11 +3,15 @@
  * 20-question round and the scores match a hand-computed expectation."
  *
  * Thirty bots play the real launch set — `config/event.example/trivia-questions.json`,
- * the twenty HashiCorp and IBM questions, which is the generic set without the
- * event-specific block an event adds — through the *runtime* (`SessionRuntime`,
- * fake sockets, fake clock), so the path under test is the one a real tap takes: the socket
+ * the generic HashiCorp and IBM questions without the event-specific block an
+ * event adds — through the *runtime* (`SessionRuntime`, fake sockets, fake
+ * clock), so the path under test is the one a real tap takes: the socket
  * boundary computes the latency-corrected response time, the reducer settles
  * the question, the projection reports it.
+ *
+ * That file holds twenty-four scored questions; this plays the first twenty of
+ * them, because twenty is the number the acceptance test is written around and
+ * the round it simulates is long enough to walk every streak.
  *
  * **The expectation is not the engine.** Nothing in this file imports
  * `questionPoints`, `streakBonus`, `settleQuestion`, `correctedResponseMs` or
@@ -99,13 +103,14 @@ export function specCorrection(rtt: readonly number[]): number {
  * round. Every question in the file is 4-answer, 1000 base (no `basePoints`).
  *
  * The blank lines are the round boundaries, and the timers are why they
- * matter: the set opens on History at 15 s, drops to a five-question Speed
- * round at 10 s where the streaks build, and spends 20 s a question through
- * the Deep cuts. A round simulation that flattened all of that to one timer
- * would stop testing the thing the set was reshaped to do.
+ * matter: the set opens on History at 15 to 20 s — 20 where the answer is a
+ * year, because a year is recalled rather than read — drops to a
+ * five-question Speed round at 10 s where the streaks build, and spends 20 s a
+ * question through the Deep cuts. A round simulation that flattened all of
+ * that to one timer would stop testing the thing the set was reshaped to do.
  */
 const SET: readonly (readonly [number, number])[] = [
-  [15, 3], // 1  founded in 2012
+  [20, 3], // 1  founded in 2012
   [15, 2], // 2  Vagrant
   [15, 1], // 3  Mitchell Hashimoto
   [15, 2], // 4  The Tao of HashiCorp
@@ -527,12 +532,12 @@ const KENJI = 13_500;
  * Her total is the one anchor here that moves when the set's timers move, and
  * it moves downwards: the same five-second tap is worth less on a short
  * question, because the speed weighting is a fraction of the time limit.
- *   T = 20 s: 1000 × (1 − (5 ÷ 20) ÷ 2) = 875     — Q5, Q13, Q15, Q17, Q19
- *   T = 15 s: 1000 × (1 − (5 ÷ 15) ÷ 2) = 833.33  — Q1, Q3 → 833
+ *   T = 20 s: 1000 × (1 − (5 ÷ 20) ÷ 2) = 875     — Q1, Q5, Q13, Q15, Q17, Q19
+ *   T = 15 s: 1000 × (1 − (5 ÷ 15) ÷ 2) = 833.33  — Q3 → 833
  *   T = 10 s: 1000 × (1 − (5 ÷ 10) ÷ 2) = 750     — Q7, Q9, Q11
- *   5 × 875 + 2 × 833 + 3 × 750 = 4 375 + 1 666 + 2 250
+ *   6 × 875 + 1 × 833 + 3 × 750 = 5 250 + 833 + 2 250
  */
-const ZOE = 8_291;
+const ZOE = 8_333;
 
 /* ------------------------------------------------------------------ */
 /* The round                                                            */

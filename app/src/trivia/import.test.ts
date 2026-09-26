@@ -264,12 +264,13 @@ describe("the committed example set", () => {
     }
   });
 
-  it("gives nothing in the scored set longer than twenty seconds", () => {
+  it("gives nothing in the file longer than twenty seconds", () => {
     // The audience answers most of these on sight, and a timer they have
-    // already beaten is dead air the host has to talk over. The tiebreakers
-    // are exempt because sudden death ignores the timer entirely.
+    // already beaten is dead air the host has to talk over. The tiebreakers are
+    // held to the same bound even though sudden death never reads the field,
+    // because a 30 in the file reads as a considered 30 to whoever edits it
+    // next and this set has nothing that needs one.
     for (const [i, q] of ok(text).entries()) {
-      if (q.tiebreak === true) continue;
       assert.ok(q.timeLimitSec >= 10, `question ${i + 1} is under ten seconds`);
       assert.ok(q.timeLimitSec <= 20, `question ${i + 1} runs ${q.timeLimitSec}s`);
     }

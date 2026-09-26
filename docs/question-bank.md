@@ -204,13 +204,16 @@ Weighted to HashiCorp history and products, IBM kept as seasoning:
 That is **20**, and it is no longer what
 `config/event.example/trivia-questions.json` contains. The committed example is
 **24 scored questions plus four tiebreakers**, and the difference between the
-two is the one thing worth carrying away from this table: it drops the whole of
-Round B and most of Round C, because a room of solutions architects answers
-"which product does secrets management" before the timer has finished drawing
-itself, and a free mark early is worse than a free mark late — speed weighting
-and the streak bonus both compound, so the openers decide the game. D1/D2 are
-in, because the licence argument is one this audience enjoys having. Take this
-table as the shape and read the JSON for what will actually be asked.
+two is the one thing worth carrying away from this table: it drops six of
+Round B's eight and five of Round C's, because a room of solutions architects
+answers "which product does secrets management" before the timer has finished
+drawing itself, and a free mark early is worse than a free mark late — speed
+weighting and the streak bonus both compound, so the openers decide the game.
+What survives from those two rounds is what is not sight-reading: B7 and B8 for
+Sentinel and Vault Radar, C5, C7 and C8 for dynamic secrets, Raft and Shamir.
+D1/D2 are in, because the licence argument is one this audience enjoys having.
+Take this table as the shape and read the JSON for what will actually be
+asked.
 
 Ordering, in the example and in anything built from it: open warm, **announce**
 a short block of on-sight questions where the streaks build, put the hard ones
@@ -222,7 +225,10 @@ to F4. A flagged question is lifted out of the scored set and into the pool
 sudden death draws on, so those four cost the game nothing in length. Without
 them the engine falls back to a built-in pool that asks C7's Raft question
 again, and a tie would be settled by two people racing to retype an answer they
-heard twenty minutes earlier.
+heard twenty minutes earlier. Their `timeLimitSec` is this bank's suggestion
+and nothing more: sudden death has no clock, because it ends when someone is
+right rather than when time runs out, so the reducer never reads the field on a
+flagged question.
 
 ---
 

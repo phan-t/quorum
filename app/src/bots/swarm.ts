@@ -43,7 +43,11 @@ interface Opts {
    * get a gameplay run past that; leave it at zero to measure the limit.
    */
   readonly staggerMs: number;
-  /** How many trivia questions to play. The real set is forty. */
+  /**
+   * How many trivia questions to play. The committed example set is
+   * twenty-four scored questions, and a run is clamped to what the session
+   * actually loaded, so asking for more than a set holds plays the set.
+   */
   readonly questions: number;
   /** The Desktop. Its frames are the heaviest and were never measured. */
   readonly screenToken: string | null;

@@ -19,7 +19,7 @@ example in the repository without any real person's words being in it. See
 | File | What it demonstrates |
 | --- | --- |
 | `session.json` | The title and subtitle, a third `manual` activity for something scored off-platform, and the console's runbook and arcade plan |
-| `trivia-questions.json` | The forty HashiCorp and IBM questions, and what the test suite loads. The optional keys — `round`, `note`, `basePoints`, `tiebreak` — are documented in [SPEC.md](../../SPEC.md#question-file); none of them are used here |
+| `trivia-questions.json` | Twenty-four scored HashiCorp and IBM questions plus four flagged `tiebreak`, and what the test suite loads. The optional keys are documented in [SPEC.md](../../SPEC.md#question-file); this set uses `round`, `note` and `tiebreak`, and deliberately not `basePoints`, so every question is worth the same before speed weighting |
 | `sendoff.json` | A send-off with messages and no photos, which is legal and is still the thing. One message is long enough to be split across slides |
 | `promo-card.html` | A self-contained poster, no scripts and no webfonts |
 

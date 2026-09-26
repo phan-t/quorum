@@ -2,7 +2,7 @@
 
 | | |
 | --- | --- |
-| `event.example/` | **Committed.** A whole event directory, invented end to end, including the forty HashiCorp and IBM questions the test suite loads — so if that set stops being valid, the build says so. Copy it to start a real one. See [its README](event.example/README.md). |
+| `event.example/` | **Committed.** A whole event directory, invented end to end, including the twenty-four HashiCorp and IBM questions the test suite loads, and the four tiebreakers behind them — so if that set stops being valid, the build says so. Copy it to start a real one. See [its README](event.example/README.md). |
 | `events/<date>-<name>/` | **Gitignored.** One directory per event: its question set, its run of show, its roster, whatever else that event needs. |
 
 ## Why the events are not in git

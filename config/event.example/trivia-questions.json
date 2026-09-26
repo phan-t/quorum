@@ -5,7 +5,7 @@
       "text": "In what year was HashiCorp founded?",
       "answers": ["2008", "2010", "2012", "2015"],
       "correct": "C",
-      "timeLimitSec": 15,
+      "timeLimitSec": 20,
       "note": "2012. Vagrant had already been out for two years by then, which is why the founding year and the first release do not line up.",
       "round": "History"
     },
@@ -197,7 +197,7 @@
       "text": "Which is the world's southernmost capital city?",
       "answers": ["Canberra", "Wellington", "Hobart", "Christchurch"],
       "correct": "B",
-      "timeLimitSec": 30,
+      "timeLimitSec": 20,
       "note": "Wellington, at about 41°S. Hobart is a state capital and Christchurch is not a capital at all.",
       "tiebreak": true
     },
@@ -205,7 +205,7 @@
       "text": "The Merlion is the landmark of which city?",
       "answers": ["Kuala Lumpur", "Hong Kong", "Singapore", "Manila"],
       "correct": "C",
-      "timeLimitSec": 30,
+      "timeLimitSec": 10,
       "note": "Singapore. The lion's head is for Singapura, the lion city; the fish tail is for its beginnings as a fishing village.",
       "tiebreak": true
     },
@@ -213,7 +213,7 @@
       "text": "Which of these countries has the largest land area?",
       "answers": ["India", "Indonesia", "Australia", "Japan"],
       "correct": "C",
-      "timeLimitSec": 30,
+      "timeLimitSec": 20,
       "note": "Australia, about 7.7 million km² — more than twice India and about four times Indonesia.",
       "tiebreak": true
     },
@@ -221,7 +221,7 @@
       "text": "In Japan, \"Golden Week\" falls across which two months?",
       "answers": ["March–April", "April–May", "July–August", "December–January"],
       "correct": "B",
-      "timeLimitSec": 30,
+      "timeLimitSec": 20,
       "note": "Late April into the first week of May, where four public holidays fall close together. It is the hardest week of the year to book anything in Japan.",
       "tiebreak": true
     }
