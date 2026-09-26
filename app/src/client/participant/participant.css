@@ -331,13 +331,35 @@ body.phone #app {
   align-items: center;
   gap: 6px;
   margin: 4px 0 2px;
-  /* Gives its space up four times as readily as anything else in the column.
+  /* Gives its space up before anything else in the column.
      A flex item's default `min-height: auto` made this unshrinkable while the
-     names beside it could shrink, so on a short phone a full room lost rows
+     names beside it could shrink, so a full room on a short window lost rows
      of names to keep the diagram at full size — exactly backwards. The names
-     are what somebody is looking for; this is a picture of them. */
-  flex: 0 4 auto;
+     are what somebody is looking for; this is a picture of them.
+
+     `4` was the first attempt and it was not enough: flex shrink is weighted
+     by basis, so at shrink 4 against the chips' shrink 1 the names still
+     absorbed about a fifth of any deficit, which was enough to cut the last
+     row — including the "+N more" chip that says how much was cut. A list
+     silently missing its own truncation notice is worse than no picture, so
+     the weight is now large enough that the names lose nothing until this is
+     gone entirely. */
+  flex: 0 999 auto;
   min-height: 0;
+  /* The caption has a min-height, so at zero height it used to paint straight
+     through "Waiting for the host" — at 320px the screen read "WAITING 33
+     COMMITTED HOST" as overlapping glyphs. */
+  overflow: hidden;
+}
+/* Too small to read: the whole thing takes itself off rather than sitting
+   there as a thumbnail. Set from JS, which measures the box flexbox actually
+   gave it — see `fit()` for why this is not a container query or an observer.
+
+   The caption goes with the drawing. On its own it is a line narrating a
+   picture that is not there, which is the same reason the wrapper is hidden
+   from screen readers, and the space it costs is a row of names. */
+.raft-wrap.is-cramped {
+  display: none;
 }
 .raft {
   width: 100%;
@@ -381,12 +403,13 @@ body.phone #app {
   font-weight: 600;
   font-family: inherit;
 }
-/* Committed: a majority has the entry, which is the only claim the picture
-   makes and the only moment it is allowed to flash. */
-.raft.is-committed .raft-node {
-  fill: var(--nomad);
-}
-.raft.is-committed .raft-link {
+/* A node that has the entry, and the link that carried it there.
+   Deliberately per-node. `is-committed` used to fill all five and light all
+   four links at once, which drew the commit as unanimity — the one thing
+   Raft exists not to require, in a product named after the alternative. Now
+   each replica lights when it answers, the word arrives on the third, and
+   the last two catch up underneath it. */
+.raft-link.is-hot {
   stroke: var(--nomad);
 }
 /* The word LEADER under the top node. Inside an aria-hidden svg, so it is
@@ -405,9 +428,21 @@ body.phone #app {
 .raft-label {
   min-height: 1.2em;
   color: var(--muted);
-  font-size: 12px;
+  /* 12px was under the 14px floor a review set for anything carrying state,
+     which this is — it is the only text that says what the picture is doing. */
+  font-size: 14px;
   letter-spacing: 0.1em;
   text-align: center;
+}
+/* The name, in the casing its owner typed. The caption carries `.label`, so
+   without this the nickname was uppercased — the same person shown three
+   ways on one screen, and the only one of the three that reads as being
+   shouted at. */
+.raft-who {
+  font-family: var(--body);
+  text-transform: none;
+  letter-spacing: 0;
+  color: var(--nomad-ink);
 }
 
 /* Reduced motion: the node fills still change, because that is a state and
@@ -452,6 +487,13 @@ body.phone #app {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+/* Your own name, which is pinned into the list however long you have been
+   here. Marked, because otherwise it is just a name sitting out of order at
+   the front and the pinning reads as a bug. */
+.chip.is-you {
+  border-color: var(--nomad);
+  color: var(--nomad-ink);
 }
 .chip-more {
   background: transparent;
@@ -3303,6 +3345,28 @@ body.phone:has(.v-splash) {
   .a-glass-recap-note,
   .a-recap-note {
     font-size: clamp(12px, 2.1cqh, 15px);
+  }
+}
+
+/* A wide, short window — a laptop window sharing the screen with a video
+   call, or a phone turned sideways.
+
+   The grid above triggers on width alone, and in a short window its chips
+   row — content-sized, and spanning four `auto` rows whose heights are set
+   by the title and the waiting line in the left column — takes the free
+   space before the cluster's row can have any. Measured at 844x390: the
+   cluster's row got four pixels, the drawing overflowed it, and `.p-stage`
+   clipped the overflow. What was on screen was the tops of three follower
+   circles and nothing else — no leader, no name, no caption. The animation
+   the list now waits on was invisible, which is the worst version of a
+   load-bearing animation.
+
+   There is no honest way to fit a 200px drawing into a 346px stage already
+   carrying a title, a room and a waiting line, so it does not try. The list
+   is unaffected: `paintRoom` never consults this. */
+@container pv (min-width: 700px) and (max-height: 520px) {
+  .v-lobby .raft-wrap {
+    display: none;
   }
 }
 
