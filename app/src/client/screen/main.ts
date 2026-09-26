@@ -1466,10 +1466,15 @@ function sceneArcade(): Scene {
     //
     // Three lines at most, because a step that closes can drain half a wave
     // and the room reads two lines of a terminal, not nine.
-    // Unseal's error is its own — DESIGN.md: *The tin has cracked. Player 017
+    // Unseal's error is its own — DESIGN.md: *The tin has shattered. Player 017
     // drained.* — and the state-lock error belongs to Plan / Apply alone. It
     // goes in the flow under the tins for the reason the bridge's does: a
     // panel over this surface is how the Desktop shows the room a rectangle.
+    //
+    // The shatter and not the crack that precedes it: this round is two
+    // strikes, and the first one stays between the tin and the phone holding it.
+    // A Desktop that named whoever is one tap from the Lounge would be handing
+    // the Lounge a result to bet against for nothing.
     const tins = arcade.unseal !== undefined;
     setClass(drainLog, "inline", g !== undefined || tins);
     replace(drainLog, [
@@ -1483,7 +1488,7 @@ function sceneArcade(): Scene {
         .map((n) =>
           h("p", {
             class: "mono s-drain-who",
-            text: g ? glassLine(n) : tins ? HOUSE.unsealCrack(n) : HOUSE.drained(n),
+            text: g ? glassLine(n) : tins ? HOUSE.unsealShatter(n) : HOUSE.drained(n),
           }),
         ),
     ]);

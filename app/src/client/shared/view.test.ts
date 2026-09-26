@@ -688,15 +688,39 @@ describe("the House when somebody wins", () => {
     // `vault status` with the seal off, which is the joke and is also literally
     // what happened.
     //
-    // *Not* split the way the crack is. The crack has a named half because the
-    // big screen says who was drained; this round's Desktop is counts and never
-    // people until the reveal, so there is no `unsealOpen(n)` to pair with, and
-    // a "Player 017 opened the tin" catalogued here with nowhere to go is a line
-    // that gets wired onto that surface by somebody who did not read why it
-    // must not be. The phone says this one; see `paintUnseal`.
+    // *Not* split the way the shatter is. The shatter has a named half because
+    // the big screen says who was drained; this round's Desktop is counts and
+    // never people until the reveal, so there is no `unsealOpen(n)` to pair
+    // with, and a "Player 017 opened the tin" catalogued here with nowhere to go
+    // is a line that gets wired onto that surface by somebody who did not read
+    // why it must not be. The phone says this one; see `paintUnseal`.
     assert.ok(!HOUSE.unsealOpened.includes("Player"));
     assert.ok(!("unsealOpen" in HOUSE), "the Desktop's half needs a surface first");
-    assert.ok(HOUSE.unsealCrack(17).startsWith(HOUSE.unsealCracked));
+    assert.ok(HOUSE.unsealShatter(17).startsWith(HOUSE.unsealShattered));
+  });
+
+  /**
+   * The round is two strikes, so it has two lines, and only one of them names
+   * anybody. DESIGN.md's sentence — *The tin has cracked.* — said the round was
+   * over, because it was; it now belongs to the tin that is damaged and still
+   * being tapped, and the drain says the tin is gone.
+   */
+  it("says the tin cracked without saying the round is over", () => {
+    assert.ok(HOUSE.unsealCracked.startsWith("The tin has cracked."));
+    // Three clauses, the shape `unsealDocs` uses in the same slot on the same
+    // phone: what happened, what it cost, and what the next tap means.
+    assert.ok(HOUSE.unsealCracked.includes("Score halved."));
+    assert.ok(HOUSE.unsealCracked.includes("shatters"));
+    // Nothing about being drained, because they are not, and nobody else's
+    // player number, because a crack stays between the tin and the phone
+    // holding it — the Desktop is never told about this beat.
+    assert.ok(!HOUSE.unsealCracked.includes("drained"));
+    assert.ok(!HOUSE.unsealCracked.includes("Player"));
+    assert.ok(!("unsealCrack" in HOUSE), "the Desktop has no half of the crack");
+    // And the ending is its own sentence: the same words twice, once as a
+    // warning and once as a drain, would be the phone saying nothing.
+    assert.notEqual(HOUSE.unsealShattered, HOUSE.unsealCracked);
+    assert.ok(HOUSE.unsealShatter(17).includes("drained"));
   });
 
   it("has a line for the rope, and it does not say anybody won", () => {

@@ -249,7 +249,7 @@ export const UNSEAL_SHAPE_SCORE: Readonly<Record<UnsealShape, number>> = {
   umbrella: 50,
 };
 
-/** "A crack drains you: banked 2 per correct letter up to the crack." */
+/** "A shattered tin drains you: banked 2 per correct letter up to it." */
 export const UNSEAL_LETTER_BANK = 2;
 
 /** "…with +10 for the fastest in each shape." */
@@ -285,6 +285,16 @@ export const UNSEAL_FASTEST_BONUS = 10;
  * is {@link UNSEAL_DOCS_COSTS.cappedAtCheapestTin}: 5 / 10 / 10 / 10, where
  * buying a big word gets you no further than buying a small one and beating an
  * honest circle means opening a tin honestly.
+ *
+ * **The crack is charged by this same rule**, and the reuse is the point. The
+ * first wrong letter damages the tin rather than ending the round, and what
+ * damage costs is this halving — so the `docs` column above is also the
+ * cracked column, and a player who has both read the docs and cracked is
+ * charged once rather than quartered. See {@link unsealFloorPoints}. A second
+ * penalty would be a second number to tune, a second column to read and a
+ * second thing for SPEC.md to be out of date about, and there is nothing to
+ * say about a damaged tin that this column does not already say: half the
+ * round, whatever the shape it was.
  *
  * **Nothing has been retuned.** `halve` is SPEC.md's rule — "it reveals the
  * next letter and halves your score for the round" — and it is what ships.
@@ -410,17 +420,29 @@ export function unsealAnswerFor(
  * One player's Floor points for this round, **excluding** the fastest bonus,
  * which is not known until the round ends.
  *
- * Unsealed pays the shape score. A crack pays 2 per letter tapped before it,
- * capped at the shape score so partial credit can never beat completion — for
- * the launch content it cannot come close (an eleven-letter umbrella banks 20
- * against 50) but a host who loads a twenty-letter circle word should not
- * discover that by paying somebody 40 for failing.
+ * Unsealed pays the shape score. A tin that never opened pays 2 per letter
+ * tapped, capped at the shape score so partial credit can never beat
+ * completion — for the launch content it cannot come close (an eleven-letter
+ * umbrella banks 20 against 50) but a host who loads a twenty-letter circle
+ * word should not discover that by paying somebody 40 for failing.
  *
  * **Read the docs** is charged by {@link UNSEAL_DOCS_COST}, which by default
  * halves the lot, rounding down: SPEC.md prices the cheat at "halves your
  * score for the round", and the round in question is this one — the Floor. It
  * does not reach into the Lounge, where the points are for something the
  * reader did afterwards and did honestly.
+ *
+ * **A cracked tin is charged by the same rule, once.** The round is two
+ * strikes: the first wrong letter damages the tin and the second shatters it,
+ * and what the damage costs is this halving rather than a penalty of its own —
+ * see {@link UNSEAL_DOCS_COSTS}. So the two ways to damage a tin do not
+ * compound. A player who read the docs at letter two and cracked at letter
+ * nine is halved, not quartered: they have one damaged tin, and quartering
+ * would price the same tin twice and hand out scores nobody in the room could
+ * work back to a rule. It follows that a shattered player's banked letters are
+ * halved too, because a player can only shatter a tin they had already
+ * cracked — the drain is the second strike, and the first one is still what it
+ * cost.
  *
  * `docsCost` is a parameter so a test can price the same round two ways in one
  * assertion. Nothing in the engine passes it: the round is played on the rule
@@ -439,7 +461,8 @@ export function unsealFloorPoints(
     progress >= tin.length
       ? score
       : Math.min(progress * UNSEAL_LETTER_BANK, score);
-  return play.docs[pid] ? docsCost(raw, tin.shape) : raw;
+  const damaged = play.docs[pid] === true || play.cracked[pid] === true;
+  return damaged ? docsCost(raw, tin.shape) : raw;
 }
 
 /**
@@ -455,6 +478,14 @@ export function unsealFloorPoints(
  * hardest and take it off the person who actually knew the word. Halving the
  * cheat's score is the price SPEC sets; it does not also make the cheat the
  * winner.
+ *
+ * **A player who cracked their tin is still eligible**, which is the same
+ * argument read backwards. The docs are barred because the button *buys* the
+ * speed it would then be paid for; a wrong letter buys nothing and costs a
+ * second of the sixty, so somebody who cracked at letter two and still opened
+ * an umbrella first did it the hard way. They take a halved tin and the +10 on
+ * top of it, which is less than an undamaged player scores for the same word —
+ * the crack is already a cost, and barring them would make it two.
  *
  * Ties go to whoever got there first, which `unsealOrder` already encodes, so
  * a strict `<` is the whole tie-break.
@@ -524,7 +555,15 @@ export interface UnsealMeView {
   readonly solved: string;
   readonly docs: boolean;
   readonly unsealed: boolean;
+  /**
+   * One wrong letter in. The tin is damaged, the round is halved, and the next
+   * wrong letter shatters it — which is the "careful now" the phone has to be
+   * able to draw, and the reason this is a field and not an inference from
+   * being drained.
+   */
   readonly cracked: boolean;
+  /** The second wrong letter: the tin is gone and they are in the Lounge. */
+  readonly shattered: boolean;
 }
 
 export function unsealMeView(
@@ -548,7 +587,12 @@ export function unsealMeView(
       answer && open ? unsealLetters(answer.answer).slice(0, progress).join("") : "",
     docs: play.docs[pid] === true,
     unsealed: tin !== undefined && progress >= tin.length,
-    cracked: arcade.standing[pid] === "drained",
+    cracked: play.cracked[pid] === true,
+    // The shatter is the only thing that drains anybody in this round, so the
+    // standing is it. Read off the arcade rather than stored a second time in
+    // the play: what the phone does with this is stop drawing the tiles and
+    // mount the Lounge, and the standing is what the Lounge is keyed on.
+    shattered: arcade.standing[pid] === "drained",
   };
 }
 
@@ -1750,7 +1794,9 @@ export function floorMax(config: ArcadeRoundConfig): number {
         finishBonus(0)
       );
     case "unseal":
-      // The best tin on offer, unsealed fastest: 50 + 10 = 60.
+      // The best tin on offer, unsealed fastest: 50 + 10 = 60. Two strikes did
+      // not move this. A crack halves the tin, so every damaged route is below
+      // the ceiling and the ceiling is still an undamaged umbrella.
       return (
         config.items.reduce(
           (best, i) => Math.max(best, UNSEAL_SHAPE_SCORE[i.shape]),

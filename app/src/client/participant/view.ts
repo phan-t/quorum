@@ -1384,6 +1384,7 @@ function sceneArcade(ctx: SceneCtx): Scene {
     unsealOpen = false;
     unsealExit = null;
     docsSaid = false;
+    crackSaid = false;
     openedSaid = false;
     unsealHouse.node.hidden = true;
     unsealPicker.dataset["sig"] = "";
@@ -1954,10 +1955,12 @@ function sceneArcade(ctx: SceneCtx): Scene {
   let swallowLetterClick = false;
   /** Whether the letters are a live control right now. */
   let unsealOpen = false;
-  /** Latched when the tin cracks, for the Lounge underneath. See paint(). */
+  /** Latched when the tin shatters, for the Lounge underneath. See paint(). */
   let unsealExit: string | null = null;
   /** The docs line, said once per round rather than on every repaint. */
   let docsSaid = false;
+  /** …and the same for the crack, which is a beat and not an ending. */
+  let crackSaid = false;
   /** …and the same for the line that says the tin came open. */
   let openedSaid = false;
 
@@ -2155,11 +2158,18 @@ function sceneArcade(ctx: SceneCtx): Scene {
     }
 
     // The docs button: its price, and what it says once it has been pressed.
+    //
+    // A cracked tin is already halved by the same rule the button is priced
+    // with — one halving, however the tin came to be damaged — so the price
+    // drops for a player who cracked without ever pressing this. The label is
+    // still "Read the docs", because they have not read them; what has changed
+    // is what the next press costs, and that is what the price says.
     const read = me?.docs === true;
+    const halved = read || me?.cracked === true;
     setText(docsLabel, read ? "Read the docs again" : "Read the docs");
     setText(
       docsPrice,
-      read ? "already halved — this one is free" : "reveals the next letter · halves your score",
+      halved ? "already halved — this one is free" : "reveals the next letter · halves your score",
     );
     docsButton.disabled = !unsealOpen;
     setAttr(docsButton, "data-read", read ? "yes" : "no");
@@ -2170,15 +2180,32 @@ function sceneArcade(ctx: SceneCtx): Scene {
       setText(announce, HOUSE.unsealDocs);
     }
 
+    // The tin cracked: *The tin has cracked. Score halved. One more wrong
+    // letter shatters it.*
+    //
+    // The beat the round is two strikes for. It goes in the same slot as the
+    // docs line and after it, because a player who read the docs and then
+    // cracked has been told about the halving once already and the last thing
+    // this slot holds should be the thing that just happened. Said once: the
+    // letters are still live underneath it and a repaint that re-set it would
+    // re-announce the warning to a screen reader on every frame.
+    if (me?.cracked === true && !crackSaid) {
+      crackSaid = true;
+      unsealHouse.node.hidden = false;
+      unsealHouse.set(HOUSE.unsealCracked);
+      setText(announce, HOUSE.unsealCracked);
+    }
+
     // The tin came open: *Sealed: false.*
     //
-    // The round narrated one of its two endings. Cracking a tin put a line on
+    // The round narrated one of its two endings. Losing a tin put a line on
     // this screen and on the big one; getting a word out put a number in a
     // total and said nothing at all, which is a House that only speaks when
-    // somebody loses. So it goes in the same slot the docs line uses, and it
-    // goes in second on purpose: a player who read the docs and then finished
-    // has had the halving said to them once already, and the last thing this
-    // slot holds should be the thing that just happened.
+    // somebody loses. So it goes in the same slot the docs and crack lines use,
+    // and it goes in last on purpose: a player who read the docs, cracked the
+    // tin and then finished anyway has had both of those said to them already,
+    // and the last thing this slot holds should be the thing that just
+    // happened.
     //
     // Said once and left up. By the time it appears the letters are gone and
     // there is nothing underneath it to be in the way of, and a repaint that
@@ -2200,7 +2227,9 @@ function sceneArcade(ctx: SceneCtx): Scene {
             : `${UNSEAL_FACE[shape].name}. You may change your mind until the round starts.`
         : unsealed
           ? `The tin is open. Banked ${mine.banked}.`
-          : `${length} letters. Tap them in order.`,
+          : me?.cracked === true
+            ? `${length} letters, and one more wrong one shatters the tin.`
+            : `${length} letters. Tap them in order.`,
     );
   };
 
@@ -2970,9 +2999,11 @@ function sceneArcade(ctx: SceneCtx): Scene {
             ? HOUSE.glassPane(pane)
             : HOUSE.glassPaneMissed(pane);
       // Unseal has its own error and DESIGN.md writes it: *The tin has
-      // cracked.* The Lounge underneath draws whichever of the three applies,
+      // cracked.* This is the second wrong letter, so it is the shatter — the
+      // crack said its own line in the House slot a moment ago and the round
+      // carried on. The Lounge underneath draws whichever of the three applies,
       // and the state-lock error is Plan / Apply's and only Plan / Apply's.
-      unsealExit = arcade.round === "unseal" ? HOUSE.unsealCracked : null;
+      unsealExit = arcade.round === "unseal" ? HOUSE.unsealShattered : null;
       node.classList.add("is-draining");
       buzz([120, 60, 120]);
       setText(

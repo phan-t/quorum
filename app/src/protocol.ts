@@ -1005,7 +1005,14 @@ export interface ArcadeMineUnseal {
   /** They pressed **Read the docs**. Their Floor score for the round halves. */
   readonly docs: boolean;
   readonly unsealed: boolean;
+  /**
+   * One wrong letter in: the tin is damaged and halved, and the next wrong
+   * letter shatters it. The round is two strikes, and this is the beat between
+   * them — the phone draws the "careful now" off this.
+   */
   readonly cracked: boolean;
+  /** The second wrong letter. The tin is gone and they are in the Lounge. */
+  readonly shattered: boolean;
 }
 
 /**

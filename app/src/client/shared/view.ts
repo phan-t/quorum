@@ -515,16 +515,42 @@ export const HOUSE = {
   glassCrossed: (n: number) =>
     `${playerName(n)} has reached the far side. It is not very interesting there.`,
   /**
-   * DESIGN.md: `> The tin has cracked. Player 017 drained.`
+   * The first wrong letter, which is the beat the round did not have.
+   *
+   * DESIGN.md's sentence — `> The tin has cracked.` — said the round was over,
+   * because it was: one wrong tap drained you. The round is two strikes now, so
+   * the sentence goes where it is literally true, on the tin that is damaged
+   * and still being tapped, and the drain gets the shatter below.
+   *
+   * Three clauses, the shape `unsealDocs` already uses on this phone in this
+   * slot: what happened, what it cost, and what it means for the next tap. The
+   * cost is said because it is the same halving the docs button prices itself
+   * with on the screen underneath, and a halving nobody is told about is a
+   * number the player cannot work back to a rule. Nothing in it names another
+   * player: a crack is the one thing in this round that stays between the tin
+   * and the person holding it.
+   */
+  unsealCracked: "The tin has cracked. Score halved. One more wrong letter shatters it.",
+  /**
+   * The second wrong letter, and the end of the tin. DESIGN.md: `> The tin has
+   * shattered. Player 017 drained.`
+   *
+   * DESIGN.md's row was one line — *The tin has cracked. Player 017 drained.* —
+   * because the round was one strike. It is two rows now: the sentence about
+   * cracking went to the crack, where it is literally true, and the drain needed
+   * a verb of its own, because the same words twice, once as a warning and once
+   * as an ending, is the phone saying nothing.
    *
    * Split in two the way the bridge's fall is, and for the same reason: the
    * phone says the half that is about the tin, because the person reading it
    * already knows whose tin it was, and the Desktop says both halves because
-   * the room does not.
+   * the room does not. The Desktop hears about this beat and not the crack —
+   * a screen that named whoever is one tap from the Lounge would be handing the
+   * Lounge a result to bet against for nothing.
    */
-  unsealCracked: "The tin has cracked.",
-  unsealCrack: (n: number) =>
-    `The tin has cracked. ${playerName(n)} drained.`,
+  unsealShattered: "The tin has shattered.",
+  unsealShatter: (n: number) =>
+    `The tin has shattered. ${playerName(n)} drained.`,
   /**
    * The other end of the same tin, which DESIGN.md has no line for.
    *
@@ -532,7 +558,7 @@ export const HOUSE = {
    * the heartbeat timeout — and exactly one way to win, the Plan / Apply
    * crossing. An announcer who only speaks when somebody loses is a different
    * game from the one DESIGN.md is describing, and Unseal is where the gap was
-   * widest: cracking a tin had a line and opening one had silence. The phone
+   * widest: losing a tin had a line and opening one had silence. The phone
    * says this one in its own House slot the frame the server agrees the tin is
    * open — see `paintUnseal` in the participant's view.ts.
    *
@@ -543,8 +569,8 @@ export const HOUSE = {
    * are Vault's, and that is the register: the line says what has happened to
    * the tin, and no part of it is invented.
    *
-   * **Not split the way the crack is, and that is a decision about the
-   * Desktop.** `unsealCracked` / `unsealCrack` are a pair because the big
+   * **Not split the way the shatter is, and that is a decision about the
+   * Desktop.** `unsealShattered` / `unsealShatter` are a pair because the big
    * screen says who was drained; there is no `unsealOpen(n)` to match, because
    * on that surface this round is counts and never people until the reveal —
    * see the tins in the screen's main.ts, and `arcadeUnsealFor`, which will not
@@ -689,7 +715,7 @@ export const HOW_TO_PLAY: Readonly<
   unseal: [
     "You choose a shape, and the shape decides how long your word is.",
     "The letters arrive scrambled. Tap them in the right order.",
-    "One wrong letter cracks the tin and drains you to the Lounge.",
+    "One wrong letter cracks the tin. A second shatters it and drains you to the Lounge.",
   ],
   tug_of_raft: [
     "Two teams, one rope, and a steady beat.",
@@ -740,9 +766,13 @@ export const PLAY_RULE: Readonly<
    * "Read the docs" is on the screen as a control with its price written on
    * it, which is where a cost belongs; putting it in this line as well would
    * make the rule about the cheat rather than about the game. What this line
-   * has to carry is the thing that ends your round, and one wrong tap is it.
+   * has to carry is the thing that ends your round, and it takes two wrong taps
+   * to do it — so both are named. A line that stopped at the crack would read
+   * as the old one-strike rule and tell a player their round was over at the
+   * moment it became worth playing carefully.
    */
-  unseal: "Tap the letters in order. One wrong letter cracks the tin.",
+  unseal:
+    "Tap the letters in order. One wrong letter cracks the tin, and a second shatters it.",
   /**
    * The rule is the *beat*, not the tapping, and the line says so in that
    * order — a player who reads "tap to pull" and stops there will hammer the
@@ -1372,8 +1402,9 @@ export function unsealTiles(cue: string, solved: string): UnsealTile[] {
  * A keystroke to the letter it would tap, or null.
  *
  * One printable letter, no modifiers, and never an OS key repeat: a held key
- * would send the same letter thirty times a second, and in a round where one
- * wrong tap cracks the tin the second one of those is always wrong.
+ * would send the same letter thirty times a second, and in this round the
+ * second and third of those are always wrong — a cracked tin and then a
+ * shattered one, off one resting finger.
  */
 export function unsealLetterKey(ev: {
   readonly key: string;

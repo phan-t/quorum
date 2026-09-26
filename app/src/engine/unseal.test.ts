@@ -284,10 +284,15 @@ describe("the launch content", () => {
   });
 
   test("partial credit can never beat completion, in any tier", () => {
-    // 2 a letter up to the crack, against the shape score for opening it. The
-    // closest call in the launch set is VAULT, the five-letter circle: cracking
-    // on its last letter banks 8 against the 10 for opening it. A six-letter
-    // circle would pay the same for failing as for succeeding.
+    // 2 a letter, against the shape score for opening it. The closest call in
+    // the launch set is VAULT, the five-letter circle: going wrong on its last
+    // letter banks 8 against the 10 for opening it. A six-letter circle would
+    // pay the same for failing as for succeeding.
+    //
+    // Checked against the undamaged bank on purpose. A shattered tin has been
+    // cracked, so what it really pays is half of this — but the cap is what
+    // stops a host's content from inverting the round, and it has to hold on
+    // the raw number rather than on the discount that happens to follow it.
     for (const item of UNSEAL_ITEMS) {
       const letters = unsealLetters(item.answer).length;
       assert.ok(
@@ -538,26 +543,69 @@ describe("unsealing", () => {
     assert.equal(unsealMeView(arcadeOf(s), tins(s), "p1").unsealed, true);
   });
 
-  test("a wrong letter cracks the tin and keeps what was banked", () => {
+  test("the first wrong letter cracks the tin and does not drain", () => {
     let s = holding();
     s = accept(s, { type: "tapLetter", pid: "p1", letter: "R" }, T0 + 100);
     s = accept(s, { type: "tapLetter", pid: "p1", letter: "A" }, T0 + 200);
+    assert.equal(banked(s, "p1"), 4);
     // T is on the tiles, and it is not the third letter of RAFT.
     const r = run(s, { type: "tapLetter", pid: "p1", letter: "T" }, T0 + 300);
     assert.ok(r.applied);
+    assert.equal(r.state.arcade?.standing["p1"], "floor", "damaged, not drained");
+    assert.equal(r.state.arcade?.lounge["p1"], undefined, "and not seated");
+    // Two letters at 2 apiece, halved by the crack: floor(4 ÷ 2) = 2. The same
+    // halving Read the docs charges, and it re-prices the letters that were
+    // banked before the tin was damaged.
+    assert.equal(r.state.arcade?.banked["p1"], 2, "2 a letter, halved");
+    s = r.state;
+    assert.equal(unsealMeView(arcadeOf(s), tins(s), "p1").cracked, true);
+    assert.equal(unsealMeView(arcadeOf(s), tins(s), "p1").shattered, false);
+    // Nothing the big screen draws has moved — its view of the round is picks,
+    // open tins and letter counts — and a screen that named whoever is one tap
+    // from the Lounge would hand the Lounge a result to bet against.
+    assert.ok(
+      !r.effects.some(
+        (e) => e.kind === "broadcast" && (e.to === "all" || e.to === "screen"),
+      ),
+      "a crack is between the tin and the phone holding it",
+    );
+    assert.ok(
+      r.effects.some((e) => e.kind === "broadcast" && e.to === "host"),
+      "the console sees the halved number",
+    );
+    // And the tin is still a game: the word can still come out.
+    s = accept(s, { type: "tapLetter", pid: "p1", letter: "F" }, T0 + 400);
+    s = accept(s, { type: "tapLetter", pid: "p1", letter: "T" }, T0 + 500);
+    assert.equal(unsealMeView(arcadeOf(s), tins(s), "p1").unsealed, true);
+    assert.equal(banked(s, "p1"), 5, "a circle tin at 10, halved by the crack");
+    assert.equal(standing(s, "p1"), "floor");
+  });
+
+  test("the second wrong letter shatters it and keeps what was banked", () => {
+    let s = holding();
+    s = accept(s, { type: "tapLetter", pid: "p1", letter: "R" }, T0 + 100);
+    s = accept(s, { type: "tapLetter", pid: "p1", letter: "A" }, T0 + 200);
+    s = accept(s, { type: "tapLetter", pid: "p1", letter: "T" }, T0 + 300);
+    assert.equal(standing(s, "p1"), "floor");
+    // The same wrong letter again. A cracked tin has no third state to be in.
+    const r = run(s, { type: "tapLetter", pid: "p1", letter: "T" }, T0 + 400);
+    assert.ok(r.applied);
     assert.equal(r.state.arcade?.standing["p1"], "drained");
-    assert.equal(r.state.arcade?.banked["p1"], 4, "2 a letter, up to the crack");
+    // Still 2: the shatter takes nothing further off, and the halving that is
+    // in this number is the crack's, charged once.
+    assert.equal(r.state.arcade?.banked["p1"], 2, "2 a letter, halved, up to the crack");
     assert.deepEqual(r.state.arcade?.lounge["p1"], {
       backing: null,
-      at: T0 + 300,
+      at: T0 + 400,
       placedAt: null,
       placedFrom: "drained",
     });
-    // A crack moves the dormitory grid, so it goes to everybody.
+    // A drain moves the dormitory grid, so it goes to everybody.
     assert.ok(
       r.effects.some((e) => e.kind === "broadcast" && e.to === "all"),
       "the room is told somebody was drained",
     );
+    assert.equal(unsealMeView(arcadeOf(r.state), tins(r.state), "p1").shattered, true);
   });
 
   test("a letter that is not on the tin at all is a refusal, not a crack", () => {
@@ -590,7 +638,7 @@ describe("unsealing", () => {
     assert.equal(unsealMeView(arcadeOf(s), tins(s), "p2").solved, word);
   });
 
-  test("a stray tap after the tin is open is not a crack", () => {
+  test("a stray tap after the tin is open is not a strike", () => {
     let s = holding();
     s = unsealWord(s, "p1", T0 + 100);
     assert.equal(run(s, { type: "tapLetter", pid: "p1", letter: "R" }, T0 + 900).applied, false);
@@ -607,9 +655,10 @@ describe("unsealing", () => {
     );
   });
 
-  test("a cracked player is in the Lounge, not on the Floor", () => {
+  test("a shattered player is in the Lounge, not on the Floor", () => {
     let s = holding();
     s = accept(s, { type: "tapLetter", pid: "p1", letter: "T" }, T0 + 100);
+    s = accept(s, { type: "tapLetter", pid: "p1", letter: "T" }, T0 + 150);
     assert.equal(standing(s, "p1"), "drained");
     assertRefused(
       s,
@@ -683,6 +732,45 @@ describe("Read the docs", () => {
     assert.equal(banked(s, "p2"), 20, "10 for the tin, 10 for being fastest");
   });
 
+  test("a tin that was read and cracked is halved once, not twice", () => {
+    // The two ways to damage a tin are priced by one rule, charged once. The
+    // alternative is a player whose score is a quarter of a circle tin, which
+    // is 2, arrived at by a sum nobody in the room could reconstruct.
+    let s = holdingCircle();
+    // The docs buy R. The next letter of RAFT is A, so F is on the tiles and
+    // wrong: the tin cracks, and the player is still on the Floor.
+    s = accept(s, { type: "readDocs", pid: "p1" }, T0 + 100);
+    assert.equal(banked(s, "p1"), 1, "one letter bought, halved");
+    s = accept(s, { type: "tapLetter", pid: "p1", letter: "F" }, T0 + 200);
+    assert.equal(standing(s, "p1"), "floor");
+    const me = unsealMeView(arcadeOf(s), tins(s), "p1");
+    assert.equal(me.docs, true);
+    assert.equal(me.cracked, true);
+    assert.equal(banked(s, "p1"), 1, "still floor(2 ÷ 2), and not floor(2 ÷ 4)");
+    // And they finish it by hand: a circle tin at 10, halved once.
+    s = accept(s, { type: "tapLetter", pid: "p1", letter: "A" }, T0 + 300);
+    s = accept(s, { type: "tapLetter", pid: "p1", letter: "F" }, T0 + 400);
+    s = accept(s, { type: "tapLetter", pid: "p1", letter: "T" }, T0 + 500);
+    assert.equal(unsealMeView(arcadeOf(s), tins(s), "p1").unsealed, true);
+    assert.equal(banked(s, "p1"), 5, "10 halved once; halved twice would be 2");
+  });
+
+  test("the docs are free to a player who has already cracked", () => {
+    // Not a rule of its own — it is what "charged once" means from the phone's
+    // side, and the price on the button says so. A cracked player has already
+    // paid what the cheat costs, so the cheat is the obvious play from there,
+    // which is the round handing somebody a way back into a word they have
+    // stopped being able to guess at.
+    let s = holdingCircle();
+    s = accept(s, { type: "tapLetter", pid: "p1", letter: "A" }, T0 + 100);
+    assert.equal(unsealMeView(arcadeOf(s), tins(s), "p1").cracked, true);
+    assert.equal(banked(s, "p1"), 0, "nothing tapped, and nothing to halve");
+    for (let i = 0; i < 4; i++) {
+      s = accept(s, { type: "readDocs", pid: "p1" }, T0 + 200 + 100 * i);
+    }
+    assert.equal(banked(s, "p1"), 5, "the whole word bought, and one halving");
+  });
+
   test("it looks exactly like a letter from outside", () => {
     // DESIGN.md: "Reading the docs. Score halved. Nobody will know." The
     // public view of the round counts letters and says nothing about how they
@@ -723,6 +811,27 @@ describe("the fastest in each shape", () => {
     assert.equal(banked(s, "p2"), 20);
     assert.equal(banked(s, "p1"), 10, "second in the circle tier is just the tin");
     assert.equal(banked(s, "p3"), 30, "20 for a triangle, 10 for being the only one");
+  });
+
+  test("a cracked tin can still be the fastest in its shape", () => {
+    // The docs are barred from this board because the button *buys* the speed
+    // it would then be paid for. A wrong letter buys nothing — it costs a
+    // second of the sixty — so somebody who cracked their tin and still got
+    // there first did it the hard way and is paid for it, on a tin that is
+    // already halved.
+    let s = carded(3);
+    s = accept(s, { type: "pickShape", pid: "p1", shape: "circle" }, T0 - 30);
+    s = accept(s, { type: "pickShape", pid: "p2", shape: "circle" }, T0 - 20);
+    s = accept(s, { type: "beginPlay" }, T0);
+    // p1 holds RAFT and taps A first, which cracks the tin; they still open it
+    // at +1 200, while p2 works their own word out and finishes at +5 200.
+    s = accept(s, { type: "tapLetter", pid: "p1", letter: "A" }, T0 + 100);
+    s = unsealWord(s, "p1", T0 + 900);
+    s = unsealWord(s, "p2", T0 + 4_900);
+    assert.equal(fastestUnseal(tins(s)).circle, "p1");
+    s = accept(s, { type: "endRound" }, T0 + 60_000);
+    assert.equal(banked(s, "p1"), 15, "a circle tin halved, plus the 10");
+    assert.equal(banked(s, "p2"), 10, "an undamaged tin, and second to it");
   });
 
   test("a tie goes to whoever got there first", () => {
@@ -775,6 +884,27 @@ describe("the numbers", () => {
       unsealFloorPoints({ ...play, progress: { p1: 8 }, docs: { p1: true } }, "p1"),
       17,
       "floor(35 ÷ 2)",
+    );
+    // A cracked tin is charged the same halving, and charged it once however
+    // the tin came to be damaged.
+    assert.equal(
+      unsealFloorPoints({ ...play, progress: { p1: 8 }, cracked: { p1: true } }, "p1"),
+      17,
+      "a crack is priced by the docs rule",
+    );
+    assert.equal(
+      unsealFloorPoints(
+        { ...play, progress: { p1: 8 }, docs: { p1: true }, cracked: { p1: true } },
+        "p1",
+      ),
+      17,
+      "and both together are still one halving, not floor(35 ÷ 4)",
+    );
+    // Four letters of SENTINEL on a cracked tin: 8 raw, halved.
+    assert.equal(
+      unsealFloorPoints({ ...play, progress: { p1: 4 }, cracked: { p1: true } }, "p1"),
+      4,
+      "a shattered player's banked letters are halved too",
     );
   });
 
@@ -839,6 +969,35 @@ describe("the numbers", () => {
       assert.ok(umbrella!.docs > row.docs, `an umbrella reader beats a ${row.shape} reader`);
     }
 
+    /** The same four tins, opened, damaged by a crack instead of the button. */
+    const crackedOpen = (shape: UnsealShape, alsoRead: boolean) => {
+      const pid = holder[shape];
+      const at = play.pick[pid];
+      assert.ok(at !== undefined, `${pid} is not holding a tin`);
+      return unsealFloorPoints(
+        {
+          ...play,
+          progress: { [pid]: play.tins[at]!.length },
+          cracked: { [pid]: true },
+          docs: alsoRead ? { [pid]: true } : {},
+        },
+        pid,
+      );
+    };
+    // There is no fifth column: the crack is charged by the rule the docs are
+    // charged by, so the docs column *is* the cracked column. Two ways of
+    // damaging one tin, and one price.
+    assert.deepEqual(
+      UNSEAL_SHAPES.map((shape) => crackedOpen(shape, false)),
+      table.map((row) => row.docs),
+      "a cracked tin pays what a read one pays",
+    );
+    assert.deepEqual(
+      UNSEAL_SHAPES.map((shape) => crackedOpen(shape, true)),
+      table.map((row) => row.docs),
+      "and a tin that was read *and* cracked is charged once, not twice",
+    );
+
     // The alternatives in UNSEAL_DOCS_COSTS, priced on the same four tins, so
     // that changing the rule is a table that moves and not an argument.
     // `quarter` keeps the docs column ordered by shape and keeps the
@@ -877,14 +1036,17 @@ describe("the numbers", () => {
 /* ------------------------------------------------------------------ */
 
 describe("the Lounge", () => {
-  /** p1 cracks at once; p2 opens a circle tin; p3 opens a triangle. */
+  /** p1 shatters at once; p2 opens a circle tin; p3 opens a triangle. */
   function cracked(): SessionState {
     let s = carded(4);
     s = accept(s, { type: "pickShape", pid: "p1", shape: "circle" }, T0 - 40);
     s = accept(s, { type: "pickShape", pid: "p2", shape: "circle" }, T0 - 30);
     s = accept(s, { type: "pickShape", pid: "p3", shape: "triangle" }, T0 - 20);
     s = accept(s, { type: "beginPlay" }, T0);
+    // Two wrong taps, because the round is two strikes: the first cracks the
+    // tin and the second is the one that seats them in the Lounge.
     s = accept(s, { type: "tapLetter", pid: "p1", letter: "T" }, T0 + 100);
+    s = accept(s, { type: "tapLetter", pid: "p1", letter: "T" }, T0 + 150);
     assert.equal(standing(s, "p1"), "drained");
     return s;
   }
@@ -900,7 +1062,7 @@ describe("the Lounge", () => {
     assert.equal(loungePoints(tins(s), "p3", "floor"), UNSEAL_BACKED_FASTEST);
     // A player still on the Floor who never opened their tin pays nothing.
     assert.equal(loungePoints(tins(s), "p4", "floor"), 0);
-    // And a player who cracked pays nothing, whoever they are.
+    // And a player who shattered pays nothing, whoever they are.
     assert.equal(loungePoints(tins(s), "p2", "drained"), 0);
   });
 
@@ -955,7 +1117,7 @@ describe("the Lounge", () => {
     let s = cracked();
     s = accept(s, { type: "backPlayer", pid: "p1", backing: "p3" }, T0 + 200);
     s = unsealWord(s, "p3", T0 + 1_000);
-    // p1 banked 0 on the Floor — they cracked on their first letter.
+    // p1 banked 0 on the Floor — they were wrong on their first letter.
     assert.equal(banked(s, "p1"), 0);
     s = accept(s, { type: "endRound" }, T0 + 60_000);
     assert.equal(banked(s, "p1"), 8, "backed the fastest triangle");
@@ -1011,5 +1173,45 @@ describe("what a player may know", () => {
       assert.ok(!json.includes(item.answer), `${item.answer} is in the public view`);
       assert.ok(!json.includes(item.cue), `${item.answer}'s cue is in the public view`);
     }
+  });
+});
+
+/* ------------------------------------------------------------------ */
+/* A round written before the second strike                             */
+/* ------------------------------------------------------------------ */
+
+describe("an Unseal round snapshotted by the one-strike engine", () => {
+  test("is brought up to shape rather than crashing the first projection", async () => {
+    // The lesson `migrateSendoff` was written after: a snapshot is trusted as
+    // state, so a field added to a round in flight arrives missing on every row
+    // written before the deploy — and `cracked` is read on every tap and every
+    // projection of this round. Unmigrated, one session recovered mid-Unseal is
+    // a TypeError in `recoverSessions` before the server can listen, which
+    // takes the service down rather than the session.
+    const { rehydrate } = await import("../server/recovery.ts");
+    let s = carded(2);
+    s = accept(s, { type: "pickShape", pid: "p1", shape: "circle" }, T0 - 30);
+    s = accept(s, { type: "beginPlay" }, T0);
+    s = accept(s, { type: "tapLetter", pid: "p1", letter: "R" }, T0 + 100);
+    assert.equal(banked(s, "p1"), 2);
+    // The same round with no record of who has cracked, which is what the old
+    // engine wrote.
+    const { cracked: _dropped, ...legacyPlay } = tins(s);
+    const out = rehydrate({
+      meta: { sid: "s", title: "t", joinCode: "hvs.a" },
+      snapshot: { seq: s.seq, state: { ...s, arcade: { ...arcadeOf(s), play: legacyPlay } } },
+      events: [],
+    } as never);
+    const back = out?.state;
+    assert.ok(back, "the session did not come back");
+    // Empty is the honest value: an engine that drained on the first wrong
+    // letter had nobody in this state to record. Anybody it did drain is
+    // drained in `standing`, which the migration does not touch.
+    assert.deepEqual(tins(back).cracked, {});
+    assert.equal(unsealMeView(arcadeOf(back), tins(back), "p1").cracked, false);
+    // And the round plays on, two strikes, from where it left off.
+    const after = accept(back, { type: "tapLetter", pid: "p1", letter: "T" }, T0 + 200);
+    assert.equal(standing(after, "p1"), "floor");
+    assert.equal(banked(after, "p1"), 1, "one letter, halved by the crack");
   });
 });

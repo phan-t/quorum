@@ -344,7 +344,7 @@ class Bot {
       case "unseal": {
         const u = mine.unseal;
         if (!u) return "idle";
-        if (u.cracked) return "idle";
+        if (u.shattered) return "idle";
         if (u.shape === null) return "actionable";
         return u.cue ? "actionable" : "idle";
       }
@@ -516,12 +516,18 @@ class Bot {
       return;
     }
     const cue = u.cue;
-    if (!cue || u.cracked) return;
+    if (!cue || u.shattered) return;
     // Tap a letter that is on the tin. Which one is a guess; the engine
     // refuses a character that is not there, and that refusal is malformed
     // rather than wrong, so a bot must not send junk.
+    //
+    // The round is two strikes, and the key carries the crack as well as the
+    // progress: a wrong guess leaves `solved` where it was, so without it a
+    // cracked bot would sit on the same spent key for the rest of the round and
+    // the swarm would stop exercising the Lounge — which is the half of this
+    // round a load test is here to put frames through.
     const at = (u.solved ?? "").length;
-    if (!this.once(`letter${round}-${at}`)) return;
+    if (!this.once(`letter${round}-${at}-${u.cracked ? "cracked" : "whole"}`)) return;
     const letter = cue[Math.floor(this.rand() * cue.length)];
     if (letter === undefined) return;
     this.later(this.think(400, 2_000), () => {

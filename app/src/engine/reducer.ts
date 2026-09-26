@@ -1868,6 +1868,7 @@ export function reduce(
           pick: {},
           progress: {},
           docs: {},
+          cracked: {},
           unsealedMs: {},
           unsealOrder: [],
         };
@@ -2533,7 +2534,7 @@ export function reduce(
           reject(
             { pid: event.pid },
             "not_on_the_floor",
-            "The tin has cracked. Back a player.",
+            "The tin has shattered. Back a player.",
           ),
         );
       }
@@ -2591,9 +2592,55 @@ export function reduce(
       }
 
       if (!correct) {
-        // "The tin has cracked. Player 017 drained." Everything banked stays
-        // banked: 2 a letter, up to the crack.
-        const cracked: UnsealPlay = play;
+        // Two strikes, and this is the first of them: the tin cracks. It is
+        // damaged rather than gone — the letters stay live, the word can still
+        // come out — and the damage is priced by the halving **Read the docs**
+        // is priced by, charged once however the tin came to be damaged. See
+        // unsealFloorPoints().
+        //
+        // The round had one strike and both of its outcomes were flat: a circle
+        // player was out in five seconds and then sat, and an umbrella player
+        // lost a word they knew to a fat thumb. In the show the honeycomb
+        // cracks audibly before it breaks, and the seconds between the two
+        // sounds are the game.
+        if (play.cracked[event.pid] !== true) {
+          const cracked: UnsealPlay = {
+            ...play,
+            cracked: { ...play.cracked, [event.pid]: true },
+          };
+          return applied(
+            {
+              ...state,
+              arcade: {
+                ...arcade,
+                // Assigned, not decremented, for the reason the letters are:
+                // the Floor score is a function of the play, so the call that
+                // paid for letters one to four re-prices them now the tin they
+                // were tapped into is damaged.
+                banked: {
+                  ...arcade.banked,
+                  [event.pid]: unsealFloorPoints(cracked, event.pid),
+                },
+                play: cracked,
+              },
+            },
+            // Their own phone, which says so, and the console, which is where
+            // the halved number shows. **Not the big screen**: its view of this
+            // round is picks, open tins and letter counts, and a crack moves
+            // none of them — and a screen that named the player who is one tap
+            // from the Lounge would be handing the Lounge a result to bet
+            // against for nothing.
+            [
+              { kind: "broadcast", to: { pid: event.pid }, what: "state" },
+              { kind: "broadcast", to: "host", what: "state" },
+              PERSIST,
+            ],
+          );
+        }
+        // The second wrong letter shatters it. Everything banked stays banked —
+        // 2 a letter, halved, because the tin this was tapped into was already
+        // cracked — and the Lounge takes over from here.
+        const shattered: UnsealPlay = play;
         return applied(
           {
             ...state,
@@ -2606,7 +2653,7 @@ export function reduce(
               },
               banked: {
                 ...arcade.banked,
-                [event.pid]: unsealFloorPoints(cracked, event.pid),
+                [event.pid]: unsealFloorPoints(shattered, event.pid),
               },
             },
           },

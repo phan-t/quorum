@@ -65,7 +65,7 @@ export function rehydrate(loaded: LoadedSession): {
   const from: "snapshot" | "log" = loaded.snapshot ? "snapshot" : "log";
   const after = loaded.events.filter((e) => e.seq > (loaded.snapshot?.seq ?? 0));
   const state = replay(
-    migrateSendoff(base),
+    migrateUnseal(migrateSendoff(base)),
     after.map((e) => ({ event: e.event, at: e.at })),
   );
   return { state, from, replayed: after.length };
@@ -125,6 +125,43 @@ function migrateSendoff(state: SessionState): SessionState {
       autoSeconds: DEFAULT_AUTO_SECONDS,
       slideAt: null,
     },
+  };
+}
+
+/**
+ * Give an Unseal round snapshotted by the one-strike engine its crack record.
+ *
+ * The same shape problem `migrateSendoff` exists for, and the same lesson: a
+ * snapshot is trusted as state, so a field added to a round in flight arrives
+ * missing on every row written before the deploy. Unseal is now two strikes and
+ * `cracked` is read on every tap and every projection of the round — a session
+ * recovered mid-Unseal without it is a TypeError in `recoverSessions`, before
+ * the server can listen, which is how one absent send-off key took the whole
+ * service down rather than one session.
+ *
+ * Empty is the honest value: the field records who has already had a wrong
+ * letter, and a snapshot written by an engine that drained them on the first
+ * one has nobody in that state to record. Anybody it did drain is drained in
+ * `standing`, which this does not touch.
+ *
+ * Deletable once nothing older than this deploy is still in the table.
+ */
+function migrateUnseal(state: SessionState): SessionState {
+  const arcade = state.arcade;
+  const play = arcade?.play;
+  if (!arcade || play?.kind !== "unseal") return state;
+  // The field is either absent, on a row written before this deploy, or a
+  // record — possibly an empty one, which is what a round nobody has gone wrong
+  // in looks like. Only the absent case has anything to do, and the cast is
+  // here because the type says it cannot happen and the table is older than the
+  // type. `!= null` rather than `!== undefined` for migrateSendoff's reason: a
+  // migration reads what was written, not what the current shape promises.
+  if ((play.cracked as Readonly<Record<string, true>> | undefined) != null) {
+    return state;
+  }
+  return {
+    ...state,
+    arcade: { ...arcade, play: { ...play, cracked: {} } },
   };
 }
 

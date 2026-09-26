@@ -213,14 +213,16 @@ describe("the words stay on the server", () => {
   });
 
   it("are in no public frame while the tins are being opened", () => {
-    // One tin is nearly open, one has cracked, and one player has read the
+    // One tin is nearly open, one has shattered, and one player has read the
     // docs. None of that is the word.
     const mid = unsealing([
       { event: { type: "tapLetter", pid: "p1", letter: "X" }, at: T0 + 1_000 },
       { event: { type: "tapLetter", pid: "p1", letter: "E" }, at: T0 + 1_500 },
       { event: { type: "readDocs", pid: "p3" }, at: T0 + 2_000 },
-      // R is on the triangle's tin and is not its first letter: a crack.
+      // N is on the triangle's tin and is not its first letter. The round is
+      // two strikes, so it takes both of these to seat p2 in the Lounge.
       { event: { type: "tapLetter", pid: "p2", letter: "N" }, at: T0 + 2_500 },
+      { event: { type: "tapLetter", pid: "p2", letter: "N" }, at: T0 + 3_000 },
     ]);
     assert.equal(view(mid, "participant", "p2").arcadeMine?.standing, "drained");
     for (const { label, frame } of publicFrames(mid)) {
@@ -236,9 +238,25 @@ describe("the words stay on the server", () => {
     ]);
     const frame = wire(mid, "participant", "p2");
     for (const secret of SECRETS) assert.ok(!frame.includes(secret), secret);
-    // Their own cue is gone too: the tin is cracked and there is nothing left
-    // to tap, so there is nothing on their screen for a neighbour to read.
-    assert.equal(view(mid, "participant", "p2").arcadeMine?.unseal?.cracked, true);
+    // The first wrong letter, so their tin is damaged and they are still
+    // tapping it: the frame carries the crack and the halved score, and still
+    // no more of the word than the letters they got right.
+    const me = view(mid, "participant", "p2").arcadeMine;
+    assert.equal(me?.unseal?.cracked, true);
+    assert.equal(me?.unseal?.shattered, false);
+    assert.equal(me?.standing, "floor");
+  });
+
+  it("is not in a shattered player's frame either, once the tin is gone", () => {
+    const mid = unsealing([
+      { event: { type: "tapLetter", pid: "p2", letter: "N" }, at: T0 + 2_500 },
+      { event: { type: "tapLetter", pid: "p2", letter: "N" }, at: T0 + 3_000 },
+    ]);
+    const frame = wire(mid, "participant", "p2");
+    for (const secret of SECRETS) assert.ok(!frame.includes(secret), secret);
+    const me = view(mid, "participant", "p2").arcadeMine;
+    assert.equal(me?.unseal?.shattered, true);
+    assert.equal(me?.standing, "drained");
   });
 
   it("opens every word and every note to the room at the reveal", () => {

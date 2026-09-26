@@ -947,6 +947,7 @@ export function arcadeMineFor(
       docs: me.docs,
       unsealed: me.unsealed,
       cracked: me.cracked,
+      shattered: me.shattered,
     };
   }
 

@@ -2750,7 +2750,8 @@ const ARCADE_ROUNDS: readonly ArcadeRoundKind[] = [
 const ARCADE_ROUND_WHAT: Readonly<Record<ArcadeRoundKind, string>> = {
   recruitment: "Two emoji, one product name. Type it. Seven items, nobody is knocked out.",
   plan_apply: "Tap fast while the light is green. Stop the moment it turns. Tapping on red drains you to the Lounge.",
-  unseal: "Pick a shape, then tap the scrambled letters in order. One wrong tap drains you to the Lounge.",
+  unseal:
+    "Pick a shape, then tap the scrambled letters in order. One wrong tap cracks the tin; a second drains you to the Lounge.",
   tug_of_raft: "Tug of war. Two teams, one rope. Tap on the beat, and nobody is knocked out.",
   gganbu: "Paired off. Six over-or-under questions, and you bet tokens against your partner.",
   glass_bridge: "Pick the real product feature, twice per step. Pick the fake one and you are drained to the Lounge.",

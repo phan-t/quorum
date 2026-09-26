@@ -620,15 +620,34 @@ A shape-pick screen first, exactly as the show: ○ △ ☆ ☂. Then the reveal
 the shapes are word lengths. Circle is a four- or five-letter term (`RAFT`,
 `VAULT`), triangle six (`MODULE`, `GOSSIP`, `UNSEAL`), star eight (`SENTINEL`,
 `PROVIDER`), umbrella eleven-plus (`DECLARATIVE`, `IDEMPOTENCY`). The letters
-appear scrambled on the phone; **tap them in order**. One wrong tap cracks the
-tin. Sixty seconds.
+appear scrambled on the phone; **tap them in order**. Sixty seconds.
+
+**Two strikes.** The first wrong tap **cracks** the tin: it is damaged, your
+score for the round is halved, and you keep tapping — the word can still come
+out. The second wrong tap **shatters** it and drains you to the Lounge. In the
+show the honeycomb cracks audibly before it breaks, and the seconds between the
+two sounds are the game: one strike gave the round no rising tension, because a
+circle player was out in five seconds and an umbrella player lost a word they
+knew to a fat thumb.
 
 Unsealing scores by shape: **10 / 20 / 35 / 50**, with **+10** for the fastest
-in each shape. A crack drains you: banked **2 per correct letter** up to the
-crack, then the Lounge. The per-letter 2 banks **towards** the shape score, not
+in each shape. A shattered tin drains you: banked **2 per correct letter** up to
+it, then the Lounge. The per-letter 2 banks **towards** the shape score, not
 on top of it — that is what makes the Floor maximum 60 rather than more.
 Backing a player who unseals is **+5**; backing the fastest in any shape
 **+8** — the better of the two, never their sum, as everywhere else.
+
+**The crack is charged by the same halving as Read the docs, once.** A player
+who has both read the docs and cracked their tin is halved, not quartered:
+there is one damaged tin and it is priced once, whichever way it came to be
+damaged. Two consequences worth saying out loud. A player who cracks and then
+opens the tin anyway takes half its shape score, and is still eligible for the
++10 — a wrong letter costs a second of the sixty and buys nothing, so somebody
+who cracked and still got there first did it the hard way. And a shattered
+player's banked letters are halved too, because a tin can only shatter after it
+has cracked: what used to pay 4 for two letters and a wrong third now pays 2.
+**The Floor maximum is unchanged at 60** — an undamaged umbrella, opened fastest
+— and no other constant moved.
 
 The Lounge is 5 / 8 here rather than Plan / Apply's 10 / 15 because this
 round's cheapest completion is a circle tin at **10**, and a perfect Lounge of

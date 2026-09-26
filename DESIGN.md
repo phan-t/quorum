@@ -402,7 +402,8 @@ Other lines the system needs, so they are written once and consistently:
 | Recruitment, correct | `> Recruited.` |
 | Plan / Apply, checkpoint | `> 30 resources applied. Progress banked.` |
 | Plan / Apply, crossed | `> Apply complete. Resources: 120 added, 0 changed, 0 destroyed.` |
-| Unseal, crack | `> The tin has cracked. Player 017 drained.` |
+| Unseal, crack | `> The tin has cracked. Score halved. One more wrong letter shatters it.` |
+| Unseal, shatter | `> The tin has shattered. Player 017 drained.` |
 | Unseal, hint | `> Reading the docs. Score halved. Nobody will know.` |
 | Tug of Raft, election | `> Heartbeat timeout. Node 017 called an election. Nothing happened.` |
 | Gganbu, revoked | `> Token revoked. TTL exceeded. Player 017 drained.` |

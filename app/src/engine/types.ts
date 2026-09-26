@@ -810,6 +810,20 @@ export type ArcadePlay =
       readonly progress: Readonly<Record<ParticipantId, number>>;
       /** Who pressed **Read the docs**. Their Floor score for the round halves. */
       readonly docs: Readonly<Record<ParticipantId, true>>;
+      /**
+       * Whose tin is cracked: they have had one wrong letter, and the next one
+       * shatters it.
+       *
+       * The round is two strikes. A cracked tin is damaged rather than gone —
+       * the player keeps tapping and can still get their word out — and what
+       * the damage costs is the same halving {@link docs} costs, charged once
+       * however the tin came to be damaged. See `unsealFloorPoints`.
+       *
+       * A flag and not a count, because there is nothing after the second
+       * strike to count towards: the second wrong letter drains the player and
+       * the Lounge takes over from here.
+       */
+      readonly cracked: Readonly<Record<ParticipantId, true>>;
       /** Time from the Floor opening to the tin coming open, in ms. */
       readonly unsealedMs: Readonly<Record<ParticipantId, number>>;
       /** Who unsealed, in the order they did it. Ties in `unsealedMs` break here. */

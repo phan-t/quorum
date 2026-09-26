@@ -362,6 +362,8 @@ interface MockUnsealPlay {
   /** Letters tapped, per player. The count, never the letters. */
   progress: Record<string, number>;
   docs: Record<string, true>;
+  /** Whose tin has had its one wrong letter. The next one shatters it. */
+  cracked: Record<string, true>;
   unsealedMs: Record<string, number>;
   unsealOrder: string[];
 }
@@ -614,7 +616,7 @@ const UNSEAL_ORDER: readonly UnsealShape[] = [
   "star",
   "umbrella",
 ];
-/** "A crack drains you: banked 2 per correct letter up to the crack." */
+/** "A shattered tin drains you: banked 2 per correct letter up to it." */
 const UNSEAL_LETTER_BANK = 2;
 /** "…with +10 for the fastest in each shape." */
 const UNSEAL_FASTEST = 10;
@@ -677,7 +679,9 @@ function mockUnsealPoints(play: MockUnsealPlay, pid: string): number {
     progress >= tin.length
       ? score
       : Math.min(progress * UNSEAL_LETTER_BANK, score);
-  return play.docs[pid] ? Math.floor(raw / 2) : raw;
+  // Damaged is damaged: the docs and a crack are the same halving, charged
+  // once, so a player who did both is halved rather than quartered.
+  return play.docs[pid] || play.cracked[pid] ? Math.floor(raw / 2) : raw;
 }
 
 /**
@@ -1408,7 +1412,9 @@ class MockSession {
           : "",
       docs: play.docs[pid] === true,
       unsealed: tin !== undefined && progress >= tin.length,
-      cracked: this.arcadeStanding[pid] === "drained",
+      cracked: play.cracked[pid] === true,
+      // The shatter is the only thing that drains anybody in this round.
+      shattered: this.arcadeStanding[pid] === "drained",
     };
   }
 
@@ -2902,6 +2908,7 @@ class MockHub {
         pick: {},
         progress: {},
         docs: {},
+        cracked: {},
         unsealedMs: {},
         unsealOrder: [],
       };
@@ -3548,7 +3555,7 @@ class MockHub {
       return refuse("wrong_round_phase", "There is no tin.");
     }
     if (s.arcadeStanding[pid] === "drained") {
-      return refuse("not_on_the_floor", "The tin has cracked. Back a player.");
+      return refuse("not_on_the_floor", "The tin has shattered. Back a player.");
     }
 
     if (what.kind === "shape") {
@@ -3609,7 +3616,20 @@ class MockHub {
     }
 
     if (!correct) {
-      // "The tin has cracked." Everything banked stays banked: 2 a letter.
+      // Two strikes. "The tin has cracked": damaged, halved by the same rule
+      // the docs are priced by, and still being tapped.
+      if (play.cracked[pid] !== true) {
+        play.cracked[pid] = true;
+        s.arcadeBanked[pid] = mockUnsealPoints(play, pid);
+        this.#send(conn, { t: "ack", cid, applied: true });
+        // Their own phone and the surfaces that are not in the room: a crack
+        // moves no count the big screen draws, and the room being told who is
+        // one tap from the Lounge is a result the Lounge could bet against.
+        this.#sendStateTo((c) => c.role !== "participant" || c.pid === pid);
+        return;
+      }
+      // The second wrong letter shatters it. Everything banked stays banked:
+      // 2 a letter, halved, because the tin was already cracked.
       s.arcadeBanked[pid] = mockUnsealPoints(play, pid);
       s.drain(pid, this.#now());
       this.#send(conn, { t: "ack", cid, applied: true });
@@ -3958,11 +3978,16 @@ class MockHub {
    * The bots unseal.
    *
    * Each picks a shape, then taps its word out at a plausible pace. Most of
-   * them get it; some crack the tin on a wrong letter, because the Lounge is
-   * where half the round's design lives and a Floor nobody ever leaves shows
-   * none of it; and one reads the docs, so the halved score has something to
-   * be seen on. A bot only ever taps letters that are on its own tin — it is
-   * given the cue the same way a phone is, and no more.
+   * them get it; some crack the tin on a wrong letter and shatter it on the
+   * next one, because the Lounge is where half the round's design lives and a
+   * Floor nobody ever leaves shows none of it; and one reads the docs, so the
+   * halved score has something to be seen on. A bot only ever taps letters that
+   * are on its own tin — it is given the cue the same way a phone is, and no
+   * more.
+   *
+   * The two strikes are a beat apart on purpose. Both are worth watching: a
+   * halved score on a tin that is still being tapped, and then the Lounge
+   * filling up behind it.
    */
   #botsUnseal(): void {
     const s = this.session;
@@ -3994,12 +4019,27 @@ class MockHub {
               if ((now.progress[p.pid] ?? 0) !== n) return;
               if (n === cracksAt) {
                 // A letter that *is* on the tin but is not the next one —
-                // which is the only kind of wrong tap a phone can make.
+                // which is the only kind of wrong tap a phone can make. A tin
+                // with one letter on it has no such tap, so that bot plays on.
                 const wrong = mockUnsealLetters(tin.cue).find((c) => c !== letter);
                 if (wrong === undefined) return;
+                now.cracked[p.pid] = true;
                 s.arcadeBanked[p.pid] = mockUnsealPoints(now, p.pid);
-                s.drain(p.pid, this.#now());
-                this.#broadcastState();
+                this.#sendStateTo((c) => c.role !== "participant" || c.pid === p.pid);
+                // And the same wrong letter again a beat later, which shatters
+                // it. Nothing else in this bot's schedule will fire in between:
+                // a crack does not move the progress they are all waiting on.
+                this.#later(() => {
+                  const later = s.arcadePlay;
+                  if (later?.kind !== "unseal" || s.arcadePhase !== "running") return;
+                  if (s.arcadeStanding[p.pid] === "drained") return;
+                  // The round it cracked in, and not whatever round the demo
+                  // has reached by the time this fires.
+                  if (later.cracked[p.pid] !== true) return;
+                  s.arcadeBanked[p.pid] = mockUnsealPoints(later, p.pid);
+                  s.drain(p.pid, this.#now());
+                  this.#broadcastState();
+                }, pace / this.#cfg.speed);
                 return;
               }
               if (reader && n === 0) now.docs[p.pid] = true;
@@ -4387,8 +4427,8 @@ class MockHub {
      * card up for three seconds rather than twenty, because the picker is
      * what the card is *for* and the bots pick the moment the Floor opens.
      * The shape of it is the real one: four tiers, a tin per player number, a
-     * few cracked tins filling the Lounge, and one bot reading the docs, so
-     * the halved score has somewhere to show.
+     * few tins cracking and then shattering into the Lounge, and one bot
+     * reading the docs, so the halved score has somewhere to show.
      */
     this.#at(139, () => {
       this.#startRound({ name: "arcade.round", kind: "unseal", seconds: 24 });
