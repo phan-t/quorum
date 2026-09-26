@@ -17,7 +17,7 @@ import type {
   TriviaMine,
   TriviaView,
 } from "../../protocol.ts";
-import type { UnsealShape } from "../../engine/types.ts";
+import type { OverUnder, UnsealShape } from "../../engine/types.ts";
 import { append, h, replace, setAttr, setClass, setText } from "../shared/dom.ts";
 import {
   ARCADE_ROUND_CARD,
@@ -40,6 +40,17 @@ import {
   finalRevealMs,
   floorEntries,
   formatCountdown,
+  GGANBU_MAX_STAKE,
+  GGANBU_SIDE,
+  gganbuKey,
+  gganbuPairResult,
+  gganbuQuestion,
+  gganbuRefusal,
+  gganbuRival,
+  gganbuSettlement,
+  gganbuStake,
+  gganbuStakes,
+  gganbuStanding,
   glassBackable,
   glassCrossing,
   gridEntries,
@@ -69,6 +80,7 @@ import {
   unsealSlot,
   unsealTiles,
   type BridgeEntry,
+  type GganbuLedger,
   type RaftEntry,
   type RaftMood,
   type RaftPlan,
@@ -92,6 +104,18 @@ export interface ParticipantView {
    * `clearPendingAnswer` exists for a trivia tap.
    */
   clearPendingStep(): void;
+  /**
+   * A command was refused, and the round that is up decides what to say.
+   *
+   * Not the same job as the two `clear*` methods above, which take an
+   * optimistic commitment back off the screen and say nothing. Gganbu's
+   * refusals carry words that only the server has: `invalid_wager` names the
+   * real ceiling on this hand, which is `min(5, held)` against a count settled
+   * on the server, and a sentence composed here would be a second copy of that
+   * rule on the one surface that cannot check it. So the code and the message
+   * come through, and {@link gganbuRefusal} decides which of them is shown.
+   */
+  commandRefused(code: string, message: string): void;
 }
 
 export interface ParticipantViewOptions {
@@ -107,6 +131,7 @@ export interface ParticipantViewOptions {
   onArcadeLetter?: (round: number, letter: string) => void;
   onArcadeDocs?: (round: number) => void;
   onArcadeBeat?: (round: number) => void;
+  onArcadeWager?: (round: number, pick: OverUnder, amount: number) => void;
   onArcadeBack?: (pid: string) => void;
 }
 
@@ -129,6 +154,8 @@ interface Scene {
   tick?(state: RenderState): void;
   /** The arcade only: a refused commitment, taken back off the screen. */
   clearStep?(): void;
+  /** The arcade only: a refusal with words on it, said where it happened. */
+  refused?(code: string, message: string): void;
   stop?(): void;
 }
 
@@ -209,6 +236,8 @@ export function createParticipantView(
     arcadeLetter: (round, letter) => opts.onArcadeLetter?.(round, letter),
     arcadeDocs: (round) => opts.onArcadeDocs?.(round),
     arcadeBeat: (round) => opts.onArcadeBeat?.(round),
+    arcadeWager: (round, pick, amount) =>
+      opts.onArcadeWager?.(round, pick, amount),
     arcadeBack: (pid) => opts.onArcadeBack?.(pid),
   };
 
@@ -285,6 +314,11 @@ export function createParticipantView(
       if (last !== null) scene?.update(last, null);
     },
 
+    commandRefused(code, message) {
+      scene?.refused?.(code, message);
+      if (last !== null) scene?.update(last, null);
+    },
+
     update(state, nickname) {
       if (state === null) return;
       last = state;
@@ -334,6 +368,7 @@ interface SceneCtx {
   arcadeLetter(round: number, letter: string): void;
   arcadeDocs(round: number): void;
   arcadeBeat(round: number): void;
+  arcadeWager(round: number, pick: OverUnder, amount: number): void;
   arcadeBack(pid: string): void;
 }
 
@@ -3362,6 +3397,444 @@ function sceneArcade(ctx: SceneCtx): Scene {
     void state;
   };
 
+  /* ---- Gganbu ---- */
+
+  /**
+   * The wager, on the phone.
+   *
+   * SPEC.md: *"Your rival's name and token count sit on your screen the whole
+   * round."* That sentence is the round, so the pair is a panel of its own and
+   * it is never off the screen while a prompt is open — above the question,
+   * because it is the thing the question is being answered *against*.
+   *
+   * Two decisions in fifteen seconds, and they are deliberately not three. The
+   * stake is a dial that holds its setting from prompt to prompt, and the side
+   * is the commit: set three once and the next five prompts are one keystroke
+   * each. A confirm button on top of that would be a third action under a
+   * fifteen-second clock, and the fifteen seconds are the round.
+   *
+   * What is drawn from the pair is `mine.gganbu.tokens` and `rivalTokens` and
+   * nothing else. There is no token map and no answer key on this frame — see
+   * `ArcadeGganbuView` — and the count that is here only ever moves when a
+   * prompt settles, which is why a rival's number sitting on screen all round
+   * is not the answer arriving early.
+   */
+  const gganbuHead = h("p", { class: "mono a-gganbu-head" });
+  const gganbuTimer = h("p", { class: "mono a-item-timer" });
+
+  /**
+   * The pair, built once and rewritten in place.
+   *
+   * `rivalCommitted` is the one tell the round allows and it is the tension, so
+   * it is its own polite live region: a screen reader hears that a gganbu has
+   * locked in, which is exactly what everybody else gets by glancing sideways.
+   * Polite rather than assertive — it must not cut across the question being
+   * read out — and it carries a word and a glyph, never a colour on its own.
+   */
+  const youTokens = h("span", { class: "mono a-pair-tokens" });
+  const youLead = h("span", { class: "a-pair-lead label" });
+  const rivalTag = h("span", { class: "mono a-pair-tag" });
+  const rivalWho = h("span", { class: "a-pair-name" });
+  const rivalTokens = h("span", { class: "mono a-pair-tokens" });
+  const rivalDot = h("span", {
+    class: "a-pair-dot",
+    attrs: { "aria-hidden": "true" },
+  });
+  const rivalTellWord = h("span");
+  // The glyph is decoration and the words are what is announced: a live region
+  // that carried ● would have a screen reader say "black circle locked in".
+  const rivalTell = h(
+    "span",
+    {
+      class: "a-pair-tell label",
+      attrs: { role: "status", "aria-live": "polite" },
+    },
+    [rivalDot, rivalTellWord],
+  );
+  const youCard = h("div", { class: "a-pair-card", attrs: { "data-who": "you" } }, [
+    h("span", { class: "label a-pair-role", text: "You" }),
+    youTokens,
+    h("span", { class: "label a-pair-unit", text: "tokens" }),
+    youLead,
+  ]);
+  const rivalCard = h(
+    "div",
+    { class: "a-pair-card", attrs: { "data-who": "rival" } },
+    [
+      h("span", { class: "label a-pair-role", text: "Your gganbu" }),
+      rivalTokens,
+      h("span", { class: "label a-pair-unit", text: "tokens" }),
+      h("span", { class: "a-pair-id" }, [rivalTag, rivalWho]),
+      rivalTell,
+    ],
+  );
+  // A group, so the `aria-label` set on every paint is actually honoured: the
+  // visual is two cards of numbers, and the label is the sentence they add up
+  // to. The same arrangement as the points strip.
+  const pairNode = h("div", { class: "a-pair", role: "group" }, [youCard, rivalCard]);
+
+  const gganbuCue = h("p", { class: "a-gganbu-cue" });
+  /**
+   * The dial, built once.
+   *
+   * The label sits *outside* the radiogroup: a group whose children are mostly
+   * radios and one caption is a group a screen reader reads wrong, and the
+   * caption is what the group's own name is for.
+   *
+   * One chip per token in the round's ceiling, built at mount and never rebuilt
+   * — only enabled, disabled and checked. A row rebuilt under the finger that
+   * is choosing is how a press lands on nothing, and here the press that
+   * follows the dial is the one that spends the tokens.
+   */
+  const gganbuStakeGroup = h("div", {
+    class: "a-stakes-group",
+    role: "radiogroup",
+    attrs: { "aria-label": "Stake, in tokens" },
+  });
+  const stakeChips: HTMLButtonElement[] = gganbuStakes(GGANBU_MAX_STAKE).map((n) => {
+    const chip = h(
+      "button",
+      {
+        class: "a-stake",
+        type: "button",
+        attrs: {
+          role: "radio",
+          "aria-checked": "false",
+          "aria-label": `Stake ${n} token${n === 1 ? "" : "s"}`,
+        },
+      },
+      [h("span", { class: "mono a-stake-num", text: String(n) })],
+    ) as HTMLButtonElement;
+    chip.addEventListener("click", () => setStake(n));
+    return chip;
+  });
+  replace(gganbuStakeGroup, stakeChips);
+  const gganbuStakeRow = h("div", { class: "a-stakes" }, [
+    h("span", { class: "label a-stakes-label", text: "Stake" }),
+    gganbuStakeGroup,
+  ]);
+  /**
+   * The two sides, built once, for the reason the bridge's panes are: this is
+   * the control that commits, it is rebuilt on every frame the room produces,
+   * and a button replaced under a cursor is a click that lands on nothing.
+   */
+  const gganbuSides = h("div", { class: "a-sides" });
+  const sideButtons = (["over", "under"] as const).map((side) => {
+    const face = GGANBU_SIDE[side];
+    const button = h(
+      "button",
+      {
+        class: "a-side",
+        type: "button",
+        attrs: { "data-side": side, "data-picked": "no" },
+      },
+      [
+        h("span", {
+          class: "a-side-glyph",
+          attrs: { "aria-hidden": "true" },
+          text: face.glyph,
+        }),
+        h("span", { class: "a-side-word display", text: face.word }),
+        h("span", {
+          class: "mono a-side-stake",
+          attrs: { "aria-hidden": "true" },
+        }),
+      ],
+    ) as HTMLButtonElement;
+    button.addEventListener("click", () => wagerOn(side));
+    return button;
+  });
+  replace(gganbuSides, sideButtons);
+  const gganbuKeys = keyHint(KEY_HINT.gganbu);
+  const gganbuStatus = h("p", { class: "a-gganbu-status" });
+  /**
+   * The refusal, in the server's words, with `role="alert"`.
+   *
+   * A visible line rather than the sr-only announce slot, because the sentence
+   * that matters most — *One to 3 tokens.* — is a correction to a control the
+   * person is still holding, and it has to be readable beside that control
+   * rather than read out once and gone.
+   */
+  const gganbuError = h("p", {
+    class: "mono a-gganbu-error",
+    attrs: { role: "alert", hidden: true },
+  });
+  const gganbuHouse = houseSlot("a-gganbu-house");
+  gganbuHouse.node.hidden = true;
+  const gganbuNode = h("div", { class: "a-gganbu" }, [
+    gganbuHead,
+    gganbuTimer,
+    playRule(PLAY_RULE.gganbu),
+    pairNode,
+    gganbuHouse.node,
+    gganbuCue,
+    gganbuStakeRow,
+    gganbuSides,
+    gganbuKeys,
+    gganbuError,
+    gganbuStatus,
+  ]);
+
+  /** The stake the dial is set to. It survives a prompt; see `gganbuStake`. */
+  let stakeWant = 1;
+  /** What this phone holds, as of the last frame. The dial's ceiling. */
+  let gganbuHeld = 0;
+  /** The wager this phone has sent for the open prompt. One per prompt, final. */
+  let wagerSent: { at: number; pick: OverUnder; amount: number } | null = null;
+  /** Which prompt the controls belong to, so a new one gives them back. */
+  let promptAt = -1;
+  /** Whether the two sides are a live control right now. */
+  let gganbuOpen = false;
+  /** The counts as of the last frame, so a change in them is a settlement. */
+  let gganbuLedger: GganbuLedger | null = null;
+  /** How this phone left the round, latched at the transition — see paint(). */
+  let gganbuExit: string | null = null;
+
+  /** A new round is a new hand, and last round's wager must not stick. */
+  const resetGganbu = (): void => {
+    stakeWant = 1;
+    gganbuHeld = 0;
+    wagerSent = null;
+    promptAt = -1;
+    gganbuOpen = false;
+    gganbuLedger = null;
+    gganbuExit = null;
+    gganbuHouse.node.hidden = true;
+    gganbuError.hidden = true;
+    setText(gganbuError, "");
+  };
+
+  const setStake = (amount: number): void => {
+    stakeWant = amount;
+    if (seen !== null) paint(seen);
+  };
+
+  /**
+   * One wager. The single place a stake is committed, whatever pressed it.
+   *
+   * Locked here rather than on the server's acknowledgement, for the reason
+   * `stepOn` is: the engine refuses a second wager as `already_answered_item`,
+   * and a person who pressed twice under a fifteen-second clock should see
+   * their first press take rather than a refusal. The lock is given back only
+   * by a refusal — `refused()` below — which is the one case where the press
+   * did not land.
+   */
+  const wagerOn = (pick: OverUnder): void => {
+    const round = Number(gganbuNode.dataset["round"] ?? "-1");
+    const at = Number(gganbuNode.dataset["at"] ?? "-1");
+    if (round < 0 || at < 0 || !gganbuOpen) return;
+    // Clamped against the hand one more time here, and not only where the dial
+    // is drawn: the frame that shrank the hand and the press can be the same
+    // 200 ms, and the engine would refuse a stake larger than the hand.
+    const amount = gganbuStake(stakeWant, gganbuHeld);
+    if (amount < 1) return;
+    wagerSent = { at, pick, amount };
+    gganbuOpen = false;
+    gganbuError.hidden = true;
+    ctx.arcadeWager(round, pick, amount);
+    if (seen !== null) paint(seen);
+  };
+
+  /**
+   * The keyboard for a wager: the digits set the stake, the arrows commit.
+   *
+   * On the window rather than on the buttons, for the reason every other key on
+   * this surface is: nobody tabs to a control before a fifteen-second clock
+   * starts, and a key that works only after a click is an affordance that
+   * arrives too late to be one.
+   */
+  const onWagerKey = (ev: KeyboardEvent): void => {
+    if (built !== "gganbu" || !gganbuOpen || isTypingTarget(ev.target)) return;
+    const press = gganbuKey(ev);
+    if (press === null) return;
+    ev.preventDefault();
+    if (press.kind === "stake") setStake(press.amount);
+    else wagerOn(press.pick);
+  };
+  if (ctx.live) window.addEventListener("keydown", onWagerKey);
+
+  /**
+   * The prompt clock, counted to the instant the server named.
+   *
+   * `promptEndsAt` is **omitted, not zeroed**, while the round card is up, so
+   * this draws nothing at all rather than the 00:00 a missing epoch would
+   * produce. Always an absolute epoch against the corrected clock: a phone that
+   * got the frame late still stops at the same instant as every other one.
+   */
+  const paintPromptTimer = (arcade: ArcadeView): void => {
+    const left = remainingMs(arcade.gganbu?.promptEndsAt ?? null, ctx.now());
+    setText(gganbuTimer, left === null ? "" : formatCountdown(left));
+    setClass(gganbuTimer, "urgent", left !== null && left <= 5_000);
+  };
+
+  const paintGganbu = (
+    state: RenderState,
+    arcade: ArcadeView,
+    mine: ArcadeMine,
+  ): void => {
+    const g = arcade.gganbu;
+    if (!g) return;
+    const fresh = built !== "gganbu";
+    mount("gganbu", [gganbuNode]);
+    gganbuNode.dataset["round"] = String(arcade.roundIndex);
+    gganbuNode.dataset["at"] = String(g.at);
+    const me = mine.gganbu;
+    // The opening stake until the server has dealt this phone in, which is what
+    // a latecomer's first frame looks like: the engine deals them in at the
+    // opening stake the moment they wager.
+    const held = me?.tokens ?? g.startTokens;
+    gganbuHeld = held;
+    // A pid, resolved through the grid and the roster exactly as `mine.backing`
+    // is. There is deliberately no `rivalNumber` on the wire.
+    const rival = gganbuRival(arcade, state.roster, me?.rival ?? null);
+
+    // A new prompt is a fresh wager and a fresh refusal.
+    if (promptAt !== g.at) {
+      promptAt = g.at;
+      wagerSent = null;
+      gganbuError.hidden = true;
+      setText(gganbuError, "");
+    }
+
+    // The settlement, read off the token count across a prompt change. There is
+    // no per-prompt reveal in this round — `nextPrompt` settles and reopens in
+    // one frame — so this is the whole of what the phone is told about the call
+    // it just made. {@link gganbuSettlement} is where the decision lives,
+    // including every frame on which it must say nothing.
+    const settled = gganbuSettlement(gganbuLedger, { at: g.at, tokens: held });
+    gganbuLedger = { at: g.at, tokens: held };
+    if (settled !== null) {
+      gganbuHouse.node.hidden = false;
+      gganbuHouse.set(settled);
+      setText(announce, settled);
+    }
+
+    const wager = me?.wager ?? null;
+    const committed = me?.committed === true || wagerSent !== null;
+    const stakes = gganbuStakes(held);
+    const stake = gganbuStake(stakeWant, held);
+    gganbuOpen =
+      arcade.phase === "running" &&
+      ctx.live &&
+      !committed &&
+      g.prompt !== undefined &&
+      stakes.length > 0;
+
+    setText(
+      gganbuHead,
+      [
+        `PROMPT ${g.at + 1} OF ${g.of}`,
+        `${g.secondsPerPrompt}s A PROMPT`,
+        `${g.wagered} LOCKED IN`,
+      ].join(" · "),
+    );
+    paintPromptTimer(arcade);
+
+    /* the pair */
+    // The console's preview is a picture of the room and the room has no single
+    // pair. Everything else on this screen — the clock, the question, the two
+    // buttons — is what everybody is looking at and is drawn; a pair panel
+    // showing ten against nobody's nought would be a lead over nobody.
+    pairNode.hidden = me === undefined;
+    setText(youTokens, String(held));
+    const lead = gganbuStanding(held, me?.rivalTokens ?? 0);
+    setAttr(youCard, "data-standing", lead);
+    const by = Math.abs(held - (me?.rivalTokens ?? 0));
+    setText(
+      youLead,
+      lead === "level" ? "Level" : `${lead === "ahead" ? "Ahead" : "Behind"} by ${by}`,
+    );
+    setText(rivalTokens, String(me?.rivalTokens ?? 0));
+    setText(rivalTag, rival.house ? "—" : rival.tag);
+    // The nickname, on the one surface DESIGN.md puts it on: the phone, where
+    // the person it belongs to is the only reader. The player number rides with
+    // it because the announcer only ever uses the number.
+    setText(
+      rivalWho,
+      rival.house ? "The house" : rival.nickname || rival.name,
+    );
+    // The tell. A word and a glyph, because this is the one thing on the screen
+    // a colour-blind player would otherwise be reading out of a hue.
+    const locked = me?.rivalCommitted === true;
+    setText(rivalDot, rival.house ? "—" : locked ? "●" : "○");
+    setText(
+      rivalTellWord,
+      rival.house ? "wagers nothing" : locked ? "locked in" : "still deciding",
+    );
+    setAttr(
+      rivalCard,
+      "data-tell",
+      rival.house ? "house" : locked ? "in" : "out",
+    );
+    setAttr(
+      pairNode,
+      "aria-label",
+      `You hold ${held}. ${rival.house ? "The house" : rival.name} holds ${
+        me?.rivalTokens ?? 0
+      } and ${rival.house ? "wagers nothing" : locked ? "has locked in" : "has not wagered yet"}.`,
+    );
+
+    /* the question */
+    setText(gganbuCue, gganbuQuestion(g.prompt));
+
+    /* the dial. Only the state moves; the chips themselves were built at mount. */
+    stakeChips.forEach((chip, i) => {
+      const n = i + 1;
+      const offered = stakes.includes(n);
+      const on = n === stake;
+      chip.disabled = !gganbuOpen || !offered;
+      chip.classList.toggle("on", on);
+      setAttr(chip, "aria-checked", on ? "true" : "false");
+      // A chip beyond the hand is not merely disabled, it is not on offer: the
+      // engine would refuse it, so the dial does not show a stake that cannot
+      // be made.
+      chip.hidden = !offered && stakes.length > 0;
+    });
+
+    /* the two sides, which are the commit */
+    const picked = wager?.pick ?? wagerSent?.pick ?? null;
+    sideButtons.forEach((button, i) => {
+      const side = i === 0 ? "over" : "under";
+      const face = GGANBU_SIDE[side];
+      const on = picked === side;
+      button.disabled = !gganbuOpen;
+      setAttr(button, "data-picked", on ? "yes" : "no");
+      setAttr(
+        button,
+        "aria-label",
+        `${face.word}, staking ${stake} token${stake === 1 ? "" : "s"}`,
+      );
+      const slot = button.querySelector(".a-side-stake");
+      if (slot instanceof HTMLElement) setText(slot, String(stake));
+    });
+    gganbuKeys.hidden = !gganbuOpen;
+
+    /**
+     * The focus ring goes on the dial, and **never** on a side.
+     *
+     * Every other round on this surface focuses the control that commits, and
+     * this is the one round where that would be a trap: a `<button>` is
+     * activated by the space bar, Plan / Apply spends 75 seconds teaching the
+     * room that space is how you play, and a focused OVER would turn one stray
+     * space into a final, irreversible wager. The stake chip is the safe end of
+     * the same reach — pressing it re-sets the stake it is already on — and the
+     * keys that commit are the arrows, which no button answers to on its own.
+     */
+    if (ctx.live && fresh && gganbuOpen) stakeChips[stake - 1]?.focus();
+
+    const amount = wager?.amount ?? wagerSent?.amount ?? stake;
+    setText(
+      gganbuStatus,
+      arcade.phase !== "running"
+        ? "The first prompt opens when the round does."
+        : stakes.length === 0
+          ? "You have nothing left to stake."
+          : committed && picked !== null
+            ? `Locked in: ${amount} token${amount === 1 ? "" : "s"} on ${GGANBU_SIDE[picked].word.toLowerCase()}. It is final.`
+            : `You hold ${held}. Set a stake, then pick a side.`,
+    );
+  };
+
   /* ---- the drain, and the Lounge ---- */
   const drainNode = h("div", { class: "a-drain" }, [
     h("p", { class: "mono a-drain-error", text: STATE_LOCK_ERROR }),
@@ -3580,7 +4053,7 @@ function sceneArcade(ctx: SceneCtx): Scene {
     // see paint(). Null outside the bridge, and cleared by the next round.
     setText(
       drainNode.querySelector(".a-drain-error") as HTMLElement,
-      glassExit ?? unsealExit ?? STATE_LOCK_ERROR,
+      glassExit ?? unsealExit ?? gganbuExit ?? STATE_LOCK_ERROR,
     );
     setText(
       drainNode.querySelector(".a-drain-who") as HTMLElement,
@@ -3725,6 +4198,30 @@ function sceneArcade(ctx: SceneCtx): Scene {
      * rope. Not the leader, which is a per-player number and lives on the
      * console and the Desktop.
      */
+    // Gganbu's answers, and the one line that says what the pair did.
+    //
+    // The recap is the first frame on which any of it has existed — the key does
+    // not reach a phone before `revealRound` — and the note is the half a room
+    // of solutions architects actually takes away: *the default is 768h, which
+    // is 32 days*. The threshold rides with the cue because without it the row
+    // is an answer to a question nobody can see.
+    const gganbuRecap = arcade.gganbu?.recap ?? [];
+    // The pair's result, which is the only place the +10 for holding more is
+    // ever said. Drawn from `mine.gganbu` and the pid resolved through the grid,
+    // because the phone has no token map: the two numbers on it are its own and
+    // its gganbu's, and that is the whole of what one person's round is.
+    const mineG = mine.gganbu;
+    const gganbuLine =
+      mineG === undefined
+        ? null
+        : gganbuPairResult(
+            {
+              tokens: mineG.tokens,
+              rivalTokens: mineG.rivalTokens,
+              revoked: mineG.revoked,
+            },
+            gganbuRival(arcade, state.roster, mineG.rival),
+          );
     const tug = arcade.tug;
     const tugLine =
       tug === undefined
@@ -3739,7 +4236,7 @@ function sceneArcade(ctx: SceneCtx): Scene {
           } · you pulled for side ${(mine.tug?.side ?? 0) === 0 ? "A" : "B"}.`;
     // Keyed on what it draws, so a later frame in the same reveal redraws it.
     mount(
-      `reveal:${mine.banked}:${mine.total}:${survived}:${glassRecap.length}:${unsealRecap.length}:${tugLine ?? ""}`,
+      `reveal:${mine.banked}:${mine.total}:${survived}:${glassRecap.length}:${unsealRecap.length}:${gganbuRecap.length}:${gganbuLine ?? ""}:${tugLine ?? ""}`,
       [
       h("div", { class: "a-reveal" }, [
         h("p", { class: "label", text: "Banked this round" }),
@@ -3789,6 +4286,29 @@ function sceneArcade(ctx: SceneCtx): Scene {
             h("span", { class: "a-recap-cue", attrs: { "aria-hidden": "true" }, text: item.cue }),
             h("span", { class: "a-recap-answer", text: item.answer }),
             h("span", { class: "a-recap-note", text: item.note }),
+          ]),
+        ),
+        gganbuLine === null
+          ? null
+          : h("p", { class: "a-gganbu-result", text: gganbuLine }),
+        ...gganbuRecap.map((prompt) =>
+          h("div", { class: "a-recap" }, [
+            // The answer, as a glyph and a word: the same pair the two buttons
+            // wore during play, so the row reads as the side that was right.
+            h("span", { class: "a-recap-prompt" }, [
+              h("span", {
+                class: "a-recap-side",
+                attrs: { "aria-hidden": "true" },
+                text: GGANBU_SIDE[prompt.answer].glyph,
+              }),
+              h("span", {
+                class: "label a-recap-answer-word",
+                text: GGANBU_SIDE[prompt.answer].word,
+              }),
+              h("span", { class: "mono a-recap-threshold", text: prompt.threshold }),
+            ]),
+            h("span", { class: "a-recap-answer", text: prompt.cue }),
+            h("span", { class: "a-recap-note", text: prompt.note }),
           ]),
         ),
         tugLine === null
@@ -3890,11 +4410,16 @@ function sceneArcade(ctx: SceneCtx): Scene {
       // carried on. The Lounge underneath draws whichever of the three applies,
       // and the state-lock error is Plan / Apply's and only Plan / Apply's.
       unsealExit = arcade.round === "unseal" ? HOUSE.unsealShattered : null;
+      // Gganbu's own way out: the stake ran out. SPEC.md: "Reach zero and your
+      // token is revoked." Latched here with the other two so the Lounge
+      // underneath draws the error that belongs to the round they left, and not
+      // Plan / Apply's state lock.
+      gganbuExit = arcade.round === "gganbu" ? HOUSE.gganbuRevoked : null;
       node.classList.add("is-draining");
       buzz([120, 60, 120]);
       setText(
         announce,
-        `${glassExit ?? unsealExit ?? STATE_LOCK_ERROR}. ${HOUSE.drained(mine.playerNumber)}`,
+        `${glassExit ?? unsealExit ?? gganbuExit ?? STATE_LOCK_ERROR}. ${HOUSE.drained(mine.playerNumber)}`,
       );
       // The Lounge is about to mount underneath this, and a mount clears the
       // live region. This one message outlives its screen on purpose.
@@ -3924,6 +4449,7 @@ function sceneArcade(ctx: SceneCtx): Scene {
       resetCheckpointLine();
       resetBridge();
       resetTug();
+      resetGganbu();
       return paintUnseal(arcade, mine);
     }
     if (arcade.phase === "card") {
@@ -3933,6 +4459,7 @@ function sceneArcade(ctx: SceneCtx): Scene {
       resetBridge();
       resetUnseal();
       resetTug();
+      resetGganbu();
       return paintCard(arcade);
     }
     if (arcade.phase === "idle") {
@@ -3944,6 +4471,7 @@ function sceneArcade(ctx: SceneCtx): Scene {
       resetBridge();
       resetUnseal();
       resetTug();
+      resetGganbu();
       mount("between", [
         h("div", { class: "a-card" }, [houseLine(HOUSE.roundEnd)]),
       ]);
@@ -3954,6 +4482,7 @@ function sceneArcade(ctx: SceneCtx): Scene {
     if (arcade.round === "plan_apply") return paintPlan(arcade, mine);
     if (arcade.round === "unseal") return paintUnseal(arcade, mine);
     if (arcade.round === "tug_of_raft") return paintTug(state, arcade, mine);
+    if (arcade.round === "gganbu") return paintGganbu(state, arcade, mine);
     if (arcade.round === "glass_bridge") return paintGlass(state, arcade, mine);
     // A round that is designed but not built: say so rather than show a
     // button that does nothing.
@@ -3983,6 +4512,7 @@ function sceneArcade(ctx: SceneCtx): Scene {
       if (a.round === "recruitment") paintItemTimer(a);
       else if (a.round === "unseal" && built === "unseal") paintUnsealTimer(a);
       else if (a.round === "glass_bridge" && built === "glass") paintStepTimer(a);
+      else if (a.round === "gganbu" && built === "gganbu") paintPromptTimer(a);
       // Tug of Raft is deliberately not here. Its clock is the heartbeat and
       // it is drawn on an animation frame, five times faster than this tick:
       // a 200 ms heartbeat sampler against a 600 ms beat would show the ring
@@ -3995,11 +4525,31 @@ function sceneArcade(ctx: SceneCtx): Scene {
       stepSent = null;
       glassOpen = false;
     },
+    refused(code, message) {
+      // Only the wager screen has words to say about a refusal, and only while
+      // it is the screen that is up: the socket carries every round's refusals,
+      // and a bridge's `already_stepped` is not something a wager explains.
+      if (built !== "gganbu") return;
+      const line = gganbuRefusal(code, message);
+      if (line === null) return;
+      // The stake did not land, so the controls come back — unless the reason
+      // is that they should not. `already_answered_item` means a wager is
+      // already in, `not_on_the_floor` means the token is gone, and giving
+      // either of those a live button back would be the screen inviting a
+      // second refusal.
+      if (code !== "already_answered_item" && code !== "not_on_the_floor") {
+        wagerSent = null;
+      }
+      gganbuError.hidden = false;
+      setText(gganbuError, line);
+      setText(announce, line);
+    },
     stop() {
       window.removeEventListener("keydown", onTapKey);
       window.removeEventListener("keydown", onPaneKey);
       window.removeEventListener("keydown", onLetterKey);
       window.removeEventListener("keydown", onPullKey);
+      window.removeEventListener("keydown", onWagerKey);
       stopTugFrame();
       if (drainTimer !== null) clearTimeout(drainTimer);
       drainTimer = null;

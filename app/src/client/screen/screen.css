@@ -1403,6 +1403,320 @@ body {
   color: var(--muted);
 }
 
+/* ---- Gganbu ---------------------------------------------------------- *
+ *
+ * Pairs, tokens, and one question at a time.
+ *
+ * The round's secret is not kept by this stylesheet and could not be: there is
+ * no `wagers` field on any frame of any role, so nothing here has a pick or a
+ * stake to draw. What is on the board is a count of who has locked in, which
+ * names nobody, and settled token counts, which move only when a prompt has
+ * closed.
+ *
+ * The board takes the dormitory grid's space rather than covering it — it *is*
+ * the grid, re-cut into rivals — the rule the bridge and the tins already keep.
+ * A full-bleed panel over this surface is how the Desktop ends up showing the
+ * room a rectangle.
+ *
+ * Nothing is told apart by hue alone, because this is read across a room over a
+ * compressed video share. Ahead carries ▲ and the word AHEAD, which becomes
+ * +10 at the reveal; the richest hand carries ★, which is the mark the rope's
+ * leaders already use; a revoked seat carries a strike and the word REVOKED; a
+ * dissolved pair is dashed and its second seat says HOUSE. Each of those is a
+ * word or a shape first and a colour second.
+ *
+ * Contrast, and measured against the surface each thing is actually on rather
+ * than against the page: the head, the richest line and the recap sit on
+ * --ground #0a0a0f, where --ink is 18.1:1 and --muted #8b8a9c is 5.84:1. The
+ * seats sit on a card, --panel #14141d, which is the tighter of the two, and
+ * tokens.css's own table has the hues there: --arc-players (--nomad-ink) 9.10,
+ * --arc-lounge (--vault-ink) 12.38, --arc-house (--terraform-ink) 4.97, with
+ * --ink 16.8 and --muted 5.42. Everything clears 4.5:1, and --arc-house is the
+ * thin one — anything that darkens that card needs re-measuring.
+ *
+ * No --miss anywhere: red is the error beat and the drain log below is where
+ * it is spent.
+ * -------------------------------------------------------------------- */
+
+.s-gganbu {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1.6vh;
+}
+.s-gganbu[hidden] {
+  display: none;
+}
+.s-gg-head {
+  margin: 0;
+  flex: none;
+  color: var(--muted);
+  font-size: clamp(18px, 1.5vw, 28px);
+  letter-spacing: 0.14em;
+}
+
+/* The open prompt. Display type for the cue, because it is the question and on
+   this surface the question is the biggest thing; mono for the threshold,
+   because it is a figure. */
+.s-gg-prompt {
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  gap: 1vh;
+}
+.s-gg-prompt[hidden] {
+  display: none;
+}
+.s-gg-cue {
+  margin: 0;
+  font-size: clamp(40px, 4.2vw, 88px);
+  line-height: 1;
+  letter-spacing: -0.02em;
+}
+.s-gg-threshold {
+  margin: 0;
+  font-size: clamp(24px, 2.1vw, 44px);
+  letter-spacing: 0.16em;
+  color: var(--ink);
+}
+
+/* Two bars, and they are told apart by the words beside them rather than by
+   their fills: the clock runs down in staff pink and the count fills up in the
+   players' green, which is the arcade's own assignment, but "0:07" and "18 OF
+   24 WAGERED" are what actually distinguishes them. */
+.s-gg-clock,
+.s-gg-wagered {
+  display: flex;
+  align-items: center;
+  gap: 1.2vw;
+}
+.s-gg-clock[hidden],
+.s-gg-wagered[hidden] {
+  display: none;
+}
+.s-gg-clock-track,
+.s-gg-wagered-track {
+  flex: 1;
+  height: 1.4vh;
+  border-radius: 999px;
+  background: var(--panel-2);
+  overflow: hidden;
+}
+/* Set from the script off the server's own epoch on every tick. Not a CSS
+   transition: a transition runs from whenever the frame arrived, and a screen
+   that got this one 300ms late would finish the countdown 300ms late. */
+.s-gg-clock-fill {
+  height: 100%;
+  width: 100%;
+  background: var(--consul);
+}
+.s-gg-wagered-fill {
+  height: 100%;
+  width: 0;
+  background: var(--nomad);
+}
+.s-gg-clock-num,
+.s-gg-wagered-text {
+  flex: 0 0 auto;
+  font-weight: 600;
+  font-size: clamp(22px, 1.8vw, 36px);
+  letter-spacing: 0.08em;
+  text-align: right;
+}
+.s-gg-clock-num {
+  min-width: 5ch;
+  color: var(--ink);
+}
+.s-gg-wagered-text {
+  color: var(--muted);
+}
+
+/* The richest hand in the room, live rather than at the reveal — the hand has
+   prompts left to lose, so backing it is a bet. Gold, like every other
+   Lounge-adjacent number on this screen, and one line so it never competes
+   with the board. */
+.s-gg-richest {
+  margin: 0;
+  flex: none;
+  font-size: clamp(16px, 1.3vw, 26px);
+  letter-spacing: 0.12em;
+  color: var(--arc-lounge);
+}
+.s-gg-richest[hidden] {
+  display: none;
+}
+
+/* The board. Sized from the same arithmetic as the dormitory grid: thirty pairs
+   at 1080p, which is sixty people, fit without either number shrinking below
+   what a compressed tile can resolve. */
+.s-gg-pairs {
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(216px, 1fr));
+  gap: 10px;
+  align-content: start;
+}
+.s-gg-pair {
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  border: 2px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel);
+}
+/* A pair that dissolved: dashed as well as labelled HOUSE, so the two pictures
+   differ in shape and not only in a word. SPEC.md: "a rival who disconnects is
+   replaced by the house." */
+.s-gg-pair[data-house="yes"] {
+  border-style: dashed;
+}
+.s-gg-vs {
+  font-size: clamp(14px, 1vw, 20px);
+  letter-spacing: 0.14em;
+  color: var(--muted);
+  text-align: center;
+}
+.s-gg-seat {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1px;
+}
+.s-gg-seat-num {
+  font-weight: 600;
+  font-size: clamp(18px, 1.5vw, 28px);
+  letter-spacing: 0.04em;
+  color: var(--ink);
+}
+.s-gg-seat-tokens {
+  font-weight: 600;
+  font-size: clamp(24px, 2.1vw, 40px);
+  color: var(--arc-players);
+}
+.s-gg-seat-mark {
+  font-size: clamp(14px, 1.1vw, 20px);
+  letter-spacing: 0.14em;
+  color: var(--muted);
+  min-height: 1.2em;
+}
+/* Ahead of your gganbu: the triangle and the word together, and no hue of its
+   own — the mark has to work where the board is a grey smear. */
+.s-gg-seat[data-ahead="yes"] .s-gg-seat-mark::before {
+  content: "\25B2\00a0";
+}
+/* The richest hand, marked exactly as the rope's leaders are: a star and the
+   Lounge's gold. */
+.s-gg-seat[data-richest="yes"] .s-gg-seat-num {
+  color: var(--arc-lounge);
+}
+.s-gg-seat[data-richest="yes"] .s-gg-seat-num::before {
+  content: "\2605\00a0";
+}
+/* Revoked: struck through and gold, because gold is where they have gone. The
+   word says it, and the strike says it again in a shape. */
+.s-gg-seat[data-revoked="yes"] .s-gg-seat-tokens {
+  color: var(--arc-lounge);
+  text-decoration: line-through;
+}
+.s-gg-seat[data-revoked="yes"] .s-gg-seat-mark {
+  color: var(--arc-lounge);
+}
+/* Away is grey and dimmer, as it is on the grid: never the hue alone. */
+.s-gg-seat[data-away="yes"] .s-gg-seat-num,
+.s-gg-seat[data-away="yes"] .s-gg-seat-tokens {
+  color: var(--muted);
+}
+/* The house is the Front-End Man, so it is the house's purple, and it is a word
+   where every other seat is a number. */
+.s-gg-seat[data-house="yes"] .s-gg-seat-num {
+  color: var(--arc-house);
+  font-size: clamp(14px, 1.2vw, 22px);
+  letter-spacing: 0.14em;
+}
+.s-gg-seat[data-house="yes"] .s-gg-seat-tokens {
+  color: var(--arc-house);
+}
+
+/* At the reveal the words take the stage and the board gives up the room for
+   them — but it does not go away, because "did I beat my gganbu" is the
+   question the whole round was, and the board is the answer to it. */
+.s-gganbu[data-phase="reveal"] .s-gg-pairs {
+  flex: none;
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  gap: 8px;
+}
+.s-gganbu[data-phase="reveal"] .s-gg-pair {
+  padding: 4px 8px;
+}
+.s-gganbu[data-phase="reveal"] .s-gg-seat-num {
+  font-size: clamp(16px, 1.2vw, 22px);
+}
+.s-gganbu[data-phase="reveal"] .s-gg-seat-tokens {
+  font-size: clamp(18px, 1.5vw, 28px);
+}
+
+/* The reveal's rows. Fixed columns rather than `auto`, for the reason the tins'
+   recap has them: six questions of very different lengths read as a table only
+   if the answer column is in the same place on every line. */
+.s-gg-recap {
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5vh;
+}
+.s-gg-recap[hidden] {
+  display: none;
+}
+.s-gg-row {
+  display: grid;
+  grid-template-columns: 4% 34% 12% 1fr;
+  align-items: baseline;
+  gap: 0 16px;
+  padding: 0.4vh 0;
+  border-top: 1px solid var(--line);
+}
+.s-gg-row-num {
+  font-size: clamp(15px, 1.25vw, 24px);
+  color: var(--muted);
+}
+.s-gg-row-q {
+  font-size: clamp(19px, 1.6vw, 32px);
+  line-height: 1.15;
+  color: var(--ink);
+}
+/* The call, as a glyph and a word. The glyph is decoration to a screen reader
+   and the word carries it, which is the rule the whole surface keeps. */
+.s-gg-row-answer {
+  display: flex;
+  gap: 0.4em;
+  font-size: clamp(17px, 1.4vw, 28px);
+  letter-spacing: 0.12em;
+  color: var(--arc-players);
+}
+/* DESIGN.md asks for notes at >= 36px, and six of them under a board cannot be
+   — the same trade the tins' nine and the bridge's twelve already make, and this
+   is the largest of the three because there are the fewest of them. The host
+   reads them aloud; the screen's job is to hold the answer beside the question
+   while they do. --muted rather than a hue, because small coloured text is the
+   one thing the codec destroys. */
+.s-gg-row-note {
+  font-size: clamp(16px, 1.35vw, 28px);
+  line-height: 1.2;
+  color: var(--muted);
+}
+
 /* ---- a drain, verbatim, the way it looks in a terminal --------------- */
 
 .s-drain-log {

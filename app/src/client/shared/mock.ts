@@ -38,15 +38,17 @@
  * the first run rather than in front of thirty people.
  *
  * The scripted session runs the whole of Phase 2 scoring, the whole of Phase
- * 3 trivia and the built rounds of the Phase 4 arcade, so every surface
+ * 3 trivia and all six rounds of the Phase 4 arcade, so every surface
  * can be watched without a backend: a judged activity out of 20 with its
  * facilitator on bench, then four real questions with bots tapping at
  * plausible speeds — including a round card, a multi-answer question, a
  * two-answer question and a sudden death — then Recruitment, Plan / Apply
  * with the light turning, Unseal with tins cracking, Tug of Raft with the
- * heartbeat at the real 100 bpm, and the Glass Bridge, with bots being
- * drained into the Lounge and backing the runners still on the Floor, two
- * Spot Awards with reasons, and finally the seal and the reveal.
+ * heartbeat at the real 100 bpm, Gganbu with rivals staking tokens against
+ * each other and the counts moving only when a prompt settles, and the Glass
+ * Bridge, with bots being drained into the Lounge and backing the runners
+ * still on the Floor, two Spot Awards with reasons, and finally the seal and
+ * the reveal.
  *
  * The arithmetic here is SCORING.md's and SPEC.md's, implemented a second
  * time on purpose — the mock is a stand-in for the server and must not borrow
@@ -59,8 +61,11 @@
 import type {
   ActivitySummary,
   ArcadeCell,
+  ArcadeGganbuRecap,
+  ArcadeGganbuView,
   ArcadeGlassView,
   ArcadeMine,
+  ArcadeMineGganbu,
   ArcadeMineGlass,
   ArcadeMineTug,
   ArcadeMineUnseal,
@@ -88,8 +93,11 @@ import type {
   ArcadeRoundKind,
   ArcadeStanding,
   EmojiItem,
+  GganbuPrompt,
   GlassStep,
   GlassWave,
+  OverUnder,
+  OverUnderItem,
   QuestionPhase,
   Seal,
   SendoffContent,
@@ -100,6 +108,7 @@ import type {
   SessionPhase,
   UnsealItem,
   UnsealShape,
+  Wager,
   WaveSeconds,
 } from "../../engine/types.ts";
 import {
@@ -114,6 +123,7 @@ import {
 import { RECRUITMENT_ITEMS } from "../../arcade/recruitment.ts";
 import { GLASS_BRIDGE_STEPS } from "../../arcade/glass-bridge.ts";
 import { UNSEAL_ITEMS } from "../../arcade/unseal.ts";
+import { GGANBU_PROMPTS } from "../../arcade/gganbu.ts";
 import type { Transport, TransportFactory, TransportHandlers } from "./transport.ts";
 
 export interface MockConfig {
@@ -395,11 +405,51 @@ interface MockTugPlay {
   wins: [number, number];
 }
 
+/**
+ * Gganbu, mocked.
+ *
+ * The split between `board` and `key` is written again rather than borrowed,
+ * for the reason the bridge's and Unseal's are: that split is the whole of the
+ * round's security — an `OverUnderItem` carries the answer, the reveal note
+ * *and* the VERIFY flag, so one careless spread puts the answer key on the
+ * phone of the person betting on it — and a mock that imported the split could
+ * never catch the server failing to make it. The *content* is imported,
+ * because content is not a rule and a second copy of six prompts is how one of
+ * them silently rots.
+ *
+ * `wagers` is the open prompt only, and it is cleared every time a prompt
+ * settles. `tokens` is the settled count and moves in `#closePrompt` and
+ * nowhere else, which is the round's other rule: a rival's count is on both
+ * phones for the whole round, so a count that twitched when a wager landed
+ * would *be* the wager.
+ */
+interface MockGganbuPlay {
+  kind: "gganbu";
+  /** Showable: the question and the threshold. */
+  board: GganbuPrompt[];
+  /** **The answer**, index-aligned with `board`. Host and reveal only, and
+      `verify` is the host's alone. */
+  key: { answer: OverUnder; note: string; verify: boolean }[];
+  at: number;
+  secondsPerPrompt: number;
+  promptEndsAt: number;
+  startTokens: number;
+  /** Settled counts. Moved by `#closePrompt`, never by a wager landing. */
+  tokens: Record<string, number>;
+  /** Symmetric: `rivals[a] === b` and `rivals[b] === a`. */
+  rivals: Record<string, string>;
+  /** Both halves of a pair with an absent half. They play the house. */
+  housed: Record<string, true>;
+  /** The open prompt's wagers. Never projected — not even as a value. */
+  wagers: Record<string, Wager>;
+}
+
 type MockPlay =
   | MockRecruitPlay
   | MockPlanPlay
   | MockUnsealPlay
   | MockTugPlay
+  | MockGganbuPlay
   | MockGlassPlay;
 
 /* ---- the send-off ---------------------------------------------------- */
@@ -836,6 +886,111 @@ function mockTugLeader(play: MockTugPlay, side: 0 | 1): string | null {
   return best;
 }
 
+/* ---- Gganbu ----------------------------------------------------------- */
+
+/** SPEC.md: 1 to 5 tokens a wager, +10 to whoever of a pair holds more. */
+const GGANBU_MIN = 1;
+const GGANBU_MAX = 5;
+const GGANBU_AHEAD_BONUS = 10;
+/**
+ * The Lounge, at 5 and 8 rather than SPEC.md's 10 and 15.
+ *
+ * Tokens convert 1:1 and everybody starts on ten, so a player who wagers
+ * nothing all round finishes on ten and the cheapest *win* pays eleven. A
+ * Lounge of 10 and 15 would beat both, and SPEC.md's tuning rule is that
+ * crossing the line always wins. Written again here rather than imported,
+ * like every other number in this file.
+ */
+const GGANBU_BACKED_AHEAD = 5;
+const GGANBU_BACKED_RICHEST = 8;
+
+/** Split content into the half that may be shown and the half that may not. */
+function mockSplitPrompts(items: readonly OverUnderItem[]): {
+  board: GganbuPrompt[];
+  key: { answer: OverUnder; note: string; verify: boolean }[];
+} {
+  return {
+    board: items.map((i) => ({ cue: i.cue, threshold: i.threshold })),
+    key: items.map((i) => ({ answer: i.answer, note: i.note, verify: i.verify })),
+  };
+}
+
+/**
+ * Draw the gganbus: shuffle, then pair adjacent.
+ *
+ * An odd roster leaves one person unpaired, and unpaired means the house —
+ * SPEC.md's "an odd person out is paired with the house, played by the
+ * Front-End Man". Being the odd one out costs nothing: the house holds the
+ * opening stake and never wagers, so beating it is beating a player who stood
+ * still.
+ */
+function mockGganbuPairs(pids: readonly string[], seed: number): Record<string, string> {
+  const order = [...pids];
+  const rand = mockSeeded(seed);
+  for (let i = order.length - 1; i > 0; i -= 1) {
+    const j = Math.floor(rand() * (i + 1));
+    const a = order[i]!;
+    const b = order[j]!;
+    order[i] = b;
+    order[j] = a;
+  }
+  const pairs: Record<string, string> = {};
+  for (let i = 0; i + 1 < order.length; i += 2) {
+    const a = order[i]!;
+    const b = order[i + 1]!;
+    pairs[a] = b;
+    pairs[b] = a;
+  }
+  return pairs;
+}
+
+/** Tokens held. Somebody who has not wagered yet holds the opening stake. */
+function mockTokensOf(play: MockGganbuPlay, pid: string): number {
+  return play.tokens[pid] ?? play.startTokens;
+}
+
+/**
+ * Who a player is playing, or null for the house.
+ *
+ * Null covers three cases and they are deliberately the same case: the odd one
+ * out, a latecomer who was not there when the pairs were drawn, and a player
+ * whose pair dissolved because one of its halves left. All three face a rival
+ * who holds the opening stake and does nothing.
+ */
+function mockRivalOf(play: MockGganbuPlay, pid: string): string | null {
+  if (play.housed[pid]) return null;
+  return play.rivals[pid] ?? null;
+}
+
+function mockRivalTokens(play: MockGganbuPlay, pid: string): number {
+  const rival = mockRivalOf(play, pid);
+  return rival === null ? play.startTokens : mockTokensOf(play, rival);
+}
+
+/** "Whoever of the pair holds more takes +10." Level pays nobody. */
+function mockAheadOfRival(play: MockGganbuPlay, pid: string): boolean {
+  return mockTokensOf(play, pid) > mockRivalTokens(play, pid);
+}
+
+/**
+ * Who holds the most, as a list because a tie is real — everyone tied at the
+ * top counts and all their backers are paid. A revoked player holds nothing and
+ * cannot be in here, which is what reaching zero means.
+ */
+function mockRichest(play: MockGganbuPlay): string[] {
+  let best = 0;
+  for (const n of Object.values(play.tokens)) if (n > best) best = n;
+  if (best <= 0) return [];
+  return Object.keys(play.tokens)
+    .filter((pid) => play.tokens[pid] === best)
+    .sort();
+}
+
+/** Tokens at the buzzer, 1:1, plus the 10 for finishing above your rival. */
+function mockGganbuPoints(play: MockGganbuPlay, pid: string): number {
+  return mockTokensOf(play, pid) + (mockAheadOfRival(play, pid) ? GGANBU_AHEAD_BONUS : 0);
+}
+
 /** SPEC.md: 2–6 seconds, drawn at the boundary because the engine is pure. */
 const LIGHT_MIN_MS = 2_000;
 const LIGHT_MAX_MS = 6_000;
@@ -1245,6 +1400,82 @@ class MockSession {
       return { ...base, tug };
     }
 
+    if (play?.kind === "gganbu") {
+      // The projection this round lives or dies on, written a second time.
+      //
+      // The round has two secrets and they are not the same kind of secret.
+      //
+      // The first is the ordinary one: **the answer key.** `answer`, `note` and
+      // `verify` live in `key`, reach the host because the host reads them out,
+      // and reach everybody else at the reveal and not one frame earlier.
+      // `verify` never travels at all, and is omitted rather than falsed so it
+      // is not even in the bytes another role receives — it is the author's
+      // own "this answer can move", and a flag beside a settled prompt is a
+      // hint that the note about to be read out might be wrong.
+      //
+      // The second is the round itself, and it is the reason `wagers` is on no
+      // surface here at all — not the phone's, not the big screen's, not the
+      // console's. Both halves of a pair answer the **same prompt** sitting
+      // next to each other, so a rival's pick, a rival's stake, or a rival's
+      // token count moving mid-prompt are all the answer arriving early from
+      // the one person in the room betting against them. `wagered` is a count
+      // and is safe for the reason trivia's "24 of 27 answered" is: it names
+      // nobody. *That* a gganbu has locked in is the one thing the round lets a
+      // rival learn, and they learn it from their own frame's `rivalCommitted`.
+      //
+      // `tokens` is public and safe because it only ever holds **settled**
+      // counts: `#closePrompt` is the only place a token moves. It says who is
+      // winning and never what the open prompt's answer is, and it goes to the
+      // two surfaces that draw the room rather than to a phone — a phone shows
+      // one person's round, and theirs plus their gganbu's is what that is.
+      const shown = host || open;
+      const gganbu: ArcadeGganbuView = {
+        at: play.at,
+        of: play.board.length,
+        secondsPerPrompt: play.secondsPerPrompt,
+        startTokens: play.startTokens,
+        wagered: Object.keys(play.wagers).length,
+        // Absent while the round card is up, as Recruitment's cue is: the room
+        // is looking at the card, and a prompt sitting in a phone's JSON
+        // fifteen seconds early is fifteen seconds of thinking that whoever has
+        // devtools open gets and nobody else does.
+        ...(shown && play.board[play.at] !== undefined
+          ? { prompt: play.board[play.at] as GganbuPrompt }
+          : {}),
+        // Omitted, never zeroed, while the card is up — including for the
+        // host: the play carries a zero until the Floor opens, and a surface
+        // handed a zero draws a countdown that expired in 1970.
+        ...(this.arcadePhase === "running" ? { promptEndsAt: play.promptEndsAt } : {}),
+        ...(privileged
+          ? {
+              tokens: { ...play.tokens },
+              richest: mockRichest(play).map((pid) => this.arcadeNumber(pid)),
+              pairs: { ...play.rivals },
+              // Rides with `pairs` rather than stopping at the console: a
+              // screen given the pairs alone would draw a dissolved pair as a
+              // live one, and tell two people they are still rivals when both
+              // have been housed.
+              housed: Object.keys(play.housed).map((pid) => this.arcadeNumber(pid)),
+            }
+          : {}),
+        ...(host || revealed
+          ? {
+              recap: play.board.map((prompt, i): ArcadeGganbuRecap => {
+                const answer = play.key[i];
+                return {
+                  cue: prompt.cue,
+                  threshold: prompt.threshold,
+                  answer: answer?.answer ?? "over",
+                  note: answer?.note ?? "",
+                  ...(host ? { verify: answer?.verify ?? false } : {}),
+                };
+              }),
+            }
+          : {}),
+      };
+      return { ...base, gganbu };
+    }
+
     if (play?.kind === "glass_bridge") {
       // THE projection of this mock, and the one worth writing twice.
       //
@@ -1416,7 +1647,38 @@ class MockSession {
             } satisfies ArcadeMineTug,
           }
         : {}),
+      ...(play?.kind === "gganbu" ? { gganbu: this.gganbuMine(play, pid) } : {}),
       ...(play?.kind === "glass_bridge" ? { glass: this.glassMine(play, pid) } : {}),
+    };
+  }
+
+  /**
+   * One phone's own hand: the only way a pick or a stake ever leaves this mock.
+   *
+   * There is no public view of the wagers at all, because the person sitting
+   * next to you is answering the prompt you are answering. Four of these six
+   * fields are about somebody else, and each is allowed to be for its own
+   * reason:
+   *
+   * - `rival` is who they were told they are playing. Null is the house.
+   * - `rivalTokens` is the **settled** count and can be nothing else: it is
+   *   read off `tokens`, which does not move until the prompt closes. A count
+   *   that twitched when a wager landed would be the wager by arithmetic.
+   * - `rivalCommitted` says that they have wagered and never what. It is the
+   *   one tell the round allows, and it is the point of the round: watching
+   *   your gganbu lock in fast is a read on their confidence.
+   * - `wager` is **theirs**, because they made it.
+   */
+  gganbuMine(play: MockGganbuPlay, pid: string): ArcadeMineGganbu {
+    const rival = mockRivalOf(play, pid);
+    return {
+      tokens: mockTokensOf(play, pid),
+      rival,
+      rivalTokens: mockRivalTokens(play, pid),
+      rivalCommitted: rival !== null && rival in play.wagers,
+      committed: pid in play.wagers,
+      wager: play.wagers[pid] ?? null,
+      revoked: this.arcadeStanding[pid] === "drained",
     };
   }
 
@@ -2064,10 +2326,18 @@ class MockSession {
           ...(this.arcadeOn
             ? {
                 arcade: {
+                  // Who has committed at whatever is open. For Gganbu that is
+                  // the **keys** of `wagers` and never its values: a value is a
+                  // pick and a stake, and the console is three feet from the
+                  // host's mouth. The host's question is only whether both
+                  // halves of every pair have locked in, which decides whether
+                  // they settle now or wait, and the keys answer it alone.
                   answeredBy:
                     this.arcadePlay?.kind === "recruitment"
                       ? Object.keys(this.arcadePlay.answered)
-                      : [],
+                      : this.arcadePlay?.kind === "gganbu"
+                        ? Object.keys(this.arcadePlay.wagers)
+                        : [],
                   drained: Object.entries(this.arcadeStanding)
                     .filter(([, st]) => st === "drained")
                     .map(([pid]) => pid),
@@ -2218,6 +2488,9 @@ class MockHub {
         return;
       case "arcade.beat":
         this.#arcadeBeat(conn, msg.cid, msg.round);
+        return;
+      case "arcade.wager":
+        this.#arcadeWager(conn, msg.cid, msg.round, msg.pick, msg.amount);
         return;
       case "arcade.back":
         this.#arcadeBack(conn, msg.cid, msg.pid);
@@ -2669,6 +2942,22 @@ class MockHub {
         this.#broadcastState();
         return;
       }
+      case "arcade.nextPrompt": {
+        const play = s.arcadePlay;
+        if (s.arcadePhase !== "running" || play?.kind !== "gganbu") {
+          return reject("wrong_round_phase", "No wager round is running.");
+        }
+        if (play.at + 1 >= play.board.length) {
+          return reject(
+            "wrong_round_phase",
+            "That was the last prompt. End the round.",
+          );
+        }
+        this.#nextPrompt(play);
+        this.#send(conn, { t: "ack", cid, applied: true });
+        this.#broadcastState();
+        return;
+      }
       case "arcade.nextWave": {
         const play = s.arcadePlay;
         if (s.arcadePhase !== "running" || play?.kind !== "glass_bridge") {
@@ -2976,6 +3265,54 @@ class MockHub {
       };
       return;
     }
+    if (cmd.kind === "gganbu") {
+      // The answer is separated from the prompt once, here, and never put back
+      // together outside the host's view and the reveal. The content comes from
+      // src/arcade/, never from the command — an `OverUnderItem` carries the
+      // answer, the note and the VERIFY flag, so six prompts on the wire would
+      // be the answer key arriving from a browser.
+      const { board, key } = mockSplitPrompts(GGANBU_PROMPTS);
+      // The seed is drawn here rather than arriving on the command, exactly as
+      // Tug of Raft's sides are: a seed the console chose is a console that can
+      // deal somebody their gganbu.
+      const seed = Math.floor(Math.random() * 0x1_0000_0000);
+      const pids = s.participants.map((p) => p.pid);
+      const rivals = mockGganbuPairs(pids, seed);
+      // "A rival who disconnects is replaced by the house" — including one who
+      // was already away when the pairs were drawn. A pair with an absent half
+      // dissolves for **both** of them, which is the rule the reducer applies
+      // mid-round too: a one-sided substitution let both halves collect on an
+      // odd roster and neither on an even one.
+      const housed: Record<string, true> = {};
+      const away = new Set(
+        s.participants.filter((p) => p.conn !== "on").map((p) => p.pid),
+      );
+      for (const pid of pids) {
+        const rival = rivals[pid];
+        if (rival === undefined) continue;
+        if (away.has(pid) || away.has(rival)) {
+          housed[pid] = true;
+          housed[rival] = true;
+        }
+      }
+      const tokens: Record<string, number> = {};
+      for (const pid of pids) tokens[pid] = cmd.startTokens;
+      s.arcadePlay = {
+        kind: "gganbu",
+        board,
+        key,
+        at: 0,
+        secondsPerPrompt: cmd.secondsPerPrompt,
+        // The prompt clock starts at `beginPlay`, not here.
+        promptEndsAt: 0,
+        startTokens: cmd.startTokens,
+        tokens,
+        rivals,
+        housed,
+        wagers: {},
+      };
+      return;
+    }
     if (cmd.kind !== "plan_apply") return;
     s.arcadePlay = {
       kind: "plan_apply",
@@ -3017,6 +3354,15 @@ class MockHub {
       // whoever did not may still pick, and has lost the seconds it takes.
       s.arcadeEndsAt = now + play.seconds * 1000;
       this.#botsUnseal();
+    } else if (play.kind === "gganbu") {
+      // The first prompt opens here. Six of them are six deadlines, so the
+      // round's end belongs to the prompt timer and not to the Floor timer —
+      // see `#armFloorTimer`.
+      play.at = 0;
+      play.promptEndsAt = now + play.secondsPerPrompt * 1000;
+      s.arcadeEndsAt = now + play.board.length * play.secondsPerPrompt * 1000;
+      this.#armPromptTimer();
+      this.#botsWager();
     } else if (play.kind === "tug_of_raft") {
       // The heartbeat starts here, and beat 0 is this instant: every beat
       // index in the pull is counted from it.
@@ -3102,6 +3448,11 @@ class MockHub {
     // whose ending the pull timer owns.
     if (s.arcadePlay?.kind === "glass_bridge") return;
     if (s.arcadePlay?.kind === "tug_of_raft") return;
+    // And Gganbu, for the third time and with the highest cost of getting it
+    // wrong: six prompts are six deadlines, and a Floor timer firing at the
+    // nominal instant would end the round on top of the last prompt with the
+    // last wagers of the round still unsettled.
+    if (s.arcadePlay?.kind === "gganbu") return;
     const at = s.arcadeEndsAt;
     this.#floorTimer = setTimeout(
       () => {
@@ -3343,6 +3694,92 @@ class MockHub {
     this.#armPullTimer();
   }
 
+  /* ---- Gganbu ---- */
+
+  #promptTimer: ReturnType<typeof setTimeout> | null = null;
+
+  /**
+   * The prompt clock, which walks the round on its own.
+   *
+   * Two things come next and the timer picks between them, because they are two
+   * different events and the wrong one would be refused: another prompt, which
+   * settles this one and opens the next; or the last prompt, which `#endRound`
+   * settles on its way past. The host's "Settle the prompt" sends the same
+   * `#nextPrompt`, so there is no prompt settled by the clock that behaves
+   * differently for anybody downstream from one settled by the host.
+   *
+   * Keyed on the prompt and the deadline, so re-arming is idempotent and a
+   * timeout in flight when the host settled early finds a state that has moved
+   * and does nothing.
+   */
+  #armPromptTimer(): void {
+    const s = this.session;
+    const play = s.arcadePlay;
+    if (this.#promptTimer !== null) clearTimeout(this.#promptTimer);
+    this.#promptTimer = null;
+    if (s.arcadePhase !== "running" || play?.kind !== "gganbu") return;
+    const at = play.promptEndsAt;
+    const prompt = play.at;
+    this.#promptTimer = setTimeout(
+      () => {
+        this.#promptTimer = null;
+        const p = s.arcadePlay;
+        if (s.arcadePhase !== "running" || p?.kind !== "gganbu") return;
+        if (p.at !== prompt || p.promptEndsAt !== at) return;
+        if (p.at + 1 < p.board.length) this.#nextPrompt(p);
+        else this.#endRound();
+        this.#broadcastState();
+      },
+      Math.max(0, at - this.#now()),
+    );
+  }
+
+  /**
+   * Settle the open prompt: move the tokens, and revoke whoever reached zero.
+   *
+   * **This is the only place a token moves**, and that is the round's secrecy
+   * rule rather than tidiness. Both halves of a pair answer the same prompt
+   * with the rival's count on screen throughout, so a count that moved when a
+   * wager was *placed* would tell you your rival's stake, and one that moved
+   * when a wager was *judged* would tell you the answer while you were still
+   * deciding. Everything waits for the prompt to close, by which point the
+   * answer is the room's anyway.
+   *
+   * Somebody who did not wager keeps what they hold: no answer is not a wrong
+   * answer, it is a wager of nothing.
+   */
+  #closePrompt(play: MockGganbuPlay): void {
+    const s = this.session;
+    const answer = play.key[play.at];
+    if (!answer) return;
+    const now = this.#now();
+    for (const [pid, wager] of Object.entries(play.wagers)) {
+      const held = mockTokensOf(play, pid);
+      const next =
+        wager.pick === answer.answer ? held + wager.amount : held - wager.amount;
+      play.tokens[pid] = Math.max(0, next);
+      // Zero is revocation, and revocation is a drain to the Lounge. `held > 0`
+      // so that a player already on nothing is not drained a second time.
+      if (play.tokens[pid] === 0 && held > 0) s.drain(pid, now);
+    }
+  }
+
+  /** Settle this prompt and open the next, with a fresh clock and no wagers. */
+  #nextPrompt(play: MockGganbuPlay): void {
+    const s = this.session;
+    this.#closePrompt(play);
+    const now = this.#now();
+    play.at += 1;
+    play.promptEndsAt = now + play.secondsPerPrompt * 1000;
+    play.wagers = {};
+    s.arcadeEndsAt =
+      play.promptEndsAt +
+      Math.max(0, play.board.length - play.at - 1) * play.secondsPerPrompt * 1000;
+    this.#armPromptTimer();
+    this.#botsWager();
+    this.#botsBackAfterRevocation();
+  }
+
   #nextItem(): void {
     const play = this.session.arcadePlay;
     if (play?.kind !== "recruitment") return;
@@ -3371,6 +3808,31 @@ class MockHub {
     // The last pull has nothing after it to settle it, so the round's end
     // does — which is also what happens when the host ends a pull early.
     if (play?.kind === "tug_of_raft") this.#closePull(play);
+    if (play?.kind === "gganbu") {
+      // The open prompt settles first — on a full round it is the sixth one,
+      // and the tokens it moves are the tokens that convert.
+      this.#closePrompt(play);
+      play.wagers = {};
+      // Tokens convert at the buzzer, 1:1, plus the 10 for finishing above your
+      // rival. Everyone who was in the round converts, including the revoked,
+      // who convert nothing: reaching zero is what revocation is.
+      for (const pid of new Set([
+        ...Object.keys(s.arcadeStanding),
+        ...Object.keys(play.tokens),
+      ])) {
+        s.bank(pid, mockGganbuPoints(play, pid));
+      }
+      // The Lounge: the better of the two, never their sum. Backing somebody
+      // who was drained pays nothing, whichever round it is.
+      const richest = new Set(mockRichest(play));
+      for (const [pid, seat] of Object.entries(s.arcadeLounge)) {
+        const backing = seat.backing;
+        if (backing === null) continue;
+        if (s.arcadeStanding[backing] !== "floor") continue;
+        if (richest.has(backing)) s.bank(pid, GGANBU_BACKED_RICHEST);
+        else if (mockAheadOfRival(play, backing)) s.bank(pid, GGANBU_BACKED_AHEAD);
+      }
+    }
     if (play?.kind === "unseal") {
       // The +10s, paid here because this is when they are known: SPEC.md's
       // "+10 for the fastest in each shape".
@@ -3434,6 +3896,7 @@ class MockHub {
       this.#floorTimer,
       this.#stepTimer,
       this.#pullTimer,
+      this.#promptTimer,
     ]) {
       if (t !== null) clearTimeout(t);
     }
@@ -3442,6 +3905,7 @@ class MockHub {
     this.#floorTimer = null;
     this.#stepTimer = null;
     this.#pullTimer = null;
+    this.#promptTimer = null;
     if (this.#botTapTimer !== null) clearInterval(this.#botTapTimer);
     this.#botTapTimer = null;
     if (this.#botBeatTimer !== null) clearInterval(this.#botBeatTimer);
@@ -3814,6 +4278,81 @@ class MockHub {
     else this.#sendStateTo((c) => c.role !== "participant" || c.pid === pid);
   }
 
+  /**
+   * One secret call and one stake, on the open prompt.
+   *
+   * One frame per prompt and it is final: fifteen seconds is short enough that
+   * a re-stake would be a second look at your gganbu's face rather than a
+   * change of mind.
+   *
+   * The refusal that matters here is the last one. The range is 1 to 5 *and*
+   * never more than they hold, and only this side knows the hand — which is
+   * why the decoder checks the shape of `amount` and this checks the number.
+   * The ceiling is in the message, because a phone that is told "one to five"
+   * while holding three has been told the wrong thing.
+   */
+  #arcadeWager(
+    conn: MockConn,
+    cid: string,
+    round: number,
+    pick: OverUnder,
+    amount: number,
+  ): void {
+    const s = this.session;
+    const pid = conn.pid;
+    const refuse = (code: string, message: string): void => {
+      this.#send(conn, { t: "refusedCmd", cid, code, message });
+    };
+    if (conn.role !== "participant" || pid === null) {
+      return refuse("forbidden", "Only a participant plays the arcade.");
+    }
+    if (!s.arcadeOn) return refuse("not_in_arcade", "The arcade is not open.");
+    if (round !== s.arcadeRoundIndex) {
+      return refuse("wrong_round_phase", "That round has moved on.");
+    }
+    const play = s.arcadePlay;
+    if (s.arcadePhase !== "running" || play?.kind !== "gganbu") {
+      return refuse("wrong_round_phase", "There is nothing to wager on.");
+    }
+    if (s.arcadeStanding[pid] === "drained") {
+      return refuse("not_on_the_floor", "Your token was revoked. Back a player.");
+    }
+    // The prompt index is deliberately not on the frame: a wager that crossed a
+    // prompt boundary is refused by the clock rather than by an index.
+    if (this.#now() >= play.promptEndsAt) {
+      return refuse("floor_locked", "That prompt has closed.");
+    }
+    if (pid in play.wagers) {
+      return refuse("already_answered_item", "You are locked in.");
+    }
+    if (play.board[play.at] === undefined) {
+      return refuse("wrong_round_phase", "No prompt is open.");
+    }
+    if (pick !== "over" && pick !== "under") {
+      return refuse("invalid_choice", "Over, or under.");
+    }
+    const held = mockTokensOf(play, pid);
+    if (
+      !Number.isInteger(amount) ||
+      amount < GGANBU_MIN ||
+      amount > GGANBU_MAX ||
+      amount > held
+    ) {
+      return refuse("invalid_wager", `One to ${Math.min(GGANBU_MAX, held)} tokens.`);
+    }
+    // A latecomer is dealt in by playing, at the opening stake.
+    play.tokens[pid] ??= held;
+    play.wagers[pid] = { pick, amount };
+    this.#send(conn, { t: "ack", cid, applied: true });
+    // **Not** a broadcast to everybody. A rival learning that a wager landed is
+    // the whole of what they are allowed to learn, and they learn it from their
+    // own frame's `rivalCommitted` — which means their frame has to move, so
+    // the one participant excluded from this is nobody: the wager's contents
+    // reach only the phone that made it, because that is all `arcadeMine`
+    // carries. The count goes to the console and the big screen.
+    this.#broadcastState();
+  }
+
   #arcadeBack(conn: MockConn, cid: string, backing: string): void {
     const s = this.session;
     const pid = conn.pid;
@@ -4093,6 +4632,91 @@ class MockHub {
         });
       });
     this.#broadcastState();
+  }
+
+  /**
+   * The bots wager.
+   *
+   * What is worth watching in this round is the **settle**: six prompts where
+   * the counts hold still while everybody commits, and then jump all at once.
+   * So the bots are wrong often enough to move tokens both ways and to drive
+   * somebody to zero over six prompts — without which the Lounge, the
+   * revocation and the +10 for finishing ahead all have nothing to show.
+   *
+   * They are given the prompt the way a phone is and no more: a bot never reads
+   * `key`. It picks from its own index and the prompt number, which is
+   * arithmetic rather than knowledge, so roughly two in five are wrong on any
+   * prompt and the same bot is not wrong every time.
+   *
+   * One bot in seven never wagers at all, so "no answer is a wager of nothing"
+   * has something to show: they keep what they hold and finish level with a
+   * rival who did the same.
+   */
+  #botsWager(): void {
+    const s = this.session;
+    const play = s.arcadePlay;
+    if (play?.kind !== "gganbu") return;
+    const at = play.at;
+    const seconds = play.secondsPerPrompt;
+    s.participants
+      .filter((p) => p.bot && s.arcadeStanding[p.pid] !== "drained")
+      .forEach((p, i) => {
+        // Somebody always sits one out.
+        if ((i + at) % 7 === 3) return;
+        this.#later(
+          () => {
+            const now = s.arcadePlay;
+            if (now?.kind !== "gganbu" || s.arcadePhase !== "running") return;
+            if (now.at !== at) return;
+            if (s.arcadeStanding[p.pid] === "drained") return;
+            if (p.pid in now.wagers) return;
+            const held = mockTokensOf(now, p.pid);
+            if (held < GGANBU_MIN) return;
+            // No read of `key`. Two of every five (i + at) land on the other
+            // side, which is the disagreement the round is built to produce.
+            const pick: OverUnder = (i * 3 + at * 2) % 5 < 3 ? "over" : "under";
+            const amount = Math.min(held, GGANBU_MIN + ((i + at) % GGANBU_MAX));
+            now.tokens[p.pid] ??= held;
+            now.wagers[p.pid] = { pick, amount };
+            // The count moves for everybody; the pick and the stake move for
+            // nobody but this bot, because that is all `arcadeMine` carries.
+            this.#broadcastState();
+          },
+          // Spread across the prompt, and never past its close: a bot that
+          // committed after the deadline would be refused by the same guard a
+          // phone is, and would look like a bug rather than a bot.
+          Math.min(seconds * 850, 400 + i * 190 + Math.random() * seconds * 400) /
+            this.#cfg.speed,
+        );
+      });
+  }
+
+  /**
+   * A revoked bot backs somebody still holding tokens.
+   *
+   * Every round with a Lounge in it needs this, or the backing counts on the
+   * big screen and the console are empty in the one round where the Lounge is
+   * paid for holding the most tokens in the room rather than for crossing a
+   * line.
+   */
+  #botsBackAfterRevocation(): void {
+    const s = this.session;
+    if (s.arcadePlay?.kind !== "gganbu") return;
+    let moved = false;
+    for (const p of s.participants) {
+      if (!p.bot) continue;
+      const seat = s.arcadeLounge[p.pid];
+      if (!seat || seat.backing !== null) continue;
+      const floor = s.participants.filter(
+        (x) => s.arcadeStanding[x.pid] === "floor" && x.pid !== p.pid,
+      );
+      const pick = floor[Math.floor(Math.random() * floor.length)];
+      if (pick) {
+        seat.backing = pick.pid;
+        moved = true;
+      }
+    }
+    if (moved) this.#broadcastState();
   }
 
   /**
@@ -4384,7 +5008,16 @@ class MockHub {
 
 
     /**
-     * The arcade: round 0 Recruitment, then round 1 Plan / Apply.
+     * The arcade: all six rounds, in SPEC.md's order, on a fixed timeline.
+     *
+     * The whole block is one chain of `#at` instants, so a round added in the
+     * middle shifts every beat after it. Gganbu went in at its SPEC position —
+     * between Tug of Raft and the bridge — and moved the thirteen beats after
+     * it by 42 seconds: 4 s of round card, 30 s of prompts, 2 s of prompt-timer
+     * slack and a 6 s reveal. The loop runs 428 s, and no gap it contains is
+     * shorter than it was.
+     *
+     * Round 0 Recruitment, then round 1 Plan / Apply.
      *
      * Both run at demo pace rather than SPEC.md's — four seconds an item
      * instead of twenty, twenty-two seconds of Floor instead of seventy-five
@@ -4516,6 +5149,47 @@ class MockHub {
     });
 
     /**
+     * Round 4, Gganbu: six prompts, and six settlements.
+     *
+     * Five seconds a prompt instead of SPEC.md's fifteen, which is the whole
+     * compression — the six prompts, the pairs and the stakes are the real
+     * ones. Five and not four, because what is worth watching here is not the
+     * prompt, it is the **settle**: the counts hold still while everybody
+     * commits and then jump all at once, and that jump is a beat in its own
+     * right sitting inside the prompt's five seconds.
+     *
+     * The round card gets **four** seconds here and three everywhere else in
+     * this loop. Four is DESIGN.md's dwell floor, this is the one card SPEC.md
+     * says every person in the room gets the reference on, and a sixth beat
+     * under the floor is not the thing to add while #8 is the closed issue
+     * about exactly that. The other five cards are a pre-existing three and are
+     * left alone: re-timing them is a change to five beats nobody asked for.
+     */
+    this.#at(213, () => {
+      this.#startRound({
+        name: "arcade.round",
+        kind: "gganbu",
+        secondsPerPrompt: 5,
+        startTokens: 10,
+      });
+      this.#broadcastState();
+    });
+    this.#at(217, () => {
+      this.#beginPlay();
+      this.#broadcastState();
+    });
+    // 6 × 5 = 30 s of prompts, walked by the prompt timer and ended by it on
+    // the sixth, exactly as the server's does. The net sits *after* the last
+    // prompt for the reason Recruitment's does — at 245 it would run while the
+    // round was still live, find a phase that was not idle, and return, which
+    // is a guard that cannot fire on the one occasion it exists for.
+    this.#at(249, () => {
+      if (this.session.arcadePhase !== "idle") return;
+      this.session.arcadePhase = "reveal";
+      this.#broadcastState();
+    });
+
+    /**
      * Round 5, The Glass Bridge: three waves across six steps.
      *
      * At demo pace — 6 / 4 / 3 seconds a step instead of SPEC.md's 12 / 9 / 6
@@ -4529,7 +5203,7 @@ class MockHub {
      * bots' own delays are divided by the speed and the server's timers are
      * not — so drive the arcade at `speed=1`.
      */
-    this.#at(213, () => {
+    this.#at(255, () => {
       this.#startRound({
         name: "arcade.round",
         kind: "glass_bridge",
@@ -4537,13 +5211,13 @@ class MockHub {
       });
       this.#broadcastState();
     });
-    this.#at(216, () => {
+    this.#at(258, () => {
       this.#beginPlay();
       this.#broadcastState();
     });
     // 6 × 6 + 6 × 4 + 6 × 3 = 78 s of bridge, walked by the step timer on its
     // own, exactly as the server's does.
-    this.#at(298, () => {
+    this.#at(340, () => {
       if (this.session.arcadePhase !== "idle") return;
       this.session.arcadePhase = "reveal";
       for (const p of this.session.participants) {
@@ -4554,12 +5228,12 @@ class MockHub {
       this.#broadcastState();
     });
 
-    this.#at(306, () => {
+    this.#at(348, () => {
       this.session.segment = "standings";
       this.#broadcastState();
     });
 
-    this.#at(308, () => {
+    this.#at(350, () => {
       const p = this.session.participants[4];
       if (!p) return;
       const spot = this.session.grantSpot(
@@ -4571,12 +5245,12 @@ class MockHub {
       this.#toast("spot", `Spot Award — ${p.nickname} — ${spot.reason}`);
     });
 
-    this.#at(310, () => {
+    this.#at(352, () => {
       this.session.seal = "sealed";
       this.#broadcastState();
     });
 
-    this.#at(322, () => {
+    this.#at(364, () => {
       this.session.seal = "revealed";
       this.session.segment = "final";
       this.#broadcastState();
@@ -4594,12 +5268,12 @@ class MockHub {
      * that forty seconds over three photos works out to — and a message holds
      * five seconds instead of however long it takes to read one out.
      */
-    this.#at(324, () => {
+    this.#at(366, () => {
       this.session.segment = "sendoff";
       this.#broadcastState();
     });
     for (let i = 0; i < 7; i += 1) {
-      this.#at(344 + i * 5, () => {
+      this.#at(386 + i * 5, () => {
         if (this.session.segment !== "sendoff") return;
         this.session.stepSendoff(1);
         this.#broadcastState();
@@ -4608,7 +5282,7 @@ class MockHub {
 
     // Long enough for the big screen's final reveal to actually finish: four
     // four-second dwells, then the hold on the empty first slot.
-    this.#at(386, () => {
+    this.#at(428, () => {
       this.#clearArcadeTimers();
       this.session.reset();
       this.#directorStarted = false;

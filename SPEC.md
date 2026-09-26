@@ -543,17 +543,24 @@ behind.
 
 ### The rounds
 
-Six are designed and **five are built**. A standard eighteen-minute run is
+**Six are designed and six are built.** A standard eighteen-minute run is
 round 0 and four of the rest; the host picks in setup and the order is theirs.
 Timings include the round card (20 s) and the reveal (20 s).
 
-**Gganbu is not built.** Its scoring and pairing are in the engine, and it is
-reachable from nowhere: `arcade.round` has no variant for it, so the wire
-refuses one, and the console lists it disabled — visible in the run of show,
-impossible to start. That was the right call at the time and remains one: SPEC
-already says to drop Gganbu first if the slot is tight, because its joke depends
-most on everyone knowing the show. The table below marks it, and the scoring
-summary is the design rather than a description of a round anyone has played.
+Gganbu was the sixth for a long time, designed and reachable from nowhere. Its
+scoring and pairing were in the engine while `arcade.round` had no variant for
+it, so the wire refused one and the console listed it disabled — visible in the
+run of show, impossible to start. That was the right call while it stood,
+because the blocker was never the wiring: the launch prompts were three default
+port numbers and three release years, and in a room of solutions architects
+both halves of every pair would have known all six, wagered the minimum, and
+tied. The most social mechanic in the arcade cannot be fed questions that
+produce no disagreement.
+
+The prompts were rewritten against that standard — a threshold set a plausible
+distance from the true value, so the wager is a judgement rather than a recall
+— and the round was then finished. It still goes first if the slot is tight,
+because its joke depends most on everyone knowing the show.
 
 | # | Round | The game | Content | Time | Drains? |
 | --- | --- | --- | --- | --- | --- |
@@ -561,7 +568,7 @@ summary is the design rather than a description of a round anyone has played.
 | 1 | **Plan / Apply** | Red Light, Green Light | — | 3 min | Yes |
 | 2 | **Unseal** | Dalgona | 17 Scrambled tins | 3 min | Yes |
 | 3 | **Tug of Raft** | Tug of War | — | 3 min | No |
-| 4 | **Gganbu** *(not built)* | Marbles | 6 new Over/Under items | 3.5 min | Yes |
+| 4 | **Gganbu** | Marbles | 6 Over/Under items | 3.5 min | Yes |
 | 5 | **The Glass Bridge** | Glass Bridge | 6 Real-or-Fake pairs (3 existing) | 3.5 min | Yes |
 
 #### Round 0 — Recruitment (Emoji Decode)
@@ -706,20 +713,15 @@ The heartbeat is also the reason this works over video: a raw tap race
 rewards whoever's phone registers taps fastest, and the beat means everyone
 is capped at the same rate, so the skill is rhythm, not hardware.
 
-#### Round 4 — Gganbu (Marbles) — not built
-
-**Designed, half-built, and unreachable.** The pairing and the scoring are
-in the engine; the wire has no way to start it and the console will not
-offer it. What follows is the design, kept because finishing it is a
-day's work and the argument for the round is still good.
+#### Round 4 — Gganbu (Marbles)
 
 *You are paired with a gganbu. You each hold ten Vault tokens. Tokens have a
 TTL — the round ends when they expire. Wager them.*
 
 Random pairs (an odd person out is paired with the house, played by the
 Front-End Man; a rival who disconnects is replaced by the house). Six
-**Over / Under** prompts, 15 seconds each: *Vagrant's first release —
-over or under 2011?* Each player secretly picks over or under and a wager of
+**Over / Under** prompts, 15 seconds each: *Vault's default max lease TTL —
+over or under 720 hours?* Each player secretly picks over or under and a wager of
 1 to 5 tokens. Correct: gain the wager. Wrong: lose it. Your rival's name and
 token count sit on your screen the whole round.
 
@@ -739,7 +741,23 @@ named rival is what makes a wager feel like a wager, and the *gganbu* card on
 the round intro is the one Squid Game reference every single person will get.
 
 Six Over/Under items ship as launch content, each carrying a note, and three
-are flagged VERIFY exactly as the trivia bank flags dates.
+are flagged VERIFY with the same discipline the trivia bank applies to dates.
+
+**The flag marks what can move, not what is doubted.** In the trivia bank that
+is usually a date; here it is two config defaults — Vault's max lease TTL and
+Consul's maximum KV value size — and the one date whose recording is genuinely
+contested, Terraform 0.12's year, which has a public preview in one year and a
+release in the next. A release can change a default silently. Nomad's 2015 and
+Vault 1.0's 2018 are settled history a clear year from their thresholds, so
+nothing about them can move and neither carries a flag.
+
+**A certainty is a bug in this round, not a safe choice.** A prompt every
+player knows produces the minimum wager from both halves of the pair and a tie,
+which is the one outcome the round has nothing to say about. The thresholds are
+therefore placed where the room's intuition splits — 720 hours is thirty days,
+the round number a mental model snaps to, and the answer is thirty-two — and
+each is far enough from its answer that no patch release or disputed month can
+flip it.
 
 #### Round 5 — The Glass Bridge
 
@@ -824,7 +842,7 @@ one. Ties go to whoever crossed first.
 | Plan / Apply | 40 | 15 |
 | Unseal | 60 | 8 |
 | Tug of Raft | 45 | — |
-| Gganbu *(not built)* | 50 | 8 |
+| Gganbu | 50 | 8 |
 | Glass Bridge | 63 | 15 |
 
 The raw arcade score is the sum. It is normalised like any other activity, so
@@ -844,8 +862,8 @@ It also means the Lounge awards do not stack. Backing a runner who crosses pays
 two rather than their sum. Adding them made 25, which tied the 25 a player
 scores for crossing the line in fourth place, and let a player drained at 90
 resources who backed the winner finish on 40 — dead level with the player who
-actually won the Floor. Gganbu, the one round not yet built, should be tuned
-against the same rule.
+actually won the Floor. Gganbu is tuned against the same rule: its
+perfect Lounge is 8, against a Floor that pays 50.
 
 The Front-End Man's lines, the round cards and every piece of copy are in
 [DESIGN.md](DESIGN.md#the-arcade-register), because how they are said is most

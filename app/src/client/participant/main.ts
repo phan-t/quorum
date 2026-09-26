@@ -119,6 +119,9 @@ const view = createParticipantView({
   onArcadeBeat: (round) => {
     client?.arcadeBeat(round);
   },
+  onArcadeWager: (round, pick, amount) => {
+    client?.arcadeWager(round, pick, amount);
+  },
   onArcadeBack: (pid) => {
     client?.arcadeBack(pid);
   },
@@ -493,6 +496,11 @@ function connect(): void {
       if (result.ok) return;
       view.clearPendingAnswer();
       view.clearPendingStep();
+      // …and the refusals that have words on them. Gganbu's `invalid_wager`
+      // carries the real ceiling on this hand — `One to 3 tokens.` — which only
+      // the server can compute, so the code and the message go through to the
+      // round that is up rather than being turned into a silence here.
+      view.commandRefused(result.code, result.message);
     },
   });
 

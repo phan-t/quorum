@@ -28,6 +28,7 @@ import { mockBadge, mockTransport, readMockConfig } from "../shared/mock.ts";
 import {
   ARCADE_ROUND_LABEL,
   ARCADE_ROUND_NUMBER,
+  GGANBU_SIDE,
   LIGHT_FACE,
   SEGMENT_LABEL,
   SEGMENT_PHASE,
@@ -35,6 +36,7 @@ import {
   answerTiles,
   bridgeEntries,
   formatCountdown,
+  gganbuQuestion,
   gridEntries,
   itemEndsAt,
   playerTag,
@@ -51,6 +53,13 @@ import {
   releaseFocus,
   type Control,
 } from "./controls.ts";
+import {
+  canSettlePrompt,
+  gganbuLockNote,
+  gganbuLockedIn,
+  gganbuRecapRows,
+  gganbuVerifyNotice,
+} from "./gganbu.ts";
 import {
   ARCADE_PLAYABLE,
   defaultPlan,
@@ -2717,10 +2726,14 @@ const bodyTrivia = h("section", { class: "pb pb-trivia" }, [
  *
  * The picker is a local choice until the host presses the primary button,
  * because `startRound` is what commits it and a round that started because
- * somebody clicked a radio would be a round nobody meant to start. The five
- * built rounds are selectable; Gganbu is listed and disabled, so the
- * host can see the shape of the run of show without being able to start
- * something that does not exist.
+ * somebody clicked a radio would be a round nobody meant to start.
+ *
+ * All six rounds are selectable. Gganbu used to be listed and disabled, so the
+ * host could see the shape of the run of show without being able to start
+ * something that did not exist; the wire caught up with the engine, so the
+ * `is-unbuilt` arm below is now dead code that nothing reaches. It is kept
+ * rather than deleted because {@link ARCADE_BUILT} is the thing that decides,
+ * and the next round designed before it is wired needs the pill it draws.
  */
 const ARCADE_ROUNDS: readonly ArcadeRoundKind[] = [
   "recruitment",
@@ -2754,7 +2767,13 @@ const ARCADE_ROUND_WHAT: Readonly<Record<ArcadeRoundKind, string>> = {
   unseal:
     "Pick a shape, then tap the scrambled letters in order. One wrong tap cracks the tin; a second drains you to the Lounge.",
   tug_of_raft: "Tug of war. Two teams, one rope. Tap on the beat, and nobody is knocked out.",
-  gganbu: "Paired off. Six over-or-under questions, and you bet tokens against your partner.",
+  gganbu:
+    // Not "takes them off your rival" — `settleGganbuPrompt` does `held ±
+    // amount`, so a token is credited or debited and nothing crosses between
+    // the pair. The rival matters because the +10 at the end goes to whoever
+    // of the two holds more, not because you are playing out of each other's
+    // hands. This line is read out loud, so it has to be the mechanic.
+    "Paired off with one rival. Six over-or-under prompts, and you secretly stake 1 to 5 of your ten tokens on each; right and the stake is credited, wrong and it is debited. Run out and you are drained to the Lounge. At the end tokens convert 1:1, and whoever of the pair holds more takes +10.",
   glass_bridge: "Pick the real product feature, twice per step. Pick the fake one and you are drained to the Lounge.",
 };
 
@@ -2771,7 +2790,13 @@ const ARCADE_BUILT: Readonly<Record<ArcadeRoundKind, boolean>> = {
   plan_apply: true,
   unseal: true,
   tug_of_raft: true,
-  gganbu: false,
+  // Was false, and it was a true note rather than a stale one: there was no
+  // `gganbu` arm in the `arcade.round` decoder and no `arcade.nextPrompt` on
+  // the wire, so a console that offered the round would have started nothing.
+  // Both are decoded now, the server attaches the six prompts and draws the
+  // pairing seed, and `settleGganbuPrompt` moves the tokens — so the round is
+  // reachable and the note was the false negative.
+  gganbu: true,
   glass_bridge: true,
 };
 
@@ -3007,6 +3032,55 @@ const arcadeTugCfg = h("div", { class: "a-cfg" }, [
   }),
 ]);
 
+/**
+ * Gganbu's two numbers, and they are the only two on the command.
+ *
+ * The **six prompts are not here**, for the reason Unseal's tins and the
+ * bridge's panes are not: an `OverUnderItem` carries the answer, the reveal
+ * note *and* the VERIFY flag, so six prompts arriving from a browser would be
+ * the answer key arriving from a browser. They are attached on the server when
+ * the event is built.
+ *
+ * The **pairing seed is not here** either, for the reason Tug of Raft's is not:
+ * the gganbus are drawn from it, and a seed a console could choose is a console
+ * that can deal somebody their rival.
+ *
+ * SPEC.md's numbers are fifteen seconds and ten tokens, which is what these
+ * default to. The floor on the tokens is 1 rather than 0 because the engine
+ * refuses a round nobody can wager in — everybody would be revoked before the
+ * first prompt — and a field that could type an instantly-refused round is a
+ * refusal in front of the room instead of on the setup panel.
+ */
+const arcadeGganbuSeconds = h("input", {
+  class: "field field-num",
+  type: "number",
+  value: "15",
+  attrs: { min: "5", max: "120", "aria-label": "Seconds a prompt" },
+}) as HTMLInputElement;
+const arcadeGganbuTokens = h("input", {
+  class: "field field-num",
+  type: "number",
+  value: "10",
+  attrs: { min: "1", max: "99", "aria-label": "Tokens each to start" },
+}) as HTMLInputElement;
+
+const arcadeGganbuCfg = h("div", { class: "a-cfg" }, [
+  h("div", { class: "a-cfg-row" }, [
+    h("label", { class: "a-cfg-cell" }, [
+      h("span", { class: "label", text: "Seconds a prompt" }),
+      arcadeGganbuSeconds,
+    ]),
+    h("label", { class: "a-cfg-cell" }, [
+      h("span", { class: "label", text: "Tokens each" }),
+      arcadeGganbuTokens,
+    ]),
+  ]),
+  h("p", {
+    class: "pb-note",
+    text: "Six prompts, each on its own clock. Everyone is paired with one rival and stakes tokens against them; the tokens only move when a prompt settles, which the clock does on its own. Reach zero and you are drained to the Lounge.",
+  }),
+]);
+
 const arcadeGlassCfg = h("div", { class: "a-cfg" }, [
   // One row, not three. The console's panel scrolls, and every row this
   // block spends is a row the round's own controls are pushed below the fold
@@ -3039,6 +3113,7 @@ const ARCADE_CFG: Readonly<Record<ArcadePick, HTMLElement>> = {
   plan_apply: arcadePlanCfg,
   unseal: arcadeUnsealCfg,
   tug_of_raft: arcadeTugCfg,
+  gganbu: arcadeGganbuCfg,
   glass_bridge: arcadeGlassCfg,
 };
 
@@ -3062,6 +3137,8 @@ const TIMING_FIELDS: readonly (readonly [HTMLInputElement, string])[] = [
   [arcadeTugPulls, "tugPulls"],
   [arcadeTugSeconds, "tugPullSeconds"],
   [arcadeTugBpm, "tugBpm"],
+  [arcadeGganbuSeconds, "gganbuSeconds"],
+  [arcadeGganbuTokens, "gganbuTokens"],
 ];
 
 function saveSetup(): void {
@@ -3281,10 +3358,10 @@ const arcadeSetup = h("section", { class: "a-setup" }, [
   }),
   arcadeSetupRows,
   arcadeSetupNote,
-  h("p", {
-    class: "pb-note",
-    text: "Gganbu is designed but not built, so it is not in the order.",
-  }),
+  // The line that used to sit here said Gganbu was designed but not built, so
+  // it was not in the order. It is built, and it is in the order — the rows
+  // above are now every round there is, which is what a note saying "all six"
+  // would only repeat.
 ]);
 
 function noteSetup(message: string): void {
@@ -3448,6 +3525,42 @@ const arcadeNextPull = control({
   onFire: (c) => issue({ name: "arcade.nextPull" }, c),
 });
 
+/**
+ * Gganbu's one live control, and it is an override rather than the way forward.
+ *
+ * The server arms a prompt timer that sends the identical `nextPrompt` at
+ * `promptEndsAt`, and `endRound` on the last prompt, so a round left alone
+ * walks itself. This is the host cutting a prompt short once both halves of
+ * every pair have locked in — which the line under the prompt says in words,
+ * off `hostExtras.arcade.answeredBy`.
+ *
+ * "Settle" and not "next", because settling is the whole of it: this is the
+ * only event in the round that moves a token. A rival's count is on both
+ * phones for the whole round, so a count that moved at any other moment would
+ * be the rival's stake leaking; pressing this is the moment it is allowed to.
+ */
+const arcadeNextPrompt = control({
+  label: "Settle the prompt",
+  className: "ctl-secondary",
+  title:
+    "Gganbu only. Settles the open prompt — this is where the tokens move, and where anyone down to zero is drained — and opens the next one. The clock does this anyway.",
+  onFire: (c) => issue({ name: "arcade.nextPrompt" }, c),
+});
+
+/**
+ * Gganbu, as the host reads it out: the six prompts, the answers, and the
+ * VERIFY flags.
+ *
+ * Unlike {@link arcadeBridge} this stays up **at the reveal**, and that is the
+ * point of it rather than an oversight. The bridge's panel hides at the reveal
+ * because the Desktop then carries the whole recap and the host reads it off
+ * that. The Desktop never carries `verify`: it is host-only and omitted rather
+ * than falsed on every other role, so it is not in the bytes any other surface
+ * receives. The reveal is exactly when the notes get read out loud, so the one
+ * surface that has the flag has to still be showing it then.
+ */
+const arcadeGganbu = h("div", { class: "a-gganbu-host", attrs: { hidden: true } });
+
 const bodyArcade = h("section", { class: "pb pb-arcade" }, [
   arcadeState,
   arcadeUpNext,
@@ -3456,6 +3569,7 @@ const bodyArcade = h("section", { class: "pb pb-arcade" }, [
   arcadeItem,
   arcadeNote,
   arcadeBridge,
+  arcadeGganbu,
   arcadeSplit,
   arcadeFloorList,
   // Above the Backing list, not below it. The list grows by a row for every
@@ -3467,6 +3581,7 @@ const bodyArcade = h("section", { class: "pb pb-arcade" }, [
     arcadeEnd.el,
     arcadeNext.el,
     arcadeNextPull.el,
+    arcadeNextPrompt.el,
     arcadeNextStep.el,
     arcadeNextWave.el,
   ]),
@@ -3504,6 +3619,16 @@ function arcadeRoundCommand(pick: ArcadePick): HostCommand {
       pulls: int(arcadeTugPulls, 3),
       pullSeconds: int(arcadeTugSeconds, 25),
       bpm: int(arcadeTugBpm, 100),
+    };
+  }
+  if (pick === "gganbu") {
+    // Two numbers and nothing else. The prompts and the pairing seed are the
+    // server's: see the note on `arcadeGganbuCfg`.
+    return {
+      name: "arcade.round",
+      kind: "gganbu",
+      secondsPerPrompt: int(arcadeGganbuSeconds, 15),
+      startTokens: int(arcadeGganbuTokens, 10),
     };
   }
   if (pick === "glass_bridge") {
@@ -3602,9 +3727,11 @@ function renderArcade(s: RenderState): void {
     setText(arcadeFloorList, "");
     replace(arcadeBacking, []);
     arcadeBridge.hidden = true;
+    arcadeGganbu.hidden = true;
     arcadeEnd.setDisabled(true);
     arcadeNext.setDisabled(true);
     arcadeNextPull.setDisabled(true);
+    arcadeNextPrompt.setDisabled(true);
     arcadeNextStep.setDisabled(true);
     arcadeNextWave.setDisabled(true);
     // The running order is still live: the host can still change it, and the
@@ -3665,8 +3792,10 @@ function renderArcade(s: RenderState): void {
   const pa = a.planApply;
   const un = a.unseal;
   const tu = a.tug;
+  const gg = a.gganbu;
   const gl = a.glass;
   if (!gl) arcadeBridge.hidden = true;
+  if (!gg) arcadeGganbu.hidden = true;
   if (r) {
     // The item's own clock, not the round's: the host is timing when to read
     // the answer out, and the round header already carries the round's.
@@ -3788,6 +3917,107 @@ function renderArcade(s: RenderState): void {
         leaders[1] === null ? "—" : playerTag(leaders[1])
       }. Nobody is knocked out in this round.`,
     );
+  } else if (gg) {
+    // The prompt's own clock, not the round's: the host is timing when to
+    // settle, and the round header already carries the round's.
+    const promptLeft = remainingMs(
+      gg.promptEndsAt ?? null,
+      client?.now() ?? Date.now(),
+    );
+    const rows = gganbuRecapRows(gg.recap, gg.at);
+    const open = rows[gg.at];
+    setText(
+      arcadeItem,
+      [
+        `PROMPT ${gg.at + 1} OF ${gg.of}`,
+        `${gg.secondsPerPrompt}s`,
+        promptLeft === null ? null : formatCountdown(promptLeft),
+        gg.prompt ? gganbuQuestion(gg.prompt) : null,
+        // The answer, on the one surface in the building that is not in the
+        // room. Both halves of a pair are sitting next to each other, so this
+        // line is also the reason the console is not for sharing.
+        open ? `\u2192 ${GGANBU_SIDE[open.answer].word}` : null,
+        open?.verify === true ? "\u26a0 VERIFY" : null,
+      ]
+        .filter((x) => x !== null)
+        .join(" \u00b7 "),
+    );
+    // Whether both halves of every pair have locked in, which is the one
+    // question the settle button answers. `answeredBy` is pids and stays pids:
+    // a value here would be somebody's pick and stake.
+    const stake = gganbuLockedIn(
+      gridEntries(a, s.roster)
+        .filter((e) => e.standing === "floor")
+        .map((e) => e.pid),
+      s.hostExtras?.arcade?.answeredBy ?? [],
+    );
+    const last = gg.at + 1 >= gg.of;
+    const richest = gg.richest ?? [];
+    arcadeNote.hidden = false;
+    setText(
+      arcadeNote,
+      [
+        gganbuLockNote(stake, last),
+        richest.length === 0
+          ? "Nobody holds a token."
+          : `Most tokens: ${richest.map((n) => playerTag(n)).join(" ")}`,
+      ].join("  |  "),
+    );
+    // Up from the round card to the reveal, unlike the bridge's panel: see the
+    // note where `arcadeGganbu` is declared.
+    arcadeGganbu.hidden = false;
+    const notice = gganbuVerifyNotice(gg.recap);
+    const pairs = gg.pairs ?? {};
+    const numbers = new Map(gridEntries(a, s.roster).map((e) => [e.pid, e.tag]));
+    // Each pair once, not twice: `pairs` is symmetric, so keying on the lower
+    // pid of the two is what turns twelve entries into six rivalries.
+    const rivalries = Object.entries(pairs)
+      .filter(([pid, other]) => pid < other)
+      .map(
+        ([pid, other]) =>
+          `${numbers.get(pid) ?? "???"}\u2194${numbers.get(other) ?? "???"}`,
+      );
+    replace(arcadeGganbu, [
+      ...rows.map((row) =>
+        h(
+          "p",
+          { class: row.open ? "a-gganbu-row is-open" : "a-gganbu-row" },
+          [
+            h("span", { class: "mono a-gganbu-n", text: String(row.n) }),
+            h("span", { class: "a-gganbu-cue" }, [
+              h("span", {
+                class: "a-gganbu-q",
+                // The room's wording, not a second copy of it: the host is
+                // reading out the sentence the big screen is showing.
+                text: gganbuQuestion({ cue: row.cue, threshold: row.threshold }),
+              }),
+              h("span", {
+                class: "mono a-gganbu-answer",
+                text: GGANBU_SIDE[row.answer].word,
+              }),
+              row.verify
+                ? h("span", { class: "mono a-gganbu-verify", text: "VERIFY" })
+                : null,
+              h("span", { class: "a-gganbu-note", text: row.note }),
+            ]),
+          ],
+        ),
+      ),
+      notice === ""
+        ? null
+        : h("p", { class: "a-gganbu-check", text: notice }),
+      h("p", { class: "mono a-gganbu-line" }, [
+        [
+          `${gg.startTokens} tokens each`,
+          `gganbus ${rivalries.length === 0 ? "\u2014" : rivalries.join(" ")}`,
+          `house ${
+            (gg.housed ?? []).length === 0
+              ? "\u2014"
+              : (gg.housed ?? []).map((n) => playerTag(n)).join(" ")
+          }`,
+        ].join(" \u00b7 "),
+      ]),
+    ]);
   } else if (gl) {
     // The console is the one surface that may hold the answer while the
     // round is running, because the host is the one who reads it out at the
@@ -3899,6 +4129,19 @@ function renderArcade(s: RenderState): void {
   const tg = a.tug;
   arcadeNextPull.setDisabled(
     !tugging || tg === undefined || tg.pull + 1 >= tg.pulls,
+  );
+  // "Settle the prompt" is refused on the last prompt — `endRound` settles that
+  // one on its way past — and says so by being unpressable. The decision is
+  // `canSettlePrompt` in gganbu.ts, which is the engine's rule written once and
+  // tested, rather than an inequality repeated here.
+  arcadeNextPrompt.setDisabled(
+    gg === undefined ||
+      !canSettlePrompt({
+        phase: a.phase,
+        round: a.round,
+        at: gg.at,
+        of: gg.of,
+      }),
   );
 }
 
@@ -4528,6 +4771,7 @@ function drivingCounts(s: RenderState): { big: string; sub: string } {
     const a = s.arcade;
     const r = a.recruitment;
     const gl = a.glass;
+    const gg = a.gganbu;
     const pa = a.planApply;
     let detail = room;
     if (r !== undefined) {
@@ -4536,6 +4780,16 @@ function drivingCounts(s: RenderState): { big: string; sub: string } {
       const onBridge = bridgeEntries(a, s.roster, gl).filter((e) => e.onBridge);
       const stepped = new Set(s.hostExtras?.arcade?.answeredBy ?? []);
       detail = `${onBridge.filter((e) => stepped.has(e.pid)).length} of ${onBridge.length} have picked`;
+    } else if (gg !== undefined) {
+      // The one decision this round leaves the host — settle now, or wait —
+      // and driving mode is where they are when they have to make it.
+      const stake = gganbuLockedIn(
+        gridEntries(a, s.roster)
+          .filter((e) => e.standing === "floor")
+          .map((e) => e.pid),
+        s.hostExtras?.arcade?.answeredBy ?? [],
+      );
+      detail = `${stake.staked} of ${stake.onFloor} have locked in`;
     } else if (pa !== undefined) {
       detail = `${pa.crossed ?? 0} finished`;
     }

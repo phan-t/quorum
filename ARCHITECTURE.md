@@ -285,17 +285,25 @@ trivia, it rides in `RenderState` rather than in frames of its own: one
 `ArcadeView` carries the envelope every round shares — `round`, `roundIndex`,
 `phase` (`idle` / `card` / `running` / `reveal`), `startedAt`, `endsAt`, the
 `grid` of players, and how many are `onFloor` and `inLounge` — and then exactly
-one optional round block: `recruitment`, `planApply`, `unseal`, `tug` or
-`glass`. `ArcadeMine` is the same idea for one player: their player number,
-standing, banked and total, who they are backing, and the same one-of-five
-round block cut for them.
+one optional round block: `recruitment`, `planApply`, `unseal`, `tug`,
+`gganbu` or `glass`. `ArcadeMine` is the same idea for one player: their player
+number, standing, banked and total, who they are backing, and the same
+one-of-six round block cut for them.
 
-**Five of the six designed rounds are built.** Gganbu is in the engine —
-pairing, wagers, scoring — and is reachable from nowhere: `arcade.round` has no
-`gganbu` variant, so `parseClientMessage` refuses one on the wire, and the
-console lists it disabled so a host can see the shape of the run of show
-without starting something that does not exist. SPEC.md's round table is the
-design; this is what a session can play.
+**All six designed rounds are built.** Gganbu was the last, and it was held
+back by its content rather than its wiring: the pairing, wagers and scoring
+were in the engine while `arcade.round` had no `gganbu` variant, because six
+prompts that every player knows produce six tied pairs. The prompts were
+rewritten and the round finished; SPEC.md's round table and what a session can
+play are now the same list.
+
+Gganbu is also the sharpest case of the projection rule below. A wager is a
+pick *and* a stake, and it must reach nobody but the player who made it until
+the prompt settles — so `gganbuFloorView`, the round's only public view,
+carries a **count** of who has wagered rather than the map of wagers. The
+secret is not filtered out of frames on the way past; it is absent from the
+value every projection is handed, so no amount of careless spreading can leak
+it.
 
 **"Public" means the Desktop and the host, not a participant.** The projection
 is per role and enforced by leaving a field out rather than nulling it, so a

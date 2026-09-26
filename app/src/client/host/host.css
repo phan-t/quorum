@@ -1928,6 +1928,92 @@ body {
   color: var(--ink);
   font-weight: 600;
 }
+/* ---- Gganbu ---------------------------------------------------------- *
+ *
+ * The six prompts, their answers, and the one flag that reaches this surface
+ * and no other. It stays up through the reveal, because the reveal is when the
+ * notes are read out and the flag is what says which of them to re-check.
+ *
+ * VERIFY is a word in a box and not a colour, for the reason the bridge's
+ * REAL / FAKE are words: this panel gets shared by accident, it gets read at a
+ * glance, and a host who is colour-blind reads the same three prompts as
+ * everybody else. The open prompt is marked with a rule down its left edge
+ * rather than a fill, so the six rows stay one list.
+ * -------------------------------------------------------------------- */
+
+.a-gganbu-host {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  padding: 0.5rem 0.6rem;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--panel-2);
+}
+.a-gganbu-host[hidden] {
+  display: none;
+}
+.a-gganbu-row {
+  margin: 0;
+  display: grid;
+  grid-template-columns: 1.4rem 1fr;
+  gap: 0 0.5rem;
+  padding-left: 0.3rem;
+  border-left: 2px solid transparent;
+  font-size: 13px;
+  line-height: 1.35;
+}
+/* The prompt the room is on. A rule, not a fill: the list has to stay a list. */
+.a-gganbu-row.is-open {
+  border-left-color: var(--arc-players);
+}
+.a-gganbu-n {
+  font-size: 11px;
+  color: var(--muted);
+}
+.a-gganbu-cue {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0 0.4rem;
+  min-width: 0;
+}
+.a-gganbu-row.is-open .a-gganbu-q {
+  font-weight: 600;
+}
+/* The answer is the thing the host reads out, so it is the thing that reads
+   first: everything else on the row is muted around it. */
+.a-gganbu-answer {
+  font-size: 11px;
+  letter-spacing: 0.1em;
+  font-weight: 600;
+  color: var(--arc-players);
+}
+.a-gganbu-verify {
+  font-size: 10px;
+  letter-spacing: 0.1em;
+  padding: 0 0.3rem;
+  border: 1px solid var(--line);
+  border-radius: 3px;
+  color: var(--ink);
+}
+.a-gganbu-note {
+  flex-basis: 100%;
+  color: var(--muted);
+}
+/* The one sentence that says which notes to check, above the counts. Not
+   muted: it is an instruction, and the only one on this panel. */
+.a-gganbu-check {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.35;
+}
+.a-gganbu-line {
+  margin: 0;
+  font-size: 11px;
+  color: var(--muted);
+}
+
 .a-cfg-row {
   display: flex;
   gap: 0.5rem;

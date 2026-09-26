@@ -2100,6 +2100,337 @@ body.phone:has(.v-splash) {
   display: none;
 }
 
+/* ---- Gganbu ----------------------------------------------------------- *
+ *
+ * SPEC.md: "Your rival's name and token count sit on your screen the whole
+ * round." So the pair is a panel of its own, directly under the clock and
+ * above the question, and it is the one thing on this screen that never goes
+ * away.
+ *
+ * Nothing here is carried by colour. The pair's standing is a word — AHEAD BY
+ * 3 / LEVEL / BEHIND BY 2 — before it is a hue; the gganbu's one tell is the
+ * word "locked in" with a filled dot in front of it and a solid border instead
+ * of a dashed one; the chosen side carries a glyph, a check and a fill. A
+ * stake chip that is set carries its own border weight as well as its ground.
+ *
+ * The column never scrolls. Every row but the two side buttons is `flex: none`,
+ * the buttons take what is left, and the stake row wraps rather than
+ * overflowing — a hand of two tokens draws two chips, so the row is as wide as
+ * the hand and never wider.
+ * -------------------------------------------------------------------- */
+
+.a-gganbu {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.55rem;
+}
+.a-gganbu-head {
+  margin: 0;
+  flex: none;
+  font-size: 12px;
+  letter-spacing: 0.1em;
+  color: var(--muted);
+}
+/* Fifteen seconds is short enough that the clock is a control surface rather
+   than a caption, so it is Recruitment's timer at the bridge's size. */
+.a-gganbu .a-item-timer {
+  flex: none;
+  font-size: 26px;
+  letter-spacing: 0.04em;
+}
+
+/* The pair. Two cards, side by side, and they stay side by side at every
+   width: the whole point is reading one against the other. */
+.a-pair {
+  flex: none;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.5rem;
+}
+.a-pair-card {
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+  min-width: 0;
+  padding: 0.45rem 0.6rem;
+  border: 1px solid var(--line);
+  border-left-width: 3px;
+  border-radius: 10px;
+  background: var(--panel-2);
+}
+.a-pair-card[data-who="you"] {
+  border-left-color: var(--nomad);
+}
+.a-pair-role,
+.a-pair-unit,
+.a-pair-lead,
+.a-pair-tell {
+  font-size: 10px;
+  letter-spacing: 0.14em;
+}
+.a-pair-tokens {
+  font-size: 34px;
+  font-weight: 600;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+}
+/* Ahead and behind are words first. The hue is the second signal and the two
+   of them are the arcade's own players/staff pair, which this page already
+   uses for "on the Floor" and "drained". */
+.a-pair-card[data-standing="ahead"] .a-pair-lead {
+  color: var(--arc-players);
+}
+.a-pair-card[data-standing="behind"] .a-pair-lead {
+  color: var(--arc-staff);
+}
+.a-pair-id {
+  display: flex;
+  align-items: baseline;
+  gap: 0.35rem;
+  min-width: 0;
+  font-size: 13px;
+}
+.a-pair-tag {
+  flex: none;
+  font-weight: 600;
+  color: var(--arc-players);
+}
+/* The nickname is the only place on this page a name is longer than its box,
+   and a clipped name is better than a card that grows under the question. */
+.a-pair-name {
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+/*
+ * The tell, which is the round's tension: *that* your gganbu has locked in,
+ * never what they picked.
+ *
+ * Three signals and none of them is the colour: the word, the dot in front of
+ * it (● against ○), and the card's own left border going solid. A dashed
+ * border is this page's established "not settled yet" — the panes and the
+ * buttons both use it — so the rival card reads as pending until it is not.
+ */
+.a-pair-card[data-who="rival"] {
+  border-left-style: dashed;
+  border-left-color: var(--line);
+}
+.a-pair-card[data-who="rival"][data-tell="in"] {
+  border-left-style: solid;
+  border-left-color: var(--arc-lounge);
+}
+.a-pair-card[data-tell="in"] .a-pair-tell {
+  color: var(--arc-lounge);
+}
+.a-pair-tell {
+  display: flex;
+  align-items: baseline;
+  gap: 0.3rem;
+}
+.a-pair-dot {
+  font-size: 9px;
+  line-height: 1.6;
+}
+
+/* The announcer's line when a prompt settles. It arrives once per prompt, so
+   it may move — and the global reduced-motion rule in tokens.css takes the
+   duration to nothing, leaving the line exactly where it lands. */
+.a-gganbu-house {
+  flex: none;
+  animation: a-slide-up var(--pop-ms) var(--pop) both;
+}
+.a-gganbu-house[hidden] {
+  display: none;
+}
+
+/* The question. Words, not the emoji Recruitment sets at 96px, so it is body
+   type at a size that still reads from a laptop's distance. */
+.a-gganbu-cue {
+  margin: 0;
+  flex: none;
+  font-size: clamp(19px, 5.4vw, 26px);
+  line-height: 1.25;
+  max-width: 34ch;
+}
+
+/* The dial. One chip per token the hand can actually stake — a player holding
+   two gets two chips, because a control set to a stake the server refuses is a
+   control that spends somebody's fifteen seconds on a refusal. */
+.a-stakes {
+  flex: none;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.4rem;
+}
+/* The chips are their own group so the caption beside them is not read as one
+   of the options. */
+.a-stakes-group {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}
+.a-stakes-label {
+  font-size: 10px;
+}
+.a-stake[hidden] {
+  display: none;
+}
+.a-stake {
+  appearance: none;
+  min-width: 48px;
+  min-height: 48px;
+  padding: 0;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--panel-2);
+  color: var(--ink);
+  cursor: pointer;
+}
+.a-stake-num {
+  font-size: 18px;
+  font-weight: 600;
+}
+/* Set: a heavier border and a filled ground, so it is not the hue doing the
+   work. `aria-checked` carries the same fact to a screen reader. */
+.a-stake.on {
+  border-width: 2px;
+  border-color: var(--arc-players);
+  background: color-mix(in srgb, var(--nomad) 16%, var(--panel-2));
+  font-weight: 700;
+}
+@media (hover: hover) and (pointer: fine) {
+  .a-stake:not(:disabled):hover {
+    border-color: var(--arc-players);
+  }
+}
+.a-stake:focus-visible {
+  outline: none;
+  border-color: var(--arc-players);
+  box-shadow: inset 0 0 0 3px var(--ibm-blue);
+}
+.a-stake:disabled {
+  cursor: default;
+  color: var(--muted);
+  border-style: dashed;
+}
+
+/*
+ * The two sides, which are the commit rather than a selection.
+ *
+ * Over is above under, because that is what the words mean and a pair of
+ * side-by-side buttons labelled OVER and UNDER makes the reader do the mapping
+ * twice. They take the height that is left: they are the decision.
+ */
+.a-sides {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+.a-side {
+  flex: 1;
+  min-height: 62px;
+  appearance: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.6rem;
+  border: 2px solid var(--line);
+  border-radius: 14px;
+  background: var(--panel-2);
+  color: var(--ink);
+  cursor: pointer;
+}
+.a-side-glyph {
+  font-size: 20px;
+  line-height: 1;
+  color: var(--muted);
+}
+.a-side-word {
+  font-size: clamp(26px, 8vw, 34px);
+  letter-spacing: 0.04em;
+}
+/* The stake, printed on the button that would spend it: a decision whose cost
+   is somewhere else is not a decision. */
+.a-side-stake {
+  font-size: 18px;
+  font-weight: 600;
+  color: var(--muted);
+}
+@media (hover: hover) and (pointer: fine) {
+  .a-side:not(:disabled):hover {
+    border-color: var(--arc-players);
+  }
+}
+.a-side:focus-visible {
+  outline: none;
+  border-color: var(--arc-players);
+  box-shadow: inset 0 0 0 3px var(--ibm-blue);
+}
+.a-side:active {
+  transform: scale(0.995);
+}
+/* Locked in: still legible, plainly not a control — the same dashed treatment
+   the panes and the rope use. */
+.a-side:disabled {
+  cursor: default;
+  color: var(--muted);
+  border-style: dashed;
+}
+/* The side that was taken, marked by a check and a fill as well as a border.
+   It stays at full ink while its neighbour dims, because it is the record of
+   what this phone did. */
+.a-side[data-picked="yes"] {
+  border-style: solid;
+  border-color: var(--arc-players);
+  background: color-mix(in srgb, var(--nomad) 14%, var(--panel-2));
+  color: var(--ink);
+}
+.a-side[data-picked="yes"] .a-side-glyph,
+.a-side[data-picked="yes"] .a-side-stake {
+  color: var(--arc-players);
+}
+.a-side[data-picked="yes"] .a-side-word::after {
+  content: " \2713";
+  color: var(--arc-players);
+}
+
+.a-gganbu-status {
+  margin: 0;
+  flex: none;
+  color: var(--muted);
+  font-size: 14px;
+  line-height: 1.4;
+}
+/*
+ * The refusal, in the server's own words.
+ *
+ * The coral error beat this page already uses for the drain, because that is
+ * what a refused wager is: the control did not do what the person asked. Full
+ * ink on the panel rather than a dimmed aside — *One to 3 tokens.* is the one
+ * sentence that tells somebody why their stake would not go, and it is a
+ * correction to a control they are still holding.
+ */
+.a-gganbu-error {
+  margin: 0;
+  flex: none;
+  padding: 0.35rem 0.6rem;
+  border-left: 3px solid var(--miss);
+  border-radius: 6px;
+  background: var(--panel);
+  color: var(--miss);
+  font-size: 13px;
+  line-height: 1.4;
+}
+.a-gganbu-error[hidden] {
+  display: none;
+}
+
 /* ---- The Glass Bridge ------------------------------------------------ *
  *
  * Two panes as large targets, the step's own clock, and the bridge with
@@ -2659,6 +2990,36 @@ body.phone:has(.v-splash) {
   line-height: 1.4;
 }
 
+/* Gganbu's reveal: the pair's own result, then the six prompts with the side
+   that was right and the note that says the real figure. */
+.a-gganbu-result {
+  margin: 0;
+  color: var(--ink);
+  font-size: 15px;
+  line-height: 1.4;
+}
+.a-recap-prompt {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.1rem;
+  min-width: 3.2rem;
+}
+.a-recap-side {
+  font-size: 18px;
+  line-height: 1.1;
+  color: var(--arc-players);
+}
+.a-recap-answer-word {
+  font-size: 9px;
+  letter-spacing: 0.12em;
+  color: var(--arc-players);
+}
+.a-recap-threshold {
+  font-size: 12px;
+  color: var(--muted);
+}
+
 .a-recap {
   display: grid;
   grid-template-columns: auto 1fr;
@@ -3140,6 +3501,128 @@ body.phone:has(.v-splash) {
   }
   .a-big-count {
     font-size: clamp(24px, 5cqh, 42px);
+  }
+
+  /*
+   * Gganbu. The pair moves into a column of its own on the right, beside the
+   * question rather than above it: SPEC.md wants the rival's name and count on
+   * screen the whole round, and in a wide shallow window "beside" is what keeps
+   * them there without spending the height the two side buttons need.
+   *
+   * The sides go horizontal here. Over above under is the honest mapping and it
+   * is what the phone does, but a laptop window beside a video call is short,
+   * and two stacked 62px buttons plus a pair panel plus a question is the
+   * layout that scrolls first. The glyphs carry the direction — ▲ and ▼ are on
+   * the buttons at every width — so nothing is lost but the stacking.
+   */
+  .a-gganbu {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(250px, 0.55fr);
+    grid-template-rows: auto auto auto auto auto minmax(0, 1fr) auto auto;
+    grid-template-areas:
+      "head   timer"
+      "rule   pair"
+      "house  pair"
+      "cue    pair"
+      "stakes pair"
+      "sides  sides"
+      "error  error"
+      "keys   status";
+    column-gap: clamp(16px, 2.4cqw, 32px);
+    row-gap: clamp(6px, 1.4cqh, 14px);
+  }
+  .a-gganbu .a-gganbu-head {
+    grid-area: head;
+    align-self: center;
+    font-size: 13px;
+  }
+  .a-gganbu .a-item-timer {
+    grid-area: timer;
+    text-align: right;
+    font-size: clamp(26px, 5.5cqh, 46px);
+  }
+  .a-gganbu .p-rule {
+    grid-area: rule;
+  }
+  .a-gganbu .a-gganbu-house {
+    grid-area: house;
+  }
+  .a-gganbu .a-gganbu-cue {
+    grid-area: cue;
+    align-self: center;
+    font-size: clamp(22px, min(3.1cqw, 5.4cqh), 40px);
+    max-width: 40ch;
+  }
+  .a-gganbu .a-stakes {
+    grid-area: stakes;
+    gap: clamp(6px, 0.9cqw, 12px);
+  }
+  .a-stakes-group {
+    gap: clamp(6px, 0.9cqw, 12px);
+  }
+  .a-gganbu .a-pair {
+    grid-area: pair;
+    align-content: start;
+    gap: clamp(8px, 1.2cqw, 16px);
+  }
+  .a-pair-card {
+    padding: clamp(8px, 1.6cqh, 16px) clamp(10px, 1.2cqw, 18px);
+    border-radius: 12px;
+  }
+  .a-pair-tokens {
+    font-size: clamp(34px, 7cqh, 58px);
+  }
+  .a-pair-role,
+  .a-pair-unit,
+  .a-pair-lead,
+  .a-pair-tell {
+    font-size: 11px;
+  }
+  .a-pair-id {
+    font-size: clamp(13px, 2.2cqh, 16px);
+  }
+  .a-gganbu .a-sides {
+    grid-area: sides;
+    flex-direction: row;
+    width: 100%;
+    max-width: 1040px;
+    margin-inline: auto;
+    gap: clamp(14px, 2cqw, 28px);
+  }
+  .a-side {
+    min-height: clamp(62px, 18cqh, 200px);
+    border-radius: 16px;
+    flex-direction: column;
+    gap: clamp(4px, 1cqh, 10px);
+  }
+  .a-side-word {
+    font-size: clamp(26px, min(3.4cqw, 6cqh), 46px);
+  }
+  .a-side-glyph {
+    font-size: clamp(20px, 3.4cqh, 30px);
+  }
+  .a-side-stake {
+    font-size: clamp(18px, 3cqh, 26px);
+  }
+  .a-stake {
+    min-width: clamp(48px, 5cqw, 66px);
+    min-height: clamp(48px, 8cqh, 62px);
+  }
+  .a-stake-num {
+    font-size: clamp(18px, 3.2cqh, 24px);
+  }
+  .a-gganbu .a-gganbu-error {
+    grid-area: error;
+    font-size: clamp(13px, 2.2cqh, 16px);
+  }
+  .a-gganbu .a-keys {
+    grid-area: keys;
+  }
+  .a-gganbu .a-gganbu-status {
+    grid-area: status;
+    text-align: right;
+    align-self: center;
+    font-size: clamp(13px, 2.4cqh, 17px);
   }
 
   /*

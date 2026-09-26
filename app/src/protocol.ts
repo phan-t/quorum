@@ -14,7 +14,9 @@ import type {
   ArcadePhase,
   ArcadeRoundKind,
   ArcadeStanding,
+  GganbuPrompt,
   GlassWave,
+  OverUnder,
   ParticipantId,
   QuestionPhase,
   Seal,
@@ -22,6 +24,7 @@ import type {
   Segment,
   SessionPhase,
   UnsealShape,
+  Wager,
   WaveSeconds,
 } from "./engine/types.ts";
 
@@ -161,6 +164,39 @@ export type ClientMessage =
    * is judged against is the server's — see `beat` in runtime.ts.
    */
   | { t: "arcade.beat"; cid: string; round: number }
+  /**
+   * Gganbu: the secret call and the stake, on the open prompt.
+   *
+   * One frame per prompt and it is final — the engine refuses a second one as
+   * `already_answered_item`, because fifteen seconds is short enough that a
+   * re-stake would be a second look at your gganbu's face rather than a change
+   * of mind.
+   *
+   * No timestamp, and here that is not the usual reason. This round measures
+   * no instant at all: there is no fastest-anything award in it, so a
+   * client-chosen `at` would not be worth points. It is absent because the one
+   * thing the instant decides is whether the stake beat the prompt's close,
+   * and that is the server's clock corrected by the server's own latency
+   * estimate for this socket — see `wager` in runtime.ts.
+   *
+   * `round` is the arcade's `roundIndex`, for the reason `arcade.shape`
+   * carries one: a stake in flight when the host starts the next round must
+   * not land on it. The *prompt* index is deliberately **not** here, unlike
+   * `arcade.step`: the engine writes the wager against whichever prompt is
+   * open and refuses it once that prompt has closed, so a frame that crossed a
+   * prompt boundary is refused by the clock rather than by an index.
+   *
+   * `amount` is a count of tokens, never a share of a hand: one to five, and
+   * never more than they hold. Both halves of that rule are the engine's
+   * (`invalid_wager`), because only the engine knows the hand.
+   */
+  | {
+      t: "arcade.wager";
+      cid: string;
+      round: number;
+      pick: OverUnder;
+      amount: number;
+    }
   /** The Lounge: back a player, or change who you are backing. */
   | { t: "arcade.back"; cid: string; pid: ParticipantId }
   /**
@@ -318,6 +354,26 @@ export type HostCommand =
       pullSeconds: number;
       bpm: number;
     }
+  /**
+   * Gganbu: how long a prompt runs, and the opening stake.
+   *
+   * The **prompts are not here**, for the reason the Bridge's panes and
+   * Unseal's tins are not: an `OverUnderItem` carries `answer`, the reveal
+   * note and the VERIFY flag, so a round config on the wire would be the
+   * answer key leaving the server on a frame the console could be made to
+   * echo. The host sets the two numbers; the six prompts are attached on the
+   * server when the event is built.
+   *
+   * The **seed is not here** either, for the reason Tug of Raft's is not: the
+   * pairs are drawn from it, and a seed the console chose would be a console
+   * that can deal somebody their gganbu.
+   */
+  | {
+      name: "arcade.round";
+      kind: "gganbu";
+      secondsPerPrompt: number;
+      startTokens: number;
+    }
   /** The round card is up; this opens the Floor. */
   | { name: "arcade.begin" }
   /** Recruitment: next emoji. */
@@ -340,6 +396,18 @@ export type HostCommand =
    * carries no seed for the reason `arcade.round` does not.
    */
   | { name: "arcade.nextPull" }
+  /**
+   * Gganbu: settle the open prompt — **this is where the tokens move** — and
+   * open the next one.
+   *
+   * The server's prompt timer sends the identical event at `promptEndsAt`, so
+   * this is the host cutting a prompt short once both halves of every pair
+   * have locked in, and not a second code path. That matters more here than in
+   * any other round: settling is the only thing that moves a token, so one
+   * event and one moment is what keeps a rival's count from twitching while
+   * the prompt is still open.
+   */
+  | { name: "arcade.nextPrompt" }
   | { name: "arcade.end" }
   | { name: "arcade.reveal" };
 
@@ -813,6 +881,134 @@ export interface ArcadeTugView {
 export type ParticipantSide = 0 | 1;
 
 /**
+ * Round 4, Gganbu — one prompt at the reveal, with the answer attached.
+ *
+ * `verify` is the author's own flag — "I checked this one least" — and it is
+ * **host only**, present on this type and omitted from every other role's
+ * copy. SPEC.md asks for the flag so the facilitator can check three prompts
+ * before the session; a flag beside a question on the big screen is a nudge
+ * towards the answer, and beside a settled prompt it is a hint that the note
+ * about to be read out might be wrong.
+ */
+export interface ArcadeGganbuRecap {
+  readonly cue: string;
+  readonly threshold: string;
+  readonly answer: OverUnder;
+  readonly note: string;
+  /** Host only. Absent, not false, for everyone else. */
+  readonly verify?: boolean;
+}
+
+/**
+ * Round 4, Gganbu — projected.
+ *
+ * The round has two secrets and they are not the same kind of secret.
+ *
+ * The first is the ordinary one: **the answer key.** `answer`, `note` and
+ * `verify` live in `ArcadePlay.key`, reach the host because the host reads
+ * them out, and reach everybody else at `revealRound` and not one frame
+ * earlier.
+ *
+ * The second is the round itself. Both halves of a pair answer the **same
+ * prompt**, sitting next to each other, so a rival's pick, a rival's stake, or
+ * a rival's token count moving mid-prompt are all the answer arriving early
+ * from the one person in the room who is betting against you. That is why
+ * there is no `wagers` on this view — not withheld from it, *absent from the
+ * value it is built out of*: `gganbuFloorView()` in engine/arcade.ts carries a
+ * count and nothing else, and no field added to `play` can make it carry more.
+ * A pick and a stake reach exactly one phone, their own, on
+ * {@link ArcadeMineGganbu}.
+ *
+ * `wagered` is the count, and it is safe on every surface for the reason
+ * trivia's "24 of 27 answered" is: it names nobody. The one thing a rival is
+ * allowed to learn is *that* their gganbu has locked in — watching them lock
+ * in fast is a read on their confidence, and reading your gganbu is the round
+ * — and they learn it from their own frame's `rivalCommitted`, never from
+ * this one.
+ *
+ * `tokens` only ever holds **settled** counts, because `settleGganbuPrompt` is
+ * the only place a token moves. So it says who is winning and never what the
+ * open prompt's answer is, and it goes to the two surfaces that draw the room.
+ * It is not on a phone for the reason `planApply.finishOrder` is not: a phone
+ * shows one person's round, and theirs plus their rival's is what one person's
+ * round is.
+ *
+ * `richest` is the same public standing with the engine's tie rule already
+ * applied, exactly as `tug.leaders` is — the rule is the engine's and a
+ * surface with its own copy of it would one day name a winner the server does
+ * not. It is deliberately **unlike** `unseal.shapes[].fastest`, which waits
+ * for the reveal: an open tin is a settled result the Lounge could back for a
+ * certainty, whereas the richest hand in Gganbu is a hand that has five more
+ * prompts to lose. Backing the current leader is a bet, which is what the
+ * Lounge is for.
+ *
+ * | field | participant | screen | host |
+ * | --- | --- | --- | --- |
+ * | `at` / `of` / `secondsPerPrompt` / `startTokens` | always | always | always |
+ * | `wagered` (a count) | always | always | always |
+ * | `prompt` (cue + threshold) | running, reveal | running, reveal | always |
+ * | `promptEndsAt` | running | running | running |
+ * | `tokens` / `richest` | never | always | always |
+ * | `pairs` / `housed` | never | always | always |
+ * | **`wagers`** | **never** | **never** | **never** |
+ * | `recap` (**the answers**) | reveal | reveal | always |
+ * | `recap[].verify` | never | never | always |
+ */
+export interface ArcadeGganbuView {
+  /** Which prompt is open, from 0. The card counts from 1. */
+  readonly at: number;
+  readonly of: number;
+  /** SPEC.md: fifteen. The rule, so no surface runs its own countdown length. */
+  readonly secondsPerPrompt: number;
+  /** "You each hold ten Vault tokens." The opening stake, announced. */
+  readonly startTokens: number;
+  /** How many have wagered on the open prompt. A count, never a list. */
+  readonly wagered: number;
+  /**
+   * The open prompt: the question and the threshold, and nothing else.
+   *
+   * This is `GganbuPrompt` from the engine on the wire — the type exists so
+   * that the answer is *absent* from the value a projection is handed rather
+   * than merely withheld by it. Absent while the round card is up, for the
+   * reason Recruitment's cue is: the room is looking at the card, and a prompt
+   * sitting in a phone's JSON fifteen seconds early is fifteen seconds of
+   * thinking that whoever has devtools open gets and nobody else does.
+   */
+  readonly prompt?: GganbuPrompt;
+  /** Absolute server epoch. Absent while the round card is up. */
+  readonly promptEndsAt?: number;
+  /** Settled token counts. Screen and host. See the note on this interface. */
+  readonly tokens?: Readonly<Record<ParticipantId, number>>;
+  /** Screen and host: who holds the most, as player numbers. A tie is real. */
+  readonly richest?: readonly number[];
+  /**
+   * Who is paired with whom, by pid. Symmetric.
+   *
+   * Pids rather than player numbers, exactly as `tug.sides` is keyed by pid:
+   * `grid` already carries pid -> player number on every surface, so a second
+   * copy here would be a second place for the same number to disagree.
+   *
+   * Screen and host, exactly as `tug.sides` is: it is not a secret — both
+   * halves of a pair were told, and the room can see them turn to each other —
+   * but it is the whole room's shape, and the Desktop is the surface that
+   * draws it. A phone gets its own gganbu, and only its own, on
+   * {@link ArcadeMineGganbu}.
+   */
+  readonly pairs?: Readonly<Record<ParticipantId, ParticipantId>>;
+  /**
+   * Screen and host: who is playing the house, as player numbers.
+   *
+   * Rides with `pairs` rather than stopping at the console, because a screen
+   * given `pairs` alone would draw a dissolved pair as a live one — two people
+   * still shown as rivals when the engine has already housed them both. SPEC:
+   * "a rival who disconnects is replaced by the house."
+   */
+  readonly housed?: readonly number[];
+  /** The answers, at the reveal. The host has them throughout: they read them out. */
+  readonly recap?: readonly ArcadeGganbuRecap[];
+}
+
+/**
  * Round 5, The Glass Bridge: one step of the bridge, as the room may see it.
  *
  * The product and the two labels, in display order, and nothing else. This is
@@ -975,6 +1171,10 @@ export interface ArcadeGlassView {
  * | `unseal.recap` (**the words**) | reveal | reveal | always |
  * | `tug` beat grid and rope | always | always | always |
  * | `tug.sides` / `leaders` | never | always | always |
+ * | `gganbu.prompt` / `wagered` | running, reveal | running, reveal | always |
+ * | `gganbu.tokens` / `richest` / `pairs` / `housed` | never | always | always |
+ * | `gganbu.wagers` (a pick and a stake) | **never** | **never** | **never** |
+ * | `gganbu.recap` (**the answers**) | reveal | reveal | always |
  * | `glass.broken` | always | always | always |
  * | `glass.board` | running, reveal | running, reveal | always |
  * | `glass.crossed` / `fastest` | never | always | always |
@@ -996,6 +1196,7 @@ export interface ArcadeView {
   readonly planApply?: ArcadePlanApplyView;
   readonly unseal?: ArcadeUnsealView;
   readonly tug?: ArcadeTugView;
+  readonly gganbu?: ArcadeGganbuView;
   readonly glass?: ArcadeGlassView;
 }
 
@@ -1093,6 +1294,48 @@ export interface ArcadeMineTug {
 }
 
 /**
+ * Gganbu, for the one phone it belongs to.
+ *
+ * This is `gganbuMeView()` from engine/arcade.ts on the wire, and it is the
+ * **only** way a pick or a stake ever leaves the server: there is no public
+ * view of the wagers at all, because the person sitting next to you is
+ * answering the prompt you are answering.
+ *
+ * Four of these six fields are about somebody else, and that is unusual enough
+ * to say why each one is allowed to be:
+ *
+ * - `rival` is who they were told they are playing. Null is the house — the odd
+ *   one out of a roster, or a gganbu whose phone died.
+ * - `rivalTokens` is the **settled** count and can be nothing else: it is read
+ *   off `play.tokens`, which does not move until the prompt closes. A count
+ *   that twitched when a wager landed would be the wager.
+ * - `rivalCommitted` says that they have wagered and never what. It is the one
+ *   tell the round allows, and it is the point of the round: watching your
+ *   gganbu lock in fast is a read on their confidence.
+ * - `wager` is **theirs**, because they made it. Null until they do.
+ *
+ * `rival` is a pid rather than a name or a number, as `backing` is, and for the
+ * same reason: `grid` already carries pid -> player number for everyone on
+ * every surface, and the roster carries the nicknames. Repeating either here
+ * would be two places for the same name to disagree.
+ */
+export interface ArcadeMineGganbu {
+  /** Tokens they hold. Settled: it moves when a prompt settles, never before. */
+  readonly tokens: number;
+  /** Their gganbu. Null means the house. */
+  readonly rival: ParticipantId | null;
+  /** Their gganbu's settled count. Never their open wager. */
+  readonly rivalTokens: number;
+  /** Their gganbu has locked in. **That**, never what. */
+  readonly rivalCommitted: boolean;
+  readonly committed: boolean;
+  /** Their own call and stake on the open prompt. Null until they make it. */
+  readonly wager: Wager | null;
+  /** They reached zero. The token is revoked and they are in the Lounge. */
+  readonly revoked: boolean;
+}
+
+/**
  * The Glass Bridge, for the one phone it belongs to.
  *
  * This is `glassMeView()` from engine/arcade.ts on the wire, and it is
@@ -1144,6 +1387,7 @@ export interface ArcadeMine {
   readonly planApply?: ArcadeMinePlanApply;
   readonly unseal?: ArcadeMineUnseal;
   readonly tug?: ArcadeMineTug;
+  readonly gganbu?: ArcadeMineGganbu;
   readonly glass?: ArcadeMineGlass;
 }
 
@@ -1511,6 +1755,38 @@ export function parseClientMessage(raw: string): ClientMessage | null {
       }
       return { t: m["t"] as "arcade.docs" | "arcade.beat", cid, round };
     }
+    case "arcade.wager": {
+      const cid = str("cid");
+      const round = m["round"];
+      const pick = m["pick"];
+      const amount = m["amount"];
+      // `pick` is checked against the two sides here, exactly as
+      // `arcade.shape` is checked against the four shapes: a third side is not
+      // a wrong bet, it is bytes that are not a frame, and the engine's
+      // `invalid_choice` is the belt to this brace.
+      //
+      // `amount` is checked for *shape* and not for range. A whole number
+      // above zero is what a count of tokens is; whether it is one to five,
+      // and whether they hold that many, needs the hand and so belongs to the
+      // engine, which refuses it as `invalid_wager` with the real ceiling in
+      // the message. Nought and a fraction are refused here because neither is
+      // a stake anybody could have meant, and a negative one is refused here
+      // because the engine adds `amount` on a winning call: a frame saying
+      // −5 must never reach the arithmetic that settles a prompt.
+      if (
+        cid === null ||
+        typeof round !== "number" ||
+        !Number.isInteger(round) ||
+        round < 0 ||
+        (pick !== "over" && pick !== "under") ||
+        typeof amount !== "number" ||
+        !Number.isInteger(amount) ||
+        amount <= 0
+      ) {
+        return null;
+      }
+      return { t: "arcade.wager", cid, round, pick, amount };
+    }
     case "arcade.back": {
       const cid = str("cid");
       const pid = str("pid");
@@ -1709,9 +1985,28 @@ function parseHostCommand(v: unknown): HostCommand | null {
               bpm,
             };
       }
-      // Gganbu is designed but not built. Refusing the frame is how the
-      // console finds that out, rather than a round that starts and does
-      // nothing.
+      if (c["kind"] === "gganbu") {
+        // No prompts and no seed. An `OverUnderItem` carries the answer, the
+        // reveal note and the VERIFY flag, so six prompts arriving from a
+        // browser would be the answer key arriving from a browser; and a seed
+        // a console could choose is a console that can deal somebody their
+        // gganbu. Both are attached on the server.
+        //
+        // `startTokens` goes through the same positive-integer gate as every
+        // other number on this command, and the engine holds the rule the gate
+        // cannot see: nobody may start below the minimum wager, or the room is
+        // revoked before the first prompt.
+        const secondsPerPrompt = int("secondsPerPrompt");
+        const startTokens = int("startTokens");
+        return secondsPerPrompt === null || startTokens === null
+          ? null
+          : {
+              name: "arcade.round",
+              kind: "gganbu",
+              secondsPerPrompt,
+              startTokens,
+            };
+      }
       return null;
     }
     case "arcade.begin":
@@ -1724,6 +2019,8 @@ function parseHostCommand(v: unknown): HostCommand | null {
       return { name: "arcade.nextWave" };
     case "arcade.nextPull":
       return { name: "arcade.nextPull" };
+    case "arcade.nextPrompt":
+      return { name: "arcade.nextPrompt" };
     case "arcade.end":
       return { name: "arcade.end" };
     case "arcade.reveal":

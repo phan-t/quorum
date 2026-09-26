@@ -26,6 +26,8 @@ import type {
 import type {
   ArcadeRoundKind,
   GlassWave,
+  GganbuPrompt,
+  OverUnder,
   Segment,
   UnsealShape,
 } from "../../engine/types.ts";
@@ -867,6 +869,59 @@ export const HOUSE = {
    */
   tugPullWon: (side: 0 | 1) =>
     `Side ${side === 0 ? "A" : "B"} has the rope. The entry is committed.`,
+  /**
+   * Gganbu's four beats, and the only way the round says whether a call was
+   * good.
+   *
+   * There is no per-prompt reveal in this round: `nextPrompt` settles the open
+   * prompt, moves the tokens and opens the next one in the same frame, and the
+   * answer key does not reach a phone until the round's own reveal. So what a
+   * player is told at the buzzer is what their hand did — which is the honest
+   * amount, because it is exactly what their gganbu, sitting next to them,
+   * can work out from watching the public count.
+   *
+   * Said off a diff in the token count across a prompt change, which is
+   * {@link gganbuSettlement} — pure, and tested, because the frames that must
+   * say *nothing* are the part that matters: a repaint inside one prompt, a
+   * count that has gone back to the opening stake for a new round, and a
+   * prompt nobody wagered on.
+   *
+   * Nothing here names the pick or the threshold. A line that said "over was
+   * right" would be the answer to a prompt, on a screen, in a room where
+   * everybody answers the same prompts in the same order.
+   */
+  gganbuWon: (tokens: number) =>
+    `The wager held. ${tokens} token${tokens === 1 ? "" : "s"} credited.`,
+  gganbuLost: (tokens: number) =>
+    `The wager did not hold. ${tokens} token${tokens === 1 ? "" : "s"} debited.`,
+  /**
+   * The prompt closed with nothing on it.
+   *
+   * Said rather than passed over in silence, because fifteen seconds is short
+   * enough to lose one to a video call and a hand that did not move looks
+   * identical to a hand that was not asked.
+   */
+  gganbuNoWager: "The prompt closed with no wager on it. Nothing moved.",
+  /**
+   * Reaching zero, which is this round's own way out of it — SPEC.md: "Reach
+   * **zero** and your token is **revoked**."
+   *
+   * The drain error on the phone, where `unsealShattered` and `glassPane` are:
+   * Vault's word for the thing that has happened to the token, and not the
+   * state lock, which is Plan / Apply's and only Plan / Apply's.
+   */
+  gganbuRevoked: "Your token has been revoked.",
+  /**
+   * The Desktop's half of the same beat, DESIGN.md's row verbatim.
+   *
+   * A pair for `unsealShattered` / `unsealShatter`'s reason: the phone is told
+   * in the second person and the room is told who. It lives here rather than
+   * in `screen/main.ts` because a line two surfaces say is a line that has to
+   * be said the same way, and the only thing keeping two copies in step is
+   * whoever notices.
+   */
+  gganbuRevokedOn: (n: number) =>
+    `Token revoked. TTL exceeded. ${playerName(n)} drained.`,
   backedSurvived: "Your player survived. The Lounge is pleased.",
   roundEnd: "All nodes rescheduled. The next game will begin shortly.",
   arcadeEnd: "The games have concluded. Please return your tracksuit.",
@@ -1044,7 +1099,18 @@ export const PLAY_RULE: Readonly<
    */
   tug_of_raft:
     "Tap on the beat to pull. Off the beat does nothing, and three missed beats times you out.",
-  gganbu: undefined,
+  /**
+   * The bet and the way out of the round, in one sentence, and nothing about
+   * the pair.
+   *
+   * Who your gganbu is and what they hold is on the screen the whole round —
+   * it is the round — so this line does not spend itself repeating it. What it
+   * has to carry is the thing that ends your round, which is the stake running
+   * out, and the ceiling on a single wager, which is the one rule a player
+   * cannot see by looking at the controls once they are locked.
+   */
+  gganbu:
+    "Pick a side and stake 1 to 5 tokens. Run out of tokens and you are drained to the Lounge.",
   /**
    * The round is unplayable without this and the screen never said it: two
    * product feature names, one of them invented, and no statement anywhere on
@@ -1117,6 +1183,17 @@ export const KEY_HINT = {
    * already answers to, so the keyboard and the pointer stay one control.
    */
   tug: "Space or Enter also pulls",
+  /**
+   * Gganbu's two decisions, which is two controls under a fifteen-second
+   * clock: the stake, and then the side that commits it.
+   *
+   * The digits set the stake because the trivia tiles already answer to digits
+   * and a room that has learned one keyboard should not have to learn a
+   * second. The side is up and down rather than left and right — over is up —
+   * and O and U are there because that is what a hand reaches for when the
+   * words on the two buttons are OVER and UNDER.
+   */
+  gganbu: "1–5 sets the stake · ↑ or O is over, ↓ or U is under",
 } as const;
 
 /**
@@ -2012,6 +2089,291 @@ export function tugPullWinner(
 ): 0 | 1 | null {
   if (now[0] > before[0]) return 0;
   if (now[1] > before[1]) return 1;
+  return null;
+}
+
+/* ------------------------------------------------------------------ */
+/* Round 4 — Gganbu                                                    */
+/* ------------------------------------------------------------------ */
+
+/**
+ * SPEC.md: "a wager of 1 to 5 tokens".
+ *
+ * A ceiling on the *control*, and never the authority on a wager. The engine
+ * owns the rule — it refuses anything outside one to `min(5, held)` as
+ * `invalid_wager`, with the real ceiling in the message — and a phone that
+ * offered a sixth chip would be offering a button the server has already said
+ * no to. The other half of the same rule is the hand: a player holding two
+ * tokens gets two chips, because a control that can be set to a stake the
+ * server will refuse is a control that spends somebody's fifteen seconds on a
+ * refusal.
+ */
+export const GGANBU_MAX_STAKE = 5;
+
+/**
+ * The stakes this hand may actually offer: one to five, and never more than
+ * they hold.
+ *
+ * Empty for a hand with nothing in it, which is a player whose token has been
+ * revoked — they are in the Lounge and there is no dial to draw.
+ */
+export function gganbuStakes(held: number): number[] {
+  const top = Math.min(GGANBU_MAX_STAKE, Math.floor(held));
+  if (!(top >= 1)) return [];
+  return Array.from({ length: top }, (_, i) => i + 1);
+}
+
+/**
+ * The stake the dial should be sitting on, given what it was set to and what
+ * the hand now holds.
+ *
+ * The dial survives a prompt — somebody who staked three last time is very
+ * likely to stake three again, and re-picking it six times is six decisions
+ * the round did not ask for — so it has to be brought back inside the ceiling
+ * when the hand shrinks. A player who staked five and lost down to two must
+ * not be left holding a control set to five, because the only thing that would
+ * tell them is a refusal.
+ */
+export function gganbuStake(want: number, held: number): number {
+  const stakes = gganbuStakes(held);
+  const top = stakes[stakes.length - 1];
+  if (top === undefined) return 0;
+  return Math.min(top, Math.max(1, Math.floor(want)));
+}
+
+/** The prompt, as the question it is: cue, then the threshold it turns on. */
+export function gganbuQuestion(prompt: GganbuPrompt | undefined): string {
+  if (prompt === undefined) return "";
+  return `${prompt.cue} — over or under ${prompt.threshold}?`;
+}
+
+/** The word on a side, and the glyph that says it without the word. */
+export const GGANBU_SIDE: Readonly<
+  Record<OverUnder, { readonly word: string; readonly glyph: string }>
+> = {
+  over: { word: "OVER", glyph: "▲" },
+  under: { word: "UNDER", glyph: "▼" },
+};
+
+/**
+ * Your gganbu, resolved from the pid on your own frame.
+ *
+ * `mine.gganbu.rival` is a pid and deliberately nothing else — `grid` already
+ * carries pid to player number on every surface and the roster carries the
+ * nicknames, so a `rivalNumber` field would be a second place for the same
+ * number to disagree. This is the join, and it is the same one `mine.backing`
+ * already goes through.
+ *
+ * Null is the house: the odd one out of a roster, or a gganbu whose phone
+ * died. **So is a pid with no cell on the grid**, which is the same fact
+ * arriving a frame early or late — a rival who was kicked or released is gone,
+ * and a card drawing their number out of a grid that no longer has them would
+ * be a rival who cannot be looked at. The house is what the round replaces a
+ * missing gganbu with, and it is what this says.
+ */
+export interface GganbuRival {
+  /** True when there is nobody to look at: the house holds and wagers nothing. */
+  readonly house: boolean;
+  readonly playerNumber: number | null;
+  /** `017`, or `—` for the house. */
+  readonly tag: string;
+  /** `Player 017`, or `the house`. The announcer's name for them. */
+  readonly name: string;
+  /** Theirs, on the one phone it belongs to. Empty for the house. */
+  readonly nickname: string;
+}
+
+export const GGANBU_HOUSE: GganbuRival = {
+  house: true,
+  playerNumber: null,
+  tag: "—",
+  name: "the house",
+  nickname: "",
+};
+
+export function gganbuRival(
+  arcade: ArcadeView,
+  roster: readonly RosterEntry[],
+  rival: string | null,
+): GganbuRival {
+  if (rival === null) return GGANBU_HOUSE;
+  const cell = gridEntries(arcade, roster).find((e) => e.pid === rival);
+  if (cell === undefined) return GGANBU_HOUSE;
+  return {
+    house: false,
+    playerNumber: cell.playerNumber,
+    tag: cell.tag,
+    name: playerName(cell.playerNumber),
+    nickname: cell.nickname,
+  };
+}
+
+/** Which of the pair is ahead, as a word rather than as a colour. */
+export type GganbuStanding = "ahead" | "level" | "behind";
+
+export function gganbuStanding(
+  tokens: number,
+  rivalTokens: number,
+): GganbuStanding {
+  if (tokens > rivalTokens) return "ahead";
+  if (tokens < rivalTokens) return "behind";
+  return "level";
+}
+
+/** The counts as of the last frame, so a change in them is a settlement. */
+export interface GganbuLedger {
+  /** Which prompt the count belongs to. */
+  readonly at: number;
+  readonly tokens: number;
+}
+
+/**
+ * What the House says when a prompt settles, as a diff against the last frame.
+ *
+ * Read off the **token count across a prompt change**, and every other reading
+ * of it is silence. That is the decision, and each of the four silences is
+ * load-bearing:
+ *
+ * - **Inside one prompt.** Tokens only ever move in `settleGganbuPrompt`, so a
+ *   count that has not changed is not a result — and this surface repaints on
+ *   every frame the room produces. A line re-set on each of them would be a
+ *   screen reader reading last prompt's result over the top of the new one.
+ * - **The first frame of a round.** There is nothing to diff against, and the
+ *   opening stake is not a win.
+ * - **A count that went back up to the opening stake**, which is a new round's
+ *   `at` returning to 0. Read as a diff it would be the largest win of the
+ *   session, announced to somebody who has just been dealt in.
+ * - **A prompt that moved nobody's tokens**, which is a prompt they did not
+ *   wager on. That is its own line rather than a win of nothing.
+ *
+ * It says the size of the move and never the pick or the threshold: the answer
+ * key does not reach a phone until the reveal, and a line that named a side
+ * would be the answer on a screen in a room answering the same six prompts.
+ */
+export function gganbuSettlement(
+  before: GganbuLedger | null,
+  now: GganbuLedger,
+): string | null {
+  if (before === null) return null;
+  // Not `!==`: a new round takes `at` back to 0 with a fresh opening stake, and
+  // the diff across that is not a result.
+  if (now.at <= before.at) return null;
+  const delta = now.tokens - before.tokens;
+  if (delta > 0) return HOUSE.gganbuWon(delta);
+  if (delta < 0) return HOUSE.gganbuLost(-delta);
+  return HOUSE.gganbuNoWager;
+}
+
+/**
+ * How the pair finished, on the phone, at the reveal.
+ *
+ * SPEC.md: tokens convert 1:1 and "whoever of the pair holds more takes +10".
+ * A tie takes nothing — the rule is *more*, and a line that implied otherwise
+ * would have the phone promising points the engine does not award.
+ *
+ * The revoked case is first and is not a comparison at all: a player who
+ * reached zero converts nothing, so telling them they finished behind on
+ * tokens would be arithmetic about a hand that is not in the round.
+ */
+export function gganbuPairResult(
+  g: {
+    readonly tokens: number;
+    readonly rivalTokens: number;
+    readonly revoked: boolean;
+  },
+  rival: GganbuRival,
+): string {
+  // The house is lower case mid-sentence and capitalised where it opens one:
+  // it is a thing rather than a name, and `playerName` already carries its own
+  // capital.
+  const them = rival.house ? "the house" : rival.name;
+  const Them = rival.house ? "The house" : rival.name;
+  if (g.revoked) {
+    return `Your token was revoked at zero. ${Them} finished with ${g.rivalTokens}.`;
+  }
+  const mine = `You finished with ${g.tokens} token${g.tokens === 1 ? "" : "s"}`;
+  switch (gganbuStanding(g.tokens, g.rivalTokens)) {
+    case "ahead":
+      return `${mine} to ${them}'s ${g.rivalTokens}. The 10 for holding more is yours.`;
+    case "behind":
+      return `${mine}. ${Them} finished with ${g.rivalTokens} and takes the 10 for holding more.`;
+    case "level":
+      return `${mine}, and so did ${them}. Nobody takes the 10.`;
+  }
+}
+
+/**
+ * A refused wager, said to the person who made it — **in the server's words**.
+ *
+ * `invalid_wager` is the reason this function does not write its own copy: the
+ * engine's message carries the real ceiling, `One to 3 tokens.`, computed from
+ * a hand only the server has settled. A sentence composed here would be a
+ * second copy of `min(5, held)` on the one surface that cannot check it, and
+ * the frame that refused the wager is also the frame that knows why.
+ *
+ * So every line is the server's, with a fallback for a message that arrived
+ * empty — a refusal with no words on it is a control that goes dead and says
+ * nothing. Null for a code this round has no business rendering: the same
+ * socket carries every round's refusals, and a wager screen is not the place a
+ * bridge's `already_stepped` gets explained.
+ */
+export function gganbuRefusal(code: string, message: string): string | null {
+  const said = message.trim();
+  switch (code) {
+    case "invalid_wager":
+      // The ceiling is the server's arithmetic and is never recomputed here.
+      return said === "" ? "That stake is not allowed." : said;
+    case "floor_locked":
+      return said === "" ? "That prompt has closed." : said;
+    case "already_answered_item":
+      return said === "" ? "You are locked in." : said;
+    case "not_on_the_floor":
+      return said === "" ? "Your token was revoked. Back a player." : said;
+    case "wrong_round_phase":
+      return said === "" ? "No prompt is open." : said;
+    default:
+      return null;
+  }
+}
+
+/** A keystroke on the wager screen: a stake, or the side that commits it. */
+export type GganbuKeyPress =
+  | { readonly kind: "stake"; readonly amount: number }
+  | { readonly kind: "pick"; readonly pick: OverUnder };
+
+/**
+ * The keyboard for a wager, which is two decisions and therefore two keys.
+ *
+ * The digits set the stake, exactly as the trivia tiles answer to digits, and
+ * the arrows commit: **over is up**. `1`–`5` and not `1`–`2`, which is why
+ * this is not {@link paneKeyIndex} — on the bridge the digits *are* the two
+ * panes, and here they are the dial. O and U are here because the two buttons
+ * say OVER and UNDER and that is what a hand reaches for.
+ *
+ * No OS key repeat and no chords, for the reason every other key on this
+ * surface rejects them: a held key would be a stream of commitments at thirty
+ * a second, and in this round the first of them is final.
+ */
+export function gganbuKey(ev: {
+  readonly key: string;
+  readonly repeat: boolean;
+  readonly altKey: boolean;
+  readonly ctrlKey: boolean;
+  readonly metaKey: boolean;
+}): GganbuKeyPress | null {
+  if (ev.altKey || ev.ctrlKey || ev.metaKey || ev.repeat) return null;
+  if (ev.key === "ArrowUp" || ev.key === "o" || ev.key === "O") {
+    return { kind: "pick", pick: "over" };
+  }
+  if (ev.key === "ArrowDown" || ev.key === "u" || ev.key === "U") {
+    return { kind: "pick", pick: "under" };
+  }
+  if (ev.key.length === 1) {
+    const n = Number(ev.key);
+    if (Number.isInteger(n) && n >= 1 && n <= GGANBU_MAX_STAKE) {
+      return { kind: "stake", amount: n };
+    }
+  }
   return null;
 }
 

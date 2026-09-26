@@ -21,6 +21,8 @@ import {
   TUG_MISSES_TO_ELECTION,
   beatToleranceMs,
   checkpointsFor,
+  gganbuFloorView,
+  gganbuMeView,
   glassFloorView,
   glassMeView,
   pullTotals,
@@ -32,6 +34,7 @@ import { currentQuestion } from "../engine/trivia.ts";
 import { longestSlide, partsOf, slideMs } from "../engine/sendoff.ts";
 import type {
   ArcadeState,
+  GganbuPrompt,
   ParticipantId,
   Question,
   SendoffState,
@@ -41,10 +44,13 @@ import type {
 import type {
   ActivitySummary,
   ArcadeCell,
+  ArcadeGganbuRecap,
+  ArcadeGganbuView,
   ArcadeGlassRecapStep,
   ArcadeGlassStep,
   ArcadeGlassView,
   ArcadeMine,
+  ArcadeMineGganbu,
   ArcadeMineGlass,
   ArcadeMinePlanApply,
   ArcadeMineRecruitment,
@@ -814,6 +820,122 @@ export function arcadeTugFor(
 }
 
 /**
+ * Gganbu, projected. The round's secrecy rule is one field wide.
+ *
+ * Built from {@link gganbuFloorView}, which is the round's **only public
+ * view**, plus one read of `play.key` for the host and for the reveal — the
+ * same shape as Unseal's and the Bridge's, and for the same reason.
+ *
+ * What is absent, and absent by construction rather than by deletion:
+ *
+ * - **the wagers.** `gganbuFloorView()` carries `wagered`, a count, and does
+ *   not carry `play.wagers` at all, so nothing this function spreads can leak
+ *   a pick or a stake however carelessly it spreads it. That is not tidiness:
+ *   both halves of a pair answer the **same prompt**, sitting next to each
+ *   other, so a rival's pick or a rival's stake is the answer arriving early
+ *   from the one person in the room betting against them. A pick and a stake
+ *   reach exactly one phone, their own, through `gganbuMeView` — see
+ *   {@link arcadeMineFor}.
+ * - **the answer key.** `answer`, `note` and `verify` live in
+ *   `ArcadePlay.key`, which the public view does not carry. The reveal below is
+ *   the one read of it in this function, and `verify` does not travel even
+ *   then: it is the author's own "I checked this one least", and a flag beside
+ *   a settled prompt is a hint that the note about to be read out might be
+ *   wrong. The console gets it, because the console is who checks.
+ *
+ * `tokens` is public and safe for a reason worth stating, because on its face
+ * it looks like the dangerous field: it only ever holds **settled** counts.
+ * `settleGganbuPrompt` is the only place a token moves and it runs on
+ * `nextPrompt`, so a count on this view cannot twitch while a prompt is open —
+ * and a count that twitched when a wager landed *would be* the wager. It goes
+ * to the two surfaces that draw the room and not to a phone, for the reason
+ * `planApply.finishOrder` does not: a phone shows one person's round, and
+ * theirs plus their gganbu's is what one person's round is.
+ *
+ * `richest` is that same public standing with the engine's tie rule already
+ * applied, exactly as `tug.leaders` is: the rule is the engine's, and a surface
+ * with its own copy would one day name a winner the server does not. It does
+ * **not** wait for the reveal the way `unseal.shapes[].fastest` does, and the
+ * difference is what kind of fact each one is. An open tin is a settled result
+ * — nothing can close it again — so naming the fastest on the big screen hands
+ * the Lounge a certainty to back. The richest hand in Gganbu is a hand with
+ * prompts left to lose, so backing it is a bet, which is what the Lounge is
+ * for.
+ */
+export function arcadeGganbuFor(
+  state: SessionState,
+  arcade: ArcadeState,
+  role: Role,
+): ArcadeGganbuView | undefined {
+  const play = arcade.play;
+  if (play?.kind !== "gganbu") return undefined;
+  const isHost = role === "host";
+  const privileged = isHost || role === "screen";
+  const running = arcade.phase === "running";
+  const revealed = arcade.phase === "reveal";
+  // The round card is not the prompt. The host has it throughout, because the
+  // host is the one about to read it out.
+  const shown = isHost || running || revealed;
+
+  // The only public view there is. Everything below is a subset of it.
+  const floor = gganbuFloorView(play);
+
+  const base: ArcadeGganbuView = {
+    at: floor.at,
+    of: floor.of,
+    secondsPerPrompt: play.secondsPerPrompt,
+    startTokens: play.startTokens,
+    // A count, on every surface. It names nobody, and *that* a gganbu has
+    // locked in is the one thing the round lets a rival learn — from their own
+    // frame's `rivalCommitted`, not from this one.
+    wagered: floor.wagered,
+  };
+
+  const extra: {
+    prompt?: GganbuPrompt;
+    promptEndsAt?: number;
+    tokens?: Readonly<Record<ParticipantId, number>>;
+    richest?: readonly number[];
+    pairs?: Readonly<Record<ParticipantId, ParticipantId>>;
+    housed?: readonly number[];
+    recap?: readonly ArcadeGganbuRecap[];
+  } = {};
+
+  if (shown && floor.prompt !== undefined) extra.prompt = floor.prompt;
+  // Omitted rather than nulled while the round card is up, and that includes
+  // for the host: the play state carries a zero until `beginPlay`, and a
+  // surface handed a zero draws a countdown that expired in 1970 at a room
+  // looking at a round card.
+  if (running) extra.promptEndsAt = floor.promptEndsAt;
+  if (privileged) {
+    extra.tokens = floor.tokens;
+    extra.richest = numbersOf(arcade, state, floor.richest);
+    extra.pairs = play.rivals;
+    // Rides with `pairs` rather than stopping at the console: a screen given
+    // the pairs alone would draw a dissolved pair as a live one, and tell two
+    // people they are still rivals when the engine has housed them both.
+    extra.housed = numbersOf(arcade, state, Object.keys(play.housed));
+  }
+  // The one read of the answer key in this function, and the only one outside
+  // the engine. Everything above was built from the public view.
+  if (isHost || revealed) {
+    extra.recap = play.board.map((prompt, i) => {
+      const answer = play.key[i];
+      return {
+        cue: prompt.cue,
+        threshold: prompt.threshold,
+        answer: answer?.answer ?? "over",
+        note: answer?.note ?? "",
+        // Host only, and omitted rather than falsed so the flag is not in the
+        // bytes of a frame the room can read.
+        ...(isHost ? { verify: answer?.verify ?? false } : {}),
+      };
+    });
+  }
+  return { ...base, ...extra };
+}
+
+/**
  * The Glass Bridge, projected. This is the round's whole security surface.
  *
  * Built from {@link glassFloorView}, not from `play`, and that is the point
@@ -955,6 +1077,7 @@ export function arcadeViewFor(
   const planApply = arcadePlanApplyFor(state, arcade, role);
   const unseal = arcadeUnsealFor(state, arcade, role);
   const tug = arcadeTugFor(state, arcade, role);
+  const gganbu = arcadeGganbuFor(state, arcade, role);
   const glass = arcadeGlassFor(state, arcade, role);
   return {
     activityId: arcade.activityId,
@@ -970,6 +1093,7 @@ export function arcadeViewFor(
     ...(planApply ? { planApply } : {}),
     ...(unseal ? { unseal } : {}),
     ...(tug ? { tug } : {}),
+    ...(gganbu ? { gganbu } : {}),
     ...(glass ? { glass } : {}),
   };
 }
@@ -1047,6 +1171,33 @@ export function arcadeMineFor(
     };
   }
 
+
+  // Gganbu, straight off the engine's own per-player view — which is the only
+  // way a pick or a stake leaves the server at all. Their hand, their gganbu's
+  // *settled* hand, whether their gganbu has locked in, and their own wager.
+  //
+  // `wager` is theirs because they made it. Their gganbu's is not here and is
+  // not anywhere else either: `gganbuFloorView` carries a count, not the
+  // wagers, so there is no frame on this wire that pairs anybody but the
+  // reader with a pick. `rivalTokens` is read off `play.tokens`, which only
+  // moves when a prompt settles, so it cannot twitch mid-prompt and be the
+  // wager by arithmetic.
+  let gganbu: ArcadeMineGganbu | undefined;
+  if (play?.kind === "gganbu") {
+    const me = gganbuMeView(arcade, play, pid);
+    gganbu = {
+      tokens: me.tokens,
+      rival: me.rival,
+      rivalTokens: me.rivalTokens,
+      // *That* they have wagered, never what. The one tell the round allows,
+      // and the reason it is a round: reading your gganbu is the game.
+      rivalCommitted: me.rivalCommitted,
+      committed: me.committed,
+      wager: me.wager,
+      revoked: me.revoked,
+    };
+  }
+
   // The Glass Bridge, straight off the engine's own per-player view, which is
   // exported as the leak-free default: it carries their wave, whether it is
   // their turn, how far along they are and whether their own pane held. It
@@ -1083,6 +1234,7 @@ export function arcadeMineFor(
     ...(planApply ? { planApply } : {}),
     ...(unseal ? { unseal } : {}),
     ...(tug ? { tug } : {}),
+    ...(gganbu ? { gganbu } : {}),
     ...(glass ? { glass } : {}),
   };
 }
@@ -1416,7 +1568,15 @@ function hostArcade(arcade: ArcadeState): NonNullable<
             // whether anybody is still choosing.
             play?.kind === "unseal"
             ? Object.keys(play.pick)
-            : [],
+            : // Gganbu: who has wagered on the open prompt. The keys of
+              // `wagers` and never its values — a value is a pick and a stake,
+              // and the console is three feet from the host's mouth. The host's
+              // question is only whether both halves of every pair have locked
+              // in, which is what decides whether they settle now or wait, and
+              // the keys answer it on their own.
+              play?.kind === "gganbu"
+              ? Object.keys(play.wagers)
+              : [],
     drained: Object.entries(arcade.standing)
       .filter(([, st]) => st === "drained")
       .map(([pid]) => pid),

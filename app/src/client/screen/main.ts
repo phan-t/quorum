@@ -23,6 +23,8 @@ import { QuorumClient } from "../shared/net.ts";
 import { mockBadge, mockTransport, readMockConfig } from "../shared/mock.ts";
 import {
   ARCADE_ROUND_CARD,
+  GGANBU_HOUSE,
+  GGANBU_SIDE,
   HOW_TO_PLAY,
   ARCADE_ROUND_LABEL,
   HOUSE,
@@ -37,6 +39,8 @@ import {
   bridgeSteps,
   finalRevealMs,
   formatCountdown,
+  gganbuQuestion,
+  gganbuStanding,
   gridEntries,
   playerName,
   playerTag,
@@ -50,6 +54,7 @@ import {
   unsealRevealHead,
   waveRosters,
   wipeFraction,
+  type GridEntry,
   type ViewKind,
 } from "../shared/view.ts";
 import { drawQr, encodeQr } from "../shared/qr.ts";
@@ -1192,6 +1197,151 @@ function sceneTrivia(): Scene {
 
 const ARCADE_TICK_MS = 60;
 
+/*
+ * Gganbu's own words. The announcer copy is not here — the revocation is a
+ * beat both surfaces say, so it lives in `HOUSE` as the pair
+ * `gganbuRevoked` (the phone's, second person) and `gganbuRevokedOn` (the
+ * room's, naming the player), exactly as the shattered tin is split.
+ *
+ * What is left below is this screen's own: a head line, a seat label and a
+ * reveal headline are layout rather than announcer copy, and no other
+ * surface says them.
+ */
+/**
+ * The house, as a seat on the board. A word and not a number, because it is
+ * not a player and the board is otherwise all player numbers.
+ */
+const GGANBU_HOUSE_SEAT = "HOUSE";
+/**
+ * The reveal's headline: DESIGN.md's own round card, at the moment it stops
+ * being a warning and becomes what happened.
+ */
+const GGANBU_REVEAL_TITLE = "Tokens expire at the end of the round.";
+/**
+ * How many may be named as the richest hand before the line stops naming them
+ * and starts counting them.
+ *
+ * Five, which is the runner ticker's number a hundred lines down, and for the
+ * same reason. `richest` is every hand tied at the top and a tie is real, so
+ * the opening frame of the round has the whole room in it — everybody holds
+ * ten, and there is no leader to back. A line that listed twenty-seven numbers
+ * would be saying "nobody is ahead" in the most expensive way available; the
+ * count says it in four words and the stars come back when there is something
+ * to put one on.
+ */
+const GGANBU_RICHEST_MAX = 5;
+
+/** One side of a pair on the Desktop's board: a player, or the house. */
+interface GganbuSeat {
+  /** The player number, or null for the house, which is not a player. */
+  readonly num: number | null;
+  /** Settled tokens. The house holds its opening stake and wagers nothing. */
+  readonly tokens: number;
+  /** Reached zero: token revoked, drained to the Lounge. */
+  readonly revoked: boolean;
+  readonly away: boolean;
+  /** Tied at the top of the room, when there are few enough to name. */
+  readonly richest: boolean;
+}
+
+interface GganbuPairCard {
+  readonly a: GganbuSeat;
+  /**
+   * The rival: another player, or a house seat for a dissolved pair and the odd
+   * one out. Null only when `pairs` never reached this surface at all, in which
+   * case the seat is drawn on its own rather than invented a rival.
+   */
+  readonly b: GganbuSeat | null;
+}
+
+/**
+ * Cut the room into pairs, the way the engine drew them.
+ *
+ * **`pairs` and `housed` are read together and there is no version of this that
+ * reads one of them.** A board built from `pairs` alone draws a dissolved pair
+ * as a live one — two people told they are still rivals after the engine has
+ * already put them both on the house. `houseThePairOf` marks both halves, and
+ * this dissolves on *either* being marked, so a board cannot end up with one
+ * seat facing the house and the other facing them.
+ *
+ * Three ways to be facing the house, and they are deliberately one picture,
+ * because the engine makes them one case in `rivalOf`: the odd one out, a player
+ * who was already gone when the pairs were drawn, and a pair that dissolved
+ * mid-round. All three are up against a hand holding the opening stake and
+ * wagering nothing.
+ *
+ * Revocation is **not** a dissolution and does not go through here. The engine
+ * leaves a revoked player in `rivals` on nothing, and their gganbu is still
+ * scored against them — so the pair stays whole with one seat on zero. That is
+ * the difference between the gold seat and the dashed card.
+ *
+ * Ordered by the lower player number of each pair, and each pair's own seats by
+ * number too. Nothing on this surface may depend on the order `grid` arrives in:
+ * a board that re-sorted itself as the tokens moved would be thirty numbers
+ * changing places on a compressed video tile, which is the one kind of motion
+ * DESIGN.md rules out outright.
+ */
+function gganbuPairCards(
+  gg: NonNullable<ArcadeView["gganbu"]>,
+  entries: readonly GridEntry[],
+): GganbuPairCard[] {
+  const byPid = new Map(entries.map((e) => [e.pid, e]));
+  const pairs = gg.pairs;
+  const housed = new Set(gg.housed ?? []);
+  const leaders = gg.richest ?? [];
+  // Above the cap nobody is starred: see GGANBU_RICHEST_MAX. The line above the
+  // board counts them instead, which is the true thing to say about a room that
+  // is still level.
+  const starred =
+    leaders.length > GGANBU_RICHEST_MAX ? new Set<number>() : new Set(leaders);
+  const seat = (e: GridEntry): GganbuSeat => ({
+    num: e.playerNumber,
+    // `?? startTokens` is `tokensOf` in engine/arcade.ts: a latecomer with no
+    // entry holds the opening stake rather than nothing.
+    tokens: gg.tokens?.[e.pid] ?? gg.startTokens,
+    revoked: e.standing === "drained",
+    away: e.away,
+    richest: starred.has(e.playerNumber),
+  });
+  const house = (): GganbuSeat => ({
+    num: null,
+    tokens: gg.startTokens,
+    revoked: false,
+    away: false,
+    richest: false,
+  });
+
+  const done = new Set<string>();
+  const cards: GganbuPairCard[] = [];
+  for (const e of entries) {
+    if (done.has(e.pid)) continue;
+    const rivalPid = pairs?.[e.pid];
+    const rival = rivalPid === undefined ? undefined : byPid.get(rivalPid);
+    // Neither a rival nor a place on the Floor, so not in this round. In
+    // practice nobody: `startRound` puts the whole roster back on the Floor and
+    // draws the pairs from it. It is checked so that a seat the round does not
+    // know about is left off the board rather than drawn facing the house.
+    if (rivalPid === undefined && e.standing !== "floor") continue;
+    done.add(e.pid);
+    if (pairs === undefined) {
+      cards.push({ a: seat(e), b: null });
+      continue;
+    }
+    const dissolved =
+      housed.has(e.playerNumber) ||
+      (rival !== undefined && housed.has(rival.playerNumber));
+    if (rival === undefined || dissolved) {
+      cards.push({ a: seat(e), b: house() });
+      continue;
+    }
+    done.add(rival.pid);
+    const [lo, hi] =
+      e.playerNumber <= rival.playerNumber ? [e, rival] : [rival, e];
+    cards.push({ a: seat(lo), b: seat(hi) });
+  }
+  return cards.sort((x, y) => (x.a.num ?? 0) - (y.a.num ?? 0));
+}
+
 /**
  * The doll: a twelve-foot Terraform logo.
  *
@@ -1374,6 +1524,77 @@ function sceneArcade(): Scene {
     tugWins,
   ]);
 
+  /* Gganbu */
+  const ggHead = h("p", { class: "mono s-gg-head" });
+  const ggCue = h("p", { class: "display s-gg-cue" });
+  const ggThreshold = h("p", { class: "mono s-gg-threshold" });
+  const ggClockFill = h("div", { class: "s-gg-clock-fill" });
+  const ggClockNum = h("span", { class: "mono s-gg-clock-num" });
+  const ggClock = h("div", { class: "s-gg-clock" }, [
+    h("div", { class: "s-gg-clock-track", attrs: { "aria-hidden": "true" } }, [
+      ggClockFill,
+    ]),
+    ggClockNum,
+  ]);
+  const ggWageredFill = h("div", { class: "s-gg-wagered-fill" });
+  const ggWageredText = h("span", { class: "mono s-gg-wagered-text" });
+  /**
+   * How many have wagered, as a bar filling toward the room — and never who.
+   *
+   * Safe for the reason trivia's "24 of 27 answered" is: it names nobody. The
+   * one thing a rival is allowed to learn is *that* their gganbu has locked in,
+   * and they learn it from their own phone's `rivalCommitted`, never from here.
+   * There is no field on this frame carrying a pick or a stake — see
+   * `ArcadeGganbuView` — so there is nothing on this surface to be careful
+   * with, which is the point of building the round that way.
+   */
+  const ggWagered = h("div", { class: "s-gg-wagered" }, [
+    h("div", { class: "s-gg-wagered-track", attrs: { "aria-hidden": "true" } }, [
+      ggWageredFill,
+    ]),
+    ggWageredText,
+  ]);
+  /**
+   * The open prompt: the cue, the threshold, the clock, the count.
+   *
+   * Up while the round runs and down at the reveal, where the recap carries all
+   * six questions with their answers attached — a seventh copy of the one that
+   * happened to be last would be the screen repeating itself in display type.
+   */
+  const ggPrompt = h("div", { class: "s-gg-prompt", attrs: { hidden: true } }, [
+    ggCue,
+    ggThreshold,
+    ggClock,
+    ggWagered,
+  ]);
+  const ggRichest = h("p", { class: "mono s-gg-richest", attrs: { hidden: true } });
+  const ggPairs = h("div", { class: "s-gg-pairs", role: "list" });
+  const ggRecap = h("ol", { class: "s-gg-recap", attrs: { hidden: true } });
+  /**
+   * The pair board, which is the dormitory grid re-cut into rivals.
+   *
+   * It takes the space the grid was using rather than covering it, the same
+   * rule the bridge and the tins keep — a full-bleed panel over this surface is
+   * how the Desktop ends up showing the room a rectangle. It *is* the grid for
+   * the length of this round: every player number is on it, a revoked seat goes
+   * gold exactly as a drained cell does, and the host can leave it up.
+   *
+   * Two things it draws and one it cannot. It draws settled token counts, which
+   * are public because `settleGganbuPrompt` is the only place a token moves, so
+   * a count on this board cannot twitch while a prompt is open. It draws the
+   * richest hand in the room, live and not at the reveal, because that hand has
+   * prompts left to lose and backing it is a bet — which is what the Lounge is
+   * for. It cannot draw a pick or a stake: there is no `wagers` field on any
+   * frame of any role in any phase.
+   */
+  const gganbu = h("section", { class: "s-gganbu", attrs: { hidden: true } }, [
+    ggHead,
+    ggPrompt,
+    ggRichest,
+    ggPairs,
+    ggRecap,
+  ]);
+
   /**
    * The win beat, which this surface did not have.
    *
@@ -1409,6 +1630,7 @@ function sceneArcade(): Scene {
     bridge,
     unseal,
     tug,
+    gganbu,
     // Directly under the round's own picture, because that is what it is about:
     // the rope the room is watching, or the four tins it is watching fill.
     winLog,
@@ -1423,7 +1645,18 @@ function sceneArcade(): Scene {
 
   let ticker: ReturnType<typeof setInterval> | null = null;
   let lastState: RenderState | null = null;
-  let struck = new Set<string>();
+  /**
+   * The drain log's memory: who carried a strike on the last frame.
+   *
+   * `null` and not an empty set, which is the fix for #13. A drain exists only
+   * between two frames — the engine sends state and never events — so the first
+   * frame a Desktop sees has to *seed* this and say nothing. Seeded empty, a tab
+   * reopened two revocations into Gganbu, or reloaded halfway across the bridge,
+   * read every strike already on the grid as news and replayed the lot. The win
+   * beat below keeps the same distinction for the same reason: "no reading yet"
+   * and "a reading of nothing" are different things.
+   */
+  let struck: Set<string> | null = null;
   let drainTimer: ReturnType<typeof setTimeout> | null = null;
   // The win beat's memory: the last frame's pulls won, and the last frame's
   // open tins per shape. Both start empty rather than at zero, because "no
@@ -1478,8 +1711,11 @@ function sceneArcade(): Scene {
     const now = new Set(
       arcade.grid.filter((c) => c.struck).map((c) => String(c.playerNumber)),
     );
-    const fresh = [...now].filter((n) => !struck.has(n));
+    const seen = struck;
     struck = now;
+    // The first frame seeds the baseline and announces nothing. See `struck`.
+    if (seen === null) return;
+    const fresh = [...now].filter((n) => !seen.has(n));
     if (fresh.length === 0) return;
     const g = arcade.glass;
     /**
@@ -1523,20 +1759,40 @@ function sceneArcade(): Scene {
     // strikes, and the first one stays between the tin and the phone holding it.
     // A Desktop that named whoever is one tap from the Lounge would be handing
     // the Lounge a result to bet against for nothing.
+    //
+    // Gganbu's error is its own too — DESIGN.md: *Token revoked. TTL exceeded.
+    // Player 017 drained.* — and it goes in the flow under the pair board for
+    // the reason the other two do. Three at most, because a prompt settles the
+    // whole room at once and five people can hit zero on the same wager.
+    //
+    // The revocation and not the wager that caused it. A player's stake is on
+    // exactly one phone and there is no field on this frame that carries it, so
+    // there is nothing to leak; what would be wrong is the arithmetic — *lost 4
+    // on under* names the pick on a prompt whose answer does not reach this
+    // surface until the reveal, and that answer is the next five prompts' worth
+    // of the round.
     const tins = arcade.unseal !== undefined;
-    setClass(drainLog, "inline", g !== undefined || tins);
+    const wagers = arcade.gganbu !== undefined;
+    const inflow = g !== undefined || tins || wagers;
+    setClass(drainLog, "inline", inflow);
     replace(drainLog, [
-      g || tins
+      inflow
         ? null
         : h("p", { class: "mono s-drain-error", text: STATE_LOCK_ERROR }),
       ...fresh
         .map(Number)
         .sort((a, b) => a - b)
-        .slice(0, g || tins ? 3 : 6)
+        .slice(0, inflow ? 3 : 6)
         .map((n) =>
           h("p", {
             class: "mono s-drain-who",
-            text: g ? glassLine(n) : tins ? HOUSE.unsealShatter(n) : HOUSE.drained(n),
+            text: g
+              ? glassLine(n)
+              : tins
+                ? HOUSE.unsealShatter(n)
+                : wagers
+                  ? HOUSE.gganbuRevokedOn(n)
+                  : HOUSE.drained(n),
           }),
         ),
     ]);
@@ -2068,6 +2324,277 @@ function sceneArcade(): Scene {
   };
 
   /**
+   * Gganbu's head line and its clock, which are the two things that move
+   * without a frame arriving.
+   *
+   * Called from `paintGganbu` and from the arcade ticker, exactly as the other
+   * rounds' clocks are, and off the absolute epoch the server sent rather than
+   * off a duration measured from whenever this frame turned up. `promptEndsAt`
+   * is **omitted and not zeroed** while the round card is up, so the bar and the
+   * number go away with it instead of drawing a countdown that expired in 1970.
+   */
+  const paintGganbuClock = (arcade: ArcadeView): void => {
+    const gg = arcade.gganbu;
+    if (!gg) return;
+    const running = arcade.phase === "running";
+    const left = running
+      ? remainingMs(gg.promptEndsAt ?? null, serverNow())
+      : null;
+    setText(
+      ggHead,
+      arcade.phase === "reveal"
+        ? // The scoring rule, at the one moment the room needs it: the board
+          // under this line is about to be read as a result, and the two halves
+          // of the result are the tokens and the +10.
+          `${gg.of} PROMPTS · TOKENS CONVERT AT 1:1 · AHEAD OF YOUR GGANBU TAKES +10`
+        : running
+          ? [
+              `PROMPT ${gg.at + 1} OF ${gg.of}`,
+              `${gg.secondsPerPrompt}s EACH`,
+              left === null ? null : formatCountdown(left),
+            ]
+              .filter((x) => x !== null)
+              .join(" · ")
+          : // The round card's own arithmetic, which is what the card's second
+            // line — "You each hold ten tokens" — is asking the room to check.
+            [
+              `${gg.of} PROMPTS`,
+              `${gg.secondsPerPrompt}s EACH`,
+              `${gg.startTokens} TOKENS EACH`,
+            ].join(" · "),
+    );
+    ggClock.hidden = left === null;
+    // The fraction is read off `secondsPerPrompt` — the rule the server sent —
+    // rather than off a `promptStartedAt` this view does not carry. Every prompt
+    // in the round is that long, which is what makes the bar honest.
+    const span = gg.secondsPerPrompt * 1_000;
+    ggClockFill.style.width =
+      left === null || span <= 0
+        ? "0%"
+        : `${Math.min(100, Math.max(0, (left / span) * 100)).toFixed(1)}%`;
+    setText(ggClockNum, left === null ? "" : formatCountdown(left));
+  };
+
+  /**
+   * Gganbu: the pairs, the tokens, and one question at a time.
+   *
+   * The round is the most social thing in the arcade and the least visible, so
+   * what this surface is for is drawing the shape of it — who is facing whom,
+   * and who is holding what — while carrying none of the round's secret. That is
+   * not a discipline kept here: there is no `wagers` field on any frame of any
+   * role in any phase, so a pick and a stake cannot reach this file. What can is
+   * a count of how many have locked in, which names nobody, and token counts
+   * that only ever move when a prompt has closed.
+   *
+   * Three decisions worth stating:
+   *
+   * `pairs` and `housed` are read **together**, always. A board drawn from
+   * `pairs` alone shows a dissolved pair as a live one and tells two people they
+   * are still rivals after the engine has housed them both — and the engine does
+   * house both, so this reads either half and dissolves on either.
+   *
+   * `richest` is drawn **now**, not at the reveal, unlike Unseal's fastest tin.
+   * An open tin is settled and backing it is a certainty; the richest hand here
+   * has prompts left to lose, so backing it is a bet, which is what the Lounge
+   * is for. Its one wrinkle is that a tie is real and the round opens with the
+   * whole room tied on ten — see {@link GGANBU_RICHEST_MAX}.
+   *
+   * A revoked seat stays on its card. Revocation is not a dissolution: the
+   * engine leaves the pair intact with one half on nothing, and their gganbu is
+   * still being scored against them. So the seat goes gold and says REVOKED
+   * where a housed pair says HOUSE, and the two are not the same picture.
+   */
+  const paintGganbu = (state: RenderState, arcade: ArcadeView): void => {
+    const gg = arcade.gganbu;
+    if (!gg) {
+      gganbu.hidden = true;
+      return;
+    }
+    gganbu.hidden = false;
+    const revealed = arcade.phase === "reveal";
+    const running = arcade.phase === "running";
+    setAttr(gganbu, "data-phase", arcade.phase);
+    paintGganbuClock(arcade);
+
+    // The prompt arrives with the round and not with the card, so there is
+    // nothing to draw here until then. At the reveal it goes down: the recap
+    // carries all six questions with their answers attached, and a seventh copy
+    // of whichever was last would be the screen repeating itself in display
+    // type.
+    ggPrompt.hidden = !running || gg.prompt === undefined;
+    if (running && gg.prompt !== undefined) {
+      setText(ggCue, gg.prompt.cue);
+      // SPEC.md's own phrasing — "over or under 2011?" — and one line rather
+      // than two tiles. Two tiles on this surface read as a distribution, and
+      // there is no distribution to put in them: a pick reaches one phone, and
+      // two permanently empty bars would look like a bug in the round.
+      setText(
+        ggThreshold,
+        `${GGANBU_SIDE.over.word} OR ${GGANBU_SIDE.under.word} ${gg.prompt.threshold}`,
+      );
+    }
+    // The denominator is the Floor. A revoked token cannot be staked — the
+    // engine refuses the wager — so the Lounge is not being counted as silent.
+    const eligible = arcade.onFloor;
+    ggWagered.hidden = !running;
+    ggWageredFill.style.width =
+      eligible > 0
+        ? `${Math.min(100, (gg.wagered / eligible) * 100).toFixed(1)}%`
+        : "0%";
+    setText(ggWageredText, `${gg.wagered} OF ${eligible} WAGERED`);
+
+    const leaders = gg.richest ?? [];
+    const held = Object.values(gg.tokens ?? {});
+    const top = held.length === 0 ? 0 : Math.max(...held);
+    const crowded = leaders.length > GGANBU_RICHEST_MAX;
+    ggRichest.hidden = leaders.length === 0;
+    setText(
+      ggRichest,
+      leaders.length === 0
+        ? ""
+        : crowded
+          ? // The truth about the opening frame, said in four words instead of
+            // twenty-seven numbers: nobody is ahead yet, so there is nothing to
+            // put a star on and nothing to back.
+            `${leaders.length} HANDS LEVEL AT THE TOP · ${top} TOKENS`
+          : `RICHEST · ${top} TOKENS · ${leaders
+              .map((n) => `★ ${playerTag(n)}`)
+              .join("  ·  ")}`,
+    );
+
+    /**
+     * One seat. The mark is a word before it is a hue, because nothing on this
+     * surface may be told apart by colour alone: AHEAD becomes +10 at the
+     * reveal, and REVOKED beats both — a seat on nothing is not winning
+     * anything, whatever the other half of the card is holding.
+     */
+    const seatEl = (s: GganbuSeat, other: GganbuSeat | null): HTMLElement => {
+      // `gganbuStanding` and not `>`, so the comparison the +10 turns on has one
+      // copy in the client and the phone and this screen cannot disagree about
+      // who is in front. "Level pays nobody" is in there too.
+      const ahead =
+        other !== null && gganbuStanding(s.tokens, other.tokens) === "ahead";
+      return h(
+        "div",
+        {
+          class: "s-gg-seat",
+          attrs: {
+            "data-house": s.num === null ? "yes" : "no",
+            "data-ahead": ahead && !s.revoked ? "yes" : "no",
+            "data-revoked": s.revoked ? "yes" : "no",
+            "data-away": s.away ? "yes" : "no",
+            "data-richest": s.richest ? "yes" : "no",
+          },
+        },
+        [
+          h("span", {
+            class: "mono s-gg-seat-num",
+            // A number, or the word. DESIGN.md: the nickname is on the phone
+            // only, where the person it belongs to is the only reader.
+            text: s.num === null ? GGANBU_HOUSE_SEAT : playerTag(s.num),
+          }),
+          h("span", { class: "mono s-gg-seat-tokens", text: String(s.tokens) }),
+          h("span", {
+            class: "mono s-gg-seat-mark",
+            text: s.revoked
+              ? "REVOKED"
+              : !ahead
+                ? ""
+                : // The house takes nothing. It is not a player and it is not
+                  // scored, so it is ahead of you and it is never +10 — which is
+                  // also the difference between losing to your gganbu and losing
+                  // to a hand that stood still.
+                  s.num === null || !revealed
+                  ? "AHEAD"
+                  : "+10",
+          }),
+        ],
+      );
+    };
+
+    const spoken = (s: GganbuSeat): string =>
+      [
+        // `GGANBU_HOUSE.name`, so the announcer's name for the house is the same
+        // one the phone's own card uses. Its `tag` is not, though: a board of
+        // three-digit numbers cannot afford a seat labelled "—", which reads as
+        // missing rather than as the House, so the word goes on the tile.
+        s.num === null ? GGANBU_HOUSE.name : playerName(s.num),
+        `${s.tokens} token${s.tokens === 1 ? "" : "s"}`,
+        s.revoked ? "revoked" : null,
+        s.richest ? "richest in the room" : null,
+      ]
+        .filter((x) => x !== null)
+        .join(", ");
+
+    replace(
+      ggPairs,
+      gganbuPairCards(gg, gridEntries(arcade, state.roster)).map((card) =>
+        h(
+          "div",
+          {
+            class: "s-gg-pair",
+            role: "listitem",
+            attrs: {
+              // A dissolved pair is dashed as well as labelled, so the two
+              // pictures differ in shape and not only in a word.
+              "data-house": card.b?.num === null ? "yes" : "no",
+              "aria-label":
+                card.b === null
+                  ? spoken(card.a)
+                  : `${spoken(card.a)}, against ${spoken(card.b)}`,
+            },
+          },
+          [
+            seatEl(card.a, card.b),
+            h("span", {
+              class: "mono s-gg-vs",
+              // "Level pays nobody", said at the only moment it is final.
+              text:
+                card.b === null
+                  ? ""
+                  : revealed && card.a.tokens === card.b.tokens
+                    ? "LEVEL"
+                    : "VS",
+            }),
+            card.b === null ? null : seatEl(card.b, card.a),
+          ],
+        ),
+      ),
+    );
+
+    // The reveal, which is the first frame on which this surface has the answers
+    // at all. Both halves of each row: the call, and the note, which is the
+    // thing somebody actually learns and which the host reads out anyway.
+    const recap = gg.recap ?? [];
+    ggRecap.hidden = recap.length === 0;
+    if (recap.length > 0) {
+      replace(
+        ggRecap,
+        recap.map((item, i) =>
+          h("li", { class: "s-gg-row" }, [
+            h("span", { class: "mono s-gg-row-num", text: String(i + 1) }),
+            // `gganbuQuestion` and `GGANBU_SIDE`, so the question and the two
+            // words are phrased once for the client: the room reads the question
+            // here in the same shape the phone asked it in, which is the point of
+            // a recap.
+            h("span", { class: "s-gg-row-q", text: gganbuQuestion(item) }),
+            h("span", { class: "mono s-gg-row-answer" }, [
+              // A glyph and the word, never the glyph alone.
+              h("span", {
+                class: "s-gg-row-arrow",
+                attrs: { "aria-hidden": "true" },
+                text: GGANBU_SIDE[item.answer].glyph,
+              }),
+              h("span", { text: GGANBU_SIDE[item.answer].word }),
+            ]),
+            h("span", { class: "s-gg-row-note", text: item.note }),
+          ]),
+        ),
+      );
+    }
+  };
+
+  /**
    * The ticker's rows, rebuilt only when the numbers on them changed.
    *
    * `paintLight` runs on every animation tick, because the wipe does — so
@@ -2145,6 +2672,7 @@ function sceneArcade(): Scene {
       bridge.hidden = true;
       unseal.hidden = true;
       tug.hidden = true;
+      gganbu.hidden = true;
       winLog.hidden = true;
       setText(counts, "");
       light.hidden = true;
@@ -2173,7 +2701,13 @@ function sceneArcade(): Scene {
     const onRope =
       arcade.round === "tug_of_raft" &&
       (arcade.phase === "running" || arcade.phase === "reveal");
-    grid.hidden = onBridge || onTins || onRope;
+    // Gganbu's board *is* the dormitory grid, re-cut into rivals: every player
+    // number is on it and a revoked seat goes gold exactly as a drained cell
+    // does. So it takes the grid's space from the round card onward — the card
+    // says "You have been paired", and the board is the answer to the only
+    // question that sentence raises — and gives it back at `idle`.
+    const onPairs = arcade.round === "gganbu" && arcade.phase !== "idle";
+    grid.hidden = onBridge || onTins || onRope || onPairs;
     counts.hidden = grid.hidden;
     paintGrid(state, arcade);
     paintDrains(arcade);
@@ -2201,6 +2735,14 @@ function sceneArcade(): Scene {
       // twenty seconds working rather than being waited out.
       if (arcade.round === "unseal" && arcade.phase === "card") paintUnseal(arcade);
       else unseal.hidden = true;
+      // Gganbu keeps its board up against the card for the same reason, and its
+      // card is the one that most needs it: "You have been paired. You each hold
+      // ten tokens" is a sentence about two facts the room cannot check, and the
+      // board is both of them. The pairs are drawn at `startRound`, so they are
+      // on this frame; the prompt is not, and is not drawn.
+      if (arcade.round === "gganbu" && arcade.phase === "card") {
+        paintGganbu(state, arcade);
+      } else gganbu.hidden = true;
       // Between rounds the headline is always the next game, never a count of
       // who is left — DESIGN.md is explicit that the grid says that, quietly.
       const between = arcade.phase === "idle";
@@ -2254,6 +2796,24 @@ function sceneArcade(): Scene {
 
     stair.hidden = true;
     replace(cardLines, []);
+
+    // First in the chain below, which means this branch hides every other
+    // round's panel and the one line after it hides this one for all of them.
+    if (arcade.round === "gganbu") {
+      // DESIGN.md's own round card, at the moment it stops being a warning and
+      // becomes what happened: the tokens on the board are about to be points.
+      setText(title, arcade.phase === "reveal" ? GGANBU_REVEAL_TITLE : "");
+      setText(cue, "");
+      setText(recruitCount, "");
+      recap.hidden = true;
+      light.hidden = true;
+      bridge.hidden = true;
+      unseal.hidden = true;
+      tug.hidden = true;
+      paintGganbu(state, arcade);
+      return;
+    }
+    gganbu.hidden = true;
 
     if (arcade.round === "unseal") {
       // SPEC.md's own framing for the round, and the answer to the question
@@ -2381,6 +2941,11 @@ function sceneArcade(): Scene {
           .filter((x) => x !== null)
           .join(" · "),
       );
+    } else if (a?.round === "gganbu" && a.phase === "running") {
+      // Fifteen seconds is the tightest clock in the arcade and the only one
+      // with a stake on it, so it gets DESIGN.md's pair: the number for people
+      // who can read it and the shrinking bar for people who cannot.
+      paintGganbuClock(a);
     } else if (a?.round === "glass_bridge" && a.phase === "running" && lastState) {
       const g = a.glass;
       const left = remainingMs(g?.stepEndsAt ?? null, serverNow());

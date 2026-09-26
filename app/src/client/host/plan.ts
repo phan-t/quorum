@@ -17,12 +17,24 @@
  * tests.
  */
 
-/** The rounds that exist. Gganbu is designed, not built. */
+/**
+ * The rounds that exist. All six of them, in SPEC.md's order.
+ *
+ * Gganbu was the exception until the wire caught up with the engine. The note
+ * that used to sit here said "designed, not built", and it was true rather
+ * than stale: there was no `gganbu` arm in the `arcade.round` decoder and no
+ * `nextPrompt` on the wire, so a console that offered the round would have
+ * started nothing. Both are built now — `arcade.round`/`kind: "gganbu"` and
+ * `arcade.nextPrompt` are decoded, the server attaches the prompts and draws
+ * the seed, and `settleGganbuPrompt` moves the tokens — so the round is on
+ * this list and the picker no longer has a disabled pill on it.
+ */
 export type ArcadePick =
   | "recruitment"
   | "plan_apply"
   | "unseal"
   | "tug_of_raft"
+  | "gganbu"
   | "glass_bridge";
 
 export const ARCADE_PLAYABLE: readonly ArcadePick[] = [
@@ -30,6 +42,7 @@ export const ARCADE_PLAYABLE: readonly ArcadePick[] = [
   "plan_apply",
   "unseal",
   "tug_of_raft",
+  "gganbu",
   "glass_bridge",
 ];
 
@@ -42,12 +55,18 @@ export interface PlanEntry {
 export type ArcadePlan = readonly PlanEntry[];
 
 /**
- * All five, in the order SPEC.md numbers them. Recruitment first because it
+ * All six, in the order SPEC.md numbers them. Recruitment first because it
  * knocks nobody out and teaches the controls; the bridge last because it is
- * the one that empties the Floor. Tug of Raft sits between Unseal and where
- * Gganbu will go, which is where SPEC.md puts it and for the reason it gives
- * — "two elimination rounds back-to-back is a downer, and the arcade needs
- * one round that is pure noise".
+ * the one that empties the Floor. Tug of Raft sits between Unseal and Gganbu,
+ * which is where SPEC.md puts it and for the reason it gives — "two
+ * elimination rounds back-to-back is a downer, and the arcade needs one round
+ * that is pure noise".
+ *
+ * Gganbu is in the default order rather than swapped in for Tug of Raft. The
+ * argument for the swap is a real one and it belongs to the facilitator, not
+ * to this function: taking a round out is one click on the setup panel, and a
+ * default that quietly dropped a round somebody had run five times would be a
+ * running order nobody asked for.
  */
 export function defaultPlan(): ArcadePlan {
   return ARCADE_PLAYABLE.map((kind) => ({ kind, included: true }));

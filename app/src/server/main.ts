@@ -45,6 +45,7 @@ import { recruitmentRound } from "../arcade/recruitment.ts";
 import { glassBridgeRound } from "../arcade/glass-bridge.ts";
 import { unsealRound } from "../arcade/unseal.ts";
 import { tugOfRaftRound } from "../arcade/tug-of-raft.ts";
+import { gganbuRound } from "../arcade/gganbu.ts";
 import { formatErrors, importTriviaJson } from "../trivia/import.ts";
 import {
   formatErrors as formatSendoffErrors,
@@ -1219,6 +1220,7 @@ wss.on("connection", (socket: WebSocket, req: IncomingMessage) => {
       case "arcade.letter":
       case "arcade.docs":
       case "arcade.beat":
+      case "arcade.wager":
       case "arcade.back": {
         if (client.role !== "participant") {
           runtime.send(client, {
@@ -1257,7 +1259,15 @@ wss.on("connection", (socket: WebSocket, req: IncomingMessage) => {
                       ? runtime.unseal(client, msg.round, { type: "readDocs" }, now)
                       : msg.t === "arcade.beat"
                         ? runtime.beat(client, msg.round, now)
-                        : runtime.back(client, msg.pid, now);
+                        : msg.t === "arcade.wager"
+                          ? runtime.wager(
+                              client,
+                              msg.round,
+                              msg.pick,
+                              msg.amount,
+                              now,
+                            )
+                          : runtime.back(client, msg.pid, now);
         if (out.rejection) {
           runtime.send(client, {
             t: "refusedCmd",
@@ -1594,6 +1604,24 @@ function commandToEvent(cmd: HostCommand, runtime: SessionRuntime): Event | null
           ),
         };
       }
+      if (cmd.kind === "gganbu") {
+        return {
+          type: "startRound",
+          round: "gganbu",
+          // The prompts are not on the command, for the reason the Bridge's
+          // pairs are not: an `OverUnderItem` carries the answer, the note and
+          // the VERIFY flag, so six prompts from a browser would be the answer
+          // key from a browser. The seed is drawn here rather than taken, for
+          // Tug of Raft's reason one arm down — a console that chooses the
+          // seed is a console that can deal somebody their gganbu.
+          config: gganbuRound(
+            pickSeed(runtime.rng),
+            undefined,
+            cmd.secondsPerPrompt,
+            cmd.startTokens,
+          ),
+        };
+      }
       if (cmd.kind === "glass_bridge") {
         return {
           type: "startRound",
@@ -1637,6 +1665,11 @@ function commandToEvent(cmd: HostCommand, runtime: SessionRuntime): Event | null
     // engine has no randomness and the sides have to be reshuffled.
     case "arcade.nextPull":
       return { type: "nextPull", seed: pickSeed(runtime.rng) };
+    // No seed: the pairs are dealt once at `startRound` and hold for the whole
+    // round, which is the round — a gganbu you keep is the only reason
+    // reading them is worth anything.
+    case "arcade.nextPrompt":
+      return { type: "nextPrompt" };
     case "arcade.end":
       return { type: "endRound" };
     case "arcade.reveal":

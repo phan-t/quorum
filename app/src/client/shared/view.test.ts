@@ -21,6 +21,15 @@ import {
   clipName,
   floorEntries,
   formatCountdown,
+  gganbuKey,
+  gganbuPairResult,
+  gganbuQuestion,
+  gganbuRefusal,
+  gganbuRival,
+  gganbuSettlement,
+  gganbuStake,
+  gganbuStakes,
+  gganbuStanding,
   glassBackable,
   glassCrossing,
   gridEntries,
@@ -65,6 +74,9 @@ import {
   LOBBY_CHIP_MAX,
   RAFT_NAME_MAX,
   RAFT_QUEUE_MAX,
+  GGANBU_HOUSE,
+  GGANBU_MAX_STAKE,
+  PLAY_RULE,
   RUN_OF_SHOW,
   SEGMENT_BUILT,
   UNSEAL_NOTHING_SAID,
@@ -1599,5 +1611,300 @@ describe("Tug of Raft's win line", () => {
     // screen mid-round is the case, and naming somebody is better than a
     // silence that reads as a draw.
     assert.equal(tugPullWinner([0, 0], [1, 1]), 0);
+  });
+});
+
+
+/* ------------------------------------------------------------------ */
+/* Round 4 — Gganbu                                                    */
+/* ------------------------------------------------------------------ */
+
+describe("the stake a hand may offer", () => {
+  it("is one to five, which is SPEC.md's wager", () => {
+    assert.equal(GGANBU_MAX_STAKE, 5);
+    assert.deepEqual(gganbuStakes(10), [1, 2, 3, 4, 5]);
+    assert.deepEqual(gganbuStakes(5), [1, 2, 3, 4, 5]);
+  });
+
+  it("is never more than the hand holds", () => {
+    // The engine refuses a stake larger than the hand as `invalid_wager`, and a
+    // chip the server has already said no to is a chip that should not be
+    // drawn: pressing it would spend a fifteen-second prompt on a refusal.
+    assert.deepEqual(gganbuStakes(3), [1, 2, 3]);
+    assert.deepEqual(gganbuStakes(1), [1]);
+  });
+
+  it("is nothing at all for a hand with nothing in it", () => {
+    // Zero is a revoked token: they are in the Lounge and there is no dial.
+    assert.deepEqual(gganbuStakes(0), []);
+    assert.deepEqual(gganbuStakes(-2), []);
+  });
+});
+
+describe("the stake dial across a prompt", () => {
+  it("holds what it was set to while the hand can still afford it", () => {
+    // Somebody who staked three is very likely to stake three again, and
+    // re-picking it six times is six decisions the round did not ask for.
+    assert.equal(gganbuStake(3, 10), 3);
+    assert.equal(gganbuStake(5, 5), 5);
+  });
+
+  it("comes back inside the ceiling when the hand shrinks", () => {
+    // A player who staked five and lost down to two must not be left holding a
+    // control set to five: the only thing that would tell them is a refusal.
+    assert.equal(gganbuStake(5, 2), 2);
+    assert.equal(gganbuStake(4, 1), 1);
+  });
+
+  it("never sits below the minimum, and is nothing on an empty hand", () => {
+    assert.equal(gganbuStake(0, 10), 1);
+    assert.equal(gganbuStake(-3, 10), 1);
+    assert.equal(gganbuStake(3, 0), 0);
+  });
+});
+
+describe("the prompt, as a question", () => {
+  it("puts the threshold in the sentence, because the cue is only half of it", () => {
+    assert.equal(
+      gganbuQuestion({ cue: "Vault's default max lease TTL, in hours", threshold: "720" }),
+      "Vault's default max lease TTL, in hours — over or under 720?",
+    );
+  });
+
+  it("is nothing while the round card is up", () => {
+    // The server omits `prompt` rather than nulling it: the room is looking at
+    // the card, and a prompt sitting in a phone's JSON fifteen seconds early is
+    // thinking that whoever has devtools open gets and nobody else does.
+    assert.equal(gganbuQuestion(undefined), "");
+  });
+});
+
+describe("your gganbu, resolved from a pid", () => {
+  it("joins the grid for the number and the roster for the name", () => {
+    // `mine.gganbu.rival` is a pid and deliberately nothing else: `grid`
+    // already carries pid to player number on every surface, so a
+    // `rivalNumber` field would be a second place for the same number to
+    // disagree. This is the same join `mine.backing` goes through.
+    const them = gganbuRival(arcade({ round: "gganbu" }), ROSTER, "p3");
+    assert.equal(them.house, false);
+    assert.equal(them.playerNumber, 17);
+    assert.equal(them.tag, "017");
+    assert.equal(them.name, "Player 017");
+    assert.equal(them.nickname, "Ade");
+  });
+
+  it("is the house when there is nobody to look at", () => {
+    // The odd one out of a roster, or a gganbu whose phone died.
+    assert.deepEqual(gganbuRival(arcade({ round: "gganbu" }), ROSTER, null), GGANBU_HOUSE);
+    assert.equal(GGANBU_HOUSE.name, "the house");
+  });
+
+  it("is the house for a pid the grid no longer has", () => {
+    // Kicked or released, which is the same fact arriving a frame early. A card
+    // drawing a number out of a grid that does not have them would be a rival
+    // who cannot be looked at.
+    assert.deepEqual(gganbuRival(arcade({ round: "gganbu" }), ROSTER, "p9"), GGANBU_HOUSE);
+  });
+});
+
+describe("which of the pair is ahead", () => {
+  it("is a word before it is a colour", () => {
+    assert.equal(gganbuStanding(12, 8), "ahead");
+    assert.equal(gganbuStanding(8, 12), "behind");
+    assert.equal(gganbuStanding(10, 10), "level");
+  });
+});
+
+describe("what the House says when a prompt settles", () => {
+  it("names the tokens a good call won", () => {
+    // There is no per-prompt reveal in this round — `nextPrompt` settles and
+    // reopens in one frame — so the size of the move is the whole of what the
+    // phone is told about the call it just made.
+    assert.equal(
+      gganbuSettlement({ at: 0, tokens: 10 }, { at: 1, tokens: 13 }),
+      HOUSE.gganbuWon(3),
+    );
+    assert.equal(gganbuSettlement({ at: 2, tokens: 4 }, { at: 3, tokens: 5 }), HOUSE.gganbuWon(1));
+  });
+
+  it("names the tokens a wrong call cost", () => {
+    assert.equal(
+      gganbuSettlement({ at: 0, tokens: 10 }, { at: 1, tokens: 5 }),
+      HOUSE.gganbuLost(5),
+    );
+  });
+
+  it("says nothing on the frames inside one prompt", () => {
+    // Tokens only ever move in `settleGganbuPrompt`, and this surface repaints
+    // on every frame the room produces — a line re-set on each of them would be
+    // a screen reader reading the last result over the top of the new prompt.
+    assert.equal(gganbuSettlement({ at: 1, tokens: 13 }, { at: 1, tokens: 13 }), null);
+  });
+
+  it("says nothing on the first frame of a round", () => {
+    // Nothing to diff against, and the opening stake is not a win.
+    assert.equal(gganbuSettlement(null, { at: 0, tokens: 10 }), null);
+  });
+
+  it("says nothing when a new round deals a fresh hand", () => {
+    // `at` goes back to 0 and the hand goes back to ten. Read as a diff that
+    // would be the largest win of the session, announced to somebody who has
+    // just been dealt in.
+    assert.equal(gganbuSettlement({ at: 5, tokens: 2 }, { at: 0, tokens: 10 }), null);
+  });
+
+  it("says a prompt that moved nothing, rather than passing over it", () => {
+    // Fifteen seconds is short enough to lose one to a video call, and a hand
+    // that did not move looks identical to a hand that was not asked.
+    assert.equal(
+      gganbuSettlement({ at: 0, tokens: 10 }, { at: 1, tokens: 10 }),
+      HOUSE.gganbuNoWager,
+    );
+  });
+
+  it("names nothing about the pick or the threshold", () => {
+    // The answer key does not reach a phone before the reveal, and a line that
+    // named a side would be the answer on a screen in a room answering the same
+    // six prompts in the same order.
+    for (const line of [HOUSE.gganbuWon(3), HOUSE.gganbuLost(3), HOUSE.gganbuNoWager]) {
+      assert.ok(!/\bover\b|\bunder\b/i.test(line), line);
+      assert.ok(!line.includes("!"), `${line} raises its voice`);
+    }
+  });
+});
+
+describe("how the pair finished", () => {
+  const them = { house: false, playerNumber: 17, tag: "017", name: "Player 017", nickname: "Ade" };
+
+  it("gives the 10 to whoever holds more", () => {
+    const line = gganbuPairResult({ tokens: 14, rivalTokens: 6, revoked: false }, them);
+    assert.ok(line.includes("14"));
+    assert.ok(line.includes("Player 017"));
+    assert.ok(/is yours/.test(line), line);
+  });
+
+  it("gives a tie to nobody, because the rule is *more*", () => {
+    // SPEC.md: "whoever of the pair holds more takes +10." A line that implied
+    // otherwise would have the phone promising points the engine does not award.
+    const line = gganbuPairResult({ tokens: 10, rivalTokens: 10, revoked: false }, them);
+    assert.ok(/Nobody takes the 10/.test(line), line);
+  });
+
+  it("says who took it when it was not you", () => {
+    const line = gganbuPairResult({ tokens: 3, rivalTokens: 11, revoked: false }, them);
+    assert.ok(/Player 017 finished with 11 and takes the 10/.test(line), line);
+  });
+
+  it("does not compare a hand that is not in the round", () => {
+    // A revoked player converts nothing, so telling them they finished behind
+    // on tokens would be arithmetic about a hand that is out of the game.
+    const line = gganbuPairResult({ tokens: 0, rivalTokens: 11, revoked: true }, them);
+    assert.ok(/revoked at zero/.test(line), line);
+    assert.ok(!/takes the 10/.test(line), line);
+  });
+
+  it("reads as a sentence when the gganbu is the house", () => {
+    assert.equal(
+      gganbuPairResult({ tokens: 12, rivalTokens: 10, revoked: false }, GGANBU_HOUSE),
+      "You finished with 12 tokens to the house's 10. The 10 for holding more is yours.",
+    );
+    assert.equal(
+      gganbuPairResult({ tokens: 10, rivalTokens: 10, revoked: false }, GGANBU_HOUSE),
+      "You finished with 10 tokens, and so did the house. Nobody takes the 10.",
+    );
+  });
+});
+
+describe("a refused wager", () => {
+  it("shows the server's ceiling and never composes its own", () => {
+    // `invalid_wager` carries `One to 3 tokens.`, computed from a hand only the
+    // server has settled. A sentence written in the client would be a second
+    // copy of `min(5, held)` on the one surface that cannot check it.
+    assert.equal(gganbuRefusal("invalid_wager", "One to 3 tokens."), "One to 3 tokens.");
+    assert.equal(gganbuRefusal("invalid_wager", "  One to 1 tokens.  "), "One to 1 tokens.");
+  });
+
+  it("shows the server's words for every refusal the round can produce", () => {
+    assert.equal(gganbuRefusal("floor_locked", "That prompt has closed."), "That prompt has closed.");
+    assert.equal(gganbuRefusal("already_answered_item", "You are locked in."), "You are locked in.");
+    assert.equal(
+      gganbuRefusal("not_on_the_floor", "Your token was revoked. Back a player."),
+      "Your token was revoked. Back a player.",
+    );
+    assert.equal(gganbuRefusal("wrong_round_phase", "No prompt is open."), "No prompt is open.");
+  });
+
+  it("still says something when the message arrives empty", () => {
+    // A refusal with no words on it is a control that goes dead and explains
+    // nothing.
+    assert.equal(gganbuRefusal("invalid_wager", ""), "That stake is not allowed.");
+    assert.equal(gganbuRefusal("floor_locked", "   "), "That prompt has closed.");
+  });
+
+  it("says nothing about another round's refusal", () => {
+    // One socket carries every round's refusals, and a wager screen is not
+    // where a bridge's `already_stepped` gets explained.
+    assert.equal(gganbuRefusal("already_stepped", "You are on the pane."), null);
+    assert.equal(gganbuRefusal("invalid_choice", "Over, or under."), null);
+  });
+});
+
+describe("the keyboard for a wager", () => {
+  const ev = (key: string, over: Record<string, boolean> = {}) => ({
+    key,
+    repeat: false,
+    altKey: false,
+    ctrlKey: false,
+    metaKey: false,
+    ...over,
+  });
+
+  it("sets the stake from the digits, as the trivia tiles already do", () => {
+    assert.deepEqual(gganbuKey(ev("1")), { kind: "stake", amount: 1 });
+    assert.deepEqual(gganbuKey(ev("5")), { kind: "stake", amount: 5 });
+  });
+
+  it("commits on the arrows, and over is up", () => {
+    assert.deepEqual(gganbuKey(ev("ArrowUp")), { kind: "pick", pick: "over" });
+    assert.deepEqual(gganbuKey(ev("ArrowDown")), { kind: "pick", pick: "under" });
+    assert.deepEqual(gganbuKey(ev("o")), { kind: "pick", pick: "over" });
+    assert.deepEqual(gganbuKey(ev("U")), { kind: "pick", pick: "under" });
+    // The hint on screen has to describe exactly this.
+    assert.equal(KEY_HINT.gganbu, "1–5 sets the stake · ↑ or O is over, ↓ or U is under");
+  });
+
+  it("is not a digit outside the wager, a chord, or a named key", () => {
+    assert.equal(gganbuKey(ev("6")), null);
+    assert.equal(gganbuKey(ev("0")), null);
+    assert.equal(gganbuKey(ev("ArrowLeft")), null);
+    assert.equal(gganbuKey(ev("Enter")), null);
+    assert.equal(gganbuKey(ev("2", { metaKey: true })), null);
+    assert.equal(gganbuKey(ev("o", { ctrlKey: true })), null);
+  });
+
+  it("is not an OS key repeat", () => {
+    // A held key would be a stream of commitments at thirty a second, and in
+    // this round the first of them is final.
+    assert.equal(gganbuKey(ev("ArrowUp", { repeat: true })), null);
+    assert.equal(gganbuKey(ev("3", { repeat: true })), null);
+  });
+});
+
+describe("the rule on Gganbu's own screen", () => {
+  it("says the thing that ends your round, and where you go", () => {
+    // Every round with a participant surface has a line, and the three that
+    // drain say so: README.md's failure case is "someone knocked out at minute
+    // six", and the Lounge is the answer to it.
+    const rule = PLAY_RULE.gganbu;
+    assert.ok(rule !== undefined);
+    assert.ok(/drained to the Lounge/.test(rule), rule);
+    assert.ok(/1 to 5/.test(rule), rule);
+    assert.ok(!rule.includes("!"), rule);
+  });
+
+  it("says nothing about the pair, which is on the screen already", () => {
+    // The rule's job is the thing a player cannot see by looking at the
+    // controls. Who your gganbu is and what they hold is a panel.
+    assert.ok(!/gganbu|rival/i.test(PLAY_RULE.gganbu ?? ""));
   });
 });

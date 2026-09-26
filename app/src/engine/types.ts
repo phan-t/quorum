@@ -529,7 +529,7 @@ export interface UnsealAnswer {
 /* Round 4 — Gganbu                                                    */
 /* ------------------------------------------------------------------ */
 
-/** A wager's side. "Vagrant's first release — over or under 2011?" */
+/** A wager's side. "Vault's default max lease TTL — over or under 720 hours?" */
 export type OverUnder = "over" | "under";
 
 /**
@@ -543,9 +543,9 @@ export type OverUnder = "over" | "under";
  * player needs, and a flag beside a question is a nudge.
  */
 export interface OverUnderItem {
-  /** "Vagrant's first public release". Shown with the threshold. */
+  /** "Vault's default max lease TTL, in hours". Shown with the threshold. */
   readonly cue: string;
-  /** "2011". Shown. */
+  /** "720". Shown. The answer is 768, which is the point: see arcade/gganbu.ts. */
   readonly threshold: string;
   /** **The answer.** */
   readonly answer: OverUnder;

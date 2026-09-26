@@ -25,7 +25,7 @@ import type {
   RenderState,
   ServerMessage,
 } from "../../protocol.ts";
-import type { UnsealShape } from "../../engine/types.ts";
+import type { OverUnder, UnsealShape } from "../../engine/types.ts";
 import {
   socketUrl,
   webSocketTransport,
@@ -229,6 +229,27 @@ export class QuorumClient {
   arcadeBeat(round: number): string {
     const cid = this.#nextCid();
     this.#send({ t: "arcade.beat", cid, round });
+    return cid;
+  }
+
+  /**
+   * Gganbu: one secret call and one stake on the open prompt.
+   *
+   * One per prompt and it is final — the engine refuses a second as
+   * `already_answered_item`, because fifteen seconds is short enough that a
+   * re-stake would be a second look at your gganbu's face. `round` is the
+   * arcade's round index, so a wager in flight when the host moves on cannot
+   * land on the next round; the engine writes it against whichever prompt is
+   * open when it arrives, which is the only reading that is fair to a slow
+   * link.
+   *
+   * The ceiling is the server's: one to `min(5, held)`, refused as
+   * `invalid_wager` with the real number in the message, because only the
+   * server has settled the hand.
+   */
+  arcadeWager(round: number, pick: OverUnder, amount: number): string {
+    const cid = this.#nextCid();
+    this.#send({ t: "arcade.wager", cid, round, pick, amount });
     return cid;
   }
 

@@ -16,6 +16,7 @@ import type {
   Audience,
   Effect,
   Event,
+  OverUnder,
   ParticipantId,
   SessionState,
   UnsealShape,
@@ -327,6 +328,8 @@ export class SessionRuntime {
   } | null = null;
   #pullTimer: ReturnType<typeof setTimeout> | null = null;
   #pullTimerFor: { round: number; pull: number; at: number } | null = null;
+  #promptTimer: ReturnType<typeof setTimeout> | null = null;
+  #promptTimerFor: { round: number; prompt: number; at: number } | null = null;
   /**
    * The coalescing tick, and who it owes a frame to. See {@link BEAT_FLUSH_MS}.
    *
@@ -732,6 +735,7 @@ export class SessionRuntime {
     this.#armItemTimer(now);
     this.#armStepTimer(now);
     this.#armPullTimer(now);
+    this.#armPromptTimer(now);
     this.#armFloorTimer(now);
   }
 
@@ -1072,6 +1076,88 @@ export class SessionRuntime {
   }
 
   /**
+   * Gganbu's prompt clock: settle the open prompt at `promptEndsAt`, and open
+   * the next one.
+   *
+   * Two things come next and the timer picks between them, because they are two
+   * different engine events and the engine will refuse the wrong one:
+   *
+   * - another prompt — `nextPrompt`, which settles this one, **moves the
+   *   tokens**, revokes whoever reached zero and restarts the fifteen seconds;
+   * - the last prompt — `endRound`, which settles it on the way past.
+   *
+   * Settling is the whole of the round's secrecy rule and it lives in the
+   * engine (`settleGganbuPrompt`), not here: tokens move there and nowhere
+   * else, which is what keeps a rival's count from twitching while a prompt is
+   * still open. This timer decides only *when*, and the host's
+   * `arcade.nextPrompt` sends the identical event — one code path, so there is
+   * no prompt settled by the clock that behaves differently from one settled by
+   * the host for anybody downstream.
+   *
+   * Keyed on the round, the prompt and the deadline, so re-arming is
+   * idempotent, a host settling early clears it, and a timeout in flight when
+   * the prompt moved checks the state before it does anything. Node's loop is
+   * single-threaded, so by the time the callback runs the state is settled: it
+   * either still matches or it is moot.
+   */
+  #armPromptTimer(now: number): void {
+    const arcade = arcadeStateOf(this.state);
+    const play = arcade?.play;
+    if (!arcade || arcade.phase !== "running" || play?.kind !== "gganbu") {
+      return this.#clearPromptTimer();
+    }
+    const want = {
+      round: arcade.roundIndex,
+      prompt: play.at,
+      at: play.promptEndsAt,
+    };
+    const armed = this.#promptTimerFor;
+    if (
+      armed !== null &&
+      armed.round === want.round &&
+      armed.prompt === want.prompt &&
+      armed.at === want.at
+    ) {
+      return;
+    }
+    this.#clearPromptTimer();
+    this.#promptTimerFor = want;
+    const last = play.at + 1 >= play.board.length;
+    const timer = setTimeout(
+      () => {
+        this.#promptTimer = null;
+        this.#promptTimerFor = null;
+        const at = arcadeStateOf(this.state);
+        if (
+          !at ||
+          at.phase !== "running" ||
+          at.roundIndex !== want.round ||
+          at.play?.kind !== "gganbu" ||
+          at.play.at !== want.prompt ||
+          at.play.promptEndsAt !== want.at
+        ) {
+          return; // the host got there first, or the round moved on
+        }
+        this.apply(last ? { type: "endRound" } : { type: "nextPrompt" }, Date.now());
+      },
+      Math.max(0, want.at - now),
+    );
+    timer.unref?.();
+    this.#promptTimer = timer;
+  }
+
+  #clearPromptTimer(): void {
+    if (this.#promptTimer !== null) clearTimeout(this.#promptTimer);
+    this.#promptTimer = null;
+    this.#promptTimerFor = null;
+  }
+
+  /** What the prompt timer is armed for. Null outside Gganbu. */
+  get armedPromptAt(): number | null {
+    return this.#promptTimerFor?.at ?? null;
+  }
+
+  /**
    * The Floor's close — for the rounds the Floor's clock actually owns.
    *
    * Recruitment's is owned by the item timer instead, and only one of them may
@@ -1097,6 +1183,13 @@ export class SessionRuntime {
    * lose the tail of. The step timer ends the round after that step (see
    * {@link #armStepTimer}) and `nextStep`/`nextWave` keep `endsAt` in step
    * for the countdown, so nothing is unowned here either.
+   *
+   * Gganbu is excluded for the third time for the same reason: six prompts are
+   * six deadlines, the prompt timer ends the round after the last one, and
+   * `nextPrompt` keeps `endsAt` in step for the countdown. Here the cost of
+   * getting it wrong is not a lost tail but a lost settlement — the Floor timer
+   * firing at the nominal instant would end the round on top of the last
+   * prompt, with the last wagers of the round still unsettled.
    */
   #armFloorTimer(now: number): void {
     const arcade = arcadeStateOf(this.state);
@@ -1106,7 +1199,8 @@ export class SessionRuntime {
       arcade.endsAt === null ||
       arcade.play?.kind === "recruitment" ||
       arcade.play?.kind === "glass_bridge" ||
-      arcade.play?.kind === "tug_of_raft"
+      arcade.play?.kind === "tug_of_raft" ||
+      arcade.play?.kind === "gganbu"
     ) {
       return this.#clearFloorTimer();
     }
@@ -1160,6 +1254,7 @@ export class SessionRuntime {
     this.#clearItemTimer();
     this.#clearStepTimer();
     this.#clearPullTimer();
+    this.#clearPromptTimer();
     this.#clearFloorTimer();
   }
 
@@ -1178,9 +1273,9 @@ export class SessionRuntime {
   }
 
   /**
-   * What the Floor timer is armed for. Null in Recruitment, in Tug of Raft
-   * and on the Glass Bridge, whose endings the item, pull and step timers own
-   * — see {@link #armFloorTimer}.
+   * What the Floor timer is armed for. Null in Recruitment, in Tug of Raft, in
+   * Gganbu and on the Glass Bridge, whose endings the item, pull, prompt and
+   * step timers own — see {@link #armFloorTimer}.
    */
   get armedFloorAt(): number | null {
     return this.#floorTimerFor?.at ?? null;
@@ -1439,6 +1534,69 @@ export class SessionRuntime {
     }
     const at = receivedAt - latencyCorrection(medianRtt(client.rtt));
     return this.apply({ type: "tapBeat", pid: client.pid, at }, receivedAt);
+  }
+
+  /**
+   * One wager in Gganbu, turned into an engine event.
+   *
+   * The instant is corrected, and the reason is narrower than anywhere else in
+   * the arcade: this round measures no instant at all. There is no
+   * fastest-anything award in it, `wager` stores no time, and the only thing
+   * `now` decides is whether the stake beat the prompt's close. So the
+   * correction can admit a frame and can never score one — a player on a
+   * 400 ms link who staked with 200 ms left on their own countdown did stake in
+   * time, and the deadline check now agrees with them. The correction is capped
+   * at 250 ms and never pushes an instant forward, so it cannot reach back into
+   * a prompt that had already settled: a stake for the previous prompt is
+   * refused by `floor_locked` whatever its instant, because settling closes it.
+   *
+   * `round` is checked here rather than in the reducer, exactly as a tap's is:
+   * `wager` carries no round id, and the prompt resets to 0 at every round, so
+   * prompt 0 is precisely the index a stale frame would land on. The *prompt*
+   * index is deliberately not on the frame at all — the engine writes against
+   * whichever prompt is open and the clock refuses a late one, which is the
+   * same guard an index would have been and one fewer number to disagree
+   * about.
+   *
+   * Everything else is the engine's and is left to it: drained, the Floor
+   * closed, the prompt closed, a second wager on the same prompt, a stake that
+   * is not one to five, and a stake larger than the hand — `invalid_wager`,
+   * which is the only refusal that needs to know what they hold.
+   */
+  wager(
+    client: Client,
+    round: number,
+    pick: OverUnder,
+    amount: number,
+    receivedAt: number,
+  ): { applied: boolean; rejection?: { code: string; message: string } } {
+    if (client.pid === undefined) {
+      return {
+        applied: false,
+        rejection: { code: "unknown_participant", message: "Not a participant." },
+      };
+    }
+    const arcade = arcadeStateOf(this.state);
+    if (!arcade) {
+      return {
+        applied: false,
+        rejection: { code: "not_in_arcade", message: "The arcade is not open." },
+      };
+    }
+    if (round !== arcade.roundIndex) {
+      return {
+        applied: false,
+        rejection: {
+          code: "wrong_round_phase",
+          message: "That round has moved on.",
+        },
+      };
+    }
+    const corrected = receivedAt - latencyCorrection(medianRtt(client.rtt));
+    return this.apply(
+      { type: "wager", pid: client.pid, pick, amount },
+      corrected,
+    );
   }
 
   /**

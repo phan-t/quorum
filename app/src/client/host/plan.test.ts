@@ -27,6 +27,7 @@ const LABEL: Readonly<Record<ArcadePick, string>> = {
   plan_apply: "Plan / Apply",
   unseal: "Unseal",
   tug_of_raft: "Tug of Raft",
+  gganbu: "Gganbu",
   glass_bridge: "The Glass Bridge",
 };
 
@@ -35,14 +36,26 @@ describe("the arcade running order", () => {
     assert.deepEqual(planIncluded(defaultPlan()), [...ARCADE_PLAYABLE]);
   });
 
+  it("puts Gganbu where SPEC.md numbers it, between Tug and the bridge", () => {
+    assert.deepEqual(planIncluded(defaultPlan()), [
+      "recruitment",
+      "plan_apply",
+      "unseal",
+      "tug_of_raft",
+      "gganbu",
+      "glass_bridge",
+    ]);
+  });
+
   it("moves a round one place at a time", () => {
     const moved = movePlan(defaultPlan(), "glass_bridge", -1);
     assert.deepEqual(planIncluded(moved), [
       "recruitment",
       "plan_apply",
       "unseal",
-      "glass_bridge",
       "tug_of_raft",
+      "glass_bridge",
+      "gganbu",
     ]);
   });
 
@@ -58,6 +71,7 @@ describe("the arcade running order", () => {
       "recruitment",
       "unseal",
       "tug_of_raft",
+      "gganbu",
       "glass_bridge",
     ]);
     assert.deepEqual(planIncluded(togglePlan(without, "plan_apply")), [
@@ -65,6 +79,7 @@ describe("the arcade running order", () => {
       "plan_apply",
       "unseal",
       "tug_of_raft",
+      "gganbu",
       "glass_bridge",
     ]);
   });
@@ -94,6 +109,21 @@ describe("the arcade running order", () => {
     assert.equal(nextRound(plan, new Set(["recruitment"])), "unseal");
   });
 
+  it("offers Gganbu after Tug of Raft, which is where the order puts it", () => {
+    const plan = defaultPlan();
+    assert.equal(
+      nextRound(plan, new Set(["recruitment", "plan_apply", "unseal", "tug_of_raft"])),
+      "gganbu",
+    );
+    assert.equal(
+      nextRound(
+        plan,
+        new Set(["recruitment", "plan_apply", "unseal", "tug_of_raft", "gganbu"]),
+      ),
+      "glass_bridge",
+    );
+  });
+
   it("runs out, so the console can offer the standings instead", () => {
     const played = new Set<ArcadePick>(ARCADE_PLAYABLE);
     assert.equal(nextRound(defaultPlan(), played), null);
@@ -102,7 +132,7 @@ describe("the arcade running order", () => {
   it("says the order in words for the checklist", () => {
     assert.equal(
       planSummary(defaultPlan(), LABEL),
-      "Recruitment, Plan / Apply, Unseal, Tug of Raft, then The Glass Bridge",
+      "Recruitment, Plan / Apply, Unseal, Tug of Raft, Gganbu, then The Glass Bridge",
     );
     let only = defaultPlan();
     for (const kind of ARCADE_PLAYABLE) {
@@ -135,15 +165,18 @@ describe("the order, across a refresh", () => {
     );
     assert.deepEqual(
       back?.plan.map((e) => e.kind),
-      ["plan_apply", "recruitment", "unseal", "tug_of_raft", "glass_bridge"],
+      ["plan_apply", "recruitment", "unseal", "tug_of_raft", "gganbu", "glass_bridge"],
     );
   });
 
   it("drops a round that no longer exists, and a duplicate", () => {
     const back = parseSetup(
       JSON.stringify({
+        // "marbles" is the round this list used to name here — it was
+        // `gganbu`, which is now built and playable, so the case needs a kind
+        // that really is not one.
         plan: [
-          { kind: "gganbu", included: true },
+          { kind: "marbles", included: true },
           { kind: "recruitment", included: false },
           { kind: "recruitment", included: true },
         ],
@@ -151,7 +184,14 @@ describe("the order, across a refresh", () => {
     );
     assert.deepEqual(
       back?.plan.map((e) => e.kind),
-      ["recruitment", "plan_apply", "unseal", "tug_of_raft", "glass_bridge"],
+      [
+        "recruitment",
+        "plan_apply",
+        "unseal",
+        "tug_of_raft",
+        "gganbu",
+        "glass_bridge",
+      ],
     );
     assert.equal(back?.plan[0]?.included, false);
   });

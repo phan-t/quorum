@@ -190,19 +190,63 @@ describe("the launch content", () => {
     });
   });
 
-  test("exactly three are flagged VERIFY, and they are the three dates", () => {
+  test("exactly three are flagged VERIFY, and they are the three that can move", () => {
     // SPEC.md: "three are flagged VERIFY exactly as the trivia bank flags
-    // dates". The flags are not decoration — they are the three whose answers
-    // turn on a release year rather than on a port number.
+    // dates". The flag is not a confidence rating and not decoration: it marks
+    // the answers that can change under a future release, or that another
+    // source records differently, so that whoever reuses this bank knows which
+    // three to check again. Two are configuration defaults and one is the only
+    // date here whose recording is genuinely contested — see the reasoning in
+    // `arcade/gganbu.ts`.
     const flagged = GGANBU_PROMPTS.filter((p) => p.verify);
     assert.equal(flagged.length, 3);
     assert.deepEqual(flagged.map((p) => p.cue), [
-      "Vagrant's first public release",
-      "Terraform's first release",
-      "The year Terraform reached 1.0",
+      "Vault's default max lease TTL, in hours",
+      "Consul's maximum KV value size, in kilobytes",
+      "The year Terraform 0.12 shipped",
     ]);
     for (const p of flagged) {
-      assert.match(p.threshold, /^\d{4}$/, "a flagged prompt turns on a year");
+      assert.match(p.threshold, /^\d+$/, "an over/under turns on a number");
+    }
+    // And the two settled dates are deliberately *not* flagged: Nomad's 2015
+    // and Vault's 2018 are history every source agrees on, a clear year or more
+    // from their thresholds, so nothing about them can move.
+    const unflagged = GGANBU_PROMPTS.filter((p) => !p.verify).map((p) => p.cue);
+    assert.deepEqual(unflagged, [
+      "Terraform's default parallelism",
+      "Nomad's first public release",
+      "The year Vault reached 1.0",
+    ]);
+  });
+
+  test("no prompt is a certainty: each threshold sits away from its answer", () => {
+    // The defect this bank replaced: three default ports and three release
+    // years an SA knows cold, so both halves of every pair wagered the minimum
+    // and every pair tied. A betting round needs prompts a well-informed player
+    // is unsure of, which means no threshold may be the answer itself, and no
+    // cue may be the kind of fact the room can recite.
+    const numeric = GGANBU_PROMPTS.map((p) => Number(p.threshold));
+    for (const n of numeric) assert.ok(Number.isFinite(n), "a threshold is a number");
+    // The true figures, each verified against a published source on 26
+    // September 2026 and recorded in `arcade/gganbu.ts`.
+    const truth = [10, 768, 512, 2015, 2019, 2018];
+    GGANBU_PROMPTS.forEach((p, i) => {
+      const threshold = numeric[i]!;
+      const actual = truth[i]!;
+      assert.notEqual(threshold, actual, `${p.cue}'s threshold is its own answer`);
+      assert.equal(
+        actual > threshold ? "over" : "under",
+        p.answer,
+        `${p.cue}: the recorded answer disagrees with the verified figure`,
+      );
+    });
+    // No default port numbers, which is what made the old bank unwinnable as a
+    // wager: 8200, 8500 and 4646 are in every getting-started guide.
+    for (const p of GGANBU_PROMPTS) {
+      assert.ok(
+        !/\b(8200|8500|8600|4646|port)\b/i.test(`${p.cue} ${p.threshold}`),
+        `${p.cue} is a default port, which nobody in the room has to guess`,
+      );
     }
   });
 
@@ -228,11 +272,11 @@ describe("the launch content", () => {
   test("splitting content leaves the answer on one side of the line", () => {
     const { board, key } = splitPrompts(GGANBU_PROMPTS);
     assert.deepEqual(board[0], {
-      cue: "Vault's default API port",
-      threshold: "8000",
+      cue: "Terraform's default parallelism",
+      threshold: "15",
     });
     assert.deepEqual(key[0], {
-      answer: "over",
+      answer: "under",
       note: GGANBU_PROMPTS[0]!.note,
       verify: false,
     });
@@ -818,8 +862,8 @@ describe("what a gganbu may know", () => {
     const view = gganbuFloorView(pot(s));
     assert.equal(view.wagered, 2);
     assert.deepEqual(view.prompt, {
-      cue: "Vault's default API port",
-      threshold: "8000",
+      cue: "Terraform's default parallelism",
+      threshold: "15",
     });
     assert.deepEqual(Object.keys(view).sort(), [
       "at",
