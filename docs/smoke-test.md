@@ -137,6 +137,27 @@ closed is correct, and a run has dozens. Silence is the fault.
 since both are replies — as p50 / p95 / slowest. This is the number that turns
 into a missed beat in Tug of Raft when the server's loop is busy.
 
+**The afternoon, as a participant had it.** How much of the run was spent in a
+game rather than in a lobby; what share of that had nothing to press; the
+longest unbroken stretch with nothing to press; and per round, how many times
+each bot acted and how many acted not at all.
+
+This is the only part of the report that is about whether the event was worth
+attending. The server can be flawless and the afternoon still be dull, and
+SPEC names that failure directly — "a person knocked out at minute six with
+fifteen minutes of watching left was the failure this had to design out." A
+bot knows, at every instant, whether it could press anything, so it can say
+whether the design achieved it instead of the question being settled by
+reading the code.
+
+Each bot samples itself on a fixed 500ms clock rather than on broadcasts. A
+bot with nothing to press is also a bot nobody is broadcasting about, so
+sampling on frames would have counted the quietest stretches for the least.
+
+A run fails if anybody sat longer than **60 seconds** with nothing pressable.
+That number is a judgement, not a measurement — it is a named constant so
+changing it is a decision.
+
 ## What a failure looks like
 
 The exit code is non-zero if any check fails, so this can gate a deploy. Checks
@@ -148,6 +169,7 @@ are deliberately about the room rather than the code:
 - every bot ended on the same segment, and at least one bot joined
 - every frame sent got an answer, applied or refused
 - no host command was refused, and none went unanswered
+- nobody sat longer than a minute with nothing to press
 
 ## What it is not
 

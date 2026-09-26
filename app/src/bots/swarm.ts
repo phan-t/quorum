@@ -203,6 +203,18 @@ function percentile(values: readonly number[], p: number): number {
 /* ------------------------------------------------------------------ */
 
 /**
+ * The longest a participant may sit with nothing to press, in a segment that
+ * is supposed to be a game, before the run says so.
+ *
+ * Sixty seconds, because SPEC names the failure the arcade exists to design
+ * out — "a person knocked out at minute six with fifteen minutes of watching
+ * left" — and a minute is about when somebody picks up their phone for a
+ * different reason. It is a judgement rather than a measurement, which is why
+ * it is a named constant: changing it should be a decision, not an edit.
+ */
+const IDLE_ALARM_MS = 60_000;
+
+/**
  * The gameplay is reactive, not scripted.
  *
  * A bot reads the state it was just sent and decides what to press. There is
@@ -215,11 +227,31 @@ function percentile(values: readonly number[], p: number): number {
  * every one of them would be a tap flood the engine refuses, which would be
  * measuring the rate limiter rather than the round.
  */
+/**
+ * What a bot could do at one instant.
+ *
+ * `idle` is the one that matters: in a playing segment, on the Floor, with
+ * nothing pressable. That is the state SPEC calls out as the failure the
+ * arcade had to design out — "a person knocked out at minute six with fifteen
+ * minutes of watching left" — and until now nothing measured whether the
+ * design actually achieved it.
+ */
+type Posture = "idle" | "actionable" | "betting" | "resting";
+
 class Bot {
   readonly conn: Conn;
   private readonly rand: () => number;
   private readonly acted = new Set<string>();
   private seq = 0;
+
+  /* ---- experience, sampled ---- */
+  /** Milliseconds in a playing segment, by what the bot could do. */
+  readonly posture: Record<Posture, number> = { idle: 0, actionable: 0, betting: 0, resting: 0 };
+  /** The longest unbroken stretch with nothing to press, and the current one. */
+  longestIdleMs = 0;
+  private idleRunMs = 0;
+  /** Play frames sent, per arcade round. A round with none is a round sat out. */
+  readonly actionsByRound = new Map<number, number>();
 
   readonly index: number;
   readonly nickname: string;
@@ -239,6 +271,81 @@ class Bot {
   private cid(): string {
     this.seq += 1;
     return `${this.index}-${this.seq}`;
+  }
+
+  /** Send a play frame and remember the round it belonged to. */
+  private act(msg: ClientMessage): void {
+    const round = this.conn.state?.arcade?.roundIndex;
+    if (typeof round === "number") {
+      this.actionsByRound.set(round, (this.actionsByRound.get(round) ?? 0) + 1);
+    }
+    this.conn.send(msg);
+  }
+
+  /**
+   * What this bot could do right now.
+   *
+   * Read from the same state the bot plays off, so it cannot drift from what
+   * the bot would actually have been able to press. `resting` is a segment
+   * that is not a game — a lobby or a holding card is not dead time, it is the
+   * afternoon working as intended.
+   */
+  posture_(): Posture {
+    const st = this.conn.state;
+    if (!st) return "resting";
+    if (st.segment === "trivia") {
+      const t = st.trivia;
+      if (!t || t.phase !== "open") return "resting";
+      return this.acted.has(`q${t.index}`) ? "idle" : "actionable";
+    }
+    if (st.segment !== "arcade") return "resting";
+    const a = st.arcade;
+    const mine = st.arcadeMine;
+    if (!a || !mine || a.phase !== "running") return "resting";
+
+    if (mine.standing === "drained") {
+      return mine.backing === undefined ? "actionable" : "betting";
+    }
+    switch (a.round) {
+      case "recruitment": {
+        const at = a.recruitment?.at;
+        if (at === undefined) return "resting";
+        return this.acted.has(`rec${a.roundIndex}-${at}`) ? "idle" : "actionable";
+      }
+      case "plan_apply":
+      case "tug_of_raft":
+        // A tap train: always something to press while the Floor is open.
+        return "actionable";
+      case "unseal": {
+        const u = mine.unseal;
+        if (!u) return "idle";
+        if (u.cracked) return "idle";
+        if (u.shape === null) return "actionable";
+        return u.cue ? "actionable" : "idle";
+      }
+      case "glass_bridge": {
+        const g = mine.glass;
+        if (!g) return "idle";
+        // The case the review found by reading: a wave that is not on the
+        // bridge has nothing to press, for as long as the waves ahead take.
+        if (!g.onTheBridge) return mine.backing === undefined ? "actionable" : "betting";
+        return g.committed ? "idle" : "actionable";
+      }
+      default:
+        return "idle";
+    }
+  }
+
+  /** Called on a fixed clock, so the number does not depend on broadcasts. */
+  sample(elapsedMs: number): void {
+    const p = this.posture_();
+    this.posture[p] += elapsedMs;
+    if (p === "idle") {
+      this.idleRunMs += elapsedMs;
+      this.longestIdleMs = Math.max(this.longestIdleMs, this.idleRunMs);
+    } else {
+      this.idleRunMs = 0;
+    }
   }
 
   /** Once per key, ever. Returns false when this bot has already acted. */
@@ -278,7 +385,7 @@ class Bot {
       // The question may have closed while this bot was thinking. Sending
       // anyway is what a real phone does, and the refusal is worth counting.
       if (now?.index !== t.index) return;
-      this.conn.send({ t: "trivia.answer", cid: this.cid(), index: t.index, choice });
+      this.act({ t: "trivia.answer", cid: this.cid(), index: t.index, choice });
     });
   }
 
@@ -301,7 +408,7 @@ class Bot {
       const pid = (pick as { pid?: string } | undefined)?.pid;
       if (pid !== undefined && this.once(`back${round}`)) {
         this.later(this.think(600, 2_500), () => {
-          this.conn.send({ t: "arcade.back", cid: this.cid(), pid });
+          this.act({ t: "arcade.back", cid: this.cid(), pid });
         });
       }
     }
@@ -324,7 +431,7 @@ class Bot {
     // is also what a room does.
     const guess = PRODUCTS[Math.floor(this.rand() * PRODUCTS.length)] ?? "terraform";
     this.later(this.think(800, 9_000), () => {
-      this.conn.send({ t: "arcade.answer", cid: this.cid(), item: r.at, answer: guess });
+      this.act({ t: "arcade.answer", cid: this.cid(), item: r.at, answer: guess });
     });
   }
 
@@ -337,7 +444,7 @@ class Bot {
       const a = s?.arcade;
       if (!a || a.phase !== "running" || a.roundIndex !== round) return;
       if (s?.arcadeMine?.standing !== "floor") return;
-      this.conn.send({ t: "arcade.tap", cid: this.cid(), round });
+      this.act({ t: "arcade.tap", cid: this.cid(), round });
       this.later(this.think(220, 900), tick);
     };
     this.later(this.think(300, 1_500), tick);
@@ -351,7 +458,7 @@ class Bot {
     this.later(this.think(500, 3_500), () => {
       const now = this.conn.state?.arcadeMine?.glass;
       if (!now?.onTheBridge || now.committed || now.step !== g.step) return;
-      this.conn.send({ t: "arcade.step", cid: this.cid(), round, step: g.step, choice });
+      this.act({ t: "arcade.step", cid: this.cid(), round, step: g.step, choice });
     });
   }
 
@@ -361,7 +468,7 @@ class Bot {
     if (u.shape === null && this.once(`shape${round}`)) {
       const shapes = ["circle", "triangle", "star", "umbrella"] as const;
       const shape = shapes[Math.floor(this.rand() * shapes.length)] ?? "triangle";
-      this.conn.send({ t: "arcade.shape", cid: this.cid(), round, shape });
+      this.act({ t: "arcade.shape", cid: this.cid(), round, shape });
       return;
     }
     const cue = u.cue;
@@ -374,7 +481,7 @@ class Bot {
     const letter = cue[Math.floor(this.rand() * cue.length)];
     if (letter === undefined) return;
     this.later(this.think(400, 2_000), () => {
-      this.conn.send({ t: "arcade.letter", cid: this.cid(), round, letter });
+      this.act({ t: "arcade.letter", cid: this.cid(), round, letter });
     });
   }
 
@@ -386,7 +493,7 @@ class Bot {
       const s = this.conn.state;
       const a = s?.arcade;
       if (!a || a.phase !== "running" || a.roundIndex !== round) return;
-      this.conn.send({ t: "arcade.beat", cid: this.cid(), round });
+      this.act({ t: "arcade.beat", cid: this.cid(), round });
       this.later(this.think(520, 700), tick);
     };
     this.later(this.think(200, 600), tick);
@@ -987,6 +1094,39 @@ function report(
     line();
   }
 
+  /* ---- the experience, as the bots had it ---- */
+  const played = conns.length > 0 ? bots.filter((b) => b.conn.joinedAt !== null) : [];
+  if (played.length > 0) {
+    const secs = (ms: number): string => `${(ms / 1000).toFixed(0)}s`;
+    const playMs = played.map((b) => b.posture.idle + b.posture.actionable + b.posture.betting);
+    const idlePct = played.map((b, i) => {
+      const total = playMs[i] ?? 0;
+      return total === 0 ? 0 : Math.round((b.posture.idle / total) * 100);
+    });
+    const longest = played.map((b) => b.longestIdleMs);
+    const rounds = [...new Set(played.flatMap((b) => [...b.actionsByRound.keys()]))].sort(
+      (a, b) => a - b,
+    );
+
+    line("  The afternoon, as a participant had it");
+    line(`    in a game      ${secs(percentile(playMs, 50))} of ${secs(elapsedMs)} elapsed (p50)`);
+    line(
+      `    nothing to press  p50 ${percentile(idlePct, 50)}% · worst ${Math.max(...idlePct)}% of that time`,
+    );
+    line(
+      `    longest wait   p50 ${secs(percentile(longest, 50))} · worst ${secs(Math.max(...longest))} with nothing pressable`,
+    );
+    for (const r of rounds) {
+      const satOut = played.filter((b) => (b.actionsByRound.get(r) ?? 0) === 0).length;
+      const acts = played.map((b) => b.actionsByRound.get(r) ?? 0);
+      line(
+        `    round ${r}        ${percentile(acts, 50)} actions each (p50)` +
+          (satOut > 0 ? ` · ${satOut} bot(s) pressed nothing at all` : ""),
+      );
+    }
+    line();
+  }
+
   line("  Where everyone ended");
   for (const [seg, n] of [...segments].sort((a, b) => b[1] - a[1])) {
     line(`    ${pad(seg, 14)} ${n}`);
@@ -1062,6 +1202,16 @@ function report(
         : reconnected.every((c) => c.refused === null)
           ? `all ${reconnected.length} bot(s) that dropped came back as themselves`
           : `${reconnected.filter((c) => c.refused !== null).length} bot(s) could not rejoin`,
+    },
+    {
+      // Not a mechanical failure — the server can be perfect and the
+      // afternoon still be dull. This is the only check about whether the
+      // event was worth attending.
+      ok: played.every((b) => b.longestIdleMs < IDLE_ALARM_MS),
+      text: played.every((b) => b.longestIdleMs < IDLE_ALARM_MS)
+        ? `nobody sat longer than ${IDLE_ALARM_MS / 1000}s with nothing to press`
+        : `${played.filter((b) => b.longestIdleMs >= IDLE_ALARM_MS).length} bot(s) sat over ` +
+          `${IDLE_ALARM_MS / 1000}s with nothing to press — the failure the arcade exists to avoid`,
     },
     {
       ok: conns.every((c) => c.error === null),
@@ -1179,6 +1329,16 @@ async function main(): Promise<void> {
     }
   }
 
+  // One clock for every bot, ticking whether or not the server says anything.
+  // Sampling on broadcasts would have measured the server's chattiness: a bot
+  // with nothing to press is also a bot nobody is broadcasting about, so the
+  // quietest stretches would have counted for the least.
+  const SAMPLE_MS = 500;
+  const sampler = setInterval(() => {
+    for (const b of bots) b.sample(SAMPLE_MS);
+  }, SAMPLE_MS);
+  sampler.unref?.();
+
   const host = new HostBot(hostConn, opts, staged);
   await host.openLobby();
 
@@ -1230,6 +1390,7 @@ async function main(): Promise<void> {
   await show;
   await sleep(2_500); // let the last acks and broadcasts land
 
+  clearInterval(sampler);
   const code = report(bots, hostConn, screen, opts, Date.now() - started);
   for (const b of bots) b.conn.ws?.close();
   hostConn.ws?.close();
