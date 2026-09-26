@@ -843,6 +843,8 @@ const LIGHT_MAX_MS = 6_000;
 const TELEGRAPH_MS = 400;
 /** SPEC.md: "a 250 ms grace after the lock for network latency". */
 const LOCK_GRACE_MS = 250;
+/** As many runners as the corner of the light has room for. See views.ts. */
+const MOCK_TICKER_ROWS = 5;
 
 /** Quarter marks of the target: 30 / 60 / 90 at the tuned 120. */
 function mockCheckpoints(target: number): number[] {
@@ -1339,6 +1341,27 @@ class MockSession {
                   : {}),
                 crossed: play.finishOrder.length,
                 finishOrder: play.finishOrder.map((pid) => this.arcadeNumber(pid)),
+                // The ticker in the corner of the light: the leading runners
+                // still on the Floor, by resources, with ties broken on the
+                // player number so the corner does not rearrange itself
+                // between frames. Worked out here rather than borrowed from
+                // views.ts, like everything else in this file — a mock that
+                // imported the projection could never catch the projection
+                // being wrong.
+                leaders: Object.entries(play.resources)
+                  .filter(
+                    ([pid, n]) =>
+                      n > 0 && (this.arcadeStanding[pid] ?? "floor") === "floor",
+                  )
+                  .map(([pid, n]) => ({
+                    playerNumber: this.arcadeNumber(pid),
+                    resources: n,
+                  }))
+                  .sort(
+                    (a, b) =>
+                      b.resources - a.resources || a.playerNumber - b.playerNumber,
+                  )
+                  .slice(0, MOCK_TICKER_ROWS),
               }
             : {}),
         },
@@ -1374,6 +1397,12 @@ class MockSession {
             planApply: {
               resources: play.resources[pid] ?? 0,
               ...(place === -1 ? {} : { place: place + 1 }),
+              // The one number about somebody else a phone is ever sent: the
+              // count of the runner it has already bet on, for the line under
+              // the Lounge card's chip. One runner, not a board.
+              ...(seat?.backing
+                ? { backedResources: play.resources[seat.backing] ?? 0 }
+                : {}),
             },
           }
         : {}),

@@ -304,7 +304,17 @@ key a participant may not have never appears in its bytes.
 The one that decides Plan / Apply is the epoch of the *next* light change. A
 client holding it can tap flat out, stop 401 ms before every lock, and never be
 caught, so it goes to the screen and the host only, with its 400 ms telegraph.
-A participant is told its own count and nothing about anyone else's.
+
+The resource counts are a different question and get a different answer, because
+they are not a secret: SPEC.md names this round's finish order as its example of
+a Floor being a public surface. The screen and the host get `leaders`, the top
+five on the Floor, which is what the light's ticker draws — less than
+`finishOrder` says, because a runner on 119 has not crossed and the next lock
+can still catch them. A participant gets its own count, and one number about one
+other person: `backedResources`, the count of the runner they have already bet
+on, so the Lounge card can show them their own stake. Not a board — one runner,
+the one they chose. What keeps the bet a bet is in the engine either way:
+`betStands` refuses a bet placed after the crossing it is betting on.
 
 **The Glass Bridge's public payload is the whole game, so three things are
 deliberately absent from it.**

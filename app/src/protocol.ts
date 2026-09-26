@@ -595,6 +595,19 @@ export interface ArcadeRecruitmentView {
 }
 
 /**
+ * One runner on the big screen's ticker: a number and how far along it is.
+ *
+ * A player number, never a nickname — the grid is labelled that way and
+ * DESIGN.md keeps the nickname on the phone, where the person it belongs to is
+ * the only reader. No pid either: the screen has nothing to join it against
+ * and does not need one, because the ticker is read and not clicked.
+ */
+export interface ArcadePlanApplyRunner {
+  readonly playerNumber: number;
+  readonly resources: number;
+}
+
+/**
  * Round 1, Plan / Apply.
  *
  * The two optional epochs are the point of the whole projection. A phone that
@@ -624,6 +637,21 @@ export interface ArcadePlanApplyView {
   readonly crossed?: number;
   /** Screen and host: who crossed, in order, as player numbers. */
   readonly finishOrder?: readonly number[];
+  /**
+   * Screen and host: the leading runners by resources, longest bar first.
+   *
+   * This is the round's *progress* made public, which the finish order already
+   * is — SPEC.md calls the Floor a public surface and names Plan / Apply's
+   * finish order as the example. It says less than `finishOrder` does, not
+   * more: a runner on 119 has not crossed and can still be caught by the next
+   * lock, which is exactly why a Lounge bet on them is still a bet. The rule
+   * that keeps it one lives in the engine — `betStands` refuses a bet placed
+   * after the crossing it is betting on — and this field cannot reach past it.
+   *
+   * Never a participant's frame. The phone shows one person's round, plus the
+   * one runner they have already put their bet on; see `ArcadeMinePlanApply`.
+   */
+  readonly leaders?: readonly ArcadePlanApplyRunner[];
 }
 
 /**
@@ -941,7 +969,7 @@ export interface ArcadeGlassView {
  * | `recruitment.answered` / `eligible` / `solved` | never | always | always |
  * | `planApply.light` | always | always | always |
  * | `planApply.nextChangeAt` / `headTurnsAt` | **never** | always | always |
- * | `planApply.crossed` / `finishOrder` | never | always | always |
+ * | `planApply.crossed` / `finishOrder` / `leaders` | never | always | always |
  * | `unseal.shapes` (glyph, score, counts) | always | always | always |
  * | `unseal.progress` / `docs` / `cracked` | never | never | always |
  * | `unseal.recap` (**the words**) | reveal | reveal | always |
@@ -991,6 +1019,18 @@ export interface ArcadeMinePlanApply {
   readonly resources: number;
   /** 1-based, once they are across the line. Absent until then. */
   readonly place?: number;
+  /**
+   * How far the runner this phone is backing has got. Absent unless it is
+   * backing one.
+   *
+   * The Lounge's whole problem was that a backer picked a name and then learnt
+   * nothing for 75 seconds, and SPEC.md builds the Lounge to keep a drained
+   * player *playing*. So the one number that makes them a spectator with a
+   * stake travels — and only that one: this is the runner they have already
+   * bet on, not a board they could shop on. The room is looking at the same
+   * count on the big screen's ticker in the meantime.
+   */
+  readonly backedResources?: number;
 }
 
 /**

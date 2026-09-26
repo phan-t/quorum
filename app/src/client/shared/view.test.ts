@@ -15,6 +15,7 @@ import {
   activityLabel,
   answerKeyIndex,
   answerTiles,
+  backedProgress,
   bridgeEntries,
   bridgeSteps,
   floorEntries,
@@ -63,6 +64,7 @@ import { UNSEAL_ITEMS } from "../../arcade/unseal.ts";
 import type {
   ActivitySummary,
   ArcadeGlassView,
+  ArcadeMine,
   ArcadeView,
   RosterEntry,
   StandingRow,
@@ -645,6 +647,88 @@ describe("the Lounge on the bridge", () => {
       crossing.map((e) => e.tag),
       ["003", "004"],
     );
+  });
+});
+
+describe("the backed runner's line on the Lounge card", () => {
+  function mine(over: Partial<ArcadeMine> = {}): ArcadeMine {
+    return {
+      playerNumber: 2,
+      standing: "drained",
+      banked: 10,
+      total: 10,
+      ...over,
+    };
+  }
+
+  const planApply = { light: "plan" as const, lightChangedAt: 0, target: 120, checkpoints: [30, 60, 90] };
+
+  it("says nothing at all to a phone with no bet placed", () => {
+    // There is no card to put a line under, and a fraction with no runner would
+    // be a bar drawn against nobody.
+    assert.equal(backedProgress(arcade({ planApply }), mine()), null);
+  });
+
+  it("gives Plan / Apply the count against the target, and the bar with it", () => {
+    // This is the whole of the fix: the Lounge could read PLAN, LOCKED and
+    // "N of M across" and learn nothing about the runner it had bet on.
+    const got = backedProgress(
+      arcade({ planApply }),
+      mine({ backing: "p1", planApply: { resources: 40, backedResources: 90 } }),
+    );
+    assert.deepEqual(got, { line: "90 of 120 resources", fraction: 0.75 });
+  });
+
+  it("says Across rather than 120 of 120, because that is the news", () => {
+    const got = backedProgress(
+      arcade({ planApply }),
+      mine({ backing: "p1", planApply: { resources: 40, backedResources: 120 } }),
+    );
+    assert.deepEqual(got, { line: "Across · 120 resources", fraction: 1 });
+  });
+
+  it("draws nought as nought, because a runner who has not moved is the news too", () => {
+    const got = backedProgress(
+      arcade({ planApply }),
+      mine({ backing: "p1", planApply: { resources: 40, backedResources: 0 } }),
+    );
+    assert.deepEqual(got, { line: "0 of 120 resources", fraction: 0 });
+  });
+
+  it("names the pane the backed runner is standing on, on the bridge", () => {
+    // `position` is steps *completed*, so a runner on 1 of 3 is standing on
+    // pane 2 — which is the pane the room is watching them decide.
+    const got = backedProgress(bridgeArcade(), mine({ backing: "p3" }));
+    assert.deepEqual(got, { line: "Standing on pane 2 of 3", fraction: 1 / 3 });
+  });
+
+  it("says Across on the bridge once they have reached the far side", () => {
+    const got = backedProgress(bridgeArcade(), mine({ backing: "p1" }));
+    assert.deepEqual(got, { line: "Across · 3 of 3 panes", fraction: 1 });
+  });
+
+  it("says nothing while the round card is up, because the board is not on the wire yet", () => {
+    // The server omits `position` until the Floor opens, and a zero drawn
+    // against a card nobody has walked on is a zero presented as progress.
+    const g = glass();
+    const card: ArcadeGlassView = {
+      wave: g.wave,
+      waveCuts: g.waveCuts,
+      waveSeconds: g.waveSeconds,
+      of: g.of,
+      broken: g.broken,
+    };
+    assert.equal(backedProgress(bridgeArcade(card), mine({ backing: "p3" })), null);
+  });
+
+  it("says nothing in Unseal, where progress is a prefix of somebody's word", () => {
+    // The server does not send it to the room for exactly that reason, and this
+    // is the client agreeing rather than reaching for whatever is on the frame.
+    const got = backedProgress(
+      arcade({ round: "unseal" }),
+      mine({ backing: "p1" }),
+    );
+    assert.equal(got, null);
   });
 });
 

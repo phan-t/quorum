@@ -2382,15 +2382,28 @@ export function reduce(
         // (see runtime.ts). Address it to the people whose surface actually
         // moves and the same round costs 2 625.
         //
-        // - A **checkpoint** moves `banked` and `resources`, and the only
-        //   surfaces that draw either are the tapper's own phone and the
-        //   console. The big screen's projection does not contain them — see
-        //   `arcadePlanApplyFor` in views.ts — so it is not sent one.
-        // - A **crossing** also moves `finishOrder` and `crossed`, which the
-        //   big screen *does* draw. It goes there too.
+        // Three surfaces move on a milestone, and the big screen is one of
+        // them now that the light carries a ticker of the leading runners:
         //
-        // Nobody else's frame changes on either: a phone is never told another
-        // player's resources, and the dormitory grid only moves on a drain.
+        // - The **tapper's own phone**, for `banked` and `resources`.
+        // - The **console**, which draws every number in the room.
+        // - The **big screen**, for `leaders` — and on a crossing also for
+        //   `finishOrder` and `crossed`. See `arcadePlanApplyFor` in views.ts.
+        //
+        // Adding the screen to the checkpoints costs one socket, not sixty:
+        // those same 144 milestones are 144 extra frames across a 75 s round,
+        // roughly two a second to a single client, against the 8 640 that
+        // `to: "all"` was rejected for. It is what makes the ticker read as
+        // live rather than as a board that only moves when somebody finishes.
+        //
+        // The Lounge is still not sent one, and that is a budget decision
+        // rather than a rule: a backer's card draws their runner's count (see
+        // `backedResources` in views.ts) and it refreshes on the light, which
+        // is `to: "all"` every two to six seconds. Addressing every backer of
+        // every milestone would be the 8 640 fan-out again, by another route,
+        // to move a number a beat sooner than the light already does.
+        //
+        // The dormitory grid still only moves on a drain.
         //
         // (An earlier draft of this comment claimed the runtime re-broadcasts
         // the round at 10 Hz. It does not; there is no periodic broadcast
@@ -2399,9 +2412,7 @@ export function reduce(
           ? [
               { kind: "broadcast", to: { pid: event.pid }, what: "state" },
               { kind: "broadcast", to: "host", what: "state" },
-              ...(crossed
-                ? [{ kind: "broadcast", to: "screen", what: "state" } as const]
-                : []),
+              { kind: "broadcast", to: "screen", what: "state" },
               PERSIST,
             ]
           : [],

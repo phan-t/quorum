@@ -2186,6 +2186,11 @@ body.phone:has(.v-splash) {
   background: rgba(255, 207, 37, 0.12);
   color: var(--arc-lounge);
 }
+/* On the bridge the card sits on the page rather than on the gold Lounge
+   panel, so the bar's track has to come off the page's own line colour. */
+.a-glass-backing .a-backed-bar {
+  background: var(--line);
+}
 
 /* The reveal: both notes per step, with the real pane marked by a glyph as
    well as by weight. SPEC.md wants the note to say why the fake was fake. */
@@ -2307,8 +2312,19 @@ body.phone:has(.v-splash) {
   opacity: 0.8;
   margin: 0;
 }
+/*
+ * The backed runner's card, which is now two rows rather than one: the chip
+ * with their number and name, and underneath it how far along they are.
+ *
+ * `flex-wrap` with the progress at full width, rather than a column, because
+ * the first row is a chip and has to stay a chip — a baseline-aligned number,
+ * name and count. The progress takes a line of its own by being too wide to
+ * sit beside them, which is also what keeps it out of the way on the bridge,
+ * where the same card carries "the bet stands" on that first row.
+ */
 .a-lounge-backed {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 0.5rem;
   padding: 0.45rem 0.6rem;
@@ -2317,6 +2333,26 @@ body.phone:has(.v-splash) {
 }
 .a-lounge-backed .label {
   color: inherit;
+}
+/* Ink at low alpha for the track and solid ink for the fill, so the bar reads
+   on the Lounge's gold and on the bridge's card without a hue of its own. */
+.a-backed-bar {
+  flex-basis: 100%;
+  height: 6px;
+  border-radius: 999px;
+  background: rgba(10, 10, 15, 0.22);
+  overflow: hidden;
+}
+.a-backed-fill {
+  height: 100%;
+  background: currentColor;
+}
+.a-backed-line {
+  flex-basis: 100%;
+  margin: 0;
+  font-size: 14px;
+  font-variant-numeric: tabular-nums;
+  opacity: 0.9;
 }
 .a-lounge-list {
   flex: 1;

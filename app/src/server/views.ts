@@ -50,6 +50,7 @@ import type {
   ArcadeMineRecruitment,
   ArcadeMineTug,
   ArcadeMineUnseal,
+  ArcadePlanApplyRunner,
   ArcadePlanApplyView,
   ArcadeRecruitmentView,
   ArcadeTugView,
@@ -371,6 +372,18 @@ export function triviaMineFor(
  */
 export const LIGHT_TELEGRAPH_MS = 400;
 
+/**
+ * How many runners the big screen's ticker carries.
+ *
+ * A projection decision rather than a styling one, so it is made here: the
+ * wire does not carry sixty rows for a corner of the light that has room for a
+ * handful. Five is what fits beside the sign at a legible size — the rows are
+ * 34 px against DESIGN.md's 32 px floor, next to a 96 px word — and it is the
+ * same five the top-five rule uses everywhere else in the product, so the room
+ * is not learning a second convention for how long a leaderboard is.
+ */
+export const PLAN_APPLY_TICKER_ROWS = 5;
+
 /** Null until `enterArcade`. Named so the call sites read as a question. */
 export function arcadeStateOf(state: SessionState): ArcadeState | null {
   return state.arcade;
@@ -534,6 +547,14 @@ export function arcadeRecruitmentFor(
  * than on every repaint (participants join on laptops, so that cue is visual
  * — nothing may depend on a haptic), and it predicts nothing: the next
  * duration is drawn fresh and uniformly between two and six seconds.
+ *
+ * `leaders` is the ticker, and it goes exactly where `finishOrder` goes.
+ * SPEC.md names Plan / Apply's finish order as its example of a Floor being a
+ * public surface, so the room is already allowed to read who has crossed; who
+ * is on 90 with the light about to turn is less than that and not more,
+ * because it is not a result yet. The bet stays a bet at the engine, where
+ * `betStands` refuses one placed after the crossing it is betting on, and no
+ * field on this view can reach past that.
  */
 export function arcadePlanApplyFor(
   state: SessionState,
@@ -559,7 +580,51 @@ export function arcadePlanApplyFor(
       : {}),
     crossed: play.finishOrder.length,
     finishOrder: numbersOf(arcade, state, play.finishOrder),
+    leaders: planApplyLeaders(state, arcade, play),
   };
+}
+
+/**
+ * The leading runners, for the ticker in the corner of the light.
+ *
+ * **Only the Floor.** A drained player's count froze at the instant they were
+ * caught, and a frozen 90 sitting at the top of a live leaderboard is a lie
+ * about who is about to cross — the more so in this round, where the light
+ * covers the dormitory grid and the ticker is the only progress the room can
+ * read. Where they went is announced over the light by the drain log, in the
+ * error, verbatim, which is the beat DESIGN.md writes for it.
+ *
+ * Ties break on the player number rather than on whatever order
+ * `Object.entries` hands back, so two runners on 60 do not swap places
+ * between frames — which at ten taps a second in a room of sixty is a corner
+ * of the screen that flickers for no reason anybody watching could name.
+ *
+ * Runners who have crossed stay on it, on a full bar. They are the round's
+ * good news and the ticker is always the *top* few, never the bottom few: a
+ * list that turned into the stragglers as the room finished would be a line
+ * about specific people that is not something they did well, which DESIGN.md
+ * rules out.
+ */
+function planApplyLeaders(
+  state: SessionState,
+  arcade: ArcadeState,
+  play: Extract<NonNullable<ArcadeState["play"]>, { kind: "plan_apply" }>,
+): ArcadePlanApplyRunner[] {
+  const rows: ArcadePlanApplyRunner[] = [];
+  for (const [pid, resources] of Object.entries(play.resources)) {
+    if (resources <= 0) continue;
+    if ((arcade.standing[pid] ?? "floor") !== "floor") continue;
+    const p = state.participants[pid];
+    if (!p || p.kicked || p.nicknameKey === "") continue;
+    rows.push({
+      playerNumber: arcade.playerNumbers[pid] ?? p.playerNumber,
+      resources,
+    });
+  }
+  rows.sort((a, b) =>
+    b.resources - a.resources || a.playerNumber - b.playerNumber,
+  );
+  return rows.slice(0, PLAN_APPLY_TICKER_ROWS);
 }
 
 /**
@@ -933,9 +998,16 @@ export function arcadeMineFor(
   let planApply: ArcadeMinePlanApply | undefined;
   if (play?.kind === "plan_apply") {
     const place = play.finishOrder.indexOf(pid);
+    const backed = seat?.backing ?? null;
     planApply = {
       resources: play.resources[pid] ?? 0,
       ...(place === -1 ? {} : { place: place + 1 }),
+      // The one number about somebody else on this frame, and it is the one
+      // this phone has already staked points on. Present from the moment the
+      // bet is placed, including at nought, because "017 · 0" is the news that
+      // your runner has not moved and is the whole reason the Lounge card was
+      // silent before this.
+      ...(backed === null ? {} : { backedResources: play.resources[backed] ?? 0 }),
     };
   }
 

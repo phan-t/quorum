@@ -1654,21 +1654,29 @@ describe("sixty bots play Recruitment and Plan / Apply", () => {
 
     // ---- after ----
     //
-    // A checkpoint goes to the tapping phone and the console; a crossing goes
-    // to the big screen as well, because `crossed` and `finishOrder` are on
-    // its projection and nothing else on it moved. A roster frame goes out
-    // when the roster changes, which during a Floor is never.
+    // A milestone — a checkpoint or a crossing — goes to the tapping phone, the
+    // console and the big screen. The screen is on that list because the light
+    // carries a ticker of the leading runners, so every checkpoint moves what
+    // it draws; a crossing additionally moves `crossed` and `finishOrder`. A
+    // roster frame goes out when the roster changes, which during a Floor is
+    // never.
+    //
+    // That is what the ticker costs, and the shape of the cost is the point:
+    // the screen and the console are one socket each, so their totals are the
+    // milestone count itself, while a phone's total is still only what was
+    // genuinely room-wide plus its own. `to: "all"` would have multiplied the
+    // same milestones by sixty.
     const after = {
       participantState: roomWide * n + pa.milestones + ownBets,
       participantRoster: 0,
       hostState: roomWide + pa.milestones + ownBets,
-      screenState: roomWide + pa.crossings + ownBets,
+      screenState: roomWide + pa.milestones + ownBets,
     };
     assert.deepEqual(after, {
       participantState: 2_573,
       participantRoster: 0,
       hostState: 213,
-      screenState: 83,
+      screenState: 213,
     });
 
     // And the measurement itself, from the fake sockets, against both.

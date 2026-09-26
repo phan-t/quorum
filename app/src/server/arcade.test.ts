@@ -37,7 +37,13 @@ import {
   pickLightMs,
   type Client,
 } from "./runtime.ts";
-import { AWAY_AFTER_MS, LIGHT_TELEGRAPH_MS, arcadeGrid, renderStateFor } from "./views.ts";
+import {
+  AWAY_AFTER_MS,
+  LIGHT_TELEGRAPH_MS,
+  PLAN_APPLY_TICKER_ROWS,
+  arcadeGrid,
+  renderStateFor,
+} from "./views.ts";
 import { parseClientMessage } from "../protocol.ts";
 import type { RenderState } from "../protocol.ts";
 
@@ -210,6 +216,164 @@ describe("a phone cannot predict the light", () => {
     assert.equal(pa?.nextChangeAt, T0 + 3_000);
     assert.equal(pa?.headTurnsAt, T0 + 2_600);
     assert.equal(pa?.crossed, 0);
+  });
+});
+
+/* ------------------------------------------------------------------ */
+/* The runner ticker, and the Lounge's one number about somebody else  */
+/* ------------------------------------------------------------------ */
+
+/** `n` taps by `pid`, all comfortably inside the PLAN this fixture opens on. */
+function tapped(state: SessionState, pid: string, n: number): SessionState {
+  return replay(
+    state,
+    Array.from({ length: n }, () => ({
+      event: { type: "tap", pid, at: T0 + 100 } as Event,
+      at: T0 + 100,
+    })),
+  );
+}
+
+describe("the light's runner ticker", () => {
+  it("gives the big screen the leading runners, longest bar first", () => {
+    // SPEC.md calls Plan / Apply's finish order a public surface. Progress is
+    // the same surface a few seconds earlier, and it is the whole of what the
+    // room could not see while the light covered the dormitory grid.
+    let s = planning();
+    s = tapped(s, "p2", 30);
+    s = tapped(s, "p1", 12);
+    const pa = view(s, "screen").arcade?.planApply;
+    assert.deepEqual(pa?.leaders, [
+      { playerNumber: 2, resources: 30 },
+      { playerNumber: 1, resources: 12 },
+    ]);
+    // The console draws every number in the room, so it has it too.
+    assert.deepEqual(view(s, "host").arcade?.planApply?.leaders, pa?.leaders);
+  });
+
+  it("keeps it off a phone, byte for byte", () => {
+    let s = planning();
+    s = tapped(s, "p2", 30);
+    const frame = wire(s, "participant", "p1");
+    assert.equal(view(s, "participant", "p1").arcade?.planApply?.leaders, undefined);
+    assert.ok(!frame.includes('"leaders"'), `the ticker reached a phone: ${frame}`);
+    // And not by another name: nobody else's count is in those bytes at all.
+    assert.ok(!frame.includes('"resources":30'), frame);
+  });
+
+  it("leaves nobody on it who has nothing to show", () => {
+    // A round where nobody has tapped is an empty ticker, not three zeroes.
+    assert.deepEqual(view(planning(), "screen").arcade?.planApply?.leaders, []);
+  });
+
+  it("drops a drained runner rather than freezing their count at the top", () => {
+    // Their number stopped moving the instant they were caught, and the light
+    // covers the grid — so a frozen 40 above a live 12 would be the room's only
+    // read of the round saying the wrong thing about who is about to cross.
+    // Where they went is the drain log's line, over the light, in the error.
+    let s = planning();
+    s = tapped(s, "p2", 40);
+    s = tapped(s, "p1", 12);
+    s = replay(s, [
+      { event: { type: "setLight", light: "apply", until: T0 + 9_000 }, at: T0 + 3_000 },
+      { event: { type: "tap", pid: "p2", at: T0 + 4_000 }, at: T0 + 4_000 },
+    ]);
+    assert.equal(s.arcade?.standing["p2"], "drained");
+    assert.deepEqual(view(s, "screen").arcade?.planApply?.leaders, [
+      { playerNumber: 1, resources: 12 },
+    ]);
+  });
+
+  it("breaks a tie on the player number, so the corner does not flicker", () => {
+    // Two runners on the same count must not swap places between frames: at ten
+    // taps a second in a room of sixty that is a corner of the big screen
+    // rearranging itself for no reason anybody watching could name.
+    let s = planning();
+    s = tapped(s, "p3", 20);
+    s = tapped(s, "p1", 20);
+    s = tapped(s, "p2", 20);
+    assert.deepEqual(
+      view(s, "screen").arcade?.planApply?.leaders?.map((r) => r.playerNumber),
+      [1, 2, 3],
+    );
+  });
+
+  it("caps the wire at the rows the corner has room for", () => {
+    // The ticker is five rows of 34 px mono beside a 96 px word; sixty rows on
+    // the wire would be fifty-five nobody can see.
+    const many = session([
+      { type: "open" },
+      ...Array.from({ length: 8 }, (_, i): Event => ({
+        type: "join",
+        pid: `q${i}`,
+        nickname: `Runner ${i}`,
+      })),
+      { type: "start" },
+      { type: "setSegment", segment: "arcade" },
+      { type: "enterArcade", activityId: "arcade" },
+      {
+        type: "startRound",
+        round: "plan_apply",
+        config: { kind: "plan_apply", target: 120, seconds: 75 },
+      },
+      { type: "beginPlay" },
+      { type: "setLight", light: "plan", until: T0 + 30_000 },
+    ]);
+    let s = many;
+    for (let i = 0; i < 8; i += 1) s = tapped(s, `q${i}`, i + 1);
+    const leaders = view(s, "screen").arcade?.planApply?.leaders ?? [];
+    assert.equal(leaders.length, PLAN_APPLY_TICKER_ROWS);
+    assert.equal(PLAN_APPLY_TICKER_ROWS, 5);
+    // The top five, not the first five found.
+    assert.deepEqual(leaders.map((r) => r.resources), [8, 7, 6, 5, 4]);
+  });
+});
+
+describe("the Lounge card's one number about somebody else", () => {
+  /** p1 drained at 20, backing p2 who is still running. */
+  function backing(): SessionState {
+    let s = planning();
+    s = tapped(s, "p1", 20);
+    s = tapped(s, "p2", 55);
+    s = replay(s, [
+      { event: { type: "setLight", light: "apply", until: T0 + 9_000 }, at: T0 + 3_000 },
+      { event: { type: "tap", pid: "p1", at: T0 + 4_000 }, at: T0 + 4_000 },
+      { event: { type: "backPlayer", pid: "p1", backing: "p2" }, at: T0 + 5_000 },
+    ]);
+    return s;
+  }
+
+  it("tells a backer how their runner is doing, and nothing about anybody else", () => {
+    const s = backing();
+    const mine = view(s, "participant", "p1").arcadeMine?.planApply;
+    assert.equal(mine?.resources, 20, "their own count is unchanged");
+    assert.equal(mine?.backedResources, 55);
+    // One runner, not a board. p3 is on the Floor and is nobody's runner, so
+    // their count is nowhere in these bytes — and neither is the ticker, which
+    // is what would turn a bet into a choice between counts.
+    const frame = wire(s, "participant", "p1");
+    assert.ok(!frame.includes('"leaders"'), frame);
+    assert.ok(!frame.includes('"finishOrder"'), frame);
+  });
+
+  it("says nothing to a phone that has not placed a bet", () => {
+    // Absent, not zero: a nought under a chip that is not there would draw a
+    // runner nobody backed.
+    const s = backing();
+    const mine = view(s, "participant", "p3").arcadeMine?.planApply;
+    assert.equal(mine?.backedResources, undefined);
+    assert.ok(!wire(s, "participant", "p3").includes("backedResources"));
+  });
+
+  it("is present at nought, because a runner who has not moved is the news", () => {
+    let s = planning();
+    s = tapped(s, "p1", 20);
+    s = replay(s, [
+      { event: { type: "setLight", light: "apply", until: T0 + 9_000 }, at: T0 + 3_000 },
+      { event: { type: "tap", pid: "p1", at: T0 + 4_000 }, at: T0 + 4_000 },
+      { event: { type: "backPlayer", pid: "p1", backing: "p3" }, at: T0 + 5_000 },
+    ]);
+    assert.equal(view(s, "participant", "p1").arcadeMine?.planApply?.backedResources, 0);
   });
 });
 
@@ -1065,7 +1229,7 @@ describe("what a broadcast costs", () => {
     runtime.clearArcadeTimers();
   });
 
-  it("sends a checkpoint to the phone that earned it and the console, and nobody else", () => {
+  it("sends a checkpoint to the phone that earned it, the console and the screen — and to no other phone", () => {
     const { runtime, phones, host, screen } = room();
     const p1 = phones[0];
     assert.ok(p1);
@@ -1077,8 +1241,10 @@ describe("what a broadcast costs", () => {
     assert.equal(runtime.state.arcade?.banked["p1"], 5);
     assert.equal(p1.state, 1);
     assert.equal(host.state, 1);
-    assert.equal(screen.state, 0, "the screen does not draw anybody's resources");
-    assert.equal(phones[1]?.state, 0);
+    // The light's ticker moves on a checkpoint, so the screen is sent one.
+    // One socket, which is the whole difference from `to: "all"`.
+    assert.equal(screen.state, 1, "the ticker on the light draws this");
+    assert.equal(phones[1]?.state, 0, "nobody else's phone draws p1's count");
     assert.equal(phones[2]?.state, 0);
     for (const p of phones) assert.equal(p.roster, 0);
     runtime.clearArcadeTimers();

@@ -1261,8 +1261,27 @@ function sceneArcade(): Scene {
   const dollWrap = h("div", { class: "s-doll-wrap" }, [doll()]);
   const wipe = h("div", { class: "s-wipe", attrs: { "aria-hidden": "true" } });
   const crossed = h("p", { class: "mono s-crossed" });
+  /**
+   * The runner ticker: the leading few, in the corner of the light.
+   *
+   * SPEC.md's Lounge is the arcade's best idea and Plan / Apply was where it
+   * went quiet — the light covers the dormitory grid for 75 seconds, so the
+   * room could read PLAN, LOCKED and "N of M across" and nothing else. Nobody,
+   * backer or runner, could see who was on 90 and who was on 30. The finish
+   * order is already a public surface, and this is the same surface a few
+   * seconds earlier.
+   *
+   * It is a corner and it stays one. The wipe and the word are the round's
+   * safety signal, so the ticker carries no background of its own — the wipe
+   * runs underneath it and the ink is the same on both faces — it sits clear
+   * of the centred sign row, and it is out of the drain log's way at the
+   * bottom. Anything that dimmed the turn from green to pink to make room for
+   * a leaderboard would be trading the warning for the scoreboard.
+   */
+  const runnerBoard = h("ol", { class: "mono s-ticker", attrs: { hidden: true } });
   const light = h("section", { class: "s-light", attrs: { hidden: true } }, [
     wipe,
+    runnerBoard,
     dollWrap,
     h("div", { class: "s-sign-row" }, [signGlyph, sign]),
     crossed,
@@ -1880,10 +1899,49 @@ function sceneArcade(): Scene {
     setAttr(tugPulse, "data-on", beat.onBeat ? "yes" : "no");
   };
 
+  /**
+   * The ticker's rows, rebuilt only when the numbers on them changed.
+   *
+   * `paintLight` runs on every animation tick, because the wipe does — so
+   * without this the corner of the screen would rebuild five list items forty
+   * times a second to draw the same five numbers. The signature is the whole
+   * of what is drawn, which is also why a tie broken on the player number in
+   * `planApplyLeaders` matters here: two runners on 60 swapping places would
+   * otherwise be a real change every frame.
+   */
+  let lastRunners = "";
+
+  const paintRunners = (pa: NonNullable<ArcadeView["planApply"]>): void => {
+    const leaders = pa.leaders ?? [];
+    runnerBoard.hidden = leaders.length === 0;
+    const signature = leaders.map((r) => `${r.playerNumber}/${r.resources}`).join(",");
+    if (signature === lastRunners) return;
+    lastRunners = signature;
+    replace(
+      runnerBoard,
+      leaders.map((r) => {
+        const fill = h("span", { class: "s-ticker-fill" });
+        // Against the round's own target, not against the leader, so the bar
+        // means "how much of the apply is done" — the same thing the phone's
+        // progress bar means, and the number the checkpoint ticks sit on.
+        fill.style.width =
+          pa.target > 0
+            ? `${Math.min(100, (r.resources / pa.target) * 100).toFixed(1)}%`
+            : "0%";
+        return h("li", { class: "s-ticker-row" }, [
+          h("span", { class: "s-ticker-num", text: playerTag(r.playerNumber) }),
+          h("span", { class: "s-ticker-bar", attrs: { "aria-hidden": "true" } }, [fill]),
+          h("span", { class: "s-ticker-count", text: String(r.resources) }),
+        ]);
+      }),
+    );
+  };
+
   const paintLight = (arcade: ArcadeView): void => {
     const pa = arcade.planApply;
     if (!pa || arcade.phase !== "running") {
       light.hidden = true;
+      lastRunners = "";
       return;
     }
     light.hidden = false;
@@ -1894,6 +1952,7 @@ function sceneArcade(): Scene {
     light.style.setProperty("--light", face.fill);
     light.style.setProperty("--light-ink", face.on);
     setText(crossed, `${pa.crossed ?? 0} of ${arcade.onFloor + arcade.inLounge} across`);
+    paintRunners(pa);
 
     // The wipe. Driven off the absolute epochs the server sent, never off a
     // duration measured from whenever this frame arrived — a screen that

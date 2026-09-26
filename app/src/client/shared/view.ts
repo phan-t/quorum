@@ -12,6 +12,7 @@ import type {
   ActivitySummary,
   ArcadeCell,
   ArcadeGlassView,
+  ArcadeMine,
   ArcadeRecruitmentView,
   ArcadeTugView,
   ArcadeView,
@@ -1273,6 +1274,75 @@ export function latestCheckpoint(
     if (c <= resources && (best === null || c > best)) best = c;
   }
   return best;
+}
+
+/** What the Lounge card says under *Backing 017*, and how full its bar is. */
+export interface BackedProgress {
+  /** One mono line. Player numbers only — the nickname is on the chip above. */
+  readonly line: string;
+  /** 0–1 for the small bar, or null where the round has no bar to draw. */
+  readonly fraction: number | null;
+}
+
+/**
+ * How the runner this phone is backing is getting on.
+ *
+ * The Lounge is SPEC.md's answer to "nobody sits out", and in the longest
+ * Floor round it was answering with a consolation token: a drained player
+ * picked a name, watched the big screen turn green and pink for 75 seconds, and
+ * found out at the reveal whether it had paid. This is the line that makes them
+ * a spectator with a stake — their runner's own progress, on their own phone,
+ * under the chip with the name on it.
+ *
+ * Two rounds have progress worth watching and they are the two that take the
+ * longest. Plan / Apply's is the resource count, which the server sends as
+ * `backedResources` for the one runner this phone has bet on. The Bridge's is
+ * the step, which needs nothing new on the wire at all: `position` is already
+ * on a participant's frame, because a step only becomes an answer once the
+ * break above it is published and by then it is public anyway.
+ *
+ * Null for every other round, and for a phone that has not placed a bet. Unseal
+ * is deliberately among them: how far into a word somebody has got is a prefix
+ * of that word, and the server does not send it to the room for that reason.
+ */
+export function backedProgress(
+  arcade: ArcadeView,
+  mine: ArcadeMine,
+): BackedProgress | null {
+  const backing = mine.backing ?? null;
+  if (backing === null) return null;
+
+  const pa = arcade.planApply;
+  const resources = mine.planApply?.backedResources;
+  if (pa !== undefined && resources !== undefined) {
+    const { fraction } = resourceBar(pa, resources);
+    return {
+      // Across is the news, so it is the word rather than "120 of 120" — which
+      // reads as a bar that has stopped, on the one surface that wants to say
+      // the bet came in.
+      line:
+        resources >= pa.target
+          ? `Across · ${resources} resources`
+          : `${resources} of ${pa.target} resources`,
+      fraction,
+    };
+  }
+
+  const glass = arcade.glass;
+  // `position` is absent until the Floor opens — the round card is not the
+  // bridge — and a step count drawn against a card nobody has walked on yet
+  // would be a zero presented as progress.
+  if (glass !== undefined && glass.position !== undefined && glass.of > 0) {
+    const done = glass.position[backing] ?? 0;
+    return {
+      line:
+        done >= glass.of
+          ? `Across · ${glass.of} of ${glass.of} panes`
+          : `Standing on pane ${done + 1} of ${glass.of}`,
+      fraction: Math.min(1, done / glass.of),
+    };
+  }
+  return null;
 }
 
 /**

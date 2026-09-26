@@ -33,6 +33,7 @@ import {
   STATE_LOCK_ERROR,
   answerKeyIndex,
   answerTiles,
+  backedProgress,
   bridgeSteps,
   finalRevealMs,
   floorEntries,
@@ -1185,6 +1186,35 @@ function playRule(text: string | undefined): HTMLElement {
 }
 
 /**
+ * The backed runner's progress, as the two nodes that go under their chip.
+ *
+ * A bar and a mono line, and an empty array where there is nothing to say —
+ * which is what lets both callers spread it into a chip they were building
+ * anyway rather than branch around a hidden element. The bar is small and
+ * carries no ticks: this is somebody else's round, and the checkpoint marks
+ * belong on the bar of the person who is banking at them.
+ *
+ * The line is mono and 14 px against the card's own type, which is the phone's
+ * scale for a tabular count and not the Desktop's — DESIGN.md's 32 px floor is
+ * a rule about a 1080p tile seen through video compression, and applying it to
+ * a phone held at arm's length would push the Lounge's chips off the screen.
+ */
+function backedLine(arcade: ArcadeView, mine: ArcadeMine): HTMLElement[] {
+  const progress = backedProgress(arcade, mine);
+  if (progress === null) return [];
+  const out: HTMLElement[] = [];
+  if (progress.fraction !== null) {
+    const fill = h("div", { class: "a-backed-fill" });
+    fill.style.width = `${(progress.fraction * 100).toFixed(1)}%`;
+    out.push(
+      h("div", { class: "a-backed-bar", attrs: { "aria-hidden": "true" } }, [fill]),
+    );
+  }
+  out.push(h("p", { class: "mono a-backed-line", text: progress.line }));
+  return out;
+}
+
+/**
  * Whether a keystroke belongs to something the person is typing into.
  *
  * The page-level key handlers are what make the keyboard work without first
@@ -1834,9 +1864,13 @@ function sceneArcade(ctx: SceneCtx): Scene {
           ? `Back a runner in wave ${g.wave}`
           : `Wave ${g.wave} has stepped. Bets are closed.`,
     );
-    const signature = `${open}:${backing ?? ""}:${g.wave}:${g.step ?? 0}:${g.onPanes ?? 0}:${runners
-      .map((e) => `${e.pid}/${e.standing}/${e.backers}/${e.away}`)
-      .join(",")}`;
+    // `position[backing]` is in the signature because the bet's own line is
+    // drawn from it: a waiting wave's runner advancing is the one thing on this
+    // panel that moves, and without it the panel would hold a stale pane
+    // number until the crossing wave's step index happened to change.
+    const signature = `${open}:${backing ?? ""}:${g.wave}:${g.step ?? 0}:${g.onPanes ?? 0}:${
+      backing === null ? "" : (g.position?.[backing] ?? 0)
+    }:${runners.map((e) => `${e.pid}/${e.standing}/${e.backers}/${e.away}`).join(",")}`;
     if (signature === glassBackSignature) return;
     glassBackSignature = signature;
     glassBackHeld.hidden = held === undefined;
@@ -1845,6 +1879,7 @@ function sceneArcade(ctx: SceneCtx): Scene {
         h("span", { class: "mono a-chip-num", text: held.tag }),
         h("span", { class: "a-chip-name", text: held.nickname }),
         h("span", { class: "a-chip-backers", text: "the bet stands" }),
+        ...backedLine(arcade, mine),
       ]);
     }
     replace(
@@ -2730,6 +2765,11 @@ function sceneArcade(ctx: SceneCtx): Scene {
         h("span", { class: "label", text: "Backing" }),
         h("span", { class: "mono a-chip-num", text: backed.tag }),
         h("span", { class: "a-chip-name", text: backed.nickname }),
+        // Deliberately drawn before the signature check below, so it moves on
+        // every frame the round sends rather than only when the chips change:
+        // the chips change on a drain, and the runner's count changes on the
+        // light. See backedProgress().
+        ...backedLine(arcade, mine),
       ]);
     }
     // Changeable until the Floor locks, which is the moment the round stops

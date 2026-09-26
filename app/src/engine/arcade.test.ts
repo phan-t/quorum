@@ -674,10 +674,15 @@ describe("plan / apply on the Floor", () => {
     assert.equal(planPlay(before).resources["p1"], 1);
   });
 
-  test("a milestone is addressed, not shouted: the tapper, the console, and the screen only on a crossing", () => {
+  test("a milestone is addressed, not shouted: the tapper, the console and the screen", () => {
     // Sixty phones do not render anybody else's resource count, so a
     // checkpoint that fans out to the room is fifty-nine frames that change
     // nothing. Measured in bots/arcade-round.test.ts; here is the rule.
+    //
+    // The screen is on the list because the light now carries a ticker of the
+    // leading runners, so a checkpoint *does* move what it draws. That is one
+    // extra socket per milestone, not sixty, which is the whole difference
+    // between this and `to: "all"`.
     const audiences = (effects: readonly Effect[]) =>
       effects
         .filter((e): e is Extract<Effect, { kind: "broadcast" }> => e.kind === "broadcast")
@@ -688,12 +693,17 @@ describe("plan / apply on the Floor", () => {
     s = taps(s, "p1", 7); // the quarter marks of 30 are 8, 15, 23
     const checkpoint = run(s, { type: "tap", pid: "p1", at: T0 + 200 }, T0 + 200);
     assert.equal(arcadeOf(checkpoint.state).banked["p1"], PLAN_APPLY_CHECKPOINT_BANK);
-    assert.deepEqual(audiences(checkpoint.effects), ["host", "pid:p1"]);
+    assert.deepEqual(audiences(checkpoint.effects), ["host", "pid:p1", "screen"]);
 
     s = taps(s, "p1", 22); // 8 + 22 = 30 − 1: one short of the line
     const crossing = run(s, { type: "tap", pid: "p1", at: T0 + 300 }, T0 + 300);
     assert.deepEqual(planPlay(crossing.state).finishOrder, ["p1"]);
     assert.deepEqual(audiences(crossing.effects), ["host", "pid:p1", "screen"]);
+
+    // And an ordinary tap is still silent. That is the line that keeps the
+    // ticker affordable: it refreshes on milestones, not on taps.
+    const plain = run(s, { type: "tap", pid: "p2", at: T0 + 350 }, T0 + 350);
+    assert.deepEqual(audiences(plain.effects), []);
 
     // A drain still is room-wide: the dormitory grid moves for everybody.
     const locked = accept(s, [{ type: "setLight", light: "apply", until: T0 + 9_000 }], T0 + 400);
