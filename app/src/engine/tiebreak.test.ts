@@ -62,14 +62,53 @@ function options(q: Question): Set<string> {
   return new Set(q.answers.map(normalise));
 }
 
+/**
+ * The words in a stem that say what it is *about*.
+ *
+ * Every question in both sets is made of "which", "what", "is" and "the", so a
+ * comparison that counted those would find every pair related. What survives is
+ * the subject — `consensus`, `protocol`, `storage`, `port` — which is what makes
+ * two questions with the same answer the same question rather than a
+ * coincidence. A trailing "s" goes as well, so "Vault's" and "Vault" count once.
+ *
+ * This is deliberately crude. It only has to be good enough to tell "both of
+ * these are about integrated storage" from "both of these happen to be answered
+ * `Australia`", and a shared word count is enough for that.
+ */
+const SHAPE_WORDS = new Set([
+  "which", "what", "who", "whose", "where", "when", "why", "how", "many",
+  "much", "the", "and", "for", "from", "with", "its", "are", "was", "does",
+  "did", "has", "have", "this", "that", "these", "those", "not", "than",
+  "one", "two", "best", "called", "name", "named", "following", "about",
+]);
+
+function subjectWords(text: string): Set<string> {
+  return new Set(
+    text
+      .toLowerCase()
+      .split(/[^a-z0-9]+/)
+      .filter((w) => w.length > 2 && !SHAPE_WORDS.has(w))
+      .map((w) => (w.length > 3 ? w.replace(/s$/, "") : w)),
+  );
+}
+
 describe("the built-in pool does not re-ask the committed set", () => {
-  // Both of these compare answers rather than question text, and that is the
-  // point: the collision that prompted them was a *reworded* question —
-  // "Which consensus protocol backs Vault's, Consul's and Nomad's integrated
-  // storage?" against "Which consensus protocol backs integrated storage in
-  // Vault, Consul and Nomad?" — and no string comparison of the two stems, not
-  // even a fuzzy one, would have separated them from two honestly different
-  // questions.
+  // What these turn on is the answer rather than the wording of the question,
+  // and that is the point: the collision that prompted them was a *reworded*
+  // question — "Which consensus protocol backs Vault's, Consul's and Nomad's
+  // integrated storage?" against "Which consensus protocol backs integrated
+  // storage in Vault, Consul and Nomad?" — and no string comparison of the two
+  // stems, not even a fuzzy one, would have separated them from two honestly
+  // different questions.
+  //
+  // A shared answer on its own is not a collision, though, which is why the
+  // first test also asks whether the two stems are about the same thing. The
+  // pool is general knowledge now and the committed set has a geography round,
+  // so two questions landing on "Australia" or on a year is a thing that will
+  // happen without either question re-asking the other — and a test that fails
+  // on that is a test someone deletes rather than reads. Two shared subject
+  // words is the bar: one ("country", "port") is the shape of a question, two
+  // is its topic.
   //
   // What they catch: the same fact asked in different words, the same fact
   // asked with different distractors, and an option list rebuilt around a
@@ -77,28 +116,28 @@ describe("the built-in pool does not re-ask the committed set", () => {
   //
   // What they cannot catch: two questions about the same subject with genuinely
   // different answers (Vault's port here, Consul's port there), an answer
-  // paraphrased past normalisation ("Raft" against "the Raft protocol"), and
-  // any collision with an event file under `config/events/`, which is real
-  // people's content and is never in the repository. They are a floor, not a
-  // proof — a human still reads the pool next to the set.
+  // paraphrased past normalisation ("Raft" against "the Raft protocol"), a
+  // reworded duplicate that reaches the same answer with fewer than two words
+  // in common, and any collision with an event file under `config/events/`,
+  // which is real people's content and is never in the repository. They are a
+  // floor, not a proof — a human still reads the pool next to the set.
 
   test("the two sets are both non-empty, so nothing here passes vacuously", () => {
     assert.ok(DEFAULT_TIEBREAKERS.length > 0, "the pool is empty");
     assert.ok(COMMITTED.length > 20, `the committed example has ${COMMITTED.length} questions`);
   });
 
-  test("no pool question is won with an answer the committed set is won with", () => {
-    const shipped = new Map<string, string>();
-    for (const q of COMMITTED) {
-      for (const answer of correctAnswers(q)) shipped.set(answer, q.text);
-    }
+  test("no pool question asks the same thing as a committed question", () => {
     for (const q of DEFAULT_TIEBREAKERS) {
-      for (const answer of correctAnswers(q)) {
-        const clash = shipped.get(answer);
-        assert.equal(
-          clash,
-          undefined,
-          `"${q.text}" is won with the same answer as "${clash}" — the room has heard it`,
+      const mine = correctAnswers(q);
+      const mySubject = subjectWords(q.text);
+      for (const other of COMMITTED) {
+        const sharedAnswer = correctAnswers(other).find((a) => mine.includes(a));
+        if (sharedAnswer === undefined) continue;
+        const sharedSubject = [...subjectWords(other.text)].filter((w) => mySubject.has(w));
+        assert.ok(
+          sharedSubject.length < 2,
+          `"${q.text}" is won with the same answer as "${other.text}", and both are about ${sharedSubject.join(", ")} — the room has heard it`,
         );
       }
     }

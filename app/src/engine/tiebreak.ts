@@ -85,7 +85,7 @@ export const DEFAULT_TIEBREAKERS: readonly Question[] = [
     answers: ["The Atlantic", "The Indian", "The Pacific", "The Southern"],
     timeLimitSec: 30,
     correct: [2],
-    note: "The Pacific — Challenger Deep, at the south end of the Mariana Trench, just under 11,000m. The depth itself is still argued over by a few metres, which is why the question asks for the ocean.",
+    note: "The Pacific — Challenger Deep, at the south end of the Mariana Trench, just under 11,000m. Published depths for it differ by tens of metres depending on the survey, which is why the question asks for the ocean instead.",
     round: null,
     basePoints: 0,
     tiebreak: true,
