@@ -2,16 +2,29 @@
  * Phase 3's acceptance test. BUILD-PLAN.md: "thirty bots play a full
  * 20-question round and the scores match a hand-computed expectation."
  *
- * Thirty bots play the real launch set — `config/event.example/trivia-questions.json`,
- * the generic HashiCorp and IBM questions without the event-specific block an
- * event adds — through the *runtime* (`SessionRuntime`, fake sockets, fake
- * clock), so the path under test is the one a real tap takes: the socket
- * boundary computes the latency-corrected response time, the reducer settles
- * the question, the projection reports it.
+ * Thirty bots play a twenty-question set through the *runtime*
+ * (`SessionRuntime`, fake sockets, fake clock), so the path under test is the
+ * one a real tap takes: the socket boundary computes the latency-corrected
+ * response time, the reducer settles the question, the projection reports it.
  *
- * That file holds twenty-four scored questions; this plays the first twenty of
- * them, because twenty is the number the acceptance test is written around and
- * the round it simulates is long enough to walk every streak.
+ * **Which set, and why there are two of them.** The round plays
+ * {@link ACCEPTANCE_SET_JSON}, the frozen fixture beside this file — a snapshot
+ * of the committed example's first twenty questions that does not move again.
+ * It used to play `config/event.example/trivia-questions.json` itself, and that
+ * made every number below a function of a *content* file: reordering two
+ * questions in the set a host copies, or changing one timer, broke a bot total
+ * worked out on paper for reasons that had nothing to do with the edit
+ * (issue #2).
+ *
+ * Freezing the arithmetic is not a licence to stop looking at the real file, so
+ * the committed example is still played here — the second `describe` below,
+ * three bots, every expectation computed from what the file says rather than
+ * read off a table. A reorder, a retimed question or a twenty-fifth one changes
+ * what that test asserts instead of breaking it, while a set the runtime cannot
+ * actually play still fails the build. The rest of what holds the example to
+ * account is elsewhere: the invariants that make it a question set at all in
+ * `trivia/import.test.ts`, and the check that it never re-asks a built-in
+ * sudden-death question in `engine/tiebreak.test.ts`.
  *
  * **The expectation is not the engine.** Nothing in this file imports
  * `questionPoints`, `streakBonus`, `settleQuestion`, `correctedResponseMs` or
@@ -45,6 +58,7 @@ import { computeStandings } from "../engine/scoring.ts";
 import { SessionRegistry, type Client } from "../server/runtime.ts";
 import { renderStateFor, triviaPodium } from "../server/views.ts";
 import { importTriviaJson } from "../trivia/import.ts";
+import { ACCEPTANCE_SET_JSON } from "./acceptance-set.ts";
 
 /* ------------------------------------------------------------------ */
 /* The oracle: SPEC.md, in integers                                     */
@@ -93,14 +107,27 @@ export function specCorrection(rtt: readonly number[]): number {
 }
 
 /* ------------------------------------------------------------------ */
-/* The set, transcribed by hand from the CSV                            */
+/* The set, transcribed by hand from the fixture                        */
 /* ------------------------------------------------------------------ */
 
 /**
- * `[time limit in seconds, correct answer 1-based]` for the first twenty
- * questions of the example set, read off the file by eye rather than through
- * the importer, so the importer is checked against this and not the other way
- * round. Every question in the file is 4-answer, 1000 base (no `basePoints`).
+ * `[time limit in seconds, correct answer 1-based]` for the twenty questions of
+ * the frozen fixture, read off its JSON by eye rather than through the
+ * importer, so the importer is checked against this and not the other way
+ * round. Every question in the fixture is 4-answer, 1000 base (no
+ * `basePoints`).
+ *
+ * This table is the independent reading the acceptance test turns on: numbers a
+ * person took off a question file, sitting next to the `Question[]` that
+ * `importTriviaJson` built from the same bytes. An importer that read
+ * `"correct": "C"` as index 3, or that quietly defaulted a timer it failed to
+ * parse, disagrees with a human here rather than scoring a round wrong in front
+ * of a room.
+ *
+ * It transcribes the fixture rather than the committed example because a hand
+ * transcription is only true of a file that holds still. Against the example it
+ * was true until somebody edited content, and then it was a build break with a
+ * diff that pointed at the wrong thing.
  *
  * The blank lines are the round boundaries, and the timers are why they
  * matter: the set opens on History at 15 to 20 s — 20 where the answer is a
@@ -138,13 +165,33 @@ const SET: readonly (readonly [number, number])[] = [
 
 const BASE = 1000;
 
+/**
+ * The fixture, read the way a session reads a set: through the importer.
+ *
+ * Going through `importTriviaJson` rather than declaring `Question[]` inline is
+ * the point of holding the fixture as file text — it keeps the letter-to-index
+ * conversion inside the path this test exercises, which is the step {@link SET}
+ * is a second opinion on.
+ */
 function loadSet(): readonly Question[] {
+  const result = importTriviaJson(ACCEPTANCE_SET_JSON);
+  assert.ok(result.ok, "the frozen fixture must load");
+  return result.questions;
+}
+
+/**
+ * The committed example: the file `config/README.md` tells a host to copy.
+ *
+ * Nothing here transcribes it. It is loaded so that it can be *played*, and
+ * every expectation about it is derived from what it turned out to contain.
+ */
+function loadCommittedExample(): readonly Question[] {
   const text = readFileSync(
     new URL("../../../config/event.example/trivia-questions.json", import.meta.url),
     "utf8",
   );
   const result = importTriviaJson(text);
-  assert.ok(result.ok, "the launch set must load");
+  assert.ok(result.ok, "the committed example must load");
   return result.questions;
 }
 
@@ -543,7 +590,7 @@ const ZOE = 8_333;
 /* The round                                                            */
 /* ------------------------------------------------------------------ */
 
-describe("thirty bots play the launch set", () => {
+describe("thirty bots play the frozen acceptance set", () => {
   const questions = loadSet();
   const expected = expectRound();
   const played = playRound(questions);
@@ -558,16 +605,18 @@ describe("thirty bots play the launch set", () => {
   test("the importer read the file the way a person reads it", () => {
     // `SET` is a hand transcription of the questions this round plays, and
     // that is the whole of its value: it is an independent reading of the
-    // file rather than a copy of whatever the importer produced. The file is
-    // allowed to grow past it — questions get added — so this pins the ones
-    // it transcribed and plays those, rather than pinning the file's length
-    // and having every new question break a round simulation that never
-    // claimed to cover it.
-    assert.ok(
-      questions.length >= SET.length,
-      `the example set has ${questions.length} questions; this fixture needs at least ${SET.length}`,
+    // file rather than a copy of whatever the importer produced.
+    //
+    // The count is pinned exactly, which it could not be while the round
+    // played a content file that grows. A count that has moved means the
+    // fixture itself was edited — most likely to follow the committed example,
+    // which is the one thing its header asks nobody to do.
+    assert.equal(
+      questions.length,
+      SET.length,
+      "the fixture is frozen at twenty questions and is not meant to follow config/event.example",
     );
-    questions.slice(0, SET.length).forEach((q, i) => {
+    questions.forEach((q, i) => {
       const [limitSec, oneBased] = SET[i] ?? [0, 0];
       assert.equal(q.timeLimitSec, limitSec, `Q${i + 1} time limit`);
       assert.deepEqual(q.correct, [oneBased - 1], `Q${i + 1} correct answer`);
@@ -755,6 +804,227 @@ describe("thirty bots play the launch set", () => {
   });
 
   test("the whole round replays from its event log to the same state", () => {
+    const again = replay(
+      played.initial,
+      played.runtime.log.map((r) => ({ event: r.event, at: r.at })),
+    );
+    assert.deepEqual(again, played.runtime.state);
+  });
+});
+
+/* ------------------------------------------------------------------ */
+/* The committed example: played, never transcribed                     */
+/* ------------------------------------------------------------------ */
+
+/**
+ * The set a host copies, played end to end, with nothing about its content
+ * written down here.
+ *
+ * This is what guards `config/event.example/trivia-questions.json` now that the
+ * arithmetic above is pinned to a fixture. It is a weaker statement than a
+ * hand-computed total and a much more durable one: every number it asserts is
+ * computed from the questions that came out of the file, through the same SPEC
+ * oracle the acceptance round uses, so the test says "whatever is in this file,
+ * the runtime can play all of it and the points it awards are the points SPEC
+ * describes" — which stays true, and stays checked, across any content edit.
+ *
+ * Three bots, no RTT samples on any socket, so there is no latency correction to
+ * reason about and each question's points fall out of its own timer alone:
+ *
+ *   - **Ace** answers correctly the instant the question opens, which must be
+ *     worth exactly the question's base points, with the streak bonus climbing
+ *     to the cap and staying there.
+ *   - **Half** answers correctly at the midpoint of the timer, which must be
+ *     worth less than Ace on every question — the one property a speed
+ *     weighting that ignored the limit would still pass, and that a weighting
+ *     with the sign wrong would not.
+ *   - **Miss** is always wrong: on the board, scoring nothing.
+ *
+ * It plays the *whole* scored set, not the first twenty, so a question added to
+ * the example is a question this covers. The four flagged tiebreakers are played
+ * too, one of them, because sudden death is the only thing that ever asks them
+ * and an event that needs one needs it to work.
+ */
+describe("the committed example set plays a whole round through the runtime", () => {
+  const loaded = loadCommittedExample();
+  const flagged = loaded.filter((q) => q.tiebreak === true);
+  const scored = loaded.filter((q) => q.tiebreak !== true);
+
+  const ACE: ParticipantId = "pAce";
+  const HALF: ParticipantId = "pHalf";
+  const MISS: ParticipantId = "pMiss";
+
+  /**
+   * Half's tap: the middle of this question's timer.
+   *
+   * Nudged off an exact half for the same reason the ordinary bots re-roll one
+   * — the engine is known to round some exact halves the wrong way (see the
+   * `describe` below). On this file's 1000-point questions the midpoint is worth
+   * exactly 750 and the nudge never fires; it is here so that a set of, say,
+   * 750-point questions would not fail this test for a bug it is not about.
+   */
+  function midpointMs(q: Question): number {
+    const limitMs = q.timeLimitSec * 1000;
+    let ms = Math.floor(limitMs / 2);
+    while (isExactHalf(q.basePoints, ms, limitMs)) ms += 1;
+    return ms;
+  }
+
+  const played = (() => {
+    const registry = new SessionRegistry();
+    const initial = newSession({
+      sid: "ses-example",
+      title: "Example Team Offsite",
+      joinCode: "RAFT",
+      activities: ACTIVITIES,
+    });
+    const { runtime } = registry.add(initial, T0);
+    const clients = new Map<ParticipantId, Client>();
+    let now = T0;
+    const must = (event: Event, at: number, what: string): void => {
+      const out = runtime.apply(event, at);
+      assert.ok(out.applied, `${what}: ${out.rejection?.code ?? "not applied"}`);
+    };
+
+    must({ type: "open" }, now, "open");
+    for (const [pid, nickname] of [[ACE, "Ace"], [HALF, "Half"], [MISS, "Miss"]] as const) {
+      must({ type: "join", pid, nickname }, (now += 500), `join ${nickname}`);
+      const client = fakeClient(pid, []);
+      clients.set(pid, client);
+      runtime.clients.add(client);
+    }
+    must({ type: "start" }, (now += 1_000), "start");
+    must({ type: "setSegment", segment: "trivia" }, (now += 1_000), "segment");
+    // The whole file goes in, tiebreakers and all, exactly as the upload
+    // endpoint hands it over; the reducer is what lifts the flagged ones out.
+    must({ type: "loadTrivia", activityId: "trivia", questions: loaded }, (now += 1_000), "load");
+
+    const closed: SessionState[] = [];
+    scored.forEach((q, qi) => {
+      const opensAt = (now += 2_000);
+      must({ type: "openQuestion", suddenDeath: false }, opensAt, `open Q${qi + 1}`);
+      // The room gets this question's own timer, whatever the file says it is.
+      assert.equal(
+        runtime.state.trivia?.closesAt,
+        opensAt + q.timeLimitSec * 1000,
+        `Q${qi + 1} closesAt`,
+      );
+      const correct = q.correct[0] ?? 0;
+      const taps: readonly (readonly [ParticipantId, number, number])[] = [
+        [ACE, correct, 0],
+        [MISS, wrongOf(correct), 1_000],
+        [HALF, correct, midpointMs(q)],
+      ];
+      for (const [pid, choice, delayMs] of taps) {
+        const client = clients.get(pid);
+        assert.ok(client, `${pid} has a socket`);
+        const out = runtime.answer(client, qi, choice, opensAt + delayMs);
+        assert.ok(out.applied, `Q${qi + 1} ${pid}: ${out.rejection?.code ?? "not applied"}`);
+      }
+      now = opensAt + q.timeLimitSec * 1000 + 400;
+      must({ type: "closeQuestion" }, now, `close Q${qi + 1}`);
+      closed.push(runtime.state);
+      must({ type: "revealQuestion" }, (now += 1_000), `reveal Q${qi + 1}`);
+      if (qi + 1 < scored.length) must({ type: "nextQuestion" }, (now += 1_000), `next after Q${qi + 1}`);
+    });
+    // Everything the scoreboard reads is settled here, before sudden death
+    // touches the state, so the standings below are the ones a room would see
+    // at the end of the round.
+    const finalState = runtime.state;
+
+    must({ type: "openQuestion", suddenDeath: true }, (now += 1_000), "open sudden death");
+    const suddenDeath = runtime.state;
+
+    return { runtime, initial, closed, finalState, suddenDeath };
+  })();
+
+  test("the flagged questions come out of the scored set and become the sudden-death pool", () => {
+    // `config/event.example/README.md` says the file is a scored game with
+    // tiebreakers behind it, and this is that sentence as behaviour: the game
+    // is the unflagged questions, in file order, and the flagged ones are
+    // reachable only through sudden death.
+    assert.ok(flagged.length > 0, "the example carries tiebreakers of its own");
+    const trivia = played.finalState.trivia;
+    assert.ok(trivia);
+    assert.deepEqual(trivia.questions, scored);
+    assert.deepEqual(trivia.tiebreakers, flagged);
+  });
+
+  test("each answer's points and streak bonus are what SPEC says for that question's own timer", () => {
+    let aceTotal = 0;
+    let halfTotal = 0;
+    scored.forEach((q, qi) => {
+      const limitMs = q.timeLimitSec * 1000;
+      const got = played.closed[qi]?.trivia;
+      assert.ok(got, `Q${qi + 1} state`);
+      assert.equal(got.phase, "closed");
+      const ace = got.answers[ACE];
+      const half = got.answers[HALF];
+      const miss = got.answers[MISS];
+      assert.ok(ace && half && miss, `Q${qi + 1} answers`);
+
+      // Ace and Half are right on every question, so the streak is the
+      // question's number and the bonus is the SPEC curve up to its cap.
+      const n = qi + 1;
+      assert.equal(ace.ms, 0, `Q${qi + 1} Ace's corrected time`);
+      assert.equal(ace.points, specPoints(q.basePoints, 0, limitMs), `Q${qi + 1} Ace's points`);
+      assert.equal(ace.points, q.basePoints, `Q${qi + 1}: an instant answer is worth the base points`);
+      assert.equal(ace.streakBonus, specBonus(n), `Q${qi + 1} Ace's streak bonus`);
+
+      assert.equal(half.ms, midpointMs(q), `Q${qi + 1} Half's corrected time`);
+      assert.equal(
+        half.points,
+        specPoints(q.basePoints, midpointMs(q), limitMs),
+        `Q${qi + 1} Half's points`,
+      );
+      assert.ok(half.points < ace.points, `Q${qi + 1}: the slower correct answer scored no less`);
+      assert.equal(half.streakBonus, specBonus(n), `Q${qi + 1} Half's streak bonus`);
+
+      assert.equal(miss.correct, false, `Q${qi + 1} Miss`);
+      assert.equal(miss.points, 0, `Q${qi + 1} Miss's points`);
+      assert.equal(miss.streakBonus, 0, `Q${qi + 1} Miss's streak bonus`);
+
+      aceTotal += ace.points + ace.streakBonus;
+      halfTotal += half.points + half.streakBonus;
+      assert.equal(got.totals[ACE], aceTotal, `Q${qi + 1} Ace's running total`);
+      assert.equal(got.totals[HALF], halfTotal, `Q${qi + 1} Half's running total`);
+      assert.equal(got.totals[MISS], 0, `Q${qi + 1} Miss's running total`);
+    });
+    // The bonus really does reach its cap in a set this long, so the walk above
+    // covered the flat part and not just the climb.
+    assert.ok(scored.length > 6, `a ${scored.length}-question game never reaches the streak cap`);
+    assert.equal(played.closed[scored.length - 1]?.trivia?.answers[ACE]?.streakBonus, 500);
+  });
+
+  test("the round the file describes ends with the scoreboard the file earns", () => {
+    // Top raw normalises to 100 (SCORING.md), and the rest fall out of it. No
+    // literal here is about the example's content: the totals come from the
+    // round that was just played, so this reads the same whatever is in it.
+    const scores = played.finalState.scores["trivia"] ?? {};
+    const totals = played.finalState.trivia?.totals ?? {};
+    assert.deepEqual(scores[ACE], { raw: totals[ACE], status: "played" });
+    assert.deepEqual(scores[MISS], { raw: 0, status: "played" });
+    const standings = computeStandings(played.finalState);
+    assert.equal(standings.find((s) => s.pid === ACE)?.perActivity["trivia"]?.points, 100);
+    assert.equal(standings.find((s) => s.pid === MISS)?.perActivity["trivia"]?.points, 0);
+    const half = standings.find((s) => s.pid === HALF)?.perActivity["trivia"]?.points ?? 0;
+    assert.ok(half > 0 && half < 100, `Half normalised to ${half}`);
+  });
+
+  test("a tiebreaker out of the file can be asked, and sudden death has no timer", () => {
+    const trivia = played.suddenDeath.trivia;
+    assert.ok(trivia);
+    assert.equal(trivia.suddenDeath, true);
+    // SPEC: sudden death is read by the host, not by a clock.
+    assert.equal(trivia.closesAt, null);
+    assert.equal(trivia.tiebreakAt, 0);
+    assert.deepEqual(trivia.tiebreakers[trivia.tiebreakAt], flagged[0]);
+  });
+
+  test("the whole round replays from its event log to the same state", () => {
+    // The same guarantee the acceptance round asserts, over the real file: a
+    // set that could not be rebuilt from its log is a set a recovered session
+    // would score differently.
     const again = replay(
       played.initial,
       played.runtime.log.map((r) => ({ event: r.event, at: r.at })),

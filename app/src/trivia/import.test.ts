@@ -228,21 +228,40 @@ describe("what is refused", () => {
 describe("the committed example set", () => {
   // The example the README points people at. If it stops loading, the thing we
   // tell people to copy is broken.
+  //
+  // What this block is allowed to assert is the point of it. These are the
+  // *invariants* a question set has to satisfy — it parses, one correct answer
+  // each, a round card behind every scored question, timers the room can live
+  // with — and nothing here is a transcription of what the file happens to say
+  // today. The example is content: it gets reordered, retimed and rewritten,
+  // and none of that should be a build break (issue #2). The arithmetic that
+  // used to be pinned to this file now plays the frozen fixture in
+  // `bots/acceptance-set.ts`, and the file itself is played, content and all,
+  // by the second `describe` in `bots/trivia-round.test.ts`.
   const text = readFileSync(
     new URL("../../../config/event.example/trivia-questions.json", import.meta.url),
     "utf8",
   );
 
   it("loads", () => {
-    assert.equal(ok(text).length, 28);
+    // No count asserted here on purpose: adding a question is a content edit,
+    // and a content edit that has to be mirrored by a literal under `app/src`
+    // is exactly what this file stopped doing. The one count worth pinning is
+    // the game's shape, below, and it is pinned because three documents state
+    // it in prose.
+    assert.ok(ok(text).length > 0);
   });
 
   it("is a 24-question game with four tiebreakers behind it", () => {
     // The two numbers are the shape `docs/running-an-event.md` builds a
-    // fifteen-minute slot around, and they are separate on purpose: a
-    // tiebreaker is lifted out of the scored set, so flagging four does not
-    // make the game twenty-eight questions long. The example is what every
-    // event gets copied from, so if it drifts back to forty the drift is here.
+    // fifteen-minute slot around, `config/README.md` and
+    // `config/event.example/README.md` both state them, and they are separate
+    // on purpose: a tiebreaker is lifted out of the scored set, so flagging
+    // four does not make the game twenty-eight questions long. The example is
+    // what every event gets copied from, so if it drifts back to forty the
+    // drift is here — and changing these is a decision that has to be written
+    // down in those three documents too, which is why it is pinned while the
+    // questions themselves are free to move.
     const loaded = ok(text);
     assert.equal(loaded.filter((q) => q.tiebreak !== true).length, 24);
     assert.equal(loaded.filter((q) => q.tiebreak === true).length, 4);
@@ -282,6 +301,29 @@ describe("the committed example set", () => {
       const at = q.correct[0] ?? -1;
       assert.ok(at >= 0 && at < q.answers.length, `question ${i + 1} points outside its answers`);
     }
+  });
+
+  it("offers four answers on every question and leaves basePoints alone", () => {
+    // SPEC's "Trivia" describes the game as four answers with shape and colour
+    // and the phone is laid out for four, so the worked example shows the full
+    // shape even though the importer accepts two and three for a set that needs
+    // them. `basePoints` is the other half of the same choice, recorded in
+    // `config/event.example/README.md`: the example deliberately sets none, so
+    // every question is worth the same 1000 before speed weighting and a host
+    // reading the file can see the scoring without doing any sums.
+    for (const [i, q] of ok(text).entries()) {
+      assert.equal(q.answers.length, 4, `question ${i + 1} offers ${q.answers.length} answers`);
+      assert.equal(q.basePoints, 1000, `question ${i + 1} overrides basePoints`);
+    }
+  });
+
+  it("asks each question once, however the set is ordered", () => {
+    // Reordering and rewriting this file is meant to be a content-only edit,
+    // and the edit that goes wrong that way is a paste that leaves a question in
+    // twice. Two identical stems are a tile the room has already seen and a
+    // second helping of points for whoever remembers the first.
+    const stems = ok(text).map((q) => q.text.toLowerCase());
+    assert.equal(new Set(stems).size, stems.length, "a question stem appears twice");
   });
 
   it("round-trips: what it loads re-exports and loads the same", () => {
