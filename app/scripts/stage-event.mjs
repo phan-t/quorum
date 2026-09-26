@@ -173,7 +173,91 @@ if (!loaded.ok) {
   process.exit(1);
 }
 
-/* 3 — the promo card, if this event has one.
+/* 3 — the arcade's content, if this event stages any.
+ *
+ * Optional and non-fatal for the promo card's reasons below, with one of its
+ * own: a round whose content did not arrive plays the set compiled into the
+ * build, so a failure here is a room playing last release's emoji board rather
+ * than a round that cannot run. That is worth a warning and not worth exiting
+ * over, by which point the session exists and re-running staging would make a
+ * second one.
+ *
+ * It goes up before the assets because it is one small request and the
+ * operator should see it fail before forty photos scroll past it.
+ *
+ * Absent is the ordinary case, and absent means every round plays its compiled
+ * set. Present and partial means only the rounds it carries are staged, and a
+ * second upload merges key by key — so a file carrying only `gganbu` leaves a
+ * staged `unseal` where it is.
+ */
+const arcadeNamed = typeof session.arcadeContent === "string";
+const arcadeFile =
+  session.arcadeContent === false
+    ? null
+    : arcadeNamed
+      ? session.arcadeContent
+      : "arcade-content.json";
+const arcadeRaw = arcadeFile === null ? null : read(arcadeFile);
+let arcadeLine = "";
+
+if (arcadeFile !== null && arcadeRaw === null && arcadeNamed) {
+  // Silent when it is only the default that is absent — the ordinary case, and
+  // the ordinary case is a session that plays the compiled sets. Loud when
+  // session.json named a file, because somebody meant it.
+  process.stderr.write(
+    `\n  No config/events/${event}/${arcadeFile} — the arcade will play its compiled content.\n`,
+  );
+}
+
+if (arcadeRaw !== null) {
+  const retry =
+    `    curl -X POST "$QUORUM_URL/api/sessions/${sid}/content/arcade" \\\n` +
+    `      -H "Authorization: Bearer $HOST_TOKEN" \\\n` +
+    `      -H 'content-type: application/json' \\\n` +
+    `      --data-binary @config/events/${event}/${arcadeFile}\n`;
+
+  let up;
+  try {
+    up = await post(
+      `/api/sessions/${encodeURIComponent(sid)}/content/arcade`,
+      arcadeRaw,
+      hostToken,
+    );
+  } catch (err) {
+    up = { ok: false, status: 0, body: null, text: err.message };
+  }
+
+  if (!up.ok) {
+    // The importer's errors are addressed by round and by item, so they are
+    // printed as they came rather than summarised into one line.
+    const errors = up.body?.errors ?? [up.text];
+    process.stderr.write(
+      `\n  The arcade content was not loaded (${up.status}).\n` +
+        `  Nothing was half-loaded — every round plays the set compiled into the\n` +
+        `  build until this upload succeeds. Fix ${arcadeFile} and re-run just it.\n` +
+        `  The session and its questions are staged. Do NOT re-run staging.\n\n` +
+        errors.map((e) => `    ${e}\n`).join("") +
+        `\n${retry}`,
+    );
+  } else {
+    // What gets reported is the server's reading of the file — which rounds it
+    // took — rather than a second parser here that could quietly disagree with
+    // it. The shape of that answer belongs to the endpoint, so this accepts a
+    // list of round names or a count per round and falls back to naming the
+    // file, because a staged round reported wrongly is worse than not reported.
+    const rounds = up.body?.rounds;
+    const summary = Array.isArray(rounds)
+      ? rounds.join(", ")
+      : rounds !== null && typeof rounds === "object"
+        ? Object.entries(rounds)
+            .map(([round, n]) => (typeof n === "number" ? `${round} ${n}` : round))
+            .join(", ")
+        : null;
+    arcadeLine = `  arcade     ${summary ?? `staged from ${arcadeFile}`}\n`;
+  }
+}
+
+/* 4 — the promo card, if this event has one.
  *
  * Optional and non-fatal, both deliberately. Optional because an event without
  * a poster stages exactly as it did before this existed. Non-fatal because of
@@ -225,7 +309,7 @@ if (promoRaw !== null) {
   }
 }
 
-/* 4 — the send-off, if this event has one.
+/* 5 — the send-off, if this event has one.
  *
  * Optional and non-fatal for exactly the promo card's reasons, and slower than
  * everything else here put together: the file is a few kilobytes and the
@@ -375,12 +459,13 @@ if (sendoffRaw !== null) {
   }
 }
 
-/* 5 — what you cannot get back */
+/* 6 — what you cannot get back */
 const line = "─".repeat(72);
 process.stdout.write(
   `\n${line}\n` +
     `  ${title}\n` +
     `  ${loaded.body.questions} questions loaded\n` +
+    arcadeLine +
     promoLine +
     sendoffLine +
     `${line}\n\n` +

@@ -381,6 +381,11 @@ export interface SessionState {
    */
   readonly trivia: TriviaState | null;
   /**
+   * Arcade content staged for this session. Absent until `loadArcadeContent`,
+   * and partial: only the rounds that were staged. See {@link ArcadeContent}.
+   */
+  readonly arcadeContent?: ArcadeContent;
+  /**
    * The arcade register: player numbers, who is on the Floor, what is banked.
    * Null until `enterArcade`.
    *
@@ -604,6 +609,33 @@ export interface GlassPane {
  * "re-paired **within a product**", so the step is never won by recognising
  * the vendor's product line — only by knowing the feature.
  */
+/**
+ * Every arcade round's content, as one staged bundle.
+ *
+ * Each key is optional and each is the whole of that round's content: a round
+ * with a key here plays what was staged, and a round without one plays the
+ * literal compiled into `arcade/<round>.ts`. There is no merging — half a
+ * staged Unseal and half a compiled one is a set nobody has read end to end,
+ * and the tiers are drawn from the whole.
+ *
+ * **This is the half of the arcade that is about the room rather than the
+ * rules.** The rules are the engine's and ship with the build; the questions
+ * are an event's and change between events, and until this existed changing
+ * one meant editing `app/src` and deploying. A default a release moves — the
+ * three Gganbu prompts flagged VERIFY are exactly that — should not need a
+ * deploy to correct.
+ *
+ * It rides in the session like `trivia` does, and for the same reason: one
+ * snapshot and one event log restore the whole session, and content in a
+ * second store would be a second consistency problem.
+ */
+export interface ArcadeContent {
+  readonly recruitment?: readonly EmojiItem[];
+  readonly unseal?: readonly UnsealItem[];
+  readonly glassBridge?: readonly GlassStep[];
+  readonly gganbu?: readonly OverUnderItem[];
+}
+
 export interface GlassStep {
   /** "Vault". Shown with the step; identical for both panes, so it is safe. */
   readonly product: string;
@@ -1089,6 +1121,12 @@ export type Event =
       questions: readonly Question[];
       tiebreakers?: readonly Question[];
     }
+  /**
+   * Stage one or more rounds' content. Absent keys are left alone, so a second
+   * upload that carries only Gganbu does not clear a staged Unseal — the file
+   * is the unit a host edits, but the event is the unit the log replays.
+   */
+  | { type: "loadArcadeContent"; content: ArcadeContent }
   | { type: "openQuestion"; suddenDeath: boolean }
   /**
    * `ms` is the corrected response time, computed at the socket boundary
@@ -1197,6 +1235,8 @@ export type RejectCode =
   | "spot_cap_reached"
   // trivia
   | "no_questions_loaded"
+  | "no_arcade_content"
+  | "arcade_already_started"
   | "questions_already_loaded"
   /** A second `loadTrivia` after the first question has been opened. */
   | "trivia_already_started"

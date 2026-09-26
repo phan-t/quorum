@@ -8,10 +8,11 @@ awscreds
 make stage EVENT=2026-03-12-example-offsite
 ```
 
-That creates the session, loads its questions, puts up the promo card if the
-event has one, uploads the send-off and its photos if the event has those,
-stages the console's setup onto it, and prints the four things there is no
-endpoint to return. Nothing else has to happen before 2:00pm.
+That creates the session, loads its questions, stages the arcade's content if
+the event has any, puts up the promo card if the event has one, uploads the
+send-off and its photos if the event has those, stages the console's setup onto
+it, and prints the four things there is no endpoint to return. Nothing else has
+to happen before 2:00pm.
 
 ---
 
@@ -21,6 +22,7 @@ endpoint to return. Nothing else has to happen before 2:00pm.
 config/events/2026-03-12-example-offsite/
   session.json            title, what the session scores, the console's setup
   trivia-questions.json   the question set
+  arcade-content.json     optional: the arcade rounds' content for this event
   promo-card.html         optional: the poster shown in the Desktop's lobby
   sendoff.json            optional: the send-off's messages and photo names
   photos/                 the photos sendoff.json names
@@ -40,6 +42,7 @@ content about the people in the room and this repository is public. See
   "title": "Example Team Offsite",
   "subtitle": "Thursday 12 March 2026",
   "questions": "trivia-questions.json",
+  "arcadeContent": "arcade-content.json",
   "promo": "promo-card.html",
   "sendoff": "sendoff.json",
   "activities": [
@@ -54,9 +57,9 @@ content about the people in the room and this repository is public. See
 }
 ```
 
-`title`, `subtitle`, `questions`, `promo`, `sendoff` and `activities` are the
-server's. Everything under `console` is the console's, and the server never
-looks inside it.
+`title`, `subtitle`, `questions`, `arcadeContent`, `promo`, `sendoff` and
+`activities` are the server's. Everything under `console` is the console's, and
+the server never looks inside it.
 
 `subtitle` is the second line under the name — a date, a time, a place. Optional
 and null by default; a session without one shows nothing in its place.
@@ -66,6 +69,12 @@ no such file stages exactly as it did before promo cards existed. Set it to
 `false` to skip the upload for an event that has the file but does not want it.
 
 `sendoff` works the same way, defaulting to `sendoff.json`.
+
+`arcadeContent` works the same way too, defaulting to `arcade-content.json`.
+It is spelled out rather than called `arcade` because `console.arcade` is
+already the console's running order for the rounds, and two keys called
+`arcade` in one file is a file that gets edited in the wrong half at five to
+two.
 
 ---
 
@@ -138,6 +147,208 @@ engine state, fixed at `POST /api/sessions`, and there is no endpoint that
 edits them — changing them means creating another session, which means another
 join code and another set of tokens. That is the reason the validation is this
 strict at the one moment it can be.
+
+---
+
+## The arcade's content
+
+Four of the arcade's six rounds have content: Recruitment's emoji items,
+Unseal's tins, Gganbu's Over/Under prompts and the Glass Bridge's pairs. Plan /
+Apply and Tug of Raft have none — a light and a heartbeat are rules, not
+questions. Each of the four sets is a literal compiled into `app/src/arcade/`,
+and `arcade-content.json` replaces any of them for one session, so correcting a
+Vault default or swapping an emoji cue is a staged file rather than a deploy.
+
+```json
+{
+  "title": "Example Team Offsite — arcade content",
+  "recruitment": [
+    { "cue": "🏦⏳", "answer": "Vault", "accept": [], "note": "…" }
+  ],
+  "unseal": [
+    { "shape": "circle", "cue": "N P A L", "answer": "PLAN", "note": "…" }
+  ],
+  "glassBridge": [
+    {
+      "product": "Packer",
+      "panes": [
+        { "label": "Packer Pre-Processors", "note": "…" },
+        { "label": "Packer Post-Processors", "note": "…" }
+      ],
+      "real": 1
+    }
+  ],
+  "gganbu": [
+    {
+      "cue": "Consul's default raft_multiplier",
+      "threshold": "3",
+      "answer": "over",
+      "note": "…",
+      "verify": true
+    }
+  ]
+}
+```
+
+[`config/event.example/arcade-content.json`](../config/event.example/arcade-content.json)
+is a complete one: all four rounds, invented end to end for the example
+directory. `title` is for whoever opens the file; nothing reads it, exactly as
+nothing reads a question file's title.
+
+**Every key is optional, and an absent key means that round plays the set
+compiled into the build.** A file carrying only `gganbu` changes Gganbu and
+nothing else, and an event that stages no file at all plays exactly what the
+release shipped — which is what every session did before this existed.
+
+**A second upload merges key by key.** Uploading a file that carries only
+`unseal` leaves a `gganbu` staged by an earlier upload where it is rather than
+clearing it, so a correction to one round does not require re-sending the
+others. What does *not* merge is the inside of a round: a staged `unseal` is the
+whole of that round's tins. Half a staged set beside half a compiled one is a
+set nobody has read end to end, and Unseal's tiers are dealt from the whole.
+
+Two uploads are refused rather than merged. **A file that stages no rounds at
+all** is somebody who meant something by it, and **an upload once the arcade has
+begun** is content changing under a round that has already banked points for the
+old one. Correcting content is a thing to do before the first round card goes
+up — which, since the ordinary path is `make stage` the day before, it is.
+
+### What goes in each round
+
+**Recruitment** — two emoji, one product, typed.
+
+| | |
+| --- | --- |
+| `cue` | The two emoji. |
+| `answer` | The product. Matched after lowercasing and stripping non-letters. |
+| `accept` | Optional. Aliases that also count: `["tf"]` for Terraform. Leave it out, or write `[]`, for an item with no aliases; the answer itself is always matched and does not belong in the list. |
+| `note` | Read out at the reveal. |
+
+**Unseal** — a scrambled word in a tin, picked by shape.
+
+| | |
+| --- | --- |
+| `shape` | `circle`, `triangle`, `star` or `umbrella`. The shape **is** the length: 4–5 letters, 6, 8, and 11 or more. |
+| `cue` | The letters of `answer`, permuted and spaced — `"S I P G O S"` for GOSSIP. The only half a player ever sees. |
+| `answer` | The word. The compiled set writes it in capitals, and the cue has to be its letters and not spell it out in order. |
+| `note` | Read out at the reveal. |
+
+A tier holding more than one word deals them out by arcade player number, so
+two people sitting together are not unscrambling the same word. Put the most
+words in the tiers the room actually picks: the circle is the cautious shape,
+and in a room of thirty most of the room is in it. One word in a tier is one
+person saying it out loud and solving the tier for everybody in it, which is
+why **a shape that appears at all needs at least three tins**. A shape left out
+of the file *entirely* is fine and is a choice — the picker greys it out and the
+round runs on three tiers — but a shape with one or two tins is refused, because
+the picker offers it.
+
+**The Glass Bridge** — two panes for one product, one of them a real feature.
+
+| | |
+| --- | --- |
+| `product` | Shown with the step, and identical for both panes. Both panes being the same product is the point: the step is won by knowing the feature, not by recognising the product line. |
+| `panes` | Exactly two, in display order. Each has a `label` and a reveal `note`, and a fake's note says why it is fake. |
+| `real` | `0` or `1`: which pane is the real feature. |
+
+Do not make the invented pane always the odd-sounding one, or the board is one
+rule an engineer has by step two. The shipped board pairs an obscure-but-real
+feature against a plausible invention four times out of six and the other way
+round twice, so there is no rule to find.
+
+**Gganbu** — an Over/Under wager against a threshold.
+
+| | |
+| --- | --- |
+| `cue` | The question, shown with the threshold. |
+| `threshold` | The number wagered against, as a string. |
+| `answer` | `over` or `under`. |
+| `note` | Read out at the reveal, with the real figure in it. |
+| `verify` | Whether the answer was checked before the session. It travels with the answer and never with the prompt — a flag beside a question is a nudge. |
+
+**A certainty is a bug in this round.** A prompt both halves of a pair know cold
+produces two minimum wagers and a tie, which is the one outcome a betting round
+has nothing to say about. Set each threshold a plausible distance from its
+answer — close enough that a well-informed player is not sure enough to stake
+five tokens, far enough that no patch release or disputed month can move the
+answer across the line. Whether a threshold really sits at that distance is not
+something an importer can check; what it does refuse is **a bank that answers
+the same way every time**, because the first reveal would hand over the rest of
+the round, and this is the round where certainty is worth five tokens.
+
+### It is validated on upload, all or nothing
+
+The rules are the question file's, applied to a file with four rounds in it, and
+they live in `app/src/arcade/import.ts`:
+
+- **Unknown keys are errors.** A `"verify_"` is a prompt whose author believes
+  they flagged it, and defaulting it to `false` is how the room finds out.
+- **The whole file is rejected or none of it is**, and every problem comes back
+  at once. A bank with prompt 5 missing is otherwise discovered live.
+- **Errors are addressed by round and index** — `gganbu[2]`,
+  `glassBridge[4], panes[1].label` — and the index is **0-based**, because it is
+  the path into the array the file itself is writing. Staging prints those lines
+  rather than the JSON.
+
+A rejected upload changes nothing: the session keeps whatever was staged before
+it, and any round that has never been staged keeps playing its compiled set.
+
+### Every note is read out to the room
+
+A reveal note is a claim about a HashiCorp product, made by the House in front
+of people who use these products for a living, so a note that is confidently
+wrong costs more than no note at all. Check each fact against the product's
+current documentation rather than recalling it, and keep version numbers out —
+a release number is a second fact to be wrong about. The headers of
+`app/src/arcade/recruitment.ts`, `unseal.ts`, `gganbu.ts` and `glass-bridge.ts`
+record what that discipline has already caught, including two notes that read
+perfectly well aloud and described an archived product.
+
+### It is staged from a terminal, and that is the safe part
+
+**Each of these four sets carries its own answers.** A Gganbu prompt holds the
+answer, the reveal note and the VERIFY flag; a Glass Bridge step holds which
+pane is real; an Unseal tin holds the word. That is exactly why the prompts do
+not travel on the `arcade.round` host command — six prompts from a browser
+would be the answer key from a browser — and it is true of all four rounds.
+
+So this is an upload from the host's machine to the server over HTTPS,
+authenticated by the host token, and the browser never holds the file. There is
+no console control that loads arcade content and there should not be one.
+Somebody who wants to change a cue, a tin or a threshold edits this file and
+runs `make stage`.
+
+### It is session state
+
+Unlike the promo card and the send-off's photos, the staged content lives *in*
+the session, next to the question set and for the same reason: one snapshot and
+one event log have to restore the whole session, and a crash between two rounds
+must come back with the same answers in it. It is a few kilobytes of text, which
+is what makes that affordable.
+
+### What staging does
+
+After the session and its questions, and before the promo card and the photos,
+staging uploads the file to `POST /api/sessions/:sid/content/arcade` with the
+host token and `application/json`.
+
+Like the promo card it is **optional and non-fatal**. An event with no
+`arcade-content.json` stages exactly as it did before this existed, and a
+failure prints the importer's errors and the `curl` that retries it rather than
+exiting — by then the session exists, and re-running staging would create a
+second one with a different join code and different tokens. **A failure is never
+a round that cannot run:** every round the upload did not reach plays its
+compiled set, so the cost of a failed upload is a room playing the content the
+build shipped.
+
+```bash
+curl -X POST "$QUORUM_URL/api/sessions/$SID/content/arcade" \
+  -H "Authorization: Bearer $HOST_TOKEN" -H 'content-type: application/json' \
+  --data-binary @config/events/<event>/arcade-content.json
+```
+
+That is the command to reach for when staging warns that the arcade content did
+not go up. Re-running `make stage` is not.
 
 ---
 
@@ -363,10 +574,10 @@ corrupt stored value is.
 
 ## What is not in here yet
 
-`session.json` covers the title and subtitle, the questions, the promo card,
-the send-off, what the session scores and the console's setup. It does
-not yet carry the practice flag, per-question timer overrides, or the arcade's
-timings as anything but the console's own `timings` object. Those are all
+`session.json` covers the title and subtitle, the questions, the arcade's
+content, the promo card, the send-off, what the session scores and the console's
+setup. It does not yet carry the practice flag, per-question timer overrides, or
+the arcade's timings as anything but the console's own `timings` object. Those are all
 server-side or engine-side state and each needs its own decision about whether
 staging should set it or the host should. Add them one at a time, and keep the
 rule that the server does not parse the console's half.

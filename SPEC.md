@@ -571,6 +571,26 @@ because its joke depends most on everyone knowing the show.
 | 4 | **Gganbu** | Marbles | 6 Over/Under items | 3.5 min | Yes |
 | 5 | **The Glass Bridge** | Glass Bridge | 6 Real-or-Fake pairs (3 existing) | 3.5 min | Yes |
 
+**The content of the four rounds that have any is staged, like the question
+set.** Recruitment's emoji items, Unseal's tins, Gganbu's prompts and the Glass
+Bridge's pairs are each a literal compiled into `app/src/arcade/`, and each can
+be replaced for one session by staging an `arcade-content.json` beside
+`trivia-questions.json`. A round the file does not carry **plays its compiled
+set**, so an event that stages nothing plays exactly what the build shipped, and
+a file that carries only Gganbu changes only Gganbu. The format, and what a
+second upload does, are in
+[docs/event-config.md](docs/event-config.md#the-arcades-content); this section
+stays about the rounds.
+
+Why it is staged from a terminal and not set in the console: **every one of
+these four rounds' content carries its own answers.** An `OverUnderItem` holds
+the answer and the reveal note, a `GlassStep` holds which pane is real, an
+`UnsealItem` holds the word. That is the same reason the Gganbu prompts do not
+travel on the `arcade.round` host command — six prompts from a browser would be
+the answer key from a browser — and it applies to all four sets. Staging goes
+host machine → server over HTTPS, authenticated by the host token, and the
+browser never holds the file.
+
 #### Round 0 — Recruitment (Emoji Decode)
 
 *In the show, a recruiter at a train station plays ddakji with strangers and

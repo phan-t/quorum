@@ -1133,6 +1133,46 @@ export function reduce(
 
     /* ---------------- trivia ---------------- */
 
+    case "loadArcadeContent": {
+      // Refused once a round has started, for `loadTrivia`'s reason and a
+      // sharper version of it: the arcade banks points *during* a round, so
+      // swapping the content under a running one rewrites what those points
+      // were for. Before the first round, replacing is the likeliest reason
+      // to upload twice — the first file was the wrong one.
+      if (state.arcade !== null) {
+        return unchanged(
+          reject(
+            "host",
+            "arcade_already_started",
+            "The arcade has begun. Re-staging now would not match what has been played.",
+          ),
+        );
+      }
+      const keys = Object.keys(event.content);
+      if (keys.length === 0) {
+        return unchanged(
+          reject("host", "no_arcade_content", "That file stages no rounds."),
+        );
+      }
+      // Merged key by key, not replaced wholesale: a second upload carrying
+      // only Gganbu must not clear a staged Unseal. The file is what a host
+      // edits; the event is what the log replays, and replaying two uploads
+      // has to land where applying them one after the other did.
+      return applied(
+        {
+          ...state,
+          arcadeContent: { ...state.arcadeContent, ...event.content },
+        },
+        // Both effects, for `loadTrivia`'s reasons one arm below. `PERSIST`
+        // because `SessionRuntime.apply` gates the snapshot *and* the stored
+        // event on it, so without it staging writes nothing to the store and
+        // survives only until the next transition that does persist — a crash
+        // in that window loses content the host has already been told landed.
+        // `BROADCAST_STATE` because the console is how a host finds out the
+        // upload took, and silence is the one answer staging must not give.
+        [BROADCAST_STATE, PERSIST],
+      );
+    }
     case "loadTrivia": {
       const activity = state.activities.find((a) => a.id === event.activityId);
       if (!activity) {

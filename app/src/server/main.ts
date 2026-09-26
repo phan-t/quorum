@@ -41,12 +41,21 @@ import {
   note,
   rateLimited,
 } from "./limits.ts";
-import { recruitmentRound } from "../arcade/recruitment.ts";
-import { glassBridgeRound } from "../arcade/glass-bridge.ts";
-import { unsealRound } from "../arcade/unseal.ts";
+// The round factories, and the compiled content each one defaults to.
+//
+// The literals are imported *by name* rather than left to the factories'
+// default parameters so that the fallback is written at the call site, where
+// the decision is: see the note above `commandToEvent`'s `arcade.round` arm.
+import { RECRUITMENT_ITEMS, recruitmentRound } from "../arcade/recruitment.ts";
+import { GLASS_BRIDGE_STEPS, glassBridgeRound } from "../arcade/glass-bridge.ts";
+import { UNSEAL_ITEMS, unsealRound } from "../arcade/unseal.ts";
 import { tugOfRaftRound } from "../arcade/tug-of-raft.ts";
-import { gganbuRound } from "../arcade/gganbu.ts";
+import { GGANBU_PROMPTS, gganbuRound } from "../arcade/gganbu.ts";
 import { formatErrors, importTriviaJson } from "../trivia/import.ts";
+import {
+  formatErrors as formatArcadeErrors,
+  importArcadeJson,
+} from "../arcade/import.ts";
 import {
   formatErrors as formatSendoffErrors,
   importSendoffJson,
@@ -361,6 +370,92 @@ async function loadTriviaQuestions(
     });
   }
   return json(res, 200, { activityId: activity, questions: result.questions.length });
+}
+
+/**
+ * The arcade's content for one session: the four rounds that have any, staged
+ * as one file.
+ *
+ * The same shape as the trivia loader above and for the same reason. Until
+ * this existed, every arcade round's questions were a TypeScript literal
+ * compiled into the build — changing one emoji cue, or a Vault default that a
+ * release had moved, meant editing `app/src` and deploying. Three of the six
+ * Gganbu prompts carry a VERIFY flag *because their answers can move*, and
+ * needing a deploy to correct one was the gap.
+ *
+ * **Why this path and not a host command.** The content is the answer key:
+ * an `OverUnderItem` carries `answer`, `note` and `verify`, a `GlassStep`
+ * carries which pane is real. That is exactly why the prompts are not on the
+ * `arcade.round` frame — six prompts on a command from a browser would be the
+ * answer key in a browser. Here the file goes from the host's machine to the
+ * server over HTTPS with the host token, the server validates and stores it,
+ * and no browser ever holds it. Trivia has always worked this way.
+ *
+ * Absent keys mean "play the compiled set for that round", so a session that
+ * stages nothing behaves exactly as it did before this existed. The engine
+ * merges key by key, so a second upload carrying only Gganbu does not clear a
+ * staged Unseal.
+ */
+async function loadArcadeContent(
+  res: ServerResponse,
+  sid: string,
+  presented: string,
+  req: IncomingMessage,
+): Promise<void> {
+  const runtime = registry.bySessionId(sid);
+  // Unknown session and wrong token answer alike, as everywhere else: a 404
+  // that only appears for a real sid is a session-id oracle.
+  if (
+    !runtime ||
+    presented === "" ||
+    !tokenMatches(presented, runtime.secrets.hostTokenHash)
+  ) {
+    return json(res, 401, { error: "unauthorized" });
+  }
+
+  let text: string;
+  try {
+    text = await readText(req);
+  } catch {
+    return json(res, 413, { error: "too_large" });
+  }
+
+  const result = importArcadeJson(text);
+  if (!result.ok) {
+    return json(res, 400, {
+      error: "invalid_arcade_content",
+      // Addressed by round and index, in the file's own order, so a host fixes
+      // the file rather than guessing which of four rounds the importer
+      // disliked.
+      errors: formatArcadeErrors(result.errors),
+      detail: result.errors,
+    });
+  }
+
+  const out = runtime.apply(
+    { type: "loadArcadeContent", content: result.content },
+    Date.now(),
+  );
+  if (out.rejection) {
+    // `arcade_already_started` lands here: the arcade banks points during a
+    // round, so content swapped under a running one would rewrite what those
+    // points were for.
+    return json(res, 409, {
+      error: out.rejection.code,
+      message: out.rejection.message,
+    });
+  }
+  return json(res, 200, {
+    // What actually landed, per round, so staging can print it and a host can
+    // see at a glance that the file they meant to send is the file that
+    // arrived.
+    rounds: Object.fromEntries(
+      Object.entries(result.content).map(([round, items]) => [
+        round,
+        (items as readonly unknown[]).length,
+      ]),
+    ),
+  });
 }
 
 /**
@@ -860,6 +955,23 @@ function handleHttp(req: IncomingMessage, res: ServerResponse): void {
         /* use it as typed; it will simply not match a session */
       }
       void loadTriviaQuestions(res, sid, bearer(req), req);
+      return;
+    }
+  }
+
+  // POST /api/sessions/:sid/content/arcade — the arcade's content, host token
+  // only. See `loadArcadeContent` for why this is an upload and not a command.
+  if (req.method === "POST" && path.startsWith("/api/sessions/")) {
+    const rest = path.slice("/api/sessions/".length);
+    const cut = rest.indexOf("/");
+    if (cut > 0 && rest.slice(cut + 1) === "content/arcade") {
+      let sid = rest.slice(0, cut);
+      try {
+        sid = decodeURIComponent(sid);
+      } catch {
+        /* use it as typed; it will simply not match a session */
+      }
+      void loadArcadeContent(res, sid, bearer(req), req);
       return;
     }
   }
@@ -1566,14 +1678,47 @@ function commandToEvent(cmd: HostCommand, runtime: SessionRuntime): Event | null
       // The content is attached here, not carried on the command: see
       // arcade-content.ts. A console cannot choose what the answers are, and
       // the answers never travel towards a browser that is not the host's.
+      //
+      // WHERE THE FALLBACK LIVES, AND WHY IT LIVES HERE.
+      //
+      // Every arm below reads `runtime.state.arcadeContent?.<round>` and falls
+      // back to the literal compiled into the build. That `??` is the whole
+      // safety property: **a session that staged nothing behaves exactly as it
+      // did before staging existed**, because the value handed to the factory
+      // is byte-for-byte the value the factory would have defaulted to.
+      //
+      // It belongs here and nowhere else:
+      //
+      //  - The reducer is pure and must stay pure. `loadArcadeContent` puts the
+      //    staged content in the state and stops; `startRound` takes a config
+      //    it is *given*. If the engine reached for a compiled literal when a
+      //    key was absent, the same event log would fold differently against a
+      //    different build, and replay — recovery, export, the tests — would no
+      //    longer be a function of the log.
+      //  - The factories are the seam. Each one already takes its items as an
+      //    optional parameter, so "which items" is a decision the caller makes,
+      //    and this is the only caller in the server.
+      //  - This is the one place where `runtime.state` is in hand at the moment
+      //    a round is configured. `commandToEvent` already reads it for the
+      //    restart confirmation and for `arcadeActivityId`.
+      //
+      // A host who stages a round they never run gets nothing: the key sits in
+      // `state.arcadeContent`, no arm below reads it, and no other code does
+      // either. Each arm reads exactly one key, so staging Gganbu cannot reach
+      // the Bridge — which is why the fallback is repeated per arm rather than
+      // resolved once into a merged object above the switch.
       if (cmd.kind === "recruitment") {
         return {
           type: "startRound",
           round: "recruitment",
-          // The items come from src/arcade/, which is where the content
+          // The items come from this session's staged content when it has
+          // some, and otherwise from src/arcade/, which is where the content
           // lives; what this boundary decides is only that they are
           // attached here and never travel on a command from a browser.
-          config: recruitmentRound(undefined, cmd.secondsPerItem),
+          config: recruitmentRound(
+            runtime.state.arcadeContent?.recruitment ?? RECRUITMENT_ITEMS,
+            cmd.secondsPerItem,
+          ),
         };
       }
       if (cmd.kind === "unseal") {
@@ -1584,7 +1729,10 @@ function commandToEvent(cmd: HostCommand, runtime: SessionRuntime): Event | null
           // `UnsealItem` carries the word and the reveal note, so a tin
           // arriving from a browser would be the answer key arriving from a
           // browser. The host sets how long the Floor runs and nothing else.
-          config: unsealRound(undefined, cmd.seconds),
+          config: unsealRound(
+            runtime.state.arcadeContent?.unseal ?? UNSEAL_ITEMS,
+            cmd.seconds,
+          ),
         };
       }
       if (cmd.kind === "tug_of_raft") {
@@ -1596,6 +1744,12 @@ function commandToEvent(cmd: HostCommand, runtime: SessionRuntime): Event | null
           // randomness, and a seed a console could choose is a console that
           // can deal itself the sides. Pulls two and three get theirs from
           // the pull timer.
+          //
+          // No staged content here, and `ArcadeContent` has no key for it:
+          // Tug of Raft is three numbers and a seed, with nothing an event
+          // could want to reword. It is listed in this comment rather than
+          // left silent so the next reader does not go looking for the
+          // fallback the other four arms have.
           config: tugOfRaftRound(
             pickSeed(runtime.rng),
             cmd.pulls,
@@ -1616,7 +1770,7 @@ function commandToEvent(cmd: HostCommand, runtime: SessionRuntime): Event | null
           // seed is a console that can deal somebody their gganbu.
           config: gganbuRound(
             pickSeed(runtime.rng),
-            undefined,
+            runtime.state.arcadeContent?.gganbu ?? GGANBU_PROMPTS,
             cmd.secondsPerPrompt,
             cmd.startTokens,
           ),
@@ -1632,7 +1786,10 @@ function commandToEvent(cmd: HostCommand, runtime: SessionRuntime): Event | null
           // arriving from a browser. The host sets the three step timers and
           // nothing else; the content is read from src/arcade/ here and the
           // engine splits the answer out of it on `startRound`.
-          config: glassBridgeRound(undefined, cmd.waveSeconds),
+          config: glassBridgeRound(
+            runtime.state.arcadeContent?.glassBridge ?? GLASS_BRIDGE_STEPS,
+            cmd.waveSeconds,
+          ),
         };
       }
       if (cmd.kind === "plan_apply") {
@@ -1760,3 +1917,10 @@ process.on("SIGTERM", () => void shutdown("SIGTERM"));
 process.on("SIGINT", () => void shutdown("SIGINT"));
 
 export { server, registry, store, persister };
+// Exported for the tests, not for another module to call: `commandToEvent` is
+// the seam where a round's content is chosen, and the property that a staged
+// session plays staged items while an unstaged one plays the compiled ones is
+// only assertable against the event it returns. Asserting it through a socket
+// would test the projection instead, and the answers deliberately do not reach
+// one. Nothing in `src/` imports it.
+export { commandToEvent };

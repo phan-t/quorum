@@ -1,0 +1,257 @@
+{
+  "title": "Example Team Offsite — arcade content",
+  "recruitment": [
+    {
+      "cue": "🏦⏳",
+      "answer": "Vault",
+      "accept": [],
+      "note": "Every dynamic credential comes out with a lease on it, and when the lease expires Vault revokes it whether or not anybody remembered to."
+    },
+    {
+      "cue": "🌎📐",
+      "answer": "Terraform",
+      "accept": ["tf"],
+      "note": "You write the end state. The plan is the difference between what you wrote and what is really out there."
+    },
+    {
+      "cue": "📇💗",
+      "answer": "Consul",
+      "accept": [],
+      "note": "A catalog of services with a health check beside every entry, and a DNS name in front of the pair."
+    },
+    {
+      "cue": "🧳💻",
+      "answer": "Vagrant",
+      "accept": [],
+      "note": "A Vagrantfile, one vagrant up, and the same development machine on everybody's laptop. Older than the company that makes it."
+    },
+    {
+      "cue": "🛡️⚖️",
+      "answer": "Sentinel",
+      "accept": [],
+      "note": "Policy as code, with the verdict kept out of the policy: advisory warns, soft mandatory can be overridden, hard mandatory cannot."
+    },
+    {
+      "cue": "🚪🎫",
+      "answer": "Boundary",
+      "accept": [],
+      "note": "You ask for a target and get a session. The hosts behind the target come out of a catalog you never have to read."
+    },
+    {
+      "cue": "🐪📌",
+      "answer": "Nomad",
+      "accept": [],
+      "note": "A job file says what to run and how much of it. Which client it lands on is the scheduler's problem, not yours."
+    }
+  ],
+  "unseal": [
+    {
+      "shape": "circle",
+      "cue": "N P A L",
+      "answer": "PLAN",
+      "note": "The half of the run that changes nothing. Game 1 is named after both halves, and only one of them is safe."
+    },
+    {
+      "shape": "circle",
+      "cue": "E S L A E",
+      "answer": "LEASE",
+      "note": "What Vault keeps beside a dynamic secret: how long it is good for, and whether you may ask for longer."
+    },
+    {
+      "shape": "circle",
+      "cue": "N T A G E",
+      "answer": "AGENT",
+      "note": "The process on every member of a Consul or Nomad cluster. A server runs one too; a flag is all that makes it a server."
+    },
+    {
+      "shape": "circle",
+      "cue": "O E D N",
+      "answer": "NODE",
+      "note": "What Nomad calls a client when the scheduler is the one talking. nomad node status is how you find out one stopped answering."
+    },
+    {
+      "shape": "triangle",
+      "cue": "R U Q M O U",
+      "answer": "QUORUM",
+      "note": "Half the servers plus one. Lose it and Raft commits nothing, which is a cluster that is up and can no longer be written to."
+    },
+    {
+      "shape": "triangle",
+      "cue": "C Y L O P I",
+      "answer": "POLICY",
+      "note": "Vault denies by default, so this is the list of paths you are allowed and what you may do at each one. An empty one grants nothing."
+    },
+    {
+      "shape": "triangle",
+      "cue": "T E R C E S",
+      "answer": "SECRET",
+      "note": "A KV entry, a database credential, a certificate. Vault keeps all three behind paths, and generates most of them on the way out."
+    },
+    {
+      "shape": "star",
+      "cue": "G R Y T S I R E",
+      "answer": "REGISTRY",
+      "note": "Where a provider or a module is published so that a configuration can name it instead of keeping a copy."
+    },
+    {
+      "shape": "star",
+      "cue": "C U O R E S R E",
+      "answer": "RESOURCE",
+      "note": "Terraform's unit of work: one block, one object, one entry in state."
+    },
+    {
+      "shape": "star",
+      "cue": "A L P M E T E T",
+      "answer": "TEMPLATE",
+      "note": "What Packer builds from. The provisioners in it run inside the running machine, before it is turned into an image."
+    },
+    {
+      "shape": "umbrella",
+      "cue": "G N I S I V O R P I N O",
+      "answer": "PROVISIONING",
+      "note": "Turning an empty account into a running one. Packer's provisioners do the same job one layer in, before the image is sealed."
+    },
+    {
+      "shape": "umbrella",
+      "cue": "C A I T U N E H T A N O T I",
+      "answer": "AUTHENTICATION",
+      "note": "Vault checks you against something it does not own — GitHub, LDAP, AppRole — and hands back a token."
+    },
+    {
+      "shape": "umbrella",
+      "cue": "R U T C A R F S I N T U R E",
+      "answer": "INFRASTRUCTURE",
+      "note": "The word in front of as code. Every product on this board is a way of managing some of it."
+    }
+  ],
+  "glassBridge": [
+    {
+      "product": "Packer",
+      "panes": [
+        {
+          "label": "Packer Pre-Processors",
+          "note": "There are builders, provisioners and post-processors. Nothing is called a pre-processor."
+        },
+        {
+          "label": "Packer Post-Processors",
+          "note": "It takes the artifact a builder produced and makes another one out of it: compress it, upload it, re-package it."
+        }
+      ],
+      "real": 1
+    },
+    {
+      "product": "Terraform",
+      "panes": [
+        {
+          "label": "Terraform Moved Blocks",
+          "note": "A moved block tells the plan that a resource has a new address, so a refactor is a rename in state and not a destroy and create."
+        },
+        {
+          "label": "Terraform Renamed Blocks",
+          "note": "There is a moved block, and renaming is what it is for. There is nothing called a renamed block."
+        }
+      ],
+      "real": 0
+    },
+    {
+      "product": "Vault",
+      "panes": [
+        {
+          "label": "Vault Response Wrapping",
+          "note": "The response goes into the cubbyhole of a single-use token, and the token is what travels. If it will not unwrap, somebody else already did."
+        },
+        {
+          "label": "Vault Courier Tokens",
+          "note": "Vault has service tokens and batch tokens, and a wrapping token that carries one response. It has never had a courier."
+        }
+      ],
+      "real": 0
+    },
+    {
+      "product": "Consul",
+      "panes": [
+        {
+          "label": "Consul Standing Queries",
+          "note": "The stored kind is real and this is very nearly its name. Consul calls them prepared."
+        },
+        {
+          "label": "Consul Prepared Queries",
+          "note": "A query kept on the servers rather than in the caller, which can fail over to another datacenter when nothing healthy answers at home."
+        }
+      ],
+      "real": 1
+    },
+    {
+      "product": "Nomad",
+      "panes": [
+        {
+          "label": "Nomad Spread Blocks",
+          "note": "A spread block asks the scheduler to distribute allocations evenly over a node attribute instead of packing them in."
+        },
+        {
+          "label": "Nomad Scatter Blocks",
+          "note": "Nomad has a spread block and it has an affinity block. It has never had a scatter."
+        }
+      ],
+      "real": 0
+    },
+    {
+      "product": "Boundary",
+      "panes": [
+        {
+          "label": "Boundary Session Brokers",
+          "note": "Boundary brokers credentials, and a worker proxies the session. Neither of those is called a session broker."
+        },
+        {
+          "label": "Boundary Dynamic Host Catalogs",
+          "note": "A host catalog that asks the cloud what is behind a target instead of being told: a plugin per provider, and tags for the rules."
+        }
+      ],
+      "real": 1
+    }
+  ],
+  "gganbu": [
+    {
+      "cue": "Versions Vault's KV v2 keeps per key by default",
+      "threshold": "5",
+      "answer": "over",
+      "note": "10 — and the write past the tenth permanently deletes the oldest. The mount sets it, and a key's own metadata can overrule the mount.",
+      "verify": true
+    },
+    {
+      "cue": "Consul's default raft_multiplier",
+      "threshold": "3",
+      "answer": "over",
+      "note": "5 — a slack default that suits a small server, and the production guidance is to set it to 1. It scales every Raft timer, so it is also how long a lost leader goes unnoticed.",
+      "verify": true
+    },
+    {
+      "cue": "Unseal key shares Vault asks for by default",
+      "threshold": "5",
+      "answer": "under",
+      "note": "3 — of the five shares vault operator init prints, any three reconstruct the root key. Five is the number everyone remembers, and it is the other one.",
+      "verify": true
+    },
+    {
+      "cue": "The year IBM's acquisition of HashiCorp closed",
+      "threshold": "2024",
+      "answer": "over",
+      "note": "2025 — February, ten months after it was announced. Half a room files this under the year of the announcement, which is what makes it a wager.",
+      "verify": false
+    },
+    {
+      "cue": "The year Terraform reached 1.0",
+      "threshold": "2022",
+      "answer": "under",
+      "note": "2021 — June, at HashiConf Europe. What 1.0 shipped was not a feature but a promise: upgrade anywhere inside 1.x and the workflow keeps working.",
+      "verify": false
+    },
+    {
+      "cue": "The year Packer was first released",
+      "threshold": "2014",
+      "answer": "under",
+      "note": "2013 — the first project started at HashiCorp. Vagrant is older still, and older than the company.",
+      "verify": false
+    }
+  ]
+}

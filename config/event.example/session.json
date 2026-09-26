@@ -2,6 +2,7 @@
   "title": "Example Team Offsite",
   "subtitle": "Thursday 12 March",
   "questions": "trivia-questions.json",
+  "arcadeContent": "arcade-content.json",
   "sendoff": "sendoff.json",
   "promo": "promo-card.html",
   "activities": [

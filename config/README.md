@@ -23,6 +23,7 @@ So the example is the thing that ships, and the events stay on the machine.
 config/events/2026-03-12-example-offsite/
   session.json              the title, what the event scores, the console's setup
   trivia-questions.json     the set uploaded to the session
+  arcade-content.json       the arcade rounds' content, if this event stages any
   promo-card.html           the poster the Desktop shows in the lobby, if there is one
   sendoff.json              the send-off's messages, and the photos it names
   photos/                   the photos, downscaled to about 1200px wide by you —
@@ -33,8 +34,9 @@ config/events/2026-03-12-example-offsite/
   roster.md
 ```
 
-`session.json`, `promo-card.html`, `sendoff.json` and the photos are the files
-in here the service *does* read, by being staged or uploaded to it.
+`session.json`, `trivia-questions.json`, `arcade-content.json`,
+`promo-card.html`, `sendoff.json` and the photos are the files in here the
+service *does* read, by being staged or uploaded to it.
 
 `session.json` is what `make stage` reads. Besides the title and the console's
 setup it carries `activities`, the list of things this event scores — a
@@ -52,6 +54,18 @@ arrives. It is optional: an event without one stages exactly as it did before.
 See [docs/event-config.md](../docs/event-config.md#the-promo-card), which is
 also where the two things worth knowing before writing one are written down —
 the frame runs no scripts and loads no webfonts, on purpose.
+
+`arcade-content.json` carries the arcade rounds' content for this event:
+Recruitment's emoji items, Unseal's tins, Gganbu's Over/Under prompts and the
+Glass Bridge's pairs, under one optional key each. **A key it leaves out is a
+round that plays the set compiled into the build**, so an event with no such
+file plays exactly what the release shipped, and a file carrying only `gganbu`
+changes only Gganbu. A second upload merges key by key rather than replacing the
+file. Also optional. See
+[docs/event-config.md](../docs/event-config.md#the-arcades-content) for the
+format, and for why this is a staged file and not a console screen: every one of
+those four sets carries its own answers, so it goes host machine → server over
+HTTPS under the host token and never enters a browser.
 
 `sendoff.json` names the person, carries the messages, and lists the photos by
 **filename**; staging uploads the JSON and then every photo it names, one
@@ -111,9 +125,10 @@ reconstruct an event's real questions undoes the point of gitignoring them.
 make stage EVENT=2026-03-12-example-offsite
 ```
 
-One command: creates the session, loads the questions, uploads the promo card
-if there is one, uploads the send-off and its photos if there are those, stages
-the console's holding cards and running order, prints the tokens. See [docs/event-config.md](../docs/event-config.md).
+One command: creates the session, loads the questions, stages the arcade's
+content if there is any, uploads the promo card if there is one, uploads the
+send-off and its photos if there are those, stages the console's holding cards
+and running order, prints the tokens. See [docs/event-config.md](../docs/event-config.md).
 
 ## Uploading one thing by hand
 
@@ -128,6 +143,21 @@ in [docs/question-bank.md](../docs/question-bank.md). The short version: name
 the correct answer by its **letter**, and every key is either one the importer
 knows or an error — a misspelled `timelimitSec` is refused rather than silently
 defaulted.
+
+The arcade's content goes up the same way, and its importer answers with a line
+per problem too:
+
+```bash
+curl -s -X POST "$QUORUM_URL/api/sessions/$SID/content/arcade" \
+  -H "Authorization: Bearer $HOST_TOKEN" -H 'content-type: application/json' \
+  --data-binary @config/events/<event>/arcade-content.json
+```
+
+Four optional keys — `recruitment`, `unseal`, `glassBridge`, `gganbu` — and a
+round whose key is absent plays the content compiled into the build. A second
+upload merges key by key, so this is also the command for correcting one round
+without re-sending the others. The format is in
+[docs/event-config.md](../docs/event-config.md#the-arcades-content).
 
 The promo card goes up the same way, as `text/html`:
 
