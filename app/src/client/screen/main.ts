@@ -1614,8 +1614,12 @@ function sceneArcade(): Scene {
       const seen = tugWinsSeen;
       if (seen !== null && (t.wins[0] > seen[0] || t.wins[1] > seen[1])) {
         const won: 0 | 1 = t.wins[0] > seen[0] ? 0 : 1;
-        // No count line: the sentence names the side in words, and the tally
-        // this beat is about is `tugWins` two lines above it on the same panel.
+        // No count line: the sentence names the side in words, which it has to
+        // do on its own. The `PULLS WON A — B` tally is two lines above this
+        // for every pull *except the last*, because the pull that ends a round
+        // arrives on the frame that sets `idle`, and `idle` hides the rope
+        // panel and its tally. A count line here would therefore be a number
+        // with nothing to read it against exactly when it mattered most.
         said.push(winLine(HOUSE.tugPullWon(won), null));
       }
       tugWinsSeen = t.wins;
@@ -2173,9 +2177,18 @@ function sceneArcade(): Scene {
     counts.hidden = grid.hidden;
     paintGrid(state, arcade);
     paintDrains(arcade);
-    // Before the phase branches, like the drain: a pull won on the frame that
-    // ends the round arrives with `phase: "reveal"`, and a beat the reveal
-    // returned early from would be the one result nobody ever sees.
+    // Before the phase branches, like the drain, because the last pull of a
+    // round is won on the frame that *ends* it and a branch that returned
+    // early would eat the one result the round was about.
+    //
+    // Not, as this said, because that frame arrives as `phase: "reveal"`:
+    // `endRound` in engine/reducer.ts sets `idle`, and `reveal` is a separate
+    // thing the host does afterwards. The placement is right and the reason
+    // given for it was wrong, which matters because the real phase is `idle`
+    // — and `idle` hides the rope, so the last pull's beat lands on the
+    // between-rounds screen with the `PULLS WON A — B` tally it refers to no
+    // longer on it. The sentence still names the side in words, so it stands
+    // on its own; see the note on the tally line.
     paintWinBeat(arcade);
 
     if (arcade.phase === "card" || arcade.phase === "idle") {

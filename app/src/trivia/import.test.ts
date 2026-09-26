@@ -243,6 +243,94 @@ describe("the committed example set", () => {
     "utf8",
   );
 
+  /**
+   * The correct answer of every question, read off the file by a person.
+   *
+   * This is a transcription, which the block header above says this file does
+   * not do — and the exception is deliberate, because removing it lost real
+   * coverage. Decoupling the acceptance test from this file (issue #2) moved
+   * the bots onto a frozen fixture, and everything that now checks the example
+   * derives its expectations *from the example*. A `correct` letter changed
+   * from C to B is then perfectly self-consistent: the file loads, the letter
+   * is inside the answer list, exactly one answer is marked, the round plays,
+   * and every score agrees with itself. Nothing noticed. An adversarial review
+   * of that commit found it by mutation, and it is the one class that got
+   * worse rather than better.
+   *
+   * A second human reading is the only thing that can catch it, which is what
+   * this is. It is keyed by question text rather than by index so that
+   * reordering the file — the content edit issue #2 exists to allow — does not
+   * touch it; only changing an *answer* does, and changing an answer should
+   * be a deliberate act with a test to match.
+   */
+  const CORRECT: ReadonlyArray<readonly [string, string, string]> = [
+    ["In what year was HashiCorp founded", "C", "2012"],
+    ["Which was HashiCorp's first product", "B", "Vagrant"],
+    ["Who co-founded HashiCorp with Armon Dadgar", "A", "Mitchell Hashimoto"],
+    ["What is HashiCorp's published product design", "B", "The Tao of HashiCorp"],
+    ["Which HashiCorp product was released first", "B", "Consul"],
+    ["Which two products were announced together", "B", "Boundary & Waypoint"],
+    ["Which language are Terraform, Vault, Consul", "B", "Go"],
+    ["What is HashiCorp's policy-as-code framework", "C", "Sentinel"],
+    ["In Vagrant, what is a packaged base image", "C", "A box"],
+    ["Which consensus protocol backs integrated", "B", "Raft"],
+    ["What is IBM's long-standing nickname", "B", "Big Blue"],
+    ["Which port does Vault's HTTP API listen on", "B", "8200"],
+    ["By default, Vault splits its unseal key", "C", "Shamir's Secret Sharing"],
+    ["What best describes a Vault dynamic secret", "B", "A credential generated on demand, with a lease"],
+    ["In Nomad, what is the set of tasks", "B", "A task group"],
+    ["Which product scans code and systems for l", "B", "Vault Radar"],
+    ["Which licence did HashiCorp adopt", "C", "Business Source License"],
+    ["Which open-source fork of Terraform", "B", "OpenTofu"],
+    ["In April 2024, Terraform Cloud was renamed", "B", "HCP Terraform"],
+    ["In which year did IBM complete its acquisi", "C", "2025"],
+    ["Which programming language was developed a", "C", "Fortran"],
+    ["Where is IBM's corporate headquarters", "B", "Armonk, New York"],
+    ["Which company did IBM acquire for about", "B", "Red Hat"],
+    ["IBM's Deep Blue defeated which world chess", "C", "Garry Kasparov"],
+    ["Which is the world's southernmost capital", "B", "Wellington"],
+    ["The Merlion is the landmark of which city", "C", "Singapore"],
+    ["Which of these countries has the largest l", "C", "Australia"],
+    ["In Japan, \"Golden Week\" falls across which", "B", "April\u2013May"],
+  ];
+
+  it("marks the answer a person reading the file would mark", () => {
+    // `ok` returns every question, tiebreakers included and flagged; the split
+    // into a scored set and a sudden-death pool happens downstream. So this
+    // reads the whole file, which is what a person transcribing it did.
+    const all = ok(text);
+    // Every question in the file is named above, so a question *added* to the
+    // example fails here until somebody reads it and writes down its answer.
+    // That is the intent: adding a question is a content edit, and vouching
+    // for its answer is the one part of it a second person should do.
+    assert.equal(
+      all.length,
+      CORRECT.length,
+      "a question was added or removed: read it and record its answer above",
+    );
+    for (const [stem, letter, answer] of CORRECT) {
+      const q = all.find((x) => x.text.startsWith(stem));
+      assert.ok(q, `no question starts with ${JSON.stringify(stem)}`);
+      // `correct` is a list of indices — the importer allows more than one in
+      // principle, and a separate test asserts the example marks exactly one.
+      const marked = "ABCDEFGH"[q.correct[0] ?? -1];
+      assert.equal(
+        marked,
+        letter,
+        `${stem}…: the file marks ${marked}, a reader marked ${letter}`,
+      );
+      // The letter and the text are transcribed separately on purpose: a
+      // reordered answer list moves the letter without changing which answer
+      // is right, and only checking both catches the reorder that silently
+      // re-points the letter at a different answer.
+      assert.equal(
+        q.answers[q.correct[0] ?? -1],
+        answer,
+        `${stem}…: answer ${marked} is not what a reader recorded`,
+      );
+    }
+  });
+
   it("loads", () => {
     // No count asserted here on purpose: adding a question is a content edit,
     // and a content edit that has to be mirrored by a literal under `app/src`

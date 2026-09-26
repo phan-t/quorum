@@ -717,6 +717,28 @@ describe("a snapshot written before the version field existed", () => {
     assert.ok(fresh);
     const old = asWrittenByTheOldCode(fresh);
     store.loadRecoverable = async () => [old];
+    // The *store's* row is aged too, not just the copy recovery is handed.
+    //
+    // Without this the re-stamp assertion at the end of this test is vacuous:
+    // `playAnAfternoon` already wrote a version-2 row, so the final read finds
+    // version 2 whether or not recovery wrote anything back. An adversarial
+    // review proved it by deleting the write-back and watching this test carry
+    // on passing. Ageing the row the assertion actually reads means only a
+    // real write-back can satisfy it.
+    // Reaching into the store's own map, because `loadSession` hands back a
+    // copy and ageing a copy ages nothing. A test may know where a fake store
+    // keeps its rows; this is the fake.
+    const rows = (
+      store as unknown as {
+        rows: Map<string, { snapshot: Record<string, unknown> | null }>;
+      }
+    ).rows;
+    const raw = rows.get(s.sid);
+    assert.ok(raw?.snapshot, "the fixture store has no row to age");
+    delete raw.snapshot["version"];
+    delete raw.snapshot["writtenAt"];
+    const before = await store.loadSession(s.sid);
+    assert.equal(before?.snapshot?.version, undefined, "the row was not aged");
 
     const lines: string[] = [];
     const persister2 = new Persister(store, () => {});

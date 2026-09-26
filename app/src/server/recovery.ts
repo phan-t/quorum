@@ -121,8 +121,25 @@ export function vintageOf(snapshot: unknown): Vintage {
  *    ```
  *
  *    Zero, and no row predates version 2. Swap `:v` for the constant of the
- *    shim being retired. `--projection-expression 'PK,version,at'` instead of
- *    `--select COUNT` names the rows that are still holding it up.
+ *    shim being retired. To name the rows still holding it up, replace
+ *    `--select COUNT` with
+ *
+ *    ```
+ *      --projection-expression 'PK,version,#a' \
+ *      --expression-attribute-names '{"#a":"at"}'
+ *    ```
+ *
+ *    `at` is a DynamoDB reserved word and has to be aliased — spelled
+ *    literally it is a `ValidationException`, at the one moment somebody is
+ *    following this procedure because something is wrong. `listAssets` in
+ *    `store/dynamo.ts` aliases it for the same reason. `version` is not
+ *    reserved.
+ *
+ *    The scan and the census can disagree about one row shape: a `version`
+ *    attribute that is not a number compares false here and so is *not*
+ *    counted, while `vintageOf` reads it as unknown vintage and does count
+ *    it. Only a hand-written row can be that shape, and the census is the
+ *    one to believe.
  *
  * What makes this converge rather than drift: `recoverSessions` writes every
  * recovered state straight back (see the note there), so **one boot re-stamps

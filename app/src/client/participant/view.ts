@@ -792,6 +792,35 @@ function raftCluster(onCommitted: (pid: string) => void): {
    * name and the head count back for an animation that was not being drawn.
    */
   /**
+   * Begin a new generation, without losing the entry the last one was holding.
+   *
+   * `gen` is what stops a superseded commit's timers from touching the
+   * picture, and it was being bumped while `inFlight` still named somebody.
+   * That orphaned them. The stage that releases a pid is scheduled from
+   * inside the *first* stage's callback, and that callback returns early once
+   * the generation has moved — so for an entry superseded inside its first
+   * 700ms, the releasing stage was never scheduled at all and the name never
+   * arrived. Reachable by turning reduced motion on mid-commit, which is a
+   * preference this code explicitly supports changing mid-session.
+   *
+   * The orphan is released *last*, after the new generation is established,
+   * because `release` calls the lobby back and the lobby can repaint and
+   * re-enter this cluster. The generation is captured before that call, so a
+   * re-entrant commit that bumps `gen` again leaves this caller's timers
+   * correctly stale rather than two generations both believing they are
+   * current.
+   */
+  function takeOver(next: string | null): number {
+    const orphan = inFlight;
+    gen += 1;
+    const mine = gen;
+    running = true;
+    inFlight = next;
+    if (orphan !== null && orphan !== next) release(orphan);
+    return mine;
+  }
+
+  /**
    * Everything waiting, into the list now. See `flush` on the returned API.
    *
    * **Take the state before releasing any of it, not after.** `release` calls
@@ -975,10 +1004,8 @@ function raftCluster(onCommitted: (pid: string) => void): {
    * once did the thing they are for.
    */
   function stillCommit(who: string | null, pid: string | null): void {
+    const mine = takeOver(null);
     release(pid);
-    gen += 1;
-    const mine = gen;
-    running = true;
     cool();
     for (const d of dots) d.classList.add("is-hot");
     for (const l of links) l.classList.add("is-hot");
@@ -993,10 +1020,7 @@ function raftCluster(onCommitted: (pid: string) => void): {
 
   /** One entry: in to the leader, out to the followers, then committed. */
   function play(who: string | null, pid: string | null): void {
-    inFlight = pid;
-    gen += 1;
-    const mine = gen;
-    running = true;
+    const mine = takeOver(pid);
     // Start from cold, so a commit never inherits the last one's lit nodes.
     cool();
     say("Appending", who);
