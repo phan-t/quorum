@@ -54,7 +54,11 @@ function parseArgs(argv: readonly string[]): Opts {
     const at = argv.indexOf(`--${name}`);
     return at === -1 ? undefined : argv[at + 1];
   };
-  const positional = argv.find((a) => !a.startsWith("--") && /^\d+$/.test(a));
+  // A bare integer, and only when it is not some flag's value. Scanning argv
+  // for "the first integer" read `--seed 99` as a request for 99 bots.
+  const positional = argv.find(
+    (a, i) => !a.startsWith("--") && /^\d+$/.test(a) && !(i > 0 && argv[i - 1]?.startsWith("--")),
+  );
   const count = Number(positional ?? flag("count") ?? 20);
   if (!Number.isInteger(count) || count < 1 || count > 500) {
     die("Bot count must be a whole number from 1 to 500.");
@@ -106,6 +110,8 @@ function mulberry32(seed: number): () => number {
 interface Gap {
   readonly from: number;
   readonly to: number;
+  /** Which frame revealed it, so its own arrival cannot be read as the cure. */
+  readonly askedAtFrame: number;
   closed: boolean;
 }
 
@@ -133,6 +139,8 @@ class Conn {
   /** cid -> when it was sent, for the ack round trip. */
   readonly pending = new Map<string, number>();
   readonly ackMs: number[] = [];
+  /** Answered, applied nothing. Neither a success nor a refusal. */
+  noop = 0;
   acked = 0;
   sent = 0;
   refusedCmds: string[] = [];
@@ -254,7 +262,12 @@ class Bot {
     // Drained, or waiting for a wave: back somebody. The engine decides
     // whether a bet from this position is allowed; a refusal is data.
     if (mine.backing === undefined && (mine.standing === "drained" || a.round === "glass_bridge")) {
-      const others = a.grid.filter((c) => c.pid !== undefined && c.pid !== mine.playerNumber.toString());
+      // Exclude *this bot* by its participant id. Comparing a pid against a
+      // player number never matches, so a bot could draw itself, be refused
+      // with `cannot_back_yourself`, and — because the one-shot key was
+      // already spent — never back anybody for the rest of the round.
+      const me = this.conn.pid;
+      const others = a.grid.filter((c) => c.pid !== undefined && c.pid !== me);
       const pick = others[Math.floor(this.rand() * others.length)];
       const pid = (pick as { pid?: string } | undefined)?.pid;
       if (pid !== undefined && this.once(`back${round}`)) {
@@ -406,6 +419,7 @@ function connect(
             conn.pending.delete(msg.cid);
             conn.ackMs.push(Date.now() - at);
             if (msg.applied) conn.acked += 1;
+            else conn.noop += 1;
           }
           return;
         }
@@ -432,19 +446,26 @@ function connect(
       // and ask, and record whether the answer closed it.
       const seq = (msg as { seq?: number }).seq;
       if (typeof seq === "number") {
-        if (conn.lastSeq > 0 && seq > conn.lastSeq + 1) {
-          conn.gaps.push({ from: conn.lastSeq, to: seq, closed: false });
+        // The server stamps `++client.seq` per socket from 1, so the first
+        // frame is 1 and anything higher means frames were skipped before we
+        // ever saw one. Keying the check on `lastSeq > 0` — as this did — made
+        // a dropped first frame invisible.
+        const expected = conn.lastSeq + 1;
+        if (seq > expected) {
+          conn.gaps.push({ from: conn.lastSeq, to: seq, closed: false, askedAtFrame: conn.frames });
           conn.send({ t: "resync" });
-        } else if (seq <= conn.lastSeq && conn.gaps.length > 0) {
-          const open = conn.gaps.find((g) => !g.closed);
-          if (open) open.closed = true;
         }
         if (seq > conn.lastSeq) conn.lastSeq = seq;
       }
       if (msg.t === "state") {
-        // A resync answers with a full state; if a gap was open, this is what
-        // closed it.
-        const open = conn.gaps.find((g) => !g.closed);
+        // A gap is closed by the `state` a resync answers with — which is a
+        // *later* frame than the one that revealed the gap.
+        //
+        // The first version closed the gap on the revealing frame itself,
+        // because that frame is usually a `state` too. The check could then
+        // never fail: a swallowed resync, with no reply at all, still reported
+        // "seen and recovered". `askedAtFrame` is what makes it a real test.
+        const open = conn.gaps.find((g) => !g.closed && conn.frames > g.askedAtFrame);
         if (open) open.closed = true;
         conn.state = msg.state;
         onState(msg.state);
@@ -456,7 +477,11 @@ function connect(
       settle();
     });
     ws.on("error", (err: Error) => {
-      conn.error = err.message;
+      // `ws` reports ECONNREFUSED with an empty message, so the code is the
+      // only thing that says what happened. Reporting "" loses the reason and
+      // defeats the `?? "no welcome"` fallback, which "" does not trigger.
+      const code = (err as Error & { code?: string }).code;
+      conn.error = err.message || code || "socket error";
       settle();
     });
 
@@ -562,6 +587,24 @@ async function runOfShow(host: Conn, bots: readonly Bot[], opts: Opts): Promise<
   await untilRoundOver(45_000);
   await cmd(host, { name: "arcade.reveal" }, 1_500, "pa-reveal");
 
+  // Unseal and the Bridge, so the bot code for them actually runs. Without
+  // these the shape/letter/step branches are dead code that typechecks: they
+  // were written against the protocol and had never once executed.
+  await cmd(host, { name: "arcade.round", kind: "unseal", seconds: 20 }, 900, "r-unseal");
+  await cmd(host, { name: "arcade.begin" }, 600, "unseal-begin");
+  await untilRoundOver(45_000);
+  await cmd(host, { name: "arcade.reveal" }, 1_500, "unseal-reveal");
+
+  await cmd(
+    host,
+    { name: "arcade.round", kind: "glass_bridge", waveSeconds: [8, 7, 6] },
+    900,
+    "r-glass",
+  );
+  await cmd(host, { name: "arcade.begin" }, 600, "glass-begin");
+  await untilRoundOver(90_000);
+  await cmd(host, { name: "arcade.reveal" }, 1_500, "glass-reveal");
+
   await cmd(host, { name: "segment", kind: "standings" }, 1_000, "seg-standings");
   await cmd(host, { name: "seal", state: "revealed" }, 1_500, "reveal");
 
@@ -638,13 +681,17 @@ function report(bots: readonly Bot[], host: Conn, opts: Opts, elapsedMs: number)
   line(`    sent         ${conns.reduce((n, c) => n + c.sent, 0)}`);
   line(`    applied      ${conns.reduce((n, c) => n + c.acked, 0)}`);
   line(`    refused      ${conns.reduce((n, c) => n + c.refusedCmds.length, 0)}   (a late or wrong-phase press; the engine is right to)`);
+  line(`    no-op        ${conns.reduce((n, c) => n + c.noop, 0)}   (accepted, changed nothing)`);
   line(`    no response  ${conns.reduce((n, c) => n + c.pending.size, 0)}`);
   if (allAcks.length > 0) {
     line(
-      `    ack round trip    p50 ${percentile(allAcks, 50)}ms · p95 ${percentile(allAcks, 95)}ms · slowest ${Math.max(...allAcks)}ms`,
+      // "Reply", not "ack": a refusal is a reply and is timed here too, so
+      // calling this an ack round trip would overstate what it measures.
+      `    reply round trip  p50 ${percentile(allAcks, 50)}ms · p95 ${percentile(allAcks, 95)}ms · slowest ${Math.max(...allAcks)}ms`,
     );
   }
   line(`    host refusals ${host.refusedCmds.length}`);
+  line(`    host silent   ${host.pending.size}   (a command with no reply at all)`);
   for (const r of host.refusedCmds.slice(0, 6)) line(`      ${r}`);
   line();
 
@@ -682,11 +729,16 @@ function report(bots: readonly Bot[], host: Conn, opts: Opts, elapsedMs: number)
           : `${openGaps.length} seq gap(s) never closed`,
     },
     {
-      ok: segments.size <= 1,
+      // `segments` is built from bots that joined, so `size <= 1` passes
+      // vacuously when none did. Requiring one segment *and* somebody in it
+      // stops a total failure reading as agreement.
+      ok: segments.size === 1 && joined.length > 0,
       text:
-        segments.size <= 1
-          ? "every bot ended on the same segment"
-          : `bots ended on ${segments.size} different segments — a desync`,
+        segments.size === 1 && joined.length > 0
+          ? `all ${joined.length} bots ended on the same segment`
+          : joined.length === 0
+            ? "no bot joined, so there is no agreement to report"
+            : `bots ended on ${segments.size} different segments — a desync`,
     },
     {
       // Answered, not applied: the engine refusing a late tap is correct, and
@@ -703,6 +755,13 @@ function report(bots: readonly Bot[], host: Conn, opts: Opts, elapsedMs: number)
         host.refusedCmds.length === 0
           ? "no host command was refused"
           : `${host.refusedCmds.length} host command(s) refused`,
+    },
+    {
+      ok: host.pending.size === 0,
+      text:
+        host.pending.size === 0
+          ? "every host command got a reply"
+          : `${host.pending.size} host command(s) got no reply at all`,
     },
     {
       ok: conns.every((c) => c.error === null),

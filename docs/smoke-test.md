@@ -7,9 +7,15 @@ in this repository performs.
 
 ```bash
 # against a local server
-cd app && npm run dev:memory                       # another terminal
-make stage EVENT=2026-03-12-example-offsite        # prints the tokens
-npm run swarm -- 9 --url http://localhost:3000 \
+cd app && QUORUM_STORE=memory QUORUM_ADMIN_KEY=localdev PORT=3000 \
+  node --experimental-strip-types src/server/main.ts     # another terminal
+
+# `make stage` targets the deployed host and needs AWS credentials, so a local
+# session is staged by calling the script directly.
+QUORUM_URL=http://localhost:3000 QUORUM_ADMIN_KEY=localdev \
+  EVENT=2026-03-12-example-offsite node app/scripts/stage-event.mjs
+
+cd app && npm run swarm -- 9 --url http://localhost:3000 \
   --code hvs.xxxx --host-token XXXX
 
 # against the deployed service, before an event
@@ -25,10 +31,7 @@ proves none of the following, because it opens no socket:
 
 - twenty phones connecting at once, which is what a QR code on a screen
   produces
-- the reconnect storm after a restart, when everyone comes back inside a second
-- per-socket latency correction, which decides who won a speed-weighted
-  question
-- broadcast fan-out, frame size, and the `seq` gap and resync path
+- broadcast fan-out and frame size, per socket
 - the join rate limiter, which until recently keyed on the load balancer rather
   than the joiner and would have refused a room joining together
 - the count that never reaches "20 of 20"
@@ -48,9 +51,13 @@ swarm breaks the way a client would.
 **Bots play by reacting to `state`.** No script of expected frames: a bot reads
 the segment, the trivia phase, the arcade round and its own `arcadeMine`, and
 acts. It answers a question at a randomised delay, taps during Plan / Apply,
-picks a pane on the Bridge, types a Recruitment answer, and backs a player when
-it is drained. Each bot's choices come from a seeded PRNG, so `--seed 99`
-reproduces a run.
+picks a shape and taps letters in Unseal, picks a pane on the Bridge, types a
+Recruitment answer, and backs a player when it is drained.
+
+Each bot's *choices* come from a seeded PRNG, so `--seed` fixes which answer it
+picks and which pane. It does not fix the run: tap trains and late presses are
+wall-clock, so two runs on one seed give similar but not identical totals. The
+network is the thing under test and cannot be made deterministic.
 
 **It measures what the client saw, not what the server thinks.** The server's
 own view is not evidence: a broadcast the server believes it sent and a frame a
@@ -65,22 +72,27 @@ checks that pass or fail, so a bad run is legible without reading the numbers.
 **Joining.** Time from socket open to `welcome`, as p50 / p95 / slowest. Any
 bot refused, with the reason. Any bot that never arrived.
 
-**Frames.** Count and bytes received per role. The largest single frame. The
-busiest second. These are the numbers that decide whether a host laptop on a
-video call can keep up, and they are per-socket because that is what a laptop
-has to drain.
+**Frames.** Count and bytes received, per bot socket and for the host socket,
+and the largest single frame seen. These are the numbers that decide whether a
+host laptop on a video call can keep up, and they are per-socket because that
+is what a laptop has to drain. No Desktop socket is opened, so the surface with
+the heaviest frames is not measured — see what it does not do.
 
 **Gaps.** Every `seq` gap seen by any bot, and whether the resync that follows
 recovers it. A gap that is never closed is a phone that has silently stopped
 agreeing with the room.
 
-**Play.** Answers sent versus acked. Commands the host issued versus refused.
-Any bot that finished on a different segment from the others, which is the
-shape a desync takes.
+**Play.** Frames sent, and how each was answered: applied, accepted but
+changing nothing, refused, or not answered at all. Host commands refused, and
+host commands that got no reply. Any bot that finished on a different segment
+from the others, which is the shape a desync takes.
 
-**Timing.** Round-trip from a play frame to its `ack`, as p50 / p95 / slowest.
-This is the number that turns into a missed beat in Tug of Raft when the
-server's loop is busy.
+A refusal is not a fault. The engine refusing a tap that arrived after a round
+closed is correct, and a run has dozens. Silence is the fault.
+
+**Timing.** Round-trip from a play frame to its reply — an ack or a refusal,
+since both are replies — as p50 / p95 / slowest. This is the number that turns
+into a missed beat in Tug of Raft when the server's loop is busy.
 
 ## What a failure looks like
 
@@ -88,10 +100,11 @@ The exit code is non-zero if any check fails, so this can gate a deploy. Checks
 are deliberately about the room rather than the code:
 
 - every bot joined, or the reason it did not is a reason the host chose
-- no bot saw a `seq` gap that stayed open
-- no bot ended on a different segment from the rest
-- every answer that was sent was acked
-- no host command was refused that the run of show expected to work
+- no bot saw a `seq` gap that stayed open — a gap counts as closed only when a
+  *later* frame answers the resync, never the frame that revealed it
+- every bot ended on the same segment, and at least one bot joined
+- every frame sent got an answer, applied or refused
+- no host command was refused, and none went unanswered
 
 ## What it is not
 
@@ -101,9 +114,21 @@ copy of a better test. If the swarm's scores are wrong and the bots' are right,
 the bug is in the wire or the projection, which is what the gap and desync
 checks are for.
 
+It does not open a Desktop socket, so the surface that receives the heaviest
+frames is unmeasured. It does not test reconnect: `rejoinToken` is captured and
+never used, so the restart storm — everyone coming back inside a second — is
+still untested by anything.
+
+It does not walk a whole session. The run of show plays three questions and
+four arcade rounds, which is enough to exercise every code path without taking
+twenty minutes.
+
 It does not replace a human at a rehearsal. It cannot tell you the Desktop is
 unreadable over a compressed share, or that a round drags. It tells you the
 thing stayed up and stayed consistent while sixty sockets used it.
+
+**Bot names are fixed by index**, so a second run against the *same* session is
+refused with `nickname_taken` for every bot. Stage a fresh session per run.
 
 ## Running it against production
 
