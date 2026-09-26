@@ -11,9 +11,13 @@ import { foldAnswer, matchesItem } from "../engine/arcade.ts";
 import { RECRUITMENT_ITEMS, RECRUITMENT_SECONDS_PER_ITEM, recruitmentRound } from "./recruitment.ts";
 
 describe("recruitment content", () => {
-  test("six items, twenty seconds each — SPEC's 2.5 minute round", () => {
-    assert.equal(RECRUITMENT_ITEMS.length, 6);
+  test("seven items, twenty seconds each", () => {
+    assert.equal(RECRUITMENT_ITEMS.length, 7);
     assert.equal(RECRUITMENT_SECONDS_PER_ITEM, 20);
+    // 140 s of Floor. SPEC budgets 2.5 minutes for the round including the
+    // 20 s card, which the seventh item spends: the reveal is the recruiting
+    // sequence, which runs on into the next card either way.
+    assert.equal(RECRUITMENT_ITEMS.length * RECRUITMENT_SECONDS_PER_ITEM, 140);
     assert.deepEqual(recruitmentRound(), {
       kind: "recruitment",
       items: RECRUITMENT_ITEMS,
@@ -21,11 +25,33 @@ describe("recruitment content", () => {
     });
   });
 
-  test("the existing six, in order", () => {
+  test("the seven, in order, with Waypoint fourth", () => {
     assert.deepEqual(
       RECRUITMENT_ITEMS.map((i) => i.answer),
-      ["Vault", "Terraform", "Consul", "Packer", "Boundary", "Nomad"],
+      ["Vault", "Terraform", "Consul", "Waypoint", "Packer", "Boundary", "Nomad"],
     );
+  });
+
+  test("the round is not decided by elimination", () => {
+    // Six emoji pairs for the six products the room can recite means the last
+    // two answers are whichever names have not come up yet, and the cue stops
+    // being read. The seventh item is the fix, and it only works if it lands
+    // before the back half — last would spring the surprise once, after
+    // elimination had already answered items 5 and 6.
+    const at = RECRUITMENT_ITEMS.findIndex((i) => i.answer === "Waypoint");
+    assert.ok(at >= 0, "the set needs a product from outside the famous six");
+    assert.ok(
+      at > 0 && at < RECRUITMENT_ITEMS.length - 2,
+      `the outsider is item ${at + 1} of ${RECRUITMENT_ITEMS.length}; it has to land before the back half`,
+    );
+  });
+
+  test("a cue is two emoji and no letters", () => {
+    // The answer is typed, so a letter anywhere in a cue is the answer being
+    // handed over. "tf" in a Terraform cue would be the whole item.
+    for (const item of RECRUITMENT_ITEMS) {
+      assert.ok(!/\p{L}/u.test(item.cue), `${item.answer}'s cue contains a letter`);
+    }
   });
 
   test("every item has a cue and a note — the note is the bit people learn from", () => {
@@ -33,6 +59,9 @@ describe("recruitment content", () => {
       assert.ok(item.cue.trim() !== "", `${item.answer} has no cue`);
       assert.ok(item.note.trim() !== "", `${item.answer} has no note`);
       assert.ok(foldAnswer(item.answer) !== "", `${item.answer} folds to nothing`);
+      // The House reads these out. DESIGN.md: "no exclamation marks, ever" —
+      // the notes were product blurbs once and a blurb is where one gets in.
+      assert.ok(!item.note.includes("!"), `${item.answer}'s note has an exclamation mark`);
     }
   });
 

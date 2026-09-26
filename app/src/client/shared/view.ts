@@ -526,6 +526,23 @@ export const HOUSE = {
   unsealCrack: (n: number) =>
     `The tin has cracked. ${playerName(n)} drained.`,
   /**
+   * The other end of the same tin, which DESIGN.md has no line for.
+   *
+   * The House narrated every way to lose — the crack, the fall, the state lock,
+   * the heartbeat timeout — and exactly one way to win, the Plan / Apply
+   * crossing. An announcer who only speaks when somebody loses is a different
+   * game from the one DESIGN.md is describing, and Unseal is where the gap was
+   * widest: cracking a tin had a line and opening one had silence.
+   *
+   * `Sealed: false` is `vault status` with the seal off. It is the joke and it
+   * is also exactly what has happened, which is the register — nothing here is
+   * invented. Split the way the crack is, and for the same reason: the phone
+   * says the half about the tin, because whoever is reading it knows whose tin
+   * it was, and the Desktop says both halves because the room does not.
+   */
+  unsealOpened: "Sealed: false.",
+  unsealOpen: (n: number) => `Sealed: false. ${playerName(n)} opened the tin.`,
+  /**
    * DESIGN.md, verbatim, and the line the whole button is for.
    *
    * "Nobody will know" is true and is the joke: reading the docs looks
@@ -538,6 +555,18 @@ export const HOUSE = {
     `Heartbeat timeout. Node ${playerTag(n)} called an election. Nothing happened.`,
   /** The other half of the same joke, said once the node is back. */
   tugElected: "Election complete. No change of leadership.",
+  /**
+   * Tug of Raft's win line, which the round did not have. Three pulls went by
+   * and the only thing the House said was that somebody's node had timed out.
+   *
+   * It names the side because the Desktop and the phone both already label them
+   * SIDE A and SIDE B, and it does not say anybody won: a pull is a log entry
+   * that committed, and in the one round where nobody is drained the entry is
+   * all that was ever at stake. That is the same joke as "Elections achieve
+   * nothing", told from the winning end.
+   */
+  tugPullWon: (side: 0 | 1) =>
+    `Side ${side === 0 ? "A" : "B"} has the rope. The entry is committed.`,
   backedSurvived: "Your player survived. The Lounge is pleased.",
   roundEnd: "All nodes rescheduled. The next game will begin shortly.",
   arcadeEnd: "The games have concluded. Please return your tracksuit.",
@@ -616,6 +645,16 @@ export const STATE_LOCK_ERROR = "Error: state lock held by another process";
  * line that could carry what the server knows. And nothing about *which*: the
  * bridge's lines name the shape of the choice and say nothing that helps with
  * an actual pane.
+ *
+ * **Nobody is out.** Three of these lines used to end "and you are out", which
+ * is the one promise the arcade makes and breaks in the same sentence: a player
+ * who taps during the lock is *drained to the Lounge*, where they bet on
+ * somebody still running and can still finish ahead of a cautious survivor.
+ * README.md is explicit that "someone knocked out at minute six" is the failure
+ * the whole format was designed around, and this is the surface where the room
+ * learns which game it is in. So the word is drained, it names where you go,
+ * and it matches {@link PLAY_RULE}'s line for Plan / Apply, which already said
+ * it properly.
  */
 export const HOW_TO_PLAY: Readonly<
   Record<ArcadeRoundKind, readonly [string, string, string]>
@@ -628,12 +667,12 @@ export const HOW_TO_PLAY: Readonly<
   plan_apply: [
     "A sign that switches between PLAN and LOCKED.",
     "Tap to add resources while it reads PLAN.",
-    "One tap while it reads LOCKED and you are out.",
+    "One tap while it reads LOCKED and you are drained to the Lounge.",
   ],
   unseal: [
     "You choose a shape, and the shape decides how long your word is.",
     "The letters arrive scrambled. Tap them in the right order.",
-    "One wrong letter cracks the tin and you are out.",
+    "One wrong letter cracks the tin and drains you to the Lounge.",
   ],
   tug_of_raft: [
     "Two teams, one rope, and a steady beat.",
@@ -643,7 +682,7 @@ export const HOW_TO_PLAY: Readonly<
   gganbu: [
     "You are paired with one other player. Ten tokens each.",
     "Six over-or-under questions — bet tokens on your answer.",
-    "Run out of tokens and you are out.",
+    "Run out of tokens and you are drained to the Lounge.",
   ],
   glass_bridge: [
     "Six steps. Two panes at each: one real HashiCorp feature, one invented.",

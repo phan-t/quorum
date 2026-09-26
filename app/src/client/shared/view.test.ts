@@ -50,6 +50,7 @@ import {
   FINAL_DWELL_MS,
   FINAL_EMPTY_FIRST_HOLD_MS,
   HOUSE,
+  HOW_TO_PLAY,
   KEY_HINT,
   LIGHT_FACE,
   RUN_OF_SHOW,
@@ -676,6 +677,78 @@ describe("the bridge's register", () => {
   });
 });
 
+describe("the House when somebody wins", () => {
+  /**
+   * The announcer narrated every way to lose and one way to win. These are the
+   * two lines that were missing, and they are here rather than in a round's own
+   * describe because what is being asserted is the register, not the round.
+   */
+  it("has a line for the tin coming open", () => {
+    assert.equal(HOUSE.unsealOpened, "Sealed: false.");
+    assert.equal(HOUSE.unsealOpen(17), "Sealed: false. Player 017 opened the tin.");
+    // `vault status` with the seal off, which is the joke and is also literally
+    // what happened. Split the way the crack is: the half without a player
+    // number in it is the phone's, because whoever reads it knows whose tin it
+    // was, and the Desktop says both halves because the room does not.
+    assert.ok(!HOUSE.unsealOpened.includes("Player"));
+    assert.ok(HOUSE.unsealOpen(17).startsWith(HOUSE.unsealOpened));
+    assert.ok(HOUSE.unsealCrack(17).startsWith(HOUSE.unsealCracked));
+  });
+
+  it("has a line for the rope, and it does not say anybody won", () => {
+    assert.equal(HOUSE.tugPullWon(0), "Side A has the rope. The entry is committed.");
+    assert.equal(HOUSE.tugPullWon(1), "Side B has the rope. The entry is committed.");
+    // Nobody is drained in this round, so nobody loses one either: a pull is a
+    // log entry that committed. "SIDE A" and "SIDE B" are what both the big
+    // screen and the phone already call the two clusters.
+    for (const side of [0, 1] as const) {
+      assert.ok(!/\b(win|won|lose|lost|beat)\b/i.test(HOUSE.tugPullWon(side)));
+    }
+  });
+
+  it("raises its voice nowhere, including in the lines that are functions", () => {
+    // DESIGN.md: "no exclamation marks, ever". Read off the object rather than
+    // listed, so a line added later cannot arrive without being checked.
+    const spoken = Object.values(HOUSE).map((v) =>
+      typeof v === "function"
+        ? (v as unknown as (a: number, b: number) => string)(4, 17)
+        : v,
+    );
+    assert.ok(spoken.length >= 20, `only ${spoken.length} lines`);
+    for (const line of spoken) {
+      assert.ok(line.trim() !== "", "an empty announcer line");
+      assert.ok(!line.includes("!"), `"${line}" raises its voice`);
+    }
+  });
+});
+
+describe("how to play", () => {
+  it("never says anybody is out, because nobody is", () => {
+    // The arcade's one promise is that being drained is not being eliminated:
+    // you go to the Lounge, you bet on a runner, and you can still finish
+    // ahead of a cautious survivor. Three of these lines used to end "and you
+    // are out", on the surface where the room learns which game it is in.
+    for (const [round, lines] of Object.entries(HOW_TO_PLAY)) {
+      for (const line of lines) {
+        assert.ok(!/\byou are out\b/i.test(line), `${round}: "${line}"`);
+        assert.ok(!line.includes("!"), `${round}: "${line}" raises its voice`);
+      }
+    }
+    // The three rounds that drain say so, and say where you go.
+    for (const round of ["plan_apply", "unseal", "gganbu"] as const) {
+      const lines = HOW_TO_PLAY[round];
+      assert.ok(
+        lines.some((l) => /drain/i.test(l)),
+        `${round} does not say what ends your round`,
+      );
+      assert.ok(
+        lines.some((l) => l.includes("Lounge")),
+        `${round} does not say where you go`,
+      );
+    }
+  });
+});
+
 describe("the two panes on a keyboard", () => {
   const ev = (key: string, over: Record<string, boolean> = {}) => ({
     key,
@@ -829,7 +902,7 @@ describe("Unseal's reveal header", () => {
    * when the content and the copy part company again.
    */
   it("counts the tins the room was actually dealt", () => {
-    assert.equal(unsealRevealHead(UNSEAL_ITEMS.length), "TEN TINS. TEN WORDS.");
+    assert.equal(unsealRevealHead(UNSEAL_ITEMS.length), "SEVENTEEN TINS. SEVENTEEN WORDS.");
     assert.equal(unsealRevealHead(9), "NINE TINS. NINE WORDS.");
     assert.equal(unsealRevealHead(11), "ELEVEN TINS. ELEVEN WORDS.");
   });

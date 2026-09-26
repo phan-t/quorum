@@ -2740,7 +2740,7 @@ const ARCADE_ROUNDS: readonly ArcadeRoundKind[] = [
  * mechanic from SPEC.md's round table, said as the thing the player does.
  */
 const ARCADE_ROUND_WHAT: Readonly<Record<ArcadeRoundKind, string>> = {
-  recruitment: "Two emoji, one product name. Type it. Six items, nobody is knocked out.",
+  recruitment: "Two emoji, one product name. Type it. Seven items, nobody is knocked out.",
   plan_apply: "Tap fast while the light is green. Stop the moment it turns. Tapping on red knocks you out.",
   unseal: "Pick a shape, then tap the scrambled letters in order. One wrong tap and you are out.",
   tug_of_raft: "Tug of war. Two teams, one rope. Tap on the beat, and nobody is knocked out.",
@@ -2877,7 +2877,7 @@ const arcadeRecruitCfg = h("div", { class: "a-cfg" }, [
   ]),
   h("p", {
     class: "pb-note",
-    text: "Six items, timed one after another. You do not have to press anything.",
+    text: "Seven items, timed one after another. You do not have to press anything.",
   }),
 ]);
 const arcadePlanCfg = h("div", { class: "a-cfg" }, [

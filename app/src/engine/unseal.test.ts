@@ -176,8 +176,8 @@ function unsealWord(
 /* ------------------------------------------------------------------ */
 
 describe("the launch content", () => {
-  test("ten tins: the existing six, three umbrellas, and a second circle", () => {
-    assert.equal(UNSEAL_ITEMS.length, 10);
+  test("seventeen tins, in the order the tiers deal them", () => {
+    assert.equal(UNSEAL_ITEMS.length, 17);
     assert.equal(UNSEAL_SECONDS, 60);
     assert.deepEqual(
       UNSEAL_ITEMS.map((i) => i.answer),
@@ -187,36 +187,50 @@ describe("the launch content", () => {
         "PROVIDER",
         "MODULE",
         "GOSSIP",
-        "UNSEAL",
+        "CANARY",
         "DECLARATIVE",
         "IDEMPOTENCY",
         "ORCHESTRATION",
         "VAULT",
+        "SERF",
+        "DRIFT",
+        "TAINT",
+        "STATE",
+        "BOUNDARY",
+        "WAYPOINT",
+        "SNAPSHOT",
       ],
     );
   });
 
-  test("no tier is one word for the whole room", () => {
+  test("no tier is thin enough for one person to solve it on the call", () => {
     // A tier with a single word is solved for everybody in it the moment one
-    // person says it out loud on the call, which is how the circle shipped
-    // with only RAFT in it. Every tier that the picker offers has at least two
-    // now, so a host who takes a word out has to notice.
+    // person says it out loud, which is how the circle shipped with only RAFT
+    // in it. Two was not enough either: the circle is the tier the cautious
+    // pick, so in a room of thirty it is where most of the room is, and one
+    // shout was still giving away half of it.
+    //
+    // Three is the floor, and the circle and star tiers — the two the room
+    // crowds into — carry more than that. A host who takes a word out has to
+    // notice.
     const perShape = new Map<UnsealShape, number>();
     for (const item of UNSEAL_ITEMS) {
       perShape.set(item.shape, (perShape.get(item.shape) ?? 0) + 1);
     }
     for (const shape of UNSEAL_SHAPES) {
       assert.ok(
-        (perShape.get(shape) ?? 0) >= 2,
-        `the ${shape} tier has ${perShape.get(shape) ?? 0} word(s); one is solved for the tier by one person`,
+        (perShape.get(shape) ?? 0) >= 3,
+        `the ${shape} tier has ${perShape.get(shape) ?? 0} word(s); one shout solves too much of it`,
       );
     }
+    assert.ok((perShape.get("circle") ?? 0) >= 5, "the circle is the tier the room crowds into");
+    assert.ok((perShape.get("star") ?? 0) >= 5);
   });
 
-  test("the existing six are the Scrambled board, verbatim", () => {
+  test("the surviving five are the Scrambled board, verbatim", () => {
     // Cue, answer and note, exactly as they are in
     // the activity library's hashi-arcade/index.html under key:"scrambled".
-    assert.deepEqual(UNSEAL_ITEMS.slice(0, 6).map((i) => [i.cue, i.answer, i.note]), [
+    assert.deepEqual(UNSEAL_ITEMS.slice(0, 5).map((i) => [i.cue, i.answer, i.note]), [
       [
         "T F A R",
         "RAFT",
@@ -230,12 +244,18 @@ describe("the launch content", () => {
         "Reusable Terraform. The thing everyone means to write and never does.",
       ],
       ["S I P G O S", "GOSSIP", "How Consul agents find out who is still alive."],
-      [
-        "N E A L U S",
-        "UNSEAL",
-        "What you do to a Vault after it starts. Shamir shares, or auto-unseal via a KMS.",
-      ],
     ]);
+  });
+
+  test("no tin holds the name of the round it is played in", () => {
+    // The sixth item of the existing board was UNSEAL, and the round card is
+    // up behind the player for twenty seconds reading "Game 2 — Unseal". That
+    // is a six-letter triangle worth twenty points with its answer printed on
+    // the wall, and unlike RAFT's reversed cue it needed noticing by nobody.
+    // CANARY stands in its place.
+    const named = UNSEAL_ITEMS.filter((i) => i.answer === "UNSEAL");
+    assert.deepEqual(named, [], "a tin whose answer is the round's name is not a puzzle");
+    assert.ok(UNSEAL_ITEMS.some((i) => i.answer === "CANARY"));
   });
 
   test("every cue is a scramble of its own word", () => {
@@ -278,13 +298,14 @@ describe("the launch content", () => {
   });
 
   test("no cue gives its word away by being in order, or in reverse", () => {
-    // ⚠️ One of the existing six is its own word backwards: `T F A R` is RAFT.
-    // It is kept, because the brief was to reuse the existing items verbatim
-    // and because a four-letter word has twenty-four arrangements and one of
-    // them was always going to look like something. The other five are
-    // genuinely scrambled, and so are the four additions — which matters most
-    // at the umbrella tier, the one that pays 50, and at VAULT, which shares
-    // the circle with the one cue this test has to make an exception for.
+    // ⚠️ One of the surviving five is its own word backwards: `T F A R` is
+    // RAFT. It is kept, because the brief was to reuse the existing items
+    // verbatim and because a four-letter word has twenty-four arrangements and
+    // one of them was always going to look like something — a player has to
+    // *notice* it, and it pays ten. The other four are genuinely scrambled, and
+    // so are all eleven additions, which matters most at the umbrella tier that
+    // pays 50 and in the circle tier that now has five other words sharing a
+    // tin shape with the one cue this test makes an exception for.
     const forwards = (item: UnsealItem) =>
       unsealLetters(item.cue).join("") === unsealLetters(item.answer).join("");
     const backwards = (item: UnsealItem) =>
@@ -321,7 +342,7 @@ describe("the launch content", () => {
 describe("handing out tins", () => {
   test("splitting content leaves the word on one side of the line", () => {
     const { tins: shown, key } = splitTins(UNSEAL_ITEMS);
-    assert.equal(shown.length, 10);
+    assert.equal(shown.length, 17);
     assert.deepEqual(shown[0], { shape: "circle", cue: "T F A R", length: 4 });
     assert.deepEqual(key[0], {
       answer: "RAFT",
@@ -341,10 +362,14 @@ describe("handing out tins", () => {
     assert.equal(tinIndexFor(shown, "triangle", 2), 4);
     assert.equal(tinIndexFor(shown, "triangle", 3), 5);
     assert.equal(tinIndexFor(shown, "triangle", 4), 3);
-    // The circle tier has two, and the second one is last in the list: RAFT
-    // at 0, VAULT at 9, and odd player numbers come back round to RAFT.
+    // The circle tier has six, one at the head of the list and five appended:
+    // RAFT at 0, then VAULT, SERF, DRIFT, TAINT and STATE at 9 to 13. Every
+    // sixth player comes back round to RAFT, which is the widening working —
+    // it used to be every second one.
     assert.equal(tinIndexFor(shown, "circle", 1), 0);
     assert.equal(tinIndexFor(shown, "circle", 2), 9);
+    assert.equal(tinIndexFor(shown, "circle", 3), 10);
+    assert.equal(tinIndexFor(shown, "circle", 6), 13);
     assert.equal(tinIndexFor(shown, "circle", 7), 0);
     // A number nobody has been given yet still gets a tin.
     assert.equal(tinIndexFor(shown, "circle", undefined), 0);

@@ -1,5 +1,5 @@
 /**
- * Round 2 — Unseal. The launch content: ten tins, one word in each.
+ * Round 2 — Unseal. The launch content: seventeen tins, one word in each.
  *
  * As with recruitment.ts and glass-bridge.ts this is a literal, imported like
  * any other module — no I/O, no clock, no randomness. The host's per-round
@@ -11,59 +11,73 @@
  * 2026 and then deleted. Its history survives as a git bundle in `private/`,
  * which is where to look if one of these strings is ever in doubt.
  *
- * SPEC.md: "6 existing Scrambled items + 3". The six are the existing Scrambled
- * board from the activity library, **verbatim** — cue, answer and note — and
- * the three additions are the umbrella tier, which the existing board has
- * nothing in: "The umbrella tier needs three long words added; they are in the
- * round file with the same `cue / ans / note` shape."
+ * SPEC.md: "6 existing Scrambled items + 4". The Scrambled board from the
+ * activity library is the start of this list, and the umbrella tier — which
+ * the existing board has nothing in — is SPEC's addition: "The umbrella tier
+ * needs three long words added; they are in the round file with the same
+ * `cue / ans / note` shape."
+ *
+ * There are seventeen here rather than ten, and the extra seven are not
+ * content SPEC asked for; they are the fix for the hole described under "Why
+ * the circle tier has six" below. SPEC's ten is a floor on how much content
+ * the round needs, not a cap: it counts the words that had to be *written*,
+ * and it was written when nobody had yet worked out that a tier is solved for
+ * everybody in it by one person on the call.
  *
  * That gives the four tiers SPEC.md describes:
  *
  * | Tin | Letters | Words |
  * | --- | --- | --- |
- * | ○ circle | 4–5 | RAFT, VAULT |
- * | △ triangle | 6 | MODULE, GOSSIP, UNSEAL |
- * | ☆ star | 8 | SENTINEL, PROVIDER |
+ * | ○ circle | 4–5 | RAFT, VAULT, SERF, DRIFT, TAINT, STATE |
+ * | △ triangle | 6 | MODULE, GOSSIP, CANARY |
+ * | ☆ star | 8 | SENTINEL, PROVIDER, BOUNDARY, WAYPOINT, SNAPSHOT |
  * | ☂ umbrella | 11+ | DECLARATIVE, IDEMPOTENCY, ORCHESTRATION |
  *
  * A tier with more than one word hands them out by arcade player number, so
  * two people sitting together are not unscrambling the same word.
  *
- * ## Why the circle tier has two
+ * ## Why the circle tier has six
  *
  * The existing content gives it one, and for a while it shipped that way: one
  * word for the whole tier, so the first person to say RAFT out loud on the
- * call solved it for everybody who picked the circle. That is not a hole a
- * host can be expected to notice in the room, and the circle is the tier the
- * cautious pick — it is the one that most needs to still be a game.
+ * call solved it for everybody who picked the circle. VAULT was added, which
+ * made it a game for two people in ten and a formality for the rest — the
+ * circle is the tier the cautious pick, and in a room of thirty it is the tier
+ * most of the room is in.
  *
- * So VAULT is added, and it is the only item here that is not from the
- * existing board or the umbrella brief. It is last in the list rather than
- * next to RAFT because the tins are dealt by index: appending leaves every
- * other tin where it was, and the six existing items stay the first six, in
- * their original order, which is what the tests read them as.
+ * So the circle now has six and the star has five, and the fix is arithmetic
+ * rather than clever: with six circles, a tier that a dozen people picked is
+ * a dozen people on four or five different words, and one shout on the call
+ * gives away a sixth of it. The thin tiers are triangle and umbrella, which is
+ * the right way round — they are the tiers picked by people who came to play.
  *
- * Two words still means two people in ten share a word; the fix for a big room
- * is more circle words, not a different mechanism, and a host who wants that
- * passes their own items to `unsealRound`.
+ * ## Why UNSEAL is not in the triangle tier any more
  *
- * ## One cue is its own word backwards
+ * It was, and it is the one item from the existing board that had to go. The
+ * round card behind the player reads *Game 2 — Unseal* for the twenty seconds
+ * before the Floor opens, so a triangle tin holding UNSEAL is twenty points
+ * printed on the wall: no scramble to solve, nothing learned, and an
+ * unfairness aimed at whichever two or three players the tier dealt it to.
+ * CANARY is a six-letter replacement with a Nomad note on it.
  *
- * `T F A R` is RAFT reversed. The other five existing cues are not — SENTINEL
- * backwards is LENITNES and the cue is `N E L S I T E N` — so this is a
- * coincidence of a four-letter word rather than a pattern, and there is
- * nothing in the tier for anybody to spot. It is kept as it is, because the
- * brief was to reuse the existing items verbatim, and a test records it so
- * that a future change to the content does not quietly introduce the pattern
- * that this one does not have. VAULT, which is now in the same tier, was
- * scrambled against that test rather than by eye.
+ * `T F A R` stays, and the two decisions are not in conflict. RAFT's cue is
+ * its own word backwards, which is a thing a player has to *notice* — a
+ * four-letter word has twenty-four arrangements and one of them was always
+ * going to look like something — and it is worth ten. UNSEAL was worth twenty
+ * and needed noticing by nobody.
  *
  * ## The additions
  *
- * Four words with nothing to verify in them: each is a term of art or a
- * product name rather than a fact, so there is no date, no branding and no
- * acquisition to be wrong about. The notes are the same shape as the existing
- * six — one line, what the thing is, with the joke where the word has one.
+ * Eleven words with almost nothing to verify in them: each is a term of art or
+ * a product name rather than a fact, so there is no date, no branding and no
+ * acquisition to be wrong about. The two that do make a claim make a small
+ * one — SERF is the library Consul and Nomad build membership on, and
+ * `terraform taint` really is deprecated in favour of `-replace` — and neither
+ * names a version, because a version number is a second fact to be wrong about
+ * in front of a room that would know.
+ *
+ * The notes are the same shape as the existing six: one line, what the thing
+ * is, with the joke where the word has one.
  */
 
 import type { ArcadeRoundConfig, UnsealItem } from "../engine/types.ts";
@@ -72,14 +86,19 @@ import type { ArcadeRoundConfig, UnsealItem } from "../engine/types.ts";
 export const UNSEAL_SECONDS = 60;
 
 /**
- * Ten tins.
+ * Seventeen tins.
  *
- * The six existing Scrambled items are first, in their original order, with
+ * The five surviving Scrambled items are first, in their original order, with
  * their shape read off the length of the word: RAFT is four letters and
- * therefore a circle, MODULE and GOSSIP and UNSEAL are six and therefore
- * triangles, SENTINEL and PROVIDER are eight and therefore stars. SPEC.md
- * assigns exactly these, by name, so the mapping is not an inference. Then the
- * three umbrellas, and last the second circle.
+ * therefore a circle, MODULE and GOSSIP are six and therefore triangles,
+ * SENTINEL and PROVIDER are eight and therefore stars. SPEC.md assigns exactly
+ * these, by name, so the mapping is not an inference. CANARY stands where
+ * UNSEAL stood. Then the three umbrellas, then VAULT, then the four circles
+ * and three stars the tiers were widened with.
+ *
+ * Additions go on the end because the tins are dealt by index: appending
+ * leaves every other tin where it was, so a host who read the board yesterday
+ * is still right about it today.
  */
 export const UNSEAL_ITEMS: readonly UnsealItem[] = [
   {
@@ -114,9 +133,9 @@ export const UNSEAL_ITEMS: readonly UnsealItem[] = [
   },
   {
     shape: "triangle",
-    cue: "N E A L U S",
-    answer: "UNSEAL",
-    note: "What you do to a Vault after it starts. Shamir shares, or auto-unseal via a KMS.",
+    cue: "R Y A C N A",
+    answer: "CANARY",
+    note: "Nomad's update block places one new allocation and waits for you to promote it.",
   },
   {
     shape: "umbrella",
@@ -141,6 +160,48 @@ export const UNSEAL_ITEMS: readonly UnsealItem[] = [
     cue: "L T V A U",
     answer: "VAULT",
     note: "Secrets, PKI and dynamic credentials. The round you are playing is named after starting one.",
+  },
+  {
+    shape: "circle",
+    cue: "R F S E",
+    answer: "SERF",
+    note: "The membership and failure-detection library Consul and Nomad are both built on.",
+  },
+  {
+    shape: "circle",
+    cue: "F T D I R",
+    answer: "DRIFT",
+    note: "What the infrastructure did while nobody was applying.",
+  },
+  {
+    shape: "circle",
+    cue: "N T I T A",
+    answer: "TAINT",
+    note: "terraform taint marked a resource for replacement. Deprecated in favour of -replace, and still the first thing anybody reaches for.",
+  },
+  {
+    shape: "circle",
+    cue: "T E S A T",
+    answer: "STATE",
+    note: "The record of what Terraform built. Game 1's lock is held on one of these.",
+  },
+  {
+    shape: "star",
+    cue: "R D Y N A O U B",
+    answer: "BOUNDARY",
+    note: "A target, a host set, and a session with a beginning and an end. No key changes hands.",
+  },
+  {
+    shape: "star",
+    cue: "P T W O N Y I A",
+    answer: "WAYPOINT",
+    note: "One command from source to a running URL. The part of the platform the developer is meant to see.",
+  },
+  {
+    shape: "star",
+    cue: "H T S O P A N S",
+    answer: "SNAPSHOT",
+    note: "consul snapshot save. The thing you find out you were not taking.",
   },
 ];
 

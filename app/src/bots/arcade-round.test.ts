@@ -84,18 +84,37 @@ function specFold(s: string): string {
 }
 
 /**
- * The six items, transcribed by hand from SPEC.md and the existing Emoji
+ * The seven items, transcribed by hand from SPEC.md and the existing Emoji
  * Decode board, so `src/arcade/recruitment.ts` is checked against this and not
  * the other way round.
+ *
+ * Waypoint is fourth and is not from SPEC: a round of exactly the six products
+ * the room can recite is a round whose last two answers are arrived at by
+ * elimination, and the content file says why the seventh sits where it does.
+ * Transcribed here anyway, because the point of this table is to be an
+ * independent reading of the board and not a copy of it.
  */
 const ITEMS: readonly { readonly answer: string; readonly accept: readonly string[] }[] = [
   { answer: "Vault", accept: [] },
   { answer: "Terraform", accept: ["tf"] },
   { answer: "Consul", accept: [] },
+  { answer: "Waypoint", accept: [] },
   { answer: "Packer", accept: [] },
   { answer: "Boundary", accept: [] },
   { answer: "Nomad", accept: [] },
 ];
+
+/**
+ * The last item, which behaves differently from the others.
+ *
+ * The round's own Floor timer is `beginPlay + n × 20 s`, and each item timer
+ * fires 100 ms late, so by the last item the item window has drifted 100 ms per
+ * item past the round's clock: an answer at the buzzer on the last item lands
+ * after the Floor has closed and is refused. Two bots are written to sit either
+ * side of that, so the drift is asserted rather than discovered, and both index
+ * off this rather than a literal that a seventh item made wrong.
+ */
+const LAST_ITEM = ITEMS.length - 1;
 
 function specMatches(item: number, typed: string): boolean {
   const it = ITEMS[item];
@@ -120,6 +139,17 @@ function mulberry32(seed: number): () => number {
 }
 
 const SEED = 20260920;
+
+/**
+ * The Plan / Apply plan's own seed.
+ *
+ * Picked, not derived: the assertions in "the plan is what it says it is" want a
+ * plan with a particular shape — about half the room across the line, at least
+ * twelve drained, and somebody in the Lounge on each of the three payouts — and
+ * a seed either produces that or it does not. `SEED + 3` is the light
+ * schedule's, chosen the same way, for the same reason.
+ */
+const PLAN_SEED = SEED + 1;
 
 /* ------------------------------------------------------------------ */
 /* The clock                                                            */
@@ -298,10 +328,11 @@ const SPECIAL: readonly Bot[] = [
   },
   {
     // Second on every item they answer, typing it every way but plainly:
-    // "TF", "vault!", " Nomad ". Sits out Consul. Second across the line.
+    // "TF", "vault!", "WAYPOINT!", " Nomad ". Sits out Consul. Second across
+    // the line.
     pid: "p002", nickname: "Kenji", rtt: [40, 40, 40],
     recruit: (item) => {
-      const typed = ["vault!", "TF", null, " packer ", "BOUNDARY", " Nomad "][item];
+      const typed = ["vault!", "TF", null, "WAYPOINT!", " packer ", "BOUNDARY", " Nomad "][item];
       return typed === null || typed === undefined ? null : { answer: typed, delayMs: 2_000 };
     },
     taps: () => tapsAt(planThumbs(7.5), [40, 40, 40]),
@@ -402,11 +433,12 @@ const SPECIAL: readonly Bot[] = [
     backs: () => [],
   },
   {
-    // Right at exactly the buzzer on items 1–5 — "within the timer" — and
-    // with a second to spare on item 6. Twenty-nine resources on the Floor,
-    // never drained: banked nothing, which SPEC says is the intended shape.
+    // Right at exactly the buzzer on every item but the last — "within the
+    // timer" — and with a second to spare on the last one, where the buzzer is
+    // already past the Floor's close. Twenty-nine resources on the Floor, never
+    // drained: banked nothing, which SPEC says is the intended shape.
     pid: "p013", nickname: "Snail", rtt: [],
-    recruit: (item) => correctAt(item === 5 ? 19_000 : R_SECONDS_PER_ITEM * 1000)(item),
+    recruit: (item) => correctAt(item === LAST_ITEM ? 19_000 : R_SECONDS_PER_ITEM * 1000)(item),
     taps: () => tapsAt(planThumbs(2, 29), []),
     backs: () => [],
   },
@@ -422,7 +454,7 @@ const SPECIAL: readonly Bot[] = [
     // time, and not one of the first three *correct*.
     pid: "p015", nickname: "Typo", rtt: [],
     recruit: (item) => ({
-      answer: ["Valut", "Terrafrom", "Consol", "Paker", "Bounday", "Nomads"][item] ?? "",
+      answer: ["Valut", "Terrafrom", "Consol", "Waypont", "Paker", "Bounday", "Nomads"][item] ?? "",
       delayMs: 1_000,
     }),
     taps: () => tapsAt(planThumbs(3.5), []),
@@ -430,10 +462,10 @@ const SPECIAL: readonly Bot[] = [
   },
   {
     // Right, 50 ms after the item's timer but before the (late) item change
-    // on items 1–5: accepted, locked in, worth nothing. Right with time to
-    // spare on item 6.
+    // on every item but the last: accepted, locked in, worth nothing. Right
+    // with time to spare on the last one, where 50 ms late is past the Floor.
     pid: "p016", nickname: "JustLate", rtt: [],
-    recruit: (item) => correctAt(item === 5 ? 19_400 : R_SECONDS_PER_ITEM * 1000 + 50)(item),
+    recruit: (item) => correctAt(item === LAST_ITEM ? 19_400 : R_SECONDS_PER_ITEM * 1000 + 50)(item),
     taps: () => tapsAt(planThumbs(3), []),
     backs: () => [],
   },
@@ -577,17 +609,28 @@ const RATES = [2.5, 3, 3.5, 4, 4.5, 5];
  * the Lounge pays 15, 10 or 0.
  */
 function ordinaryBots(): Bot[] {
-  const rng = mulberry32(SEED);
+  // Two streams rather than one. The Recruitment plan and the Plan / Apply plan
+  // used to be drawn from the same PRNG, in that order, so the number of emoji
+  // items decided how far along the stream every tap rate, every slip and every
+  // bet in the *next* round started. Adding a seventh emoji item therefore
+  // re-rolled Plan / Apply: nineteen bots crossed instead of twenty, and a
+  // hundred numbers in this file moved for a reason that had nothing to do with
+  // them. Separate streams mean each round's plan is a function of its own seed
+  // and of nothing else.
+  const rRecruit = mulberry32(SEED);
+  const rng = mulberry32(PLAN_SEED);
   return ORDINARY_NAMES.map((nickname, i) => {
     const pid = `p${String(i + 29).padStart(3, "0")}`;
     const rtt = RTT_PROFILES[i % RTT_PROFILES.length] ?? [];
     const recruits: (Recruit | null)[] = ITEMS.map((it, item) => {
-      const r = rng();
-      const delayMs = 3_500 + Math.floor(rng() * 14_500);
+      const r = rRecruit();
+      const delayMs = 3_500 + Math.floor(rRecruit() * 14_500);
       if (r < 0.15) return null;
-      if (r < 0.35) return { answer: "Waypoint", delayMs };
+      // A real HashiCorp product that is not on the board: Waypoint used to be
+      // that product and is now item 4, so a bot typing it would be right.
+      if (r < 0.35) return { answer: "Vagrant", delayMs };
       const variants = [it.answer, it.answer.toUpperCase(), ` ${it.answer} `, `${it.answer}!`, ...it.accept];
-      const answer = variants[Math.floor(rng() * variants.length)] ?? it.answer;
+      const answer = variants[Math.floor(rRecruit() * variants.length)] ?? it.answer;
       // The oracle must not depend on an answer the plan meant to be right
       // being refused by a misprint in this table.
       assert.ok(specMatches(item, answer));
@@ -1169,18 +1212,18 @@ function play(): Played {
 /* ------------------------------------------------------------------ */
 
 /**
- * Priya: right and first on all six items, 10 + 5 each → 90. First across
+ * Priya: right and first on all seven items, 10 + 5 each → 105. First across
  * the line: 30, 60, 90 bank 5 each (15), crossing 10, first place 15 → 40.
- *   90 + 40
+ *   105 + 40
  */
-const PRIYA = 130;
+const PRIYA = 145;
 
 /**
- * Kenji: right and second on five items (sits out Consul) → 5 × 15 = 75.
+ * Kenji: right and second on six items (sits out Consul) → 6 × 15 = 90.
  * Second across: 15 + 10 + 10 → 35.
- *   75 + 35
+ *   90 + 35
  */
-const KENJI = 110;
+const KENJI = 125;
 
 /**
  * Zoë: third correct on Vault (Priya, Kenji, Zoë) and on Consul (Kenji sits
@@ -1206,8 +1249,8 @@ const SAM = 25;
 /** Late: drained in the first lock with nothing banked; backed the winner. */
 const LATE = 15;
 
-/** Snail: right at the buzzer on five items and with a second to spare on the sixth, 10 each; 29 resources banks nothing. */
-const SNAIL = 60;
+/** Snail: right at the buzzer on six items and with a second to spare on the seventh, 10 each; 29 resources banks nothing. */
+const SNAIL = 70;
 
 /** Hermit: nothing, and on the board for it. */
 const HERMIT = 0;
@@ -1312,12 +1355,13 @@ describe("sixty bots play Recruitment and Plan / Apply", () => {
     });
     // Typo is first to type on every item and never among the first three.
     for (const it of recruit.items) assert.ok(!it.firstThree.includes("p015"));
-    // JustLate is locked in on items 1–5 for nothing; MovedOn is refused on all six.
-    for (let item = 0; item < 5; item += 1) {
+    // JustLate is locked in for nothing on every item but the last; MovedOn is
+    // refused on all of them.
+    for (let item = 0; item < LAST_ITEM; item += 1) {
       assert.deepEqual(played.answerOutcomes.get(`${item}:p016`), { applied: true, code: undefined });
       assert.equal(played.items[item]?.arcade?.play?.kind === "recruitment" && played.items[item]?.arcade?.banked["p016"], undefined);
     }
-    for (let item = 0; item < 6; item += 1) {
+    for (let item = 0; item < ITEMS.length; item += 1) {
       assert.deepEqual(played.answerOutcomes.get(`${item}:p017`), { applied: false, code: "wrong_round_phase" });
     }
   });
@@ -1332,8 +1376,10 @@ describe("sixty bots play Recruitment and Plan / Apply", () => {
       assert.equal(arcade.standing[pid], "floor");
     }
     assert.deepEqual(arcade.lounge, {});
-    assert.equal(arcade.banked[WINNER], 90, "the Floor max");
-    assert.equal(Math.max(...Object.values(arcade.banked)), 90);
+    // Seven items at 10 + 5 for a first-three finish: the Floor max moved with
+    // the seventh item, and SPEC's table of 90 counts six.
+    assert.equal(arcade.banked[WINNER], 105, "the Floor max");
+    assert.equal(Math.max(...Object.values(arcade.banked)), 105);
   });
 
   test("the latecomer is Player 060 and nobody was renumbered", () => {
@@ -1539,7 +1585,7 @@ describe("sixty bots play Recruitment and Plan / Apply", () => {
       const row = standings.find((s) => s.pid === b.pid);
       assert.equal(row?.perActivity["arcade"]?.points, Math.round((100 * raw) / top), b.nickname);
     }
-    assert.equal(standings.find((s) => s.pid === "p002")?.perActivity["arcade"]?.points, 85); // 110/130
+    assert.equal(standings.find((s) => s.pid === "p002")?.perActivity["arcade"]?.points, 86); // 125/145
   });
 
   test("a phone is never sent the light schedule, the answer key or the Floor's results", () => {
@@ -1579,8 +1625,8 @@ describe("sixty bots play Recruitment and Plan / Apply", () => {
     // state broadcast also forced a roster resend — a second full frame on
     // every socket, and for the host a second whole RenderState rather than a
     // delta. These four numbers are the measurement this change was made
-    // against: 11 121 state frames and 11 100 roster frames to the phones over
-    // a 75 s Floor with sixty players, about 113 MB at the frame size below,
+    // against: 11 600 state frames and 11 580 roster frames to the phones over
+    // a 75 s Floor with sixty players, about 118 MB at the frame size below,
     // roughly 300 frames a second.
     const wasAll = roomWide + pa.milestones;
     const before = {
@@ -1590,10 +1636,10 @@ describe("sixty bots play Recruitment and Plan / Apply", () => {
       screenState: wasAll + ownBets,
     };
     assert.deepEqual(before, {
-      participantState: 11_121,
-      participantRoster: 11_100,
-      hostState: 391,
-      screenState: 206,
+      participantState: 11_600,
+      participantRoster: 11_580,
+      hostState: 406,
+      screenState: 213,
     }, "the baseline these numbers are measured against has moved");
 
     // ---- after ----
@@ -1609,9 +1655,9 @@ describe("sixty bots play Recruitment and Plan / Apply", () => {
       screenState: roomWide + pa.crossings + ownBets,
     };
     assert.deepEqual(after, {
-      participantState: 2_625,
+      participantState: 2_573,
       participantRoster: 0,
-      hostState: 206,
+      hostState: 213,
       screenState: 83,
     });
 

@@ -1,20 +1,66 @@
 /**
- * Round 0 — Recruitment. The launch content, moved here from the existing
- * Emoji Decode board.
+ * Round 0 — Recruitment. The launch content, grown out of the existing Emoji
+ * Decode board.
  *
  * BUILD-PLAN.md moves content at the phase that consumes it, so this arrives
- * with the arcade rather than in an upfront migration. It is the *existing*
- * six items, verbatim, including the notes: reusing them is the point, because
- * they have already been played and they already land.
+ * with the arcade rather than in an upfront migration.
  *
  * No I/O here either — this is a literal, imported like any other module. The
  * host's per-round settings arrive on `startRound`; what is in this file is
  * only the default.
+ *
+ * ## Seven items, not six
+ *
+ * SPEC.md says six, and six was the round being decided by elimination. Six
+ * emoji pairs for six products, out of a set of six products this room could
+ * recite in its sleep, means the last two answers are not decoded at all: they
+ * are whichever names have not come up yet. The cue stops being read.
+ *
+ * Waypoint is the seventh, and it sits fourth rather than last on purpose. Last
+ * would leave items 5 and 6 still answerable by elimination and then spring the
+ * surprise once, when it is too late to matter. Fourth is where the room finds
+ * out that the set is open, which is one item before the back half where
+ * elimination would otherwise start.
+ *
+ * **What the seventh item costs, so that somebody can decide it is too much.**
+ * Twenty seconds of Floor, which takes the round to 140 s and puts it about 20 s
+ * past the 2.5 minutes SPEC's round table budgets for it. And fifteen points of
+ * ceiling: the Floor max is `items × (10 + 5)`, so it goes from 90 to 105, which
+ * is 50% of the three-round order the event actually runs and 34% of all five.
+ * Recruitment was already the largest single round on the Floor and the only one
+ * nobody can be knocked out of, and engine/arcade.test.ts prices the retune that
+ * fixes it — 5 for a correct answer instead of 10 brings the round to 70 and its
+ * share to 40%. That retune is a scoring decision and is not taken here; what is
+ * taken here is that a round decided by elimination is not worth its 2.5 minutes
+ * either. SPEC.md's round table and its scoring summary both still say six items
+ * and 90, and both are now behind this file.
+ *
+ * ## Two cues that did not produce their word
+ *
+ * `🏛️🤝` for Consul was a building and a handshake: it decodes to *diplomacy*,
+ * or to *treaty*, or to *embassy*, and a player who gets Consul out of it did
+ * so by knowing which products were left. It is now `🔎🕸️` — service discovery
+ * and a service mesh, which are the two things the product is.
+ *
+ * `📡🐪` for Nomad had a satellite dish doing nothing that the camel was not
+ * already doing better. `🏕️🐪` is a camp and a camel, which is one idea said
+ * twice rather than two ideas said once.
+ *
+ * SPEC.md quotes `📡🐪` as an example of the existing content. It was quoting
+ * the board, not specifying it.
+ *
+ * ## The notes
+ *
+ * These are read out at the reveal, by the House, in the Front-End Man's
+ * voice. They were product blurbs — "Secrets management, dynamic credentials,
+ * encryption as a service" is a slide, and it was the only copy in the arcade
+ * not in voice. They now say the true thing about the product and then the dry
+ * thing about it, which is what every other note in the arcade does.
  */
 
 import type { ArcadeRoundConfig, EmojiItem } from "../engine/types.ts";
 
-/** SPEC.md: "Six items, 20 seconds each". */
+/** SPEC.md: "Six items, 20 seconds each". Seven items is 20 seconds longer. */
 export const RECRUITMENT_SECONDS_PER_ITEM = 20;
 
 /**
@@ -30,37 +76,43 @@ export const RECRUITMENT_ITEMS: readonly EmojiItem[] = [
     cue: "🔐🏦",
     answer: "Vault",
     accept: [],
-    note: "Secrets management, dynamic credentials, encryption as a service.",
+    note: "Encryption as a service, PKI, and credentials that arrive with an expiry you did not ask for.",
   },
   {
     cue: "🌍🛠️",
     answer: "Terraform",
     accept: ["tf"],
-    note: "terra + form. Infrastructure as code.",
+    note: "terra + form. Infrastructure as code, and a plan output nobody reads to the end.",
   },
   {
-    cue: "🏛️🤝",
+    cue: "🔎🕸️",
     answer: "Consul",
     accept: [],
-    note: "A consul is a diplomat — service discovery and service mesh.",
+    note: "A consul is a diplomat. Service discovery and a service mesh, which turn out to be the same job.",
+  },
+  {
+    cue: "🗺️🚩",
+    answer: "Waypoint",
+    accept: [],
+    note: "Build, deploy and release from one command. Somewhere you pass through, not somewhere you stop.",
   },
   {
     cue: "🎒📦",
     answer: "Packer",
     accept: [],
-    note: "Identical machine images for many platforms from one config.",
+    note: "One configuration, identical images on every platform. Nobody remembers which configuration built the one in production.",
   },
   {
     cue: "🚧📍",
     answer: "Boundary",
     accept: [],
-    note: "Secure remote access without handing out SSH keys.",
+    note: "Access to hosts you are never given the address of. Nothing is handed out, so there is nothing to rotate.",
   },
   {
-    cue: "📡🐪",
+    cue: "🏕️🐪",
     answer: "Nomad",
     accept: [],
-    note: "The wandering scheduler — containers, binaries, Java, VMs.",
+    note: "Containers, binaries, Java, VMs. It does not much care which node they end up on.",
   },
 ];
 

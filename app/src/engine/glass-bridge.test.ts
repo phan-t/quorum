@@ -218,29 +218,18 @@ describe("the launch content", () => {
     }
   });
 
-  test("the existing three reals and three fakes survive verbatim", () => {
-    // SPEC.md: "the existing three real and three fake Real-or-Fake items".
-    // These six strings are the activity library's, character for
-    // character, which is the whole point of reusing them.
+  test("the two surviving library panes survive verbatim", () => {
+    // One of the activity library's reals and one of its fakes, character for
+    // character. The other four pairs were replaced — see "the plain pane is
+    // not always the real one" below — but these two are the model the
+    // replacements were written against, and Provisioner Mesh's note is the
+    // sentence that defines the voice of the round.
     const existing: readonly [string, string][] = [
-      [
-        "Vault Transit Secrets Engine",
-        "Encryption as a service — apps send plaintext, Vault returns ciphertext, keys never leave.",
-      ],
-      [
-        "Consul Gossip Pool",
-        "Consul agents use LAN and WAN gossip pools for membership and failure detection.",
-      ],
       [
         "Boundary Host Catalog",
         "A host catalog is how Boundary groups the hosts behind a target.",
       ],
-      ["Terraform Drift Guard", "Drift detection is real; this product name is not."],
       ["Packer Provisioner Mesh", "Packer has provisioners. It does not have a mesh."],
-      [
-        "Nomad Sentinel Scheduler",
-        "Nomad has a scheduler and Sentinel is real — but not this.",
-      ],
     ];
     const panes = GLASS_BRIDGE_STEPS.flatMap((s) => s.panes);
     for (const [label, note] of existing) {
@@ -248,24 +237,63 @@ describe("the launch content", () => {
       assert.ok(pane, `${label} is missing from the board`);
       assert.equal(pane.note, note, `${label}'s note was rewritten`);
     }
+    const realLabels = GLASS_BRIDGE_STEPS.map((s) => s.panes[s.real].label);
+    assert.ok(realLabels.includes("Boundary Host Catalog"));
+    assert.ok(!realLabels.includes("Packer Provisioner Mesh"));
   });
 
-  test("the three existing reals are real and the three existing fakes are fake", () => {
+  test("the plain pane is not always the real one", () => {
+    // The board shipped with every real taken from the documentation and every
+    // fake given a product-shaped name, which is one rule an engineer has by
+    // step two: pick the plain one. Six for six, nobody falls, and there is
+    // nothing for wave 2 to learn from wave 1 — which is the round's whole
+    // mechanism. Four pairs are now inverted: an obscure-but-real feature
+    // against a plausible invention.
+    //
+    // Four and not six, because a board where the strange pane is always the
+    // real one is the same tell backwards. This test is the one that notices
+    // if somebody "tidies" the board back into a rule, in either direction.
+    const inverted = [
+      "Vault Cubbyhole",
+      "Consul Autopilot",
+      "Terraform Ephemeral Resources",
+      "Nomad Sysbatch Jobs",
+    ];
     const realLabels = GLASS_BRIDGE_STEPS.map((s) => s.panes[s.real].label);
-    for (const label of [
-      "Vault Transit Secrets Engine",
-      "Consul Gossip Pool",
-      "Boundary Host Catalog",
-    ]) {
+    for (const label of inverted) {
       assert.ok(realLabels.includes(label), `${label} must be the real pane`);
     }
     for (const label of [
-      "Terraform Drift Guard",
-      "Packer Provisioner Mesh",
-      "Nomad Sentinel Scheduler",
+      "Vault Lockbox Engine",
+      "Consul Copilot",
+      "Terraform Transient Resources",
+      "Nomad Sysperiodic Jobs",
     ]) {
       assert.ok(!realLabels.includes(label), `${label} must be the fake pane`);
     }
+    assert.equal(
+      inverted.length,
+      GLASS_BRIDGE_STEPS.length - 2,
+      "two pairs stay the old way round, so neither heuristic pays",
+    );
+  });
+
+  test("wave 1 gets across step 1", () => {
+    // Wave 1 walks the bridge blind at twelve seconds a step. A bridge whose
+    // first step is one of the inverted pairs takes its first wave out before
+    // the room has seen anything, which tells waves 2 and 3 nothing and is the
+    // one failure mode this order exists to avoid. Step 1 is Packer, where the
+    // fake is a mesh, and the hardest pair is last.
+    assert.equal(GLASS_BRIDGE_STEPS[0]?.product, "Packer");
+    assert.equal(GLASS_BRIDGE_STEPS[GLASS_BRIDGE_STEPS.length - 1]?.product, "Nomad");
+  });
+
+  test("no invented pane ends in a noun another invented pane ends in", () => {
+    // Two fakes called something Mesh is a smaller tell than the plain-pane
+    // rule, but it is the same kind of tell and it is free to not have.
+    const fakes = GLASS_BRIDGE_STEPS.map((s) => s.panes[s.real === 0 ? 1 : 0]!.label);
+    const lastWords = fakes.map((l) => l.split(" ").at(-1));
+    assert.equal(new Set(lastWords).size, lastWords.length, lastWords.join(", "));
   });
 
   test("the real pane is not always on the same side", () => {
