@@ -61,10 +61,10 @@ exist before the first deploy.
 
 ## Licence
 
-[Business Source License 1.1](LICENSE), the licence HashiCorp's own products
-use. In short: read it, change it, run it for your own team's events. You may
-not offer it to other people as a hosted service. On 18 September 2030 it
-becomes Mozilla Public License 2.0 and those restrictions fall away.
+[Business Source License 1.1](LICENSE). In short: read it, change it, run it
+for your own team's events. You may not offer it to other people as a hosted
+service. On 18 September 2030 it becomes Mozilla Public License 2.0 and those
+restrictions fall away.
 
 ---
 
