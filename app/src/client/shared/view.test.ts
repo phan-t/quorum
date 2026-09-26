@@ -18,6 +18,7 @@ import {
   backedProgress,
   bridgeEntries,
   bridgeSteps,
+  clipName,
   floorEntries,
   formatCountdown,
   glassBackable,
@@ -26,10 +27,17 @@ import {
   isTapKey,
   itemEndsAt,
   latestCheckpoint,
+  lobbyAdmission,
+  lobbyRoom,
   msToTurn,
   nextSegment,
+  nickKey,
   paneKeyIndex,
   playerName,
+  raftArrival,
+  raftDrain,
+  tugPullWinner,
+  unsealSlot,
   unsealLetterKey,
   unsealRevealHead,
   unsealTiles,
@@ -54,8 +62,14 @@ import {
   HOW_TO_PLAY,
   KEY_HINT,
   LIGHT_FACE,
+  LOBBY_CHIP_MAX,
+  RAFT_NAME_MAX,
+  RAFT_QUEUE_MAX,
   RUN_OF_SHOW,
   SEGMENT_BUILT,
+  UNSEAL_NOTHING_SAID,
+  type RaftEntry,
+  type RaftPlan,
 } from "./view.ts";
 // The round's content, imported here and nowhere in the client itself: the
 // tins never reach a browser, but the number of them is what the reveal
@@ -1150,5 +1164,440 @@ describe("Unseal's keyboard", () => {
    */
   it("is not an OS key repeat", () => {
     assert.equal(key({ key: "a", repeat: true }), null);
+  });
+});
+
+/* ------------------------------------------------------------------ */
+/* The lobby                                                           */
+/* ------------------------------------------------------------------ */
+
+/**
+ * The lobby is the one screen where a bug costs somebody the only thing they
+ * have asked the product for so far: their name, on the list, so they know the
+ * join worked. Everything below is a way that has gone wrong.
+ */
+const room = (n: number, from = 1): RosterEntry[] =>
+  Array.from({ length: n }, (_, i) => ({
+    pid: `p${i + from}`,
+    nickname: `Player ${i + from}`,
+    playerNumber: i + from,
+    conn: "on" as const,
+  }));
+
+const everyone = (roster: readonly RosterEntry[]): Set<string> =>
+  new Set(roster.map((r) => r.pid));
+
+describe("the lobby's list of names", () => {
+  it("draws the people the cluster has committed and not the people the server has", () => {
+    // The hold is the whole point of the cluster: for about a second and a
+    // half a joiner's name is travelling into the leader instead of sitting in
+    // the list. A list drawn off the roster would be a second, faster answer
+    // to the same question sitting a few pixels away from the first.
+    const roster = room(3);
+    const drawn = lobbyRoom(roster, new Set(["p1", "p3"]), null);
+    assert.equal(drawn.count, 2);
+    assert.deepEqual(drawn.shown.map((r) => r.nickname), ["Player 1", "Player 3"]);
+  });
+
+  it("counts everybody it is not drawing, so the head count never contradicts the chips", () => {
+    // `over` is not decoration. The chips box clips from the bottom, so this
+    // number is the only thing on the screen that admits somebody is missing —
+    // and it has to be exactly who is missing, or a person counting chips to
+    // find themselves is being lied to by a smaller number.
+    const roster = room(40);
+    const drawn = lobbyRoom(roster, everyone(roster), null);
+    assert.equal(drawn.over + drawn.shown.length, drawn.count);
+    assert.equal(drawn.shown.length, LOBBY_CHIP_MAX);
+    assert.equal(drawn.over, 40 - LOBBY_CHIP_MAX);
+  });
+
+  it("keeps the last names, because a latecomer is the only one for whom the list is news", () => {
+    // This took the *first* names, which meant that in any room over the cap
+    // every latecomer — exactly the people the cluster had just animated — fell
+    // into the counter and never appeared at all. The lobby was animating names
+    // into a list with no room for them.
+    const roster = room(26);
+    const drawn = lobbyRoom(roster, everyone(roster), null);
+    assert.equal(drawn.shown[0]?.nickname, "Player 3");
+    assert.equal(drawn.shown.at(-1)?.nickname, "Player 26");
+  });
+
+  it("pins your own name in front of the others and spends a place on it", () => {
+    // Flow order, because the box clips from the bottom. Your own chip and the
+    // "+N earlier" counter used to sit at the *end*, so in a short window they
+    // were the first two things cut: the list lost its truncation notice and
+    // you lost the one name you were looking for.
+    const roster = room(30);
+    const drawn = lobbyRoom(roster, everyone(roster), "Player 4");
+    assert.equal(drawn.you?.nickname, "Player 4");
+    assert.equal(drawn.shown.includes(drawn.you!), false);
+    // One fewer place for everybody else, and the counter absorbs the difference.
+    assert.equal(drawn.shown.length, LOBBY_CHIP_MAX - 1);
+    assert.equal(drawn.over + drawn.shown.length + 1, drawn.count);
+  });
+
+  it("finds your chip whatever case and spacing your nickname was typed with", () => {
+    // The nickname this surface holds came back from the server round trip and
+    // the roster's copy came from another one. A mismatch here does not look
+    // like a bug: it looks like your name being in the list twice, once pinned
+    // and once not, or not pinned at all in a room over the cap.
+    const roster = room(3);
+    const drawn = lobbyRoom(roster, everyone(roster), "  player   2 ");
+    assert.equal(drawn.you?.nickname, "Player 2");
+  });
+
+  it("has no pinned chip on the console's preview, which is nobody's phone", () => {
+    const roster = room(3);
+    const drawn = lobbyRoom(roster, everyone(roster), null);
+    assert.equal(drawn.you, null);
+    assert.equal(drawn.shown.length, 3);
+  });
+
+  it("draws an empty room as nothing at all rather than as a counter", () => {
+    const drawn = lobbyRoom([], new Set(), "Player 1");
+    assert.deepEqual(drawn, { count: 0, you: null, shown: [], over: 0 });
+  });
+});
+
+describe("a nickname's matching key", () => {
+  /**
+   * Deliberately finer than the engine's `nicknameKey`, which also strips
+   * combining marks and non-alphanumerics. Finer is the safe direction: two
+   * names equal here are necessarily equal there, so a collision here would
+   * already have been refused at the door.
+   */
+  it("ignores the case and the spacing somebody typed", () => {
+    assert.equal(nickKey("Sam "), nickKey("sam"));
+    assert.equal(nickKey("  Sam   Vimes "), nickKey("sam vimes"));
+  });
+
+  it("does not make two different people the same person", () => {
+    assert.notEqual(nickKey("Sam"), nickKey("Samm"));
+    assert.notEqual(nickKey("Sám"), nickKey("Sam"));
+  });
+});
+
+describe("what the lobby admits on a render", () => {
+  it("holds the room it arrived into and plays only your own commit", () => {
+    // Arriving into a room of eleven should not replay eleven commits; it
+    // should say eleven are committed. The one commit that plays is yours,
+    // because it is the only arrival that just happened.
+    const roster = room(11);
+    const got = lobbyAdmission(roster, null, "Player 7", false);
+    assert.equal(got.yours, true);
+    assert.deepEqual(got.commit, [{ who: "Player 7", pid: "p7" }]);
+    assert.equal(got.hold.length, 10);
+    // Your own pid is the one that is *not* held: the list must not already
+    // contain the name the cluster is about to deliver.
+    assert.equal(got.hold.includes("p7"), false);
+  });
+
+  it("plays it once per session, and commits the room as one after that", () => {
+    // `buildScene` makes a fresh lobby every time the host changes what is on
+    // screen, so without the guard the welcome replays each time the room comes
+    // back from a holding card — and the third time somebody watches themselves
+    // join they are not being welcomed, they are watching a loop.
+    const roster = room(11);
+    const again = lobbyAdmission(roster, null, "Player 7", true);
+    assert.equal(again.yours, false);
+    assert.deepEqual(again.commit, [{ who: null, pid: null }]);
+    // And everybody is in the list immediately, including you.
+    assert.equal(again.hold.length, 11);
+    assert.equal(again.hold.includes("p7"), true);
+  });
+
+  it("commits the room as one on the console's preview, which has no name of its own", () => {
+    const roster = room(4);
+    const got = lobbyAdmission(roster, null, null, false);
+    assert.equal(got.yours, false);
+    assert.deepEqual(got.commit, [{ who: null, pid: null }]);
+    assert.equal(got.hold.length, 4);
+  });
+
+  it("commits nothing into an empty room", () => {
+    // "Appending" nobody into a cluster of nobody is a sentence about nothing,
+    // and the console's lobby preview opens on exactly that.
+    const got = lobbyAdmission([], null, null, false);
+    assert.deepEqual(got, { hold: [], commit: [], yours: false });
+  });
+
+  it("commits only the pids that are new, on every render after the first", () => {
+    const first = room(2);
+    const later = [...first, ...room(2, 3)];
+    const got = lobbyAdmission(later, everyone(first), "Player 1", true);
+    assert.deepEqual(got.commit, [
+      { who: "Player 3", pid: "p3" },
+      { who: "Player 4", pid: "p4" },
+    ]);
+    // Nothing is held on a later render: a new pid earns its commit, and the
+    // commit is what puts it in the list.
+    assert.deepEqual(got.hold, []);
+  });
+
+  it("says nothing on a render where nobody joined", () => {
+    // The lobby re-renders on anything — somebody going away, the host locking
+    // joins — and animating those would make the picture mean "a frame arrived"
+    // rather than "somebody joined".
+    const roster = room(3);
+    assert.deepEqual(lobbyAdmission(roster, everyone(roster), "Player 1", true).commit, []);
+    // Including a render where somebody *left*: two pids in, one out, and the
+    // one that stayed must not commit a second time.
+    const fewer = room(2);
+    assert.deepEqual(lobbyAdmission(fewer, everyone(roster), "Player 1", true).commit, []);
+  });
+
+  it("finds you by the same key the chips use, not by the exact string", () => {
+    // If these two disagree, the arrival plays for you as though you were
+    // somebody else — a nameless "entry appended" — while your name sits in the
+    // list from the first frame. That is the moment shown to everyone it does
+    // not belong to, which is the bug the hold exists to fix.
+    const roster = room(3);
+    const got = lobbyAdmission(roster, null, " player 2 ", false);
+    assert.equal(got.yours, true);
+    assert.deepEqual(got.commit, [{ who: "Player 2", pid: "p2" }]);
+  });
+});
+
+describe("the lobby cluster's queue", () => {
+  const mood = (over: Partial<{ unseen: boolean; still: boolean; running: boolean }> = {}) => ({
+    unseen: false,
+    still: false,
+    running: false,
+    ...over,
+  });
+  const join = (pid: string): RaftEntry => ({ who: pid.toUpperCase(), pid });
+
+  it("draws an arrival at once when the cluster is idle", () => {
+    const plan = raftArrival([], join("p1"), mood());
+    assert.deepEqual(plan.begin, join("p1"));
+    assert.deepEqual(plan.release, []);
+    assert.deepEqual(plan.queue, []);
+  });
+
+  it("makes an arrival wait behind the commit already on screen", () => {
+    const plan = raftArrival([], join("p2"), mood({ running: true }));
+    assert.equal(plan.begin, null);
+    assert.deepEqual(plan.release, []);
+    assert.deepEqual(plan.queue, [join("p2")]);
+  });
+
+  it("lets the oldest waiting name through when the queue is full, rather than dropping the newest", () => {
+    // Dropping was fine while this only drove a picture. Now that it gates the
+    // list, a dropped entry is somebody who joined and whose name never
+    // arrived — so over the cap the oldest waiter gives up its animation and
+    // goes straight into the list, and nothing is ever thrown away.
+    const full = [join("p2"), join("p3"), join("p4")];
+    assert.equal(full.length, RAFT_QUEUE_MAX);
+    const plan = raftArrival(full, join("p5"), mood({ running: true }));
+    assert.deepEqual(plan.release, ["p2"]);
+    assert.deepEqual(plan.queue, [join("p3"), join("p4"), join("p5")]);
+    assert.equal(plan.begin, null);
+  });
+
+  it("holds nobody back while nobody is watching", () => {
+    // A hidden tab, or a window with no room to draw the cluster in. There is
+    // no moment to wait for, so waiting only costs a person their place in the
+    // list. This is the case that was missing: a commit ran its full two and a
+    // half seconds behind a `display: none`, holding a name back for an
+    // animation that was not being drawn.
+    const arrival = raftArrival([join("p2")], join("p3"), mood({ unseen: true, running: true }));
+    assert.deepEqual(arrival.release, ["p3"]);
+    assert.equal(arrival.begin, null);
+    const drain = raftDrain([join("p2"), join("p3")], mood({ unseen: true }));
+    assert.deepEqual(drain.release, ["p2", "p3"]);
+    assert.deepEqual(drain.queue, []);
+    assert.equal(drain.begin, null);
+  });
+
+  it("never queues under reduced motion, and drains a queue it already had all at once", () => {
+    // A queue is for keeping an animation readable, and reduced motion has no
+    // animation to keep readable. The conditions are re-asked at the drain on
+    // purpose: turning the preference on mid-rush used to animate the three
+    // names already waiting in full, the last of them seven seconds later.
+    const arrival = raftArrival([join("p2")], join("p3"), mood({ still: true, running: true }));
+    assert.deepEqual(arrival.begin, join("p3"));
+    const drain = raftDrain([join("p2"), join("p3"), join("p4")], mood({ still: true }));
+    // Everyone arrives together, and the last of them carries the one state
+    // change so that the picture still says the word once.
+    assert.deepEqual(drain.release, ["p2", "p3"]);
+    assert.deepEqual(drain.begin, join("p4"));
+    assert.deepEqual(drain.queue, []);
+  });
+
+  it("has nothing to draw when the queue runs out, which is how the caption clears", () => {
+    const plan = raftDrain([], mood());
+    assert.equal(plan.begin, null);
+    assert.deepEqual(plan.release, []);
+  });
+
+  /**
+   * The invariant the two functions exist to hold, and the only one worth
+   * calling a bug: **every pid handed in is accounted for.** Released, begun,
+   * or still waiting — a pid that falls out of all three is a person who
+   * joined and whose name never appeared, which is worse than any animation
+   * is good.
+   */
+  it("accounts for every pid in a room that all scans the code at once", () => {
+    const joins = room(20).map((r) => r.pid);
+    const released: string[] = [];
+    let queue: readonly RaftEntry[] = [];
+    let running = false;
+    let drawn = 0;
+    const take = (plan: RaftPlan): void => {
+      released.push(...plan.release);
+      queue = plan.queue;
+      if (plan.begin === null) return;
+      running = true;
+      drawn += 1;
+      // What `play` does at the majority moment: the pid becomes a name in the
+      // list, and the rest of the commit is only the picture catching up.
+      if (plan.begin.pid !== null) released.push(plan.begin.pid);
+    };
+    for (const pid of joins) take(raftArrival(queue, join(pid), { ...mood(), running }));
+    // Then each commit finishes in turn until nothing is waiting.
+    while (running) {
+      running = false;
+      take(raftDrain(queue, mood()));
+    }
+    assert.deepEqual([...released].sort(), [...joins].sort());
+    // Twenty people get four animations and sixteen names, which is the right
+    // way round: the names are the promise and the picture is the decoration.
+    assert.equal(drawn, 4);
+  });
+});
+
+describe("a name on an arriving entry", () => {
+  it("leaves a name that fits exactly as it was typed", () => {
+    assert.equal(clipName("Sam"), "Sam");
+    assert.equal(clipName("A".repeat(RAFT_NAME_MAX)), "A".repeat(RAFT_NAME_MAX));
+  });
+
+  it("is never longer than the cap, ellipsis included", () => {
+    // The cap is what keeps the name inside a 240-unit viewBox; a name that
+    // overran it crossed the leader and the links.
+    const clipped = clipName("A".repeat(40));
+    assert.equal([...clipped].length, RAFT_NAME_MAX);
+    assert.equal(clipped.endsWith("…"), true);
+  });
+
+  it("never cuts an emoji in half", () => {
+    // `slice` counts UTF-16 code units, so this cut "Sam 🎉" through the middle
+    // of the emoji and rendered a lone high surrogate as a replacement
+    // character — on the one screen whose job is to show a person their own
+    // name back to them.
+    assert.equal(clipName(`Sam${"\u{1F389}".repeat(11)}`), `Sam${"\u{1F389}".repeat(9)}…`);
+    assert.match(clipName(`Sam${"\u{1F389}".repeat(11)}`), /^[^\uD800-\uDFFF]*(?:[\uD800-\uDBFF][\uDC00-\uDFFF])*…$/);
+  });
+
+  it("counts a family emoji as one character rather than four people", () => {
+    // Four code points joined by ZWJ. Counting code points keeps the surrogate
+    // pairs together but still splits the family, which renders as the first
+    // one or two members of it and a stray joiner.
+    const family = "\u{1F468}‍\u{1F469}‍\u{1F467}‍\u{1F466}";
+    assert.equal(clipName(`${"A".repeat(11)}${family}BC`), `${"A".repeat(11)}${family}…`);
+  });
+});
+
+/* ------------------------------------------------------------------ */
+/* The two lines the House says about a round's own ending             */
+/* ------------------------------------------------------------------ */
+
+describe("the tin's House slot", () => {
+  const nothing = { docs: false, cracked: false, opened: false };
+
+  it("says the docs line the frame it becomes true", () => {
+    const slot = unsealSlot({ ...nothing, docs: true }, UNSEAL_NOTHING_SAID);
+    assert.equal(slot.line, HOUSE.unsealDocs);
+    assert.deepEqual(slot.said, { docs: true, cracked: false, opened: false });
+  });
+
+  it("says each beat once, and nothing at all on the next frame", () => {
+    // `paintUnseal` runs on every frame the server sends and the letters stay
+    // live underneath these lines. A repaint that re-set the slot would
+    // re-announce the warning to a screen reader several times a second.
+    const flags = { docs: true, cracked: true, opened: false };
+    const first = unsealSlot(flags, UNSEAL_NOTHING_SAID);
+    assert.equal(first.line, HOUSE.unsealCracked);
+    const second = unsealSlot(flags, first.said);
+    assert.equal(second.line, null);
+    assert.deepEqual(second.said, first.said);
+    // And on the twentieth frame, too.
+    assert.equal(unsealSlot(flags, second.said).line, null);
+  });
+
+  it("gives the slot to the later beat when two land on the same frame", () => {
+    // A player who read the docs, cracked the tin and then finished anyway has
+    // had the first two said to them already, so the last thing the slot holds
+    // is the thing that just happened.
+    assert.equal(
+      unsealSlot({ docs: true, cracked: true, opened: true }, UNSEAL_NOTHING_SAID).line,
+      HOUSE.unsealOpened,
+    );
+    assert.equal(
+      unsealSlot({ docs: true, cracked: true, opened: false }, UNSEAL_NOTHING_SAID).line,
+      HOUSE.unsealCracked,
+    );
+  });
+
+  it("marks the beats it did not say, so an earlier one cannot arrive later", () => {
+    // Otherwise the frame after a tin opens says the crack line — a warning
+    // about the next wrong letter, on a tin that is already open.
+    const said = unsealSlot({ docs: true, cracked: true, opened: true }, UNSEAL_NOTHING_SAID).said;
+    assert.deepEqual(said, { docs: true, cracked: true, opened: true });
+    assert.equal(unsealSlot({ docs: true, cracked: true, opened: true }, said).line, null);
+  });
+
+  it("says the tin coming open, which the round used not to narrate at all", () => {
+    // Losing a tin put a line on this screen and on the big one; getting a word
+    // out put a number in a total and said nothing, which is a House that only
+    // speaks when somebody loses.
+    const slot = unsealSlot({ ...nothing, opened: true }, UNSEAL_NOTHING_SAID);
+    assert.equal(slot.line, HOUSE.unsealOpened);
+  });
+
+  it("starts a new tin having said nothing", () => {
+    // A new round resets the latch. Without that, the second tin of the
+    // session opens in silence because the first one already said the line.
+    assert.deepEqual(UNSEAL_NOTHING_SAID, nothing);
+    assert.equal(unsealSlot({ ...nothing, opened: true }, UNSEAL_NOTHING_SAID).line, HOUSE.unsealOpened);
+  });
+});
+
+describe("Tug of Raft's win line", () => {
+  it("names the side whose pull count went up", () => {
+    assert.equal(tugPullWinner([0, 0], [1, 0]), 0);
+    assert.equal(tugPullWinner([1, 1], [1, 2]), 1);
+  });
+
+  it("says nothing about a pull that finished level", () => {
+    // A level pull increments neither side. The House does not narrate a draw:
+    // there is no side to name, and "nobody has the rope" is a joke about the
+    // round rather than the round's own voice.
+    assert.equal(tugPullWinner([1, 1], [1, 1]), null);
+    assert.equal(tugPullWinner([0, 0], [0, 0]), null);
+  });
+
+  it("says nothing on the hundreds of frames that carry no change", () => {
+    // This surface repaints continuously off the server's beat grid. A win line
+    // read off the rope rather than off a diff would be re-announced every
+    // frame, talking over the pull that had already started.
+    assert.equal(tugPullWinner([2, 1], [2, 1]), null);
+  });
+
+  it("says nothing when a new round takes the counts back to zero", () => {
+    // The client forgets the last round's result when the round card comes up,
+    // and the server's `wins` restart too. Neither may be read as a win — least
+    // of all as a win for whoever is now nominally ahead at 0–0.
+    assert.equal(tugPullWinner([2, 1], [0, 0]), null);
+    // And the first pull of the new round is announced normally afterwards.
+    assert.equal(tugPullWinner([0, 0], [0, 1]), 1);
+  });
+
+  it("names one side when a dropped frame carries two pulls at once", () => {
+    // Only one line fits in the slot, so the earlier side gets it. Worth
+    // stating rather than discovering: a phone that came back from a lock
+    // screen mid-round is the case, and naming somebody is better than a
+    // silence that reads as a draw.
+    assert.equal(tugPullWinner([0, 0], [1, 1]), 0);
   });
 });

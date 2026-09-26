@@ -33,8 +33,10 @@ import {
   STATE_LOCK_ERROR,
   answerKeyIndex,
   answerTiles,
+  UNSEAL_NOTHING_SAID,
   backedProgress,
   bridgeSteps,
+  clipName,
   finalRevealMs,
   floorEntries,
   formatCountdown,
@@ -44,12 +46,16 @@ import {
   isTapKey,
   itemEndsAt,
   latestCheckpoint,
+  lobbyAdmission,
+  lobbyRoom,
   paneKeyIndex,
   playerName,
   playerTag,
   pointsStripCells,
   pointsStripText,
   questionLabel,
+  raftArrival,
+  raftDrain,
   remainingMs,
   resolveView,
   resourceBar,
@@ -57,10 +63,16 @@ import {
   timerFraction,
   tugBeatAt,
   tugElectionAt,
+  tugPullWinner,
   tugRope,
   unsealLetterKey,
+  unsealSlot,
   unsealTiles,
   type BridgeEntry,
+  type RaftEntry,
+  type RaftMood,
+  type RaftPlan,
+  type UnsealSaid,
   type ViewKind,
 } from "../shared/view.ts";
 
@@ -590,17 +602,6 @@ function kudoSize(longest: number): string {
 const COMMIT_MS = 2_800;
 
 /**
- * The longest name drawn on an arriving entry.
- *
- * Nicknames are capped well above this, and one that long centred over a
- * 240-unit viewBox runs past both the leader and the links. Clipped with an
- * ellipsis rather than shrunk to fit: the cluster is decoration and the chip
- * with the full name is a few pixels away, so a name that does not fit loses
- * its tail instead of costing everything else legibility.
- */
-const RAFT_NAME_MAX = 13;
-
-/**
  * How many of the five must have the entry before it is committed.
  *
  * Three of five. This is the whole reason the picture is worth drawing and
@@ -655,20 +656,6 @@ const RAFT_MIN_PX = 110;
  * the viewBox edge.
  */
 const RAFT_NAME_W = 92;
-
-/** Unicode-safe truncation: never split a surrogate pair or a ZWJ sequence. */
-function clipName(who: string): string {
-  // `slice` counts UTF-16 code units, so it cut "Sam 🎉" through the middle of
-  // the emoji and rendered a lone high surrogate as a replacement character.
-  // Segmenter where there is one, code points everywhere else — both keep a
-  // pair together, and only the first also keeps a family emoji together.
-  const units =
-    typeof Intl !== "undefined" && "Segmenter" in Intl
-      ? Array.from(new Intl.Segmenter().segment(who), (g) => g.segment)
-      : Array.from(who);
-  if (units.length <= RAFT_NAME_MAX) return who;
-  return `${units.slice(0, RAFT_NAME_MAX - 1).join("")}\u2026`;
-}
 
 /**
  * @param onCommitted Called with a joiner's pid at the instant their entry is
@@ -783,8 +770,8 @@ function raftCluster(onCommitted: (pid: string) => void): {
   }
 
   let running = false;
-  /** Entries waiting their turn: the count after each, and who it was. */
-  const queue: { who: string | null; pid: string | null }[] = [];
+  /** Entries waiting their turn, and who each of them was. */
+  let queue: readonly RaftEntry[] = [];
   /** The pid of the entry on screen now, released when it commits. */
   let inFlight: string | null = null;
 
@@ -804,11 +791,32 @@ function raftCluster(onCommitted: (pid: string) => void): {
    * its full two and a half seconds behind the `display: none`, holding the
    * name and the head count back for an animation that was not being drawn.
    */
-  /** Everything waiting, into the list now. See `flush` on the returned API. */
+  /**
+   * Everything waiting, into the list now. See `flush` on the returned API.
+   *
+   * **Take the state before releasing any of it, not after.** `release` calls
+   * the lobby back, the lobby repaints, the repaint calls `fit`, and `fit`
+   * calls this again when it decides the cluster has no room — so this
+   * function re-enters itself, and it does so *through the DOM* rather than
+   * anywhere a reader of these six lines would look.
+   *
+   * Releasing first made that fatal. The re-entrant call still saw `inFlight`
+   * set, because the outer call had not reached the line that clears it, so it
+   * released the same pid again, and again: a short window plus a commit in
+   * flight plus any repaint was `Maximum call stack size exceeded` thrown out
+   * of the lobby's render. The queue had the identical shape — a second pass
+   * walked the same array before `queue = []` ran.
+   *
+   * Clearing first makes the re-entrant call a no-op instead: it finds no
+   * entry in flight and an empty queue, releases nothing, and unwinds.
+   */
   function flushAll(): void {
-    release(inFlight);
+    const pending = inFlight;
+    const waiting = queue;
     inFlight = null;
-    while (queue.length > 0) release(queue.shift()?.pid ?? null);
+    queue = [];
+    release(pending);
+    for (const e of waiting) release(e.pid);
   }
 
   function unseen(): boolean {
@@ -824,6 +832,26 @@ function raftCluster(onCommitted: (pid: string) => void): {
       typeof matchMedia === "function" &&
       matchMedia("(prefers-reduced-motion: reduce)").matches
     );
+  }
+
+  /** The three conditions the decisions turn on, read at this instant. */
+  function mood(): RaftMood {
+    return { unseen: unseen(), still: stillPref(), running };
+  }
+
+  /**
+   * Do what {@link raftArrival} or {@link raftDrain} decided.
+   *
+   * The queue is written *before* anything is released, and that ordering is
+   * load-bearing: a release repaints the lobby, a repaint calls `fit`, and a
+   * `fit` that finds the drawing cramped flushes. Releasing first would let
+   * that flush drain a queue this function then overwrote with the old one,
+   * putting names back in a queue they had already left.
+   */
+  function apply(plan: RaftPlan): void {
+    queue = plan.queue;
+    for (const pid of plan.release) onCommitted(pid);
+    if (plan.begin !== null) begin(plan.begin.who, plan.begin.pid);
   }
   /**
    * Which commit the timers belong to.
@@ -906,33 +934,15 @@ function raftCluster(onCommitted: (pid: string) => void): {
   /**
    * Whatever is next, decided now rather than when it was queued.
    *
-   * Both drains used to call `play` straight out, which meant a preference or
-   * a window that changed *during* a burst was ignored for everything already
-   * waiting: turning on reduced motion mid-rush still animated the three
-   * queued names in full, the last of them seven seconds later. The
-   * conditions are re-asked here, so a queue drains under the rules in force
-   * when it drains.
+   * The decision is {@link raftDrain}, which is pure and has a test; this is
+   * the half of it that touches the document.
    */
   function nextUp(): void {
     running = false;
-    if (unseen()) {
-      while (queue.length > 0) release(queue.shift()?.pid ?? null);
-      say("");
-      return;
-    }
-    // Reduced motion, decided now: everyone waiting arrives together and the
-    // last of them carries the one state change. Draining them one still
-    // commit at a time would trickle names out over seconds for a preference
-    // whose whole point is to stop making people wait on decoration.
-    if (stillPref()) {
-      while (queue.length > 1) release(queue.shift()?.pid ?? null);
-    }
-    const next = queue.shift();
-    if (next === undefined) {
-      say("");
-      return;
-    }
-    begin(next.who, next.pid);
+    const plan = raftDrain(queue, mood());
+    apply(plan);
+    // Nothing to draw, so nothing to narrate.
+    if (plan.begin === null) say("");
   }
 
   /**
@@ -1115,35 +1125,14 @@ function raftCluster(onCommitted: (pid: string) => void): {
   return {
     el,
     commit(who: string | null, pid: string | null): void {
-      // `flush` covers what was already in the cluster when it went out of
-      // sight; this covers everything arriving while it stays out of sight,
-      // which is the commoner ordering — a laptop is not hidden mid-commit,
-      // it is hidden and then the room fills up.
-      if (unseen()) {
-        release(pid);
-        return;
-      }
-      // A queue is for keeping an animation readable. Reduced motion has no
-      // animation to keep readable, so it never waits in one — it restarts
-      // the state instead, and the name is in the list either way.
-      if (!running || stillPref()) {
-        begin(who, pid);
-        return;
-      }
-      // A room scanning a QR at once arrives in a burst. Queueing keeps each
-      // commit readable instead of drawing nine at once; the queue is capped
-      // because nobody watches the ninth. Now that a commit takes nearly
-      // three seconds the cap matters more, not less — a queue of nine would
-      // still be draining long after the room had stopped looking.
-      //
-      // Over the cap the *oldest* waiting entry is let through without its
-      // animation rather than the newest being dropped. Dropping was fine
-      // while this only drove a picture; now that it gates the list, a
-      // dropped entry is somebody who joined and whose name never arrived.
-      // Twenty people scanning at once get four animations and sixteen
-      // names, which is the right way round — the names are the promise.
-      if (queue.length >= 3) release(queue.shift()?.pid ?? null);
-      queue.push({ who, pid });
+      // Straight through when nobody is watching, drawn now if nothing else
+      // is, queued behind a cap otherwise — the whole of that is
+      // {@link raftArrival}, which is pure and has a test. `flush` covers what
+      // was already in the cluster when it went out of sight; the arrival
+      // covers everything arriving while it stays out of sight, which is the
+      // commoner ordering — a laptop is not hidden mid-commit, it is hidden
+      // and then the room fills up.
+      apply(raftArrival(queue, { who, pid }, mood()));
     },
     /**
      * Everything waiting, into the list now.
@@ -1237,7 +1226,7 @@ function raftCluster(onCommitted: (pid: string) => void): {
       timers.clear();
       gen += 1;
       running = false;
-      queue.length = 0;
+      queue = [];
     },
   };
 }
@@ -1253,29 +1242,6 @@ function raftCluster(onCommitted: (pid: string) => void): {
  * just arrive.
  */
 const welcomed = new Set<string>();
-
-/**
- * How many names the lobby draws before it starts counting the rest.
- *
- * A layout limit, not a product one: past this the chips wrap past the
- * bottom of the surface and the list stops being readable at a glance.
- */
-const CHIP_MAX = 24;
-
-/**
- * Match a nickname to its owner, so "Sam " and "sam" find the same person.
- *
- * Deliberately *not* the engine's `nicknameKey`, which also normalises to
- * NFKD, strips combining marks and drops everything non-alphanumeric. This
- * is strictly finer than that one, which is the direction that is safe: two
- * names equal here are necessarily equal there, so a collision here would
- * already have been refused at the door as `nickname_taken`. Copying the
- * engine's rule into the client would be a second copy to keep in step for
- * no gain.
- */
-function nickKey(s: string): string {
-  return s.trim().replace(/\s+/g, " ").toLowerCase();
-}
 
 function sceneLobby(): Scene {
   const nick = h("p", { class: "display lobby-nick" });
@@ -1378,46 +1344,27 @@ function sceneLobby(): Scene {
    */
   function paintRoom(state: RenderState, nickname?: string | null): void {
     if (nickname !== undefined) mine = nickname;
-    const room = state.roster.filter((r) => held.has(r.pid));
-    setText(count, String(room.length));
-    cluster.settle();
+    // Who is drawn, and in what order, is {@link lobbyRoom} — pure, and tested.
     // Names, as text, clipped by the layout rather than by a slice: the
     // surface must not scroll, and "+7 earlier" is more honest than a cut.
-    //
-    // The *last* twenty-four, not the first. This took the first, which meant
-    // that in any room over the cap every latecomer — exactly the people the
-    // cluster animates, and the only people for whom the list is still news —
-    // landed in "+N more" and never appeared at all. The lobby was animating
-    // names into a list that had no room for them. Arrival order is kept
-    // within the window; what falls off is the people who have been here
-    // longest and have already seen themselves.
-    const self =
-      mine === null
-        ? undefined
-        : room.find((r) => nickKey(r.nickname) === nickKey(mine ?? ""));
-    const others = self === undefined ? room : room.filter((r) => r !== self);
-    const budget = self === undefined ? CHIP_MAX : CHIP_MAX - 1;
-    const over = Math.max(0, others.length - budget);
-    const shown = others.slice(over);
-    // Order matters as much as membership, because the box clips from the
-    // bottom. The two chips worth keeping are the count of who is missing and
-    // your own name, and both used to sit at the *end* of the flow — so in a
-    // short window they were the first two things cut, which is precisely
-    // backwards: the list lost its own truncation notice and you lost the one
-    // name you were looking for. Both go first now. "+N earlier" at the front
-    // is also where those people would have been.
+    const room = lobbyRoom(state.roster, held, mine);
+    setText(count, String(room.count));
+    cluster.settle();
     replace(chips, []);
-    if (over > 0) {
+    if (room.over > 0) {
       append(chips, [
-        h("span", { class: "chip chip-more label", text: `+${over} earlier` }),
+        h("span", {
+          class: "chip chip-more label",
+          text: `+${room.over} earlier`,
+        }),
       ]);
     }
-    if (self !== undefined) {
-      append(chips, [h("span", { class: "chip is-you", text: self.nickname })]);
+    if (room.you !== null) {
+      append(chips, [h("span", { class: "chip is-you", text: room.you.nickname })]);
     }
     append(
       chips,
-      shown.map((r) => h("span", { class: "chip", text: r.nickname })),
+      room.shown.map((r) => h("span", { class: "chip", text: r.nickname })),
     );
     cluster.fit();
   }
@@ -1481,39 +1428,20 @@ function sceneLobby(): Scene {
         cluster.flush();
       }
       last = state;
-      const here = state.roster.length;
-      const fresh =
-        seen === null ? [] : state.roster.filter((r) => !seen?.has(r.pid));
-      const first = seen === null;
+      // Who is held and who is animated is {@link lobbyAdmission} — pure, and
+      // tested. Everyone already here on the first render is already committed;
+      // the picture plays once for the room rather than once per person in it —
+      // except for you, who are the reason it is playing at all.
+      const admission = lobbyAdmission(
+        state.roster,
+        seen,
+        nickname,
+        welcomed.has(state.sid),
+      );
       seen = new Set(state.roster.map((r) => r.pid));
-      if (first) {
-        // Everyone already here is already committed; the picture plays once
-        // for the room rather than once per person in it — except for you,
-        // who are the reason it is playing at all.
-        const me =
-          nickname === null
-            ? undefined
-            : state.roster.find(
-                (r) => nickKey(r.nickname) === nickKey(nickname),
-              );
-        const own = me !== undefined && !welcomed.has(state.sid);
-        for (const r of state.roster) {
-          if (own && r.pid === me.pid) continue;
-          held.add(r.pid);
-        }
-        if (own) {
-          welcomed.add(state.sid);
-          cluster.commit(me.nickname, me.pid);
-        } else if (here > 0) {
-          // The room, arriving as one. Not a person, so no name.
-          cluster.commit(null, null);
-        }
-        // An empty room has nothing to commit, and "appending" nobody into a
-        // cluster of nobody is a sentence about nothing. The console's lobby
-        // preview opens on exactly that.
-      } else {
-        for (const r of fresh) cluster.commit(r.nickname, r.pid);
-      }
+      for (const pid of admission.hold) held.add(pid);
+      if (admission.yours) welcomed.add(state.sid);
+      for (const entry of admission.commit) cluster.commit(entry.who, entry.pid);
       // Anyone who has left stops being held, so a name cannot be waiting on
       // a commit for somebody who is no longer in the room.
       //
@@ -2326,9 +2254,7 @@ function sceneArcade(ctx: SceneCtx): Scene {
     tileSignature = "";
     unsealOpen = false;
     unsealExit = null;
-    docsSaid = false;
-    crackSaid = false;
-    openedSaid = false;
+    unsealSaid = UNSEAL_NOTHING_SAID;
     unsealHouse.node.hidden = true;
     unsealPicker.dataset["sig"] = "";
     unsealSolved.dataset["sig"] = "";
@@ -2905,12 +2831,15 @@ function sceneArcade(ctx: SceneCtx): Scene {
   let unsealOpen = false;
   /** Latched when the tin shatters, for the Lounge underneath. See paint(). */
   let unsealExit: string | null = null;
-  /** The docs line, said once per round rather than on every repaint. */
-  let docsSaid = false;
-  /** …and the same for the crack, which is a beat and not an ending. */
-  let crackSaid = false;
-  /** …and the same for the line that says the tin came open. */
-  let openedSaid = false;
+  /**
+   * Which of the tin's three beats this round has already said.
+   *
+   * Each is said once per round rather than on every repaint, and the later of
+   * any two that land together wins the slot. That ordering is
+   * {@link unsealSlot}, which is pure and has a test; this is only the latch it
+   * reads and writes.
+   */
+  let unsealSaid: UnsealSaid = UNSEAL_NOTHING_SAID;
 
   const unsealRound = (): number =>
     Number(unsealNode.dataset["round"] ?? "-1");
@@ -3121,48 +3050,34 @@ function sceneArcade(ctx: SceneCtx): Scene {
     );
     docsButton.disabled = !unsealOpen;
     setAttr(docsButton, "data-read", read ? "yes" : "no");
-    if (read && !docsSaid) {
-      docsSaid = true;
-      unsealHouse.node.hidden = false;
-      unsealHouse.set(HOUSE.unsealDocs);
-      setText(announce, HOUSE.unsealDocs);
-    }
-
-    // The tin cracked: *The tin has cracked. Score halved. One more wrong
-    // letter shatters it.*
+    // The tin's three beats, all of which land in one House slot: reading the
+    // docs, the crack, and the word coming out.
     //
-    // The beat the round is two strikes for. It goes in the same slot as the
-    // docs line and after it, because a player who read the docs and then
-    // cracked has been told about the halving once already and the last thing
-    // this slot holds should be the thing that just happened. Said once: the
-    // letters are still live underneath it and a repaint that re-set it would
-    // re-announce the warning to a screen reader on every frame.
-    if (me?.cracked === true && !crackSaid) {
-      crackSaid = true;
-      unsealHouse.node.hidden = false;
-      unsealHouse.set(HOUSE.unsealCracked);
-      setText(announce, HOUSE.unsealCracked);
-    }
-
-    // The tin came open: *Sealed: false.*
+    // *Reading the docs. Score halved. Nobody will know.* — the price, said
+    // once, because the halving is a number only this phone and the console
+    // ever see.
     //
-    // The round narrated one of its two endings. Losing a tin put a line on
-    // this screen and on the big one; getting a word out put a number in a
-    // total and said nothing at all, which is a House that only speaks when
-    // somebody loses. So it goes in the same slot the docs and crack lines use,
-    // and it goes in last on purpose: a player who read the docs, cracked the
-    // tin and then finished anyway has had both of those said to them already,
-    // and the last thing this slot holds should be the thing that just
-    // happened.
+    // *The tin has cracked. Score halved. One more wrong letter shatters it.*
+    // — the beat the round is two strikes for.
     //
-    // Said once and left up. By the time it appears the letters are gone and
-    // there is nothing underneath it to be in the way of, and a repaint that
-    // re-set it would re-announce it to a screen reader on every frame.
-    if (unsealed && !openedSaid) {
-      openedSaid = true;
+    // *Sealed: false.* — the other end of the same tin, which the round used
+    // not to narrate at all: losing a tin put a line on this screen and on the
+    // big one, and getting a word out said nothing, which is a House that only
+    // speaks when somebody loses.
+    //
+    // Each said once, and the last of them to happen wins the slot. Both of
+    // those are {@link unsealSlot}, because they are the decision here and the
+    // letters are still live underneath the first two — a repaint that re-set
+    // the slot would re-announce a warning to a screen reader on every frame.
+    const slot = unsealSlot(
+      { docs: read, cracked: me?.cracked === true, opened: unsealed },
+      unsealSaid,
+    );
+    unsealSaid = slot.said;
+    if (slot.line !== null) {
       unsealHouse.node.hidden = false;
-      unsealHouse.set(HOUSE.unsealOpened);
-      setText(announce, HOUSE.unsealOpened);
+      unsealHouse.set(slot.line);
+      setText(announce, slot.line);
     }
 
     setText(
@@ -3362,18 +3277,12 @@ function sceneArcade(ctx: SceneCtx): Scene {
     }
     // *Side A has the rope. The entry is committed.*
     //
-    // Read off `wins` and not off the rope: the rope is a running difference
-    // inside a pull, and the thing worth saying is the pull that closed. The
-    // frame that carries the result is the one that starts the next pull, or
-    // for the last pull the one that ends the round, so this is the same
-    // reading either way and needs no notion of "between pulls".
-    //
-    // A pull that ended level increments neither side and is announced as
-    // nothing. The House does not narrate a draw: there is no side to name,
-    // and "nobody has the rope" is a joke about the round rather than the
-    // round's own voice.
-    if (t.wins[0] > tugWins[0] || t.wins[1] > tugWins[1]) {
-      const won: 0 | 1 = t.wins[0] > tugWins[0] ? 0 : 1;
+    // A diff against the last frame's `wins`, which is {@link tugPullWinner} —
+    // pure, and tested, because what it does *not* say is the part that matters:
+    // a level pull, a frame with no change, and a `wins` that has gone back to
+    // zero for a new round are all silence.
+    const won = tugPullWinner(tugWins, t.wins);
+    if (won !== null) {
       const line = HOUSE.tugPullWon(won);
       tugPullLine.node.hidden = false;
       tugPullLine.set(line);
