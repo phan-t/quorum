@@ -439,12 +439,18 @@ export interface TriviaPodiumRow {
  * | `distribution` | never | reveal | always |
  * | `note` | reveal | reveal | always |
  * | `podium` | reveal | reveal | reveal |
- * | `answered` / `eligible` | never | always | always |
+ * | `answered` / `eligible` | once that phone has locked in | always | always |
  *
  * A phone that learns the correct answer while the question is open has lost
  * the game for the person sitting next to its owner, and a phone that learns
  * the distribution is showing a big-screen thing on a 360px surface. The host
  * sees everything, always, because they are reading the answer out.
+ *
+ * The answered count is the one row in that table that is not about secrecy. A
+ * count of how many people have answered carries no choice, so there is
+ * nothing in it to leak; it waits for the phone's own tap only because a
+ * number climbing under a question somebody is still reading is a second
+ * clock.
  */
 export interface TriviaView {
   readonly activityId: string;

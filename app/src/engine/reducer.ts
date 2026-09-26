@@ -568,7 +568,14 @@ export function reduce(
           // the same reason a kick's does.
           arcade: houseThePairOf(state, event.pid),
         },
-        [{ kind: "broadcast", to: "host", what: "state" }, PERSIST],
+        // The whole room, as a kick is, and for the same reason: leaving the
+        // roster changes the roster every surface draws and the "of 27" beside
+        // the answered count, and that count is now on the phones that have
+        // locked in as well as on the console and the big screen. Told only to
+        // the host, a release mid-question left every other surface counting
+        // somebody who is no longer in the room until the next tap moved the
+        // frame along.
+        [BROADCAST_STATE, ...BROADCAST_STANDINGS, PERSIST],
       );
     }
 

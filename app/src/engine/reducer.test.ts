@@ -418,6 +418,20 @@ describe("releaseNickname", () => {
     assertNoOp(s, run(s, { type: "releaseNickname", pid: "p1" }));
   });
 
+  test("is told to the whole room, not only the host", () => {
+    // Leaving the roster changes the roster every surface draws and the "of 27"
+    // beside the answered count, which a locked-in phone now carries too. Told
+    // only to the host, a release mid-question left the big screen and every
+    // locked phone counting somebody who had gone until the next tap.
+    const s = running(["p1", "p2"]);
+    const r = run(s, { type: "releaseNickname", pid: "p2" });
+    assert.ok(
+      has(r.effects, (e) => e.kind === "broadcast" && e.what === "state" && e.to === "all"),
+      "the room is told",
+    );
+    assert.ok(has(r.effects, isPersist));
+  });
+
   test("the released participant's own scores stay with them", () => {
     const s = accept(running(["p1"]), [
       { type: "setScore", activityId: "ttx", pid: "p1", raw: 10 },
@@ -469,6 +483,15 @@ describe("kick", () => {
   test("twice is a no-op the second time", () => {
     const s = accept(running(), [{ type: "kick", pid: "p2" }]);
     assertNoOp(s, run(s, { type: "kick", pid: "p2" }));
+  });
+
+  test("is told to the whole room, so the answered count's \"of 27\" cannot go stale", () => {
+    const s = running(["p1", "p2"]);
+    const r = run(s, { type: "kick", pid: "p2" });
+    assert.ok(
+      has(r.effects, (e) => e.kind === "broadcast" && e.what === "state" && e.to === "all"),
+      "the room is told",
+    );
   });
 
   test("a kicked participant's stale score does not cap the room", () => {
