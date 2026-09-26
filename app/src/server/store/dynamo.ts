@@ -70,6 +70,17 @@ const str = (v: unknown, fallback = ""): string =>
   typeof v === "string" ? v : fallback;
 const num = (v: unknown, fallback = 0): number =>
   typeof v === "number" && Number.isFinite(v) ? v : fallback;
+/**
+ * A number, or nothing at all.
+ *
+ * Distinct from `num` on purpose: the snapshot's vintage has to be able to say
+ * "this row does not have one", and `num`'s zero default would turn a row
+ * written before the field existed into a row written at the epoch, claiming
+ * version 0 — the one answer that must not be invented. See
+ * `SNAPSHOT_SELF_DESCRIBING_VERSION`.
+ */
+const optNum = (v: unknown): number | undefined =>
+  typeof v === "number" && Number.isFinite(v) ? v : undefined;
 
 export class DynamoStore implements SessionStore {
   readonly kind = "dynamodb" as const;
@@ -163,6 +174,10 @@ export class DynamoStore implements SessionStore {
       SK: "SNAPSHOT",
       version: SNAPSHOT_VERSION,
       seq: state.seq,
+      // Also the row's write time, read back as `StoredSnapshot.writtenAt`. No
+      // second attribute for it: `at` has been on every snapshot row since the
+      // first one, so dating a row needs nothing new written — which is the
+      // whole point, because the rows that need dating are the old ones.
       at,
       state,
       ttl: ttlAt(at),
@@ -384,6 +399,18 @@ export class DynamoStore implements SessionStore {
         ? {
             seq: num(snapItem["seq"]),
             state: snapItem["state"] as SessionState,
+            // Spread away when absent rather than defaulted. A row written
+            // before the version was read back has no vintage, and recovery
+            // needs to be told that rather than handed a plausible number: it
+            // is the difference between a migration that asserts and one that
+            // guesses. `at` has been written since the first snapshot ever
+            // stored, so even the oldest row in the table can be dated.
+            ...(optNum(snapItem["version"]) !== undefined
+              ? { version: optNum(snapItem["version"])! }
+              : {}),
+            ...(optNum(snapItem["at"]) !== undefined
+              ? { writtenAt: optNum(snapItem["at"])! }
+              : {}),
           }
         : null;
 

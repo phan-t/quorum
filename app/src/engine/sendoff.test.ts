@@ -336,6 +336,14 @@ describe("what each surface is told", () => {
   });
 });
 
+/**
+ * The migration lives in `server/recovery.ts`; its harness lives here, because
+ * this is where a legacy send-off can be built honestly. The store's half of it
+ * — that a row carries the version the migration asserts against, that a row
+ * with no version at all still recovers, and that the version is never allowed
+ * to decide whether the migration runs — is in `server/persistence.test.ts`
+ * under "the snapshot's vintage", which is where a reader looks first.
+ */
 describe("a send-off written by the old engine", () => {
   test("is brought up to shape rather than crashing the first projection", async () => {
     const { rehydrate } = await import("../server/recovery.ts");

@@ -1180,6 +1180,12 @@ describe("what a player may know", () => {
 /* A round written before the second strike                             */
 /* ------------------------------------------------------------------ */
 
+/**
+ * As with `migrateSendoff` in `sendoff.test.ts`: the round's half of the
+ * migration is here, and the store's half — the snapshot's version, the old row
+ * with no version at all, and the rule that the version comments rather than
+ * decides — is in `server/persistence.test.ts` under "the snapshot's vintage".
+ */
 describe("an Unseal round snapshotted by the one-strike engine", () => {
   test("is brought up to shape rather than crashing the first projection", async () => {
     // The lesson `migrateSendoff` was written after: a snapshot is trusted as

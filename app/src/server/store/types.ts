@@ -12,8 +12,38 @@
 
 import type { Event, SessionState } from "../../engine/types.ts";
 
-/** Bumped if the snapshot shape ever stops being readable by the old code. */
-export const SNAPSHOT_VERSION = 1;
+/**
+ * The shape version stamped on every `SNAPSHOT` row this code writes.
+ *
+ * Version 1 was written and never read back, which made it decoration: a row
+ * said `version: 1` whether it was written before or after the send-off gained
+ * a plan, so a migration could not ask the row what it was and had to sniff for
+ * the absent field instead. Version 2 is the first that recovery reads, and its
+ * contract is the useful one:
+ *
+ * > **A row at version N carries every field the state had at version N.**
+ *
+ * So a field added to a round in flight gets a constant in `server/recovery.ts`
+ * naming the version it shipped in, the migration for it can *assert* what it is
+ * looking at instead of guessing, and it can be retired against the table's own
+ * minimum version and oldest write time rather than against a hunch. Bump this
+ * whenever a field is added to `SessionState` that recovery has to fill in for
+ * older rows, and add the constant next to the migration.
+ *
+ * Bumping it is not a compatibility break in either direction: older code reads
+ * the row by its fields and ignores the number, and newer code treats anything
+ * below {@link SNAPSHOT_SELF_DESCRIBING_VERSION} as unknown vintage.
+ */
+export const SNAPSHOT_VERSION = 2;
+
+/**
+ * The lowest version a row can claim and be believed.
+ *
+ * A row with no `version`, or with version 1, says nothing about which fields it
+ * has — see above — so recovery treats both as unknown vintage and keeps
+ * sniffing. Everything at or above this is self-describing.
+ */
+export const SNAPSHOT_SELF_DESCRIBING_VERSION = 2;
 
 /** 90 days, per ARCHITECTURE.md "Retention". */
 export const RETENTION_MS = 90 * 24 * 60 * 60 * 1000;
@@ -185,11 +215,39 @@ export interface StoredEvent {
   readonly at: number;
 }
 
+/**
+ * `SESSION#<sid>` / `SNAPSHOT` — the full state, as it was read back.
+ *
+ * `version` and `writtenAt` are optional because absence is the fact recovery
+ * needs: a row written before either was read back has no vintage, and that is
+ * exactly the row the migration shims in `server/recovery.ts` exist for. They
+ * are left off rather than defaulted to `0` and `Date.now()`, because a default
+ * would be a claim about a row nobody can make.
+ */
+export interface StoredSnapshot {
+  readonly seq: number;
+  readonly state: SessionState;
+  /**
+   * The writer's {@link SNAPSHOT_VERSION}. Absent on a row written before the
+   * version was read back — see {@link SNAPSHOT_SELF_DESCRIBING_VERSION}.
+   */
+  readonly version?: number;
+  /**
+   * The writer's clock at the moment the row was written, in ms.
+   *
+   * The writer's clock, not the store's: this is the `at` handed to
+   * `putSnapshot`, which is the `at` of the transition that produced the state.
+   * Good enough to date a row to the minute, which is all retiring a migration
+   * needs; not a thing to compare against another process's clock.
+   */
+  readonly writtenAt?: number;
+}
+
 /** Everything one session needs to come back. */
 export interface LoadedSession {
   readonly meta: SessionMeta;
   /** The fast path. Null means the slow path: replay the log from scratch. */
-  readonly snapshot: { readonly seq: number; readonly state: SessionState } | null;
+  readonly snapshot: StoredSnapshot | null;
   /** Ordered by seq. On recovery only those past the snapshot are replayed. */
   readonly events: readonly StoredEvent[];
   readonly participants: readonly StoredParticipant[];

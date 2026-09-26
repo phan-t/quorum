@@ -110,7 +110,7 @@ thousand items and under a megabyte.
 | PK | SK | Item |
 | --- | --- | --- |
 | `SESSION#<sid>` | `META` | sid, title, joinCode, phase, seal, hostTokenHash, screenTokenHash, the console's opaque `setup` blob, createdAt, updatedAt, ttl |
-| `SESSION#<sid>` | `SNAPSHOT` | full in-memory state, JSON, version, seq — rewritten on every transition |
+| `SESSION#<sid>` | `SNAPSHOT` | full in-memory state, JSON, version, seq, at — rewritten on every transition |
 | `SESSION#<sid>` | `EVENT#<seq:010d>` | one game event: type, the event itself, at, byPid — append-only |
 | `SESSION#<sid>` | `PARTICIPANT#<pid>` | nickname, nicknameKey, playerNumber, rejoinTokenHashes[], joinedAt, kicked |
 | `SESSION#<sid>#PROMO` | `PROMO` | the event's promo card, one HTML page, chars, at |
@@ -547,6 +547,17 @@ the snapshot's (there should be none or one), marks everybody the snapshot
 thought was present as `away`, and re-arms timers from the state: a `closesAt`
 in the past fires immediately, one in the future is scheduled. All of this
 happens before the port opens.
+
+**The snapshot says which shape it is.** `version` is the writer's
+`SNAPSHOT_VERSION` and `at` is the writer's clock, and recovery reads both. A
+field added to a round in flight arrives missing on every row written before the
+deploy, so recovery carries a migration per field; the version is what lets that
+migration say what it is looking at, and be retired against the table rather than
+against a hunch — `recoverSessions` logs the vintage of everything it loaded at
+every boot, and `server/recovery.ts` has the procedure under `RETIREMENT`. The
+version never decides *whether* a migration runs: a row written before this was
+read back has no version at all, so the absent field is what triggers the fix and
+the version only gets to say the row was surprising.
 
 `draft` and `closed` are in that list because both were left out once and both
 cost a session. A host sets an event up the day before, which is exactly the

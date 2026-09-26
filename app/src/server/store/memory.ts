@@ -17,6 +17,7 @@ import {
   checkAssetKey,
   checkAssetSize,
   checkPromoSize,
+  SNAPSHOT_VERSION,
   type AssetSummary,
   type LoadedSession,
   type SessionMeta,
@@ -24,11 +25,12 @@ import {
   type StoredAsset,
   type StoredEvent,
   type StoredParticipant,
+  type StoredSnapshot,
 } from "./types.ts";
 
 interface Row {
   meta: SessionMeta | null;
-  snapshot: { seq: number; state: SessionState } | null;
+  snapshot: StoredSnapshot | null;
   events: Map<number, StoredEvent>;
   participants: Map<string, StoredParticipant>;
   /** The promo card. Not in `LoadedSession`: it is never replayed. */
@@ -81,9 +83,19 @@ export class MemoryStore implements SessionStore {
     this.row(meta.sid).meta = copy(meta);
   }
 
-  async putSnapshot(sid: string, state: SessionState, _at: number): Promise<void> {
+  async putSnapshot(sid: string, state: SessionState, at: number): Promise<void> {
     this.guard();
-    this.row(sid).snapshot = { seq: state.seq, state: copy(state) };
+    // Stamped with the same vintage the DynamoDB store writes, and for the
+    // reason the note at the top of this file gives: the suite runs here, so a
+    // field this store does not record is a field recovery is never tested
+    // against. `at` used to be ignored; reading it back is what lets a
+    // migration be retired on evidence instead of on a hunch.
+    this.row(sid).snapshot = {
+      seq: state.seq,
+      state: copy(state),
+      version: SNAPSHOT_VERSION,
+      writtenAt: at,
+    };
   }
 
   async putPromo(sid: string, html: string, _at: number): Promise<void> {
