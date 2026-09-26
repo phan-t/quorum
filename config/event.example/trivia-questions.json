@@ -5,241 +5,225 @@
       "text": "In what year was HashiCorp founded?",
       "answers": ["2008", "2010", "2012", "2015"],
       "correct": "C",
-      "timeLimitSec": 20
+      "timeLimitSec": 15,
+      "note": "2012. Vagrant had already been out for two years by then, which is why the founding year and the first release do not line up.",
+      "round": "History"
     },
     {
       "text": "Which was HashiCorp's first product?",
       "answers": ["Terraform", "Vagrant", "Vault", "Consul"],
       "correct": "B",
-      "timeLimitSec": 20
+      "timeLimitSec": 15,
+      "note": "Vagrant, in 2010, two years before the company existed. Packer followed in 2013, Terraform and Consul in 2014.",
+      "round": "History"
     },
     {
       "text": "Who co-founded HashiCorp with Armon Dadgar?",
       "answers": ["Mitchell Hashimoto", "Solomon Hykes", "Kelsey Hightower", "Adam Jacob"],
       "correct": "A",
-      "timeLimitSec": 20
-    },
-    {
-      "text": "Which HashiCorp product was released first?",
-      "answers": ["Vault", "Consul", "Nomad", "Boundary"],
-      "correct": "B",
-      "timeLimitSec": 30
-    },
-    {
-      "text": "Which two products were announced together at HashiConf Digital 2020?",
-      "answers": ["Vault & Consul", "Boundary & Waypoint", "Nomad & Packer", "Terraform & Sentinel"],
-      "correct": "B",
-      "timeLimitSec": 30
+      "timeLimitSec": 15,
+      "note": "Mitchell Hashimoto, and the company name is his surname rather than anything to do with a hash function.",
+      "round": "History"
     },
     {
       "text": "What is HashiCorp's published product design philosophy called?",
       "answers": ["The HashiCorp Way", "The Tao of HashiCorp", "The Blue Book", "Infrastructure Manifesto"],
       "correct": "B",
-      "timeLimitSec": 20
+      "timeLimitSec": 15,
+      "note": "The Tao of HashiCorp — workflows over technologies, automation through codification, immutability. It is still what the product teams argue from.",
+      "round": "History"
     },
     {
-      "text": "Which product does secrets management, encryption as a service and dynamic credentials?",
-      "answers": ["Consul", "Boundary", "Vault", "Nomad"],
-      "correct": "C",
-      "timeLimitSec": 20
-    },
-    {
-      "text": "Which product gives secure remote access to hosts without distributing SSH keys or VPNs?",
-      "answers": ["Consul", "Boundary", "Vault", "Packer"],
+      "text": "Which HashiCorp product was released first?",
+      "answers": ["Vault", "Consul", "Nomad", "Boundary"],
       "correct": "B",
-      "timeLimitSec": 20
+      "timeLimitSec": 20,
+      "note": "Consul, in April 2014. Terraform followed three months later, Vault in April 2015, Nomad that September, and Boundary not until 2020.",
+      "round": "History"
     },
     {
-      "text": "Which product schedules containers, raw binaries, Java and VMs as workloads?",
-      "answers": ["Nomad", "Consul", "Waypoint", "Terraform"],
-      "correct": "A",
-      "timeLimitSec": 20
-    },
-    {
-      "text": "Which product does service discovery, health checking and service mesh?",
-      "answers": ["Nomad", "Boundary", "Consul", "Terraform"],
-      "correct": "C",
-      "timeLimitSec": 20
-    },
-    {
-      "text": "Which product builds identical machine images for many platforms from one config?",
-      "answers": ["Vagrant", "Packer", "Waypoint", "Terraform"],
+      "text": "Which two products were announced together at HashiConf Digital 2020?",
+      "answers": ["Vault & Consul", "Boundary & Waypoint", "Nomad & Packer", "Terraform & Sentinel"],
       "correct": "B",
-      "timeLimitSec": 20
-    },
-    {
-      "text": "Which product creates reproducible dev environments, driven by a Vagrantfile?",
-      "answers": ["Packer", "Waypoint", "Vagrant", "Nomad"],
-      "correct": "C",
-      "timeLimitSec": 20
-    },
-    {
-      "text": "What is HashiCorp's policy-as-code framework called?",
-      "answers": ["Rego", "Gatekeeper", "Sentinel", "Guardrail"],
-      "correct": "C",
-      "timeLimitSec": 20
-    },
-    {
-      "text": "Which product scans code and systems for leaked secrets?",
-      "answers": ["Vault Sentinel", "Vault Radar", "Consul Watch", "Vault Scout"],
-      "correct": "B",
-      "timeLimitSec": 30
-    },
-    {
-      "text": "Which Terraform command previews changes without applying them?",
-      "answers": ["terraform preview", "terraform plan", "terraform dry-run", "terraform diff"],
-      "correct": "B",
-      "timeLimitSec": 20
-    },
-    {
-      "text": "By default, what is Terraform's state file called?",
-      "answers": ["state.json", "terraform.tfstate", "tfstate.lock", "main.tfstate"],
-      "correct": "B",
-      "timeLimitSec": 20
-    },
-    {
-      "text": "What best describes a Vault dynamic secret?",
-      "answers": ["A secret that rotates yearly", "A credential generated on demand, with a lease", "An encrypted static value", "A secret shared between two apps"],
-      "correct": "B",
-      "timeLimitSec": 30
-    },
-    {
-      "text": "Which consensus protocol backs integrated storage in Vault, Consul and Nomad?",
-      "answers": ["Paxos", "Raft", "Zab", "Two-phase commit"],
-      "correct": "B",
-      "timeLimitSec": 20
-    },
-    {
-      "text": "What is IBM's long-standing nickname?",
-      "answers": ["Big Iron", "Big Blue", "The Blue Giant", "Blue Sky"],
-      "correct": "B",
-      "timeLimitSec": 10
-    },
-    {
-      "text": "IBM's Deep Blue defeated which world chess champion in 1997?",
-      "answers": ["Anatoly Karpov", "Magnus Carlsen", "Garry Kasparov", "Vladimir Kramnik"],
-      "correct": "C",
-      "timeLimitSec": 20
-    },
-    {
-      "text": "What does HCL, the language Terraform configurations are written in, stand for?",
-      "answers": ["HashiCorp Control Language", "HashiCorp Configuration Language", "Hybrid Cloud Language", "HashiCorp Cluster Language"],
-      "correct": "B",
-      "timeLimitSec": 20
-    },
-    {
-      "text": "Which Terraform command downloads providers and prepares a working directory?",
-      "answers": ["terraform get", "terraform setup", "terraform init", "terraform build"],
-      "correct": "C",
-      "timeLimitSec": 20
-    },
-    {
-      "text": "In Terraform, what is a reusable, self-contained package of configuration called?",
-      "answers": ["A module", "A bundle", "A blueprint", "A chart"],
-      "correct": "A",
-      "timeLimitSec": 20
-    },
-    {
-      "text": "Which Terraform block declares a value that is passed in from outside the configuration?",
-      "answers": ["parameter", "input", "variable", "argument"],
-      "correct": "C",
-      "timeLimitSec": 20
+      "timeLimitSec": 20,
+      "note": "Boundary and Waypoint, both at HashiConf Digital in October 2020: identity-based access, and application deploys.",
+      "round": "History"
     },
     {
       "text": "Which language are Terraform, Vault, Consul and Nomad written in?",
       "answers": ["Rust", "Go", "Java", "Python"],
       "correct": "B",
-      "timeLimitSec": 20
+      "timeLimitSec": 10,
+      "note": "Go, all four. The single static binary is why a Consul agent or a Nomad client is one file to ship.",
+      "round": "Speed round"
     },
     {
-      "text": "By default, Vault splits its unseal key using which scheme?",
-      "answers": ["RSA key splitting", "Diffie-Hellman exchange", "Shamir's Secret Sharing", "AES key wrapping"],
+      "text": "What is HashiCorp's policy-as-code framework called?",
+      "answers": ["Rego", "Gatekeeper", "Sentinel", "Guardrail"],
       "correct": "C",
-      "timeLimitSec": 30
-    },
-    {
-      "text": "Which port does Vault's HTTP API listen on by default?",
-      "answers": ["8080", "8200", "8500", "4646"],
-      "correct": "B",
-      "timeLimitSec": 20
-    },
-    {
-      "text": "Consul's key-value store is most commonly used for what?",
-      "answers": ["Storing container images", "Distributed configuration", "Aggregating metrics", "Long-term log storage"],
-      "correct": "B",
-      "timeLimitSec": 20
-    },
-    {
-      "text": "In Nomad, what is the set of tasks that are always placed together on one client called?",
-      "answers": ["A pod", "A task group", "A batch", "A cluster"],
-      "correct": "B",
-      "timeLimitSec": 30
+      "timeLimitSec": 10,
+      "note": "Sentinel, across the enterprise products. Rego is Open Policy Agent's language and Gatekeeper is OPA's Kubernetes admission controller — both real, neither HashiCorp's.",
+      "round": "Speed round"
     },
     {
       "text": "In Vagrant, what is a packaged base image called?",
       "answers": ["A crate", "An image", "A box", "A template"],
       "correct": "C",
-      "timeLimitSec": 15
+      "timeLimitSec": 10,
+      "note": "A box. It is what a Vagrantfile starts from, and Packer is what builds one.",
+      "round": "Speed round"
+    },
+    {
+      "text": "Which consensus protocol backs integrated storage in Vault, Consul and Nomad?",
+      "answers": ["Paxos", "Raft", "Zab", "Two-phase commit"],
+      "correct": "B",
+      "timeLimitSec": 10,
+      "note": "Raft, in all three. Paxos is the ancestor Raft was written to be easier to understand than; Zab is ZooKeeper's.",
+      "round": "Speed round"
+    },
+    {
+      "text": "What is IBM's long-standing nickname?",
+      "answers": ["Big Iron", "Big Blue", "The Blue Giant", "Blue Sky"],
+      "correct": "B",
+      "timeLimitSec": 10,
+      "note": "Big Blue. IBM never coined it; it is usually traced to the blue of the logo and of the mainframe cabinets.",
+      "round": "Speed round"
+    },
+    {
+      "text": "Which port does Vault's HTTP API listen on by default?",
+      "answers": ["8080", "8200", "8500", "4646"],
+      "correct": "B",
+      "timeLimitSec": 20,
+      "note": "8200 for the API, 8201 for cluster traffic. 8500 is Consul's HTTP API and 4646 is Nomad's, which is what those two are doing in the list.",
+      "round": "Deep cuts"
+    },
+    {
+      "text": "By default, Vault splits its unseal key using which scheme?",
+      "answers": ["RSA key splitting", "Diffie-Hellman exchange", "Shamir's Secret Sharing", "AES key wrapping"],
+      "correct": "C",
+      "timeLimitSec": 20,
+      "note": "Shamir's Secret Sharing: the root key is split into shares and a threshold of them reconstructs it. Auto-unseal replaces the ceremony with a cloud KMS, but the default is still Shamir.",
+      "round": "Deep cuts"
+    },
+    {
+      "text": "What best describes a Vault dynamic secret?",
+      "answers": ["A secret that rotates yearly", "A credential generated on demand, with a lease", "An encrypted static value", "A secret shared between two apps"],
+      "correct": "B",
+      "timeLimitSec": 20,
+      "note": "Generated on demand and bound to a lease, so it expires whether or not anyone remembers to revoke it. That is the whole difference from a static value in the KV engine.",
+      "round": "Deep cuts"
+    },
+    {
+      "text": "In Nomad, what is the set of tasks that are always placed together on one client called?",
+      "answers": ["A pod", "A task group", "A batch", "A cluster"],
+      "correct": "B",
+      "timeLimitSec": 20,
+      "note": "A task group. It is the same idea as a Kubernetes pod and deliberately not the same word — Nomad places an allocation of a group, and the group is what lands on one client.",
+      "round": "Deep cuts"
+    },
+    {
+      "text": "Which product scans code and systems for leaked secrets?",
+      "answers": ["Vault Sentinel", "Vault Radar", "Consul Watch", "Vault Scout"],
+      "correct": "B",
+      "timeLimitSec": 15,
+      "note": "Vault Radar. It looks through repositories, wikis and ticket systems for secrets that were never in Vault — the half of the problem Vault itself cannot see.",
+      "round": "Deep cuts"
     },
     {
       "text": "Which licence did HashiCorp adopt for its products in August 2023?",
       "answers": ["Apache 2.0", "Mozilla Public License 2.0", "Business Source License", "GNU AGPL"],
       "correct": "C",
-      "timeLimitSec": 30
+      "timeLimitSec": 20,
+      "note": "The Business Source License v1.1, announced on 10 August 2023 in place of MPL 2.0. It permits everything except a competing offering, and each release reverts to MPL four years on.",
+      "round": "Licence and brand"
     },
     {
       "text": "Which open-source fork of Terraform was created in response to that licence change?",
       "answers": ["Terragrunt", "OpenTofu", "Terrakube", "Terraspace"],
       "correct": "B",
-      "timeLimitSec": 20
+      "timeLimitSec": 15,
+      "note": "OpenTofu. It was forked within days as OpenTF and renamed in September 2023 when it joined the Linux Foundation. Terragrunt is real, but it wraps Terraform rather than forking it.",
+      "round": "Licence and brand"
     },
     {
-      "text": "What does HCP stand for?",
-      "answers": ["HashiCorp Control Plane", "HashiCorp Cloud Platform", "Hybrid Cloud Provisioner", "HashiCorp Certified Platform"],
+      "text": "In April 2024, Terraform Cloud was renamed to what?",
+      "answers": ["Terraform Enterprise", "HCP Terraform", "Terraform One", "HashiCorp Terraform"],
       "correct": "B",
-      "timeLimitSec": 20
-    },
-    {
-      "text": "In 2023, Terraform Cloud was renamed to what?",
-      "answers": ["Terraform Enterprise", "HCP Terraform", "Terraform Online", "HashiCorp Terraform Cloud"],
-      "correct": "B",
-      "timeLimitSec": 20
-    },
-    {
-      "text": "IBM was founded in 1911 as CTR. In what year did it take the name International Business Machines?",
-      "answers": ["1911", "1924", "1936", "1945"],
-      "correct": "B",
-      "timeLimitSec": 20
-    },
-    {
-      "text": "IBM's Watson famously won which television quiz show in 2011?",
-      "answers": ["Wheel of Fortune", "Who Wants to Be a Millionaire", "Jeopardy!", "The Chase"],
-      "correct": "C",
-      "timeLimitSec": 20
+      "timeLimitSec": 20,
+      "note": "HCP Terraform, on 22 April 2024, and only the name changed. Terraform Enterprise is still a separate self-hosted product, which is what makes it a fair distractor rather than a trick.",
+      "round": "Licence and brand"
     },
     {
       "text": "In which year did IBM complete its acquisition of HashiCorp?",
       "answers": ["2023", "2024", "2025", "2026"],
       "correct": "C",
-      "timeLimitSec": 20
-    },
-    {
-      "text": "Which company did IBM acquire for about $34 billion in 2019?",
-      "answers": ["SUSE", "Red Hat", "VMware", "Canonical"],
-      "correct": "B",
-      "timeLimitSec": 20
-    },
-    {
-      "text": "Where is IBM's corporate headquarters?",
-      "answers": ["Austin, Texas", "Armonk, New York", "Raleigh, North Carolina", "San Jose, California"],
-      "correct": "B",
-      "timeLimitSec": 20
+      "timeLimitSec": 20,
+      "note": "2025. It was announced on 24 April 2024 and closed on 27 February 2025, at an enterprise value of $6.4bn. 2024 takes most of the room because the announcement is the part everyone remembers.",
+      "round": "IBM"
     },
     {
       "text": "Which programming language was developed at IBM in the 1950s?",
       "answers": ["COBOL", "LISP", "Fortran", "ALGOL"],
       "correct": "C",
-      "timeLimitSec": 20
+      "timeLimitSec": 20,
+      "note": "Fortran, from John Backus's team at IBM, delivered in 1957. COBOL came out of a committee, LISP out of MIT, ALGOL out of an international group.",
+      "round": "IBM"
+    },
+    {
+      "text": "Where is IBM's corporate headquarters?",
+      "answers": ["Austin, Texas", "Armonk, New York", "Raleigh, North Carolina", "San Jose, California"],
+      "correct": "B",
+      "timeLimitSec": 15,
+      "note": "Armonk, in Westchester County, New York, since 1964. Austin, Raleigh and San Jose are all large IBM sites, which is why they are the other three.",
+      "round": "IBM"
+    },
+    {
+      "text": "Which company did IBM acquire for about $34 billion in 2019?",
+      "answers": ["SUSE", "Red Hat", "VMware", "Canonical"],
+      "correct": "B",
+      "timeLimitSec": 15,
+      "note": "Red Hat, and it is still IBM's largest acquisition — roughly five times what it paid for HashiCorp.",
+      "round": "IBM"
+    },
+    {
+      "text": "IBM's Deep Blue defeated which world chess champion in 1997?",
+      "answers": ["Anatoly Karpov", "Magnus Carlsen", "Garry Kasparov", "Vladimir Kramnik"],
+      "correct": "C",
+      "timeLimitSec": 15,
+      "note": "Garry Kasparov, 3½–2½ in the 1997 rematch. He had beaten the same machine in 1996, which is the part that gets forgotten.",
+      "round": "IBM"
+    },
+    {
+      "text": "Which is the world's southernmost capital city?",
+      "answers": ["Canberra", "Wellington", "Hobart", "Christchurch"],
+      "correct": "B",
+      "timeLimitSec": 30,
+      "note": "Wellington, at about 41°S. Hobart is a state capital and Christchurch is not a capital at all.",
+      "tiebreak": true
+    },
+    {
+      "text": "The Merlion is the landmark of which city?",
+      "answers": ["Kuala Lumpur", "Hong Kong", "Singapore", "Manila"],
+      "correct": "C",
+      "timeLimitSec": 30,
+      "note": "Singapore. The lion's head is for Singapura, the lion city; the fish tail is for its beginnings as a fishing village.",
+      "tiebreak": true
+    },
+    {
+      "text": "Which of these countries has the largest land area?",
+      "answers": ["India", "Indonesia", "Australia", "Japan"],
+      "correct": "C",
+      "timeLimitSec": 30,
+      "note": "Australia, about 7.7 million km² — more than twice India and about four times Indonesia.",
+      "tiebreak": true
+    },
+    {
+      "text": "In Japan, \"Golden Week\" falls across which two months?",
+      "answers": ["March–April", "April–May", "July–August", "December–January"],
+      "correct": "B",
+      "timeLimitSec": 30,
+      "note": "Late April into the first week of May, where four public holidays fall close together. It is the hardest week of the year to book anything in Japan.",
+      "tiebreak": true
     }
   ]
 }

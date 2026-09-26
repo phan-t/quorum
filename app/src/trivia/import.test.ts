@@ -234,7 +234,45 @@ describe("the committed example set", () => {
   );
 
   it("loads", () => {
-    assert.equal(ok(text).length, 40);
+    assert.equal(ok(text).length, 28);
+  });
+
+  it("is a 24-question game with four tiebreakers behind it", () => {
+    // The two numbers are the shape `docs/running-an-event.md` builds a
+    // fifteen-minute slot around, and they are separate on purpose: a
+    // tiebreaker is lifted out of the scored set, so flagging four does not
+    // make the game twenty-eight questions long. The example is what every
+    // event gets copied from, so if it drifts back to forty the drift is here.
+    const loaded = ok(text);
+    assert.equal(loaded.filter((q) => q.tiebreak !== true).length, 24);
+    assert.equal(loaded.filter((q) => q.tiebreak === true).length, 4);
+  });
+
+  it("carries the notes and the round cards the reveal is for", () => {
+    // SPEC calls `note` "the bit people learn from", and a set with none is a
+    // set where a lit tile is the whole reveal. Round values are what put a
+    // card up in front of the room, so every scored question needs one; a
+    // tiebreaker is never part of a round and must not claim to be.
+    const loaded = ok(text);
+    assert.ok(
+      loaded.filter((q) => q.note !== null).length >= 10,
+      "at least ten questions carry a note",
+    );
+    for (const [i, q] of loaded.entries()) {
+      if (q.tiebreak === true) assert.equal(q.round, null, `question ${i + 1} is a tiebreaker`);
+      else assert.ok(q.round !== null, `question ${i + 1} has no round`);
+    }
+  });
+
+  it("gives nothing in the scored set longer than twenty seconds", () => {
+    // The audience answers most of these on sight, and a timer they have
+    // already beaten is dead air the host has to talk over. The tiebreakers
+    // are exempt because sudden death ignores the timer entirely.
+    for (const [i, q] of ok(text).entries()) {
+      if (q.tiebreak === true) continue;
+      assert.ok(q.timeLimitSec >= 10, `question ${i + 1} is under ten seconds`);
+      assert.ok(q.timeLimitSec <= 20, `question ${i + 1} runs ${q.timeLimitSec}s`);
+    }
   });
 
   it("marks exactly one correct answer per question, inside its own answers", () => {
@@ -250,11 +288,18 @@ describe("the committed example set", () => {
     const letters = ["A", "B", "C", "D"];
     const again = ok(
       JSON.stringify({
+        // Every optional key goes back out as well, because the round trip is
+        // only worth anything if it carries what the file actually says. An
+        // export that dropped `note` and `round` would still load and would
+        // still be a quiz — just a silent one with no round cards.
         questions: first.map((q) => ({
           text: q.text,
           answers: q.answers,
           correct: q.correct.map((c) => letters[c]),
           timeLimitSec: q.timeLimitSec,
+          ...(q.note === null ? {} : { note: q.note }),
+          ...(q.round === null ? {} : { round: q.round }),
+          ...(q.tiebreak === true ? { tiebreak: true } : {}),
         })),
       }),
     );

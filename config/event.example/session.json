@@ -25,7 +25,19 @@
     ],
     "arcade": {
       "plan": ["recruitment", "plan_apply", "glass_bridge"],
-      "timings": {}
+      "_timings": "SPEC's own numbers, except Recruitment. An empty object here meant every copied event started on defaults nobody chose.",
+      "timings": {
+        "secondsPerItem": 10,
+        "target": 120,
+        "seconds": 75,
+        "unsealSeconds": 60,
+        "tugPulls": 3,
+        "tugPullSeconds": 25,
+        "tugBpm": 100,
+        "wave1": 12,
+        "wave2": 9,
+        "wave3": 6
+      }
     }
   }
 }

@@ -1,7 +1,7 @@
 # Question bank — HashiCorp trivia (+ a little IBM)
 
 32 questions, weighted heavily toward **HashiCorp history and products**. Run
-**20**. Suggested set at the bottom.
+**20 to 24**. Suggested set at the bottom.
 
 This is the writing surface; it is not what the service reads. Quorum loads
 JSON — `config/events/<event>/trivia-questions.json`, with the committed worked
@@ -17,11 +17,13 @@ Correct answer in **bold**. `T` = suggested time limit, in seconds.
 > sources on **19 September 2026** and are marked **✅ Verified** with what
 > confirmed them. Re-check if this bank is reused for a later event.
 
-> **None of the three verified questions are in the shipped set.** A8, D4 and
-> E4 are bank-only: `config/event.example/trivia-questions.json` is a superset
-> of the twenty below and none of the three is among them. Verifying them protects a *future*
-> swap, not the next game. If you swap one in, the JSON is what the service
-> reads — edit that, not this.
+> **Two of the three verified questions are in the shipped set, and the
+> verification paid for itself on one of them.** D4 and E4 are both in
+> `config/event.example/trivia-questions.json`; D4 went into that file dated
+> "in 2023", and the note under D4 below is what caught it. A8 is still
+> bank-only, so verifying it protects a *future* swap rather than the next
+> game. If you swap it in, the JSON is what the service reads — edit that, not
+> this.
 
 ---
 
@@ -199,15 +201,28 @@ Weighted to HashiCorp history and products, IBM kept as seasoning:
 | **C** — deep cuts | C1, C3, C5, C7 (4) | Where the field separates |
 | **E** — IBM | E1, E2 (2) | Light touch, keeps it fun |
 
-That is **20**, and it is the core of what
-`config/event.example/trivia-questions.json` contains — twenty more were added
-to that file later, so it is forty now and this table is the original set. Swap in **D1/D2** (licensing) for a crowd that will enjoy the
-argument, and keep **Round F** in reserve for a sudden-death tiebreak — a
-question marked `"tiebreak": true` in the JSON is lifted out of the scored
-twenty and into the pool sudden death draws on.
+That is **20**, and it is no longer what
+`config/event.example/trivia-questions.json` contains. The committed example is
+**24 scored questions plus four tiebreakers**, and the difference between the
+two is the one thing worth carrying away from this table: it drops the whole of
+Round B and most of Round C, because a room of solutions architects answers
+"which product does secrets management" before the timer has finished drawing
+itself, and a free mark early is worse than a free mark late — speed weighting
+and the streak bonus both compound, so the openers decide the game. D1/D2 are
+in, because the licence argument is one this audience enjoys having. Take this
+table as the shape and read the JSON for what will actually be asked.
 
-Ordering: run A → B → C → E. Never open on a deep cut, and never close on one
-either — finish on an IBM question everyone can get.
+Ordering, in the example and in anything built from it: open warm, **announce**
+a short block of on-sight questions where the streaks build, put the hard ones
+in the middle where the field separates, and close on something the whole mixed
+room can get. Never open on a deep cut and never close on one either.
+
+**Round F is in the JSON**, as four questions flagged `"tiebreak": true` — F1
+to F4. A flagged question is lifted out of the scored set and into the pool
+sudden death draws on, so those four cost the game nothing in length. Without
+them the engine falls back to a built-in pool that asks C7's Raft question
+again, and a tie would be settled by two people racing to retype an answer they
+heard twenty minutes earlier.
 
 ---
 

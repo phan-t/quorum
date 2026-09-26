@@ -93,32 +93,42 @@ export function specCorrection(rtt: readonly number[]): number {
 /* ------------------------------------------------------------------ */
 
 /**
- * `[time limit in seconds, correct answer 1-based]` for each row of
- * kahoot-import.csv, read off the file by eye rather than through the
- * importer, so the importer is checked against this and not the other way
- * round. Every question in the file is 4-answer, 1000 base (no Points column).
+ * `[time limit in seconds, correct answer 1-based]` for the first twenty
+ * questions of the example set, read off the file by eye rather than through
+ * the importer, so the importer is checked against this and not the other way
+ * round. Every question in the file is 4-answer, 1000 base (no `basePoints`).
+ *
+ * The blank lines are the round boundaries, and the timers are why they
+ * matter: the set opens on History at 15 s, drops to a five-question Speed
+ * round at 10 s where the streaks build, and spends 20 s a question through
+ * the Deep cuts. A round simulation that flattened all of that to one timer
+ * would stop testing the thing the set was reshaped to do.
  */
 const SET: readonly (readonly [number, number])[] = [
-  [20, 3], // 1  founded in 2012
-  [20, 2], // 2  Vagrant
-  [20, 1], // 3  Mitchell Hashimoto
-  [30, 2], // 4  Consul
-  [30, 2], // 5  Boundary & Waypoint
-  [20, 2], // 6  The Tao of HashiCorp
-  [20, 3], // 7  Vault
-  [20, 2], // 8  Boundary
-  [20, 1], // 9  Nomad
-  [20, 3], // 10 Consul
-  [20, 2], // 11 Packer
-  [20, 3], // 12 Vagrant
-  [20, 3], // 13 Sentinel
-  [30, 2], // 14 Vault Radar
-  [20, 2], // 15 terraform plan
-  [20, 2], // 16 terraform.tfstate
-  [30, 2], // 17 a credential generated on demand
-  [20, 2], // 18 Raft
-  [10, 2], // 19 Big Blue
-  [20, 3], // 20 Garry Kasparov
+  [15, 3], // 1  founded in 2012
+  [15, 2], // 2  Vagrant
+  [15, 1], // 3  Mitchell Hashimoto
+  [15, 2], // 4  The Tao of HashiCorp
+  [20, 2], // 5  Consul
+  [20, 2], // 6  Boundary & Waypoint
+
+  [10, 2], // 7  Go
+  [10, 3], // 8  Sentinel
+  [10, 3], // 9  a box
+  [10, 2], // 10 Raft
+  [10, 2], // 11 Big Blue
+
+  [20, 2], // 12 8200
+  [20, 3], // 13 Shamir's Secret Sharing
+  [20, 2], // 14 a credential generated on demand
+  [20, 2], // 15 a task group
+  [15, 2], // 16 Vault Radar
+
+  [20, 3], // 17 Business Source License
+  [15, 2], // 18 OpenTofu
+  [20, 2], // 19 HCP Terraform
+
+  [20, 3], // 20 2025
 ];
 
 const BASE = 1000;
@@ -501,9 +511,10 @@ const PRIYA = 28_500;
 
 /**
  * Kenji: right at the buzzer, 500 a question — except Q6 and Q13, where the
- * host closes at 6 s and his 20 s tap is refused, which also breaks the
- * streak. Late lands in exactly the same place (tap after closesAt, clamped
- * to the buzzer; refused on the same two questions).
+ * host closes at 6 s and his tap at the buzzer is refused, which also breaks
+ * the streak. Both of those questions run 20 s, so the early close still
+ * lands well before him. Late lands in exactly the same place (tap after
+ * closesAt, clamped to the buzzer; refused on the same two questions).
  *   Q1–5:   5 × 500 + (0 + 100 + 200 + 300 + 400)             = 3 500
  *   Q7–12:  6 × 500 + (0 + 100 + 200 + 300 + 400 + 500)       = 4 500
  *   Q14–20: 7 × 500 + (0 + 100 + 200 + 300 + 400 + 500 + 500) = 5 500
@@ -512,12 +523,16 @@ const KENJI = 13_500;
 
 /**
  * Zoë: right on the odd questions only, always at 5 s, never a streak of 2.
- *   T = 20 s: 1000 × (1 − (5 ÷ 20) ÷ 2) = 875     — Q1, Q3, Q7, Q9, Q11, Q13, Q15
- *   T = 30 s: 1000 × (1 − (5 ÷ 30) ÷ 2) = 916.67  — Q5, Q17 → 917
- *   T = 10 s: 1000 × (1 − (5 ÷ 10) ÷ 2) = 750     — Q19
- *   7 × 875 + 2 × 917 + 750 = 6 125 + 1 834 + 750
+ *
+ * Her total is the one anchor here that moves when the set's timers move, and
+ * it moves downwards: the same five-second tap is worth less on a short
+ * question, because the speed weighting is a fraction of the time limit.
+ *   T = 20 s: 1000 × (1 − (5 ÷ 20) ÷ 2) = 875     — Q5, Q13, Q15, Q17, Q19
+ *   T = 15 s: 1000 × (1 − (5 ÷ 15) ÷ 2) = 833.33  — Q1, Q3 → 833
+ *   T = 10 s: 1000 × (1 − (5 ÷ 10) ÷ 2) = 750     — Q7, Q9, Q11
+ *   5 × 875 + 2 × 833 + 3 × 750 = 4 375 + 1 666 + 2 250
  */
-const ZOE = 8_709;
+const ZOE = 8_291;
 
 /* ------------------------------------------------------------------ */
 /* The round                                                            */
