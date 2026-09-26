@@ -1374,6 +1374,24 @@ function sceneArcade(): Scene {
     tugWins,
   ]);
 
+  /**
+   * The win beat, which this surface did not have.
+   *
+   * The drain log below is DESIGN.md's error beat — `--miss` coral, bordered,
+   * the way a terminal says it — and a tin coming open is not that beat. Red
+   * is the show's blood, DESIGN.md spends it on the 400 ms error and the
+   * trivia reveal and nowhere else, so this is the house speaking instead: the
+   * `>` prompt the round card already uses, the house's purple, and one rule
+   * down the left rather than a box. It is told apart from a drain by its
+   * shape and its sentence before its hue, because nothing on this surface may
+   * be carried by colour alone.
+   *
+   * In the flow, under whichever panel is up, never laid over it — the same
+   * rule the bridge, the tins and the inline drain log keep. A panel over this
+   * surface is how the Desktop ends up showing the room a rectangle.
+   */
+  const winLog = h("div", { class: "s-win-log", attrs: { hidden: true } });
+
   /* the drain, verbatim */
   const drainLog = h("div", { class: "s-drain-log", attrs: { hidden: true } });
 
@@ -1391,6 +1409,9 @@ function sceneArcade(): Scene {
     bridge,
     unseal,
     tug,
+    // Directly under the round's own picture, because that is what it is about:
+    // the rope the room is watching, or the four tins it is watching fill.
+    winLog,
     grid,
     counts,
     light,
@@ -1404,6 +1425,14 @@ function sceneArcade(): Scene {
   let lastState: RenderState | null = null;
   let struck = new Set<string>();
   let drainTimer: ReturnType<typeof setTimeout> | null = null;
+  // The win beat's memory: the last frame's pulls won, and the last frame's
+  // open tins per shape. Both start empty rather than at zero, because "no
+  // reading yet" and "a reading of nothing" are different things here — see
+  // `paintWinBeat`.
+  let winRound = -1;
+  let tugWinsSeen: readonly [number, number] | null = null;
+  let tinsOpenSeen: Map<string, number> | null = null;
+  let winTimer: ReturnType<typeof setTimeout> | null = null;
 
   const paintGrid = (state: RenderState, arcade: ArcadeView): void => {
     const entries = gridEntries(arcade, state.roster);
@@ -1518,6 +1547,141 @@ function sceneArcade(): Scene {
     drainTimer = setTimeout(() => {
       drainLog.hidden = true;
       drainTimer = null;
+    }, 4_000);
+  };
+
+  /**
+   * One house line in the round card's own shape — the prompt, then the
+   * sentence — with an optional mono line of counts under it.
+   *
+   * The sentence is the beat and the counts are the evidence, which is the
+   * order the room reads them in: the house says what happened, and the line
+   * under it is the number already on the panel above, on the frame it moved.
+   */
+  const winLine = (line: string, detail: string | null): HTMLElement =>
+    h("div", { class: "s-win-beat" }, [
+      h("p", { class: "mono s-win-said" }, [
+        h("span", { class: "s-prompt", attrs: { "aria-hidden": "true" }, text: ">" }),
+        h("span", { text: line }),
+      ]),
+      detail === null ? null : h("p", { class: "mono s-win-count", text: detail }),
+    ]);
+
+  /**
+   * A pull being won, and a tin coming open: the two beats this screen had no
+   * words for while it narrated every way to lose.
+   *
+   * Both are read as a **diff against the last frame**, which is the reading
+   * the phone already does in `paintTug`: the engine sends state and never
+   * events, so the only place a win exists is between two frames. Two
+   * consequences, and they are the whole of why this function keeps memory of
+   * its own:
+   *
+   * The first frame of a round seeds the numbers and says nothing. A Desktop
+   * tab reopened three pulls in — the host reloads it, the share is restarted
+   * — must not narrate the three pulls it was not there for, and `null` rather
+   * than `[0, 0]` is what tells those two cases apart.
+   *
+   * A round restart forgets the last result, because the rope and the tins are
+   * new and the previous run's closing pull is not news about this one.
+   * `roundIndex` is the key that says so: `startRound` counts every round it
+   * starts, so running Tug of Raft twice is two indices and not one, and the
+   * second run's wins start from `null` rather than from the first run's three.
+   */
+  const paintWinBeat = (arcade: ArcadeView): void => {
+    if (arcade.roundIndex !== winRound) {
+      winRound = arcade.roundIndex;
+      tugWinsSeen = null;
+      tinsOpenSeen = null;
+      if (winTimer !== null) clearTimeout(winTimer);
+      winTimer = null;
+      winLog.hidden = true;
+    }
+    const said: (HTMLElement | null)[] = [];
+
+    const t = arcade.tug;
+    if (t) {
+      // Off `wins` and not off the rope: the rope is a running difference
+      // inside a pull, and the thing worth saying is the pull that closed. The
+      // frame that carries the result is the one that starts the next pull, or
+      // for the last pull the one that ends the round — so this reads the same
+      // either way and the reveal frame is not a special case.
+      //
+      // A pull that ended level moves neither number and is announced as
+      // nothing. There is no side to name, and the house does not narrate a
+      // draw: *Elections achieve nothing* is the round's joke about itself and
+      // it is already the reveal's headline.
+      const seen = tugWinsSeen;
+      if (seen !== null && (t.wins[0] > seen[0] || t.wins[1] > seen[1])) {
+        const won: 0 | 1 = t.wins[0] > seen[0] ? 0 : 1;
+        // No count line: the sentence names the side in words, and the tally
+        // this beat is about is `tugWins` two lines above it on the same panel.
+        said.push(winLine(HOUSE.tugPullWon(won), null));
+      }
+      tugWinsSeen = t.wins;
+    }
+
+    const u = arcade.unseal;
+    if (u) {
+      const now = new Map<string, number>(u.shapes.map((sh) => [sh.shape, sh.unsealed]));
+      // Counts, and never people. `unsealOpened` — *Sealed: false.* — names
+      // nobody, and the line under it is the shape's own counter, which is the
+      // number already printed on that tile and has been all round. So this
+      // beat carries no fact the panel was not carrying a frame earlier; it
+      // only makes the moment legible from across the room.
+      //
+      // There is deliberately no `HOUSE.unsealOpen(n)` to reach for: "Player
+      // 017 opened the tin", on a screen three metres from Player 017, is a
+      // result the Lounge can bet on for a certainty, which is why the fastest
+      // in a shape does not reach this surface before the reveal either — see
+      // `arcadeUnsealFor`. `unsealOrder` is on this view and is not read here.
+      //
+      // Every open and not only a shape's first, which is the other half of
+      // the same argument: the first tin in a shape *is* the +10 the server
+      // withholds, and a beat that fired once per shape would be the screen
+      // marking that moment out for the room. Every open is announced the same
+      // way, so no one of them is flagged as the result.
+      //
+      // Running only. A tin opens when somebody finishes a word, which happens
+      // while the round runs; a count that moves on the reveal frame is the
+      // round being totted up, not a tin coming open, and *NOW OPEN* over the
+      // words would be the screen narrating its own arithmetic.
+      const seen = tinsOpenSeen;
+      const opened =
+        seen === null || arcade.phase !== "running"
+          ? []
+          : u.shapes.filter((sh) => sh.unsealed > (seen.get(sh.shape) ?? 0));
+      if (opened.length > 0) {
+        said.push(
+          winLine(
+            HOUSE.unsealOpened,
+            `NOW OPEN · ${opened
+              .map((sh) => {
+                const face = UNSEAL_FACE[sh.shape];
+                // The shape's name as well as its glyph: ○ and ☆ at this size
+                // are two rings once the codec has had them, and the tiles are
+                // the only other place the room can tell them apart.
+                return `${face.glyph} ${face.name.toUpperCase()} ${sh.unsealed}/${sh.picked}`;
+              })
+              .join("  ·  ")}`,
+          ),
+        );
+      }
+      tinsOpenSeen = now;
+    }
+
+    if (said.length === 0) return;
+    replace(winLog, said);
+    winLog.hidden = false;
+    if (winTimer !== null) clearTimeout(winTimer);
+    // Four seconds, the dwell floor the drain keeps and for the same reason:
+    // video latency is one to two seconds, so a thing shown for two was never
+    // on the screen. A second tin inside the four re-arms the timer rather
+    // than queueing behind it — the newer line is the one the room wants, and
+    // a queue would leave the beat up for the rest of the round.
+    winTimer = setTimeout(() => {
+      winLog.hidden = true;
+      winTimer = null;
     }, 4_000);
   };
 
@@ -1977,6 +2141,7 @@ function sceneArcade(): Scene {
       bridge.hidden = true;
       unseal.hidden = true;
       tug.hidden = true;
+      winLog.hidden = true;
       setText(counts, "");
       light.hidden = true;
       recap.hidden = true;
@@ -2008,6 +2173,10 @@ function sceneArcade(): Scene {
     counts.hidden = grid.hidden;
     paintGrid(state, arcade);
     paintDrains(arcade);
+    // Before the phase branches, like the drain: a pull won on the frame that
+    // ends the round arrives with `phase: "reveal"`, and a beat the reveal
+    // returned early from would be the one result nobody ever sees.
+    paintWinBeat(arcade);
 
     if (arcade.phase === "card" || arcade.phase === "idle") {
       stair.hidden = false;
@@ -2227,6 +2396,8 @@ function sceneArcade(): Scene {
       ticker = null;
       if (drainTimer !== null) clearTimeout(drainTimer);
       drainTimer = null;
+      if (winTimer !== null) clearTimeout(winTimer);
+      winTimer = null;
     },
   };
 }

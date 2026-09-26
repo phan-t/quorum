@@ -1440,6 +1440,68 @@ body {
   line-height: 1.35;
 }
 
+/* ---- the win beat: a tin open, a pull won ---------------------------- *
+ *
+ * The other half of the log, and deliberately not in the drain's clothes.
+ * DESIGN.md spends coral on the 400ms error beat and the trivia reveal and
+ * nowhere else — "the show's red is blood" — so a win is the house speaking:
+ * the round card's `>` prompt, the house purple the card's lines are already
+ * set in, and a single rule down the left where the drain has a box on all
+ * four sides. A room that cannot resolve purple from coral on a compressed
+ * tile still has a prompt, a different silhouette and a different sentence,
+ * which is the rule that nothing here is carried by colour alone.
+ *
+ * In the flow, so the panel above gives up the space for the four seconds the
+ * beat is up and takes it straight back — never over the top of the rope or
+ * the tins, for the reason the whole file keeps repeating.
+ *
+ * Nothing animates: the beat appears, holds its four seconds and cuts, so
+ * `prefers-reduced-motion` has nothing here to reduce. The stylesheet's
+ * opening `* { transition: none }` already sees to the rest.
+ *
+ * Contrast on --ground #0a0a0f: --arc-house (--terraform-ink #a06ae6) 5.36:1
+ * for the sentence, --muted #8b8a9c 5.84:1 for the counts under it.
+ */
+
+.s-win-log {
+  position: relative;
+  z-index: 2;
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  gap: 0.8vh;
+  margin-top: 0.6vh;
+  padding: 0.6rem 0 0.6rem 1.2rem;
+  border-left: 8px solid var(--arc-house);
+  background: #0a0a0f;
+}
+.s-win-log[hidden] {
+  display: none;
+}
+/* One beat: the sentence and, when there is a number in it, the count. */
+.s-win-beat {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3vh;
+}
+.s-win-said {
+  margin: 0;
+  display: flex;
+  gap: 0.6rem;
+  color: var(--arc-house);
+  font-size: 30px;
+  line-height: 1.35;
+}
+/* The counts: the number that just moved, in the same register as the panel's
+   own head line above it. Muted rather than coloured — small coloured text is
+   the one thing the codec destroys — and the words in it carry the meaning. */
+.s-win-count {
+  margin: 0;
+  color: var(--muted);
+  font-size: clamp(16px, 1.3vw, 26px);
+  letter-spacing: 0.12em;
+}
+
 /* ---- the light: the screen *is* the light ---------------------------- */
 
 .s-light {
