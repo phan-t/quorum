@@ -25,6 +25,7 @@ import WebSocket from "ws";
 import { newSession } from "../engine/reducer.ts";
 import type { Event, ParticipantId, Question } from "../engine/types.ts";
 import { DEFAULT_ACTIVITIES, type SessionRuntime } from "./runtime.ts";
+import { HELLO_FAIL_LIMIT } from "./limits.ts";
 
 const ADMIN_KEY = "test-admin-key-" + Math.random().toString(36).slice(2);
 process.env["PORT"] = "0";
@@ -852,19 +853,46 @@ describe("connection and identity", () => {
     );
   });
 
-  it("hello is rate limited at 10 per minute per IP", async () => {
+  /**
+   * This used to assert the eleventh hello from one address was refused,
+   * which is what the service did and was wrong: a team joining from one
+   * office shares a public IP, so the limit refused the room rather than an
+   * attacker. See limits.ts. The arithmetic is pinned in hello-limit.test.ts;
+   * what matters here is that it holds over a real socket.
+   */
+  it("lets a room join from one address, and shuts out a bad code quickly", async () => {
     const s = makeSession("running");
     const ip = "203.0.113.77";
     const conns: Conn[] = [];
-    for (let i = 1; i <= 10; i += 1) {
+    // Well past the old ceiling of ten, from one address, all admitted.
+    for (let i = 1; i <= 20; i += 1) {
       const { conn, reply } = await hello(s.joinCode, `Bot${i}`, undefined, ip);
       conns.push(conn);
-      assert.equal(reply.msg.t, "welcome", `hello #${i} from one IP should be within the limit`);
+      assert.equal(reply.msg.t, "welcome", `hello #${i} from one address should be admitted`);
       await conn.expect("state");
     }
-    const { conn, reply } = await hello(s.joinCode, "Bot11", undefined, ip);
-    assert.equal(reply.msg.t, "refused", "the eleventh hello in a minute should be refused");
-    await conn.close();
+
+    // A different address, failing: locked out after a handful, while the
+    // room above stays connected.
+    const badIp = "203.0.113.99";
+    for (let i = 1; i <= HELLO_FAIL_LIMIT; i += 1) {
+      const { conn, reply } = await hello("hvs.notacodeatall", `Bad${i}`, undefined, badIp);
+      assert.equal(reply.msg.t, "refused", `bad code #${i} should be a plain refusal`);
+      await conn.close();
+    }
+    const { conn: after, reply: afterReply } = await hello(
+      s.joinCode,
+      "BadLast",
+      undefined,
+      badIp,
+    );
+    assert.equal(afterReply.msg.t, "refused", "a failing address is shut out");
+    assert.equal(
+      (afterReply.msg as { reason?: string }).reason,
+      "rate_limited",
+      "and shut out for the rate limit, not the code",
+    );
+    await after.close();
     for (const c of conns) await c.close();
   });
 });

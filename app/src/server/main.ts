@@ -33,6 +33,14 @@ import { describe as describeError, openStore } from "./store/index.ts";
 import { assetKeyProblem, MAX_ASSET_BYTES, MAX_PROMO_CHARS } from "./store/types.ts";
 import type { StoredEvent } from "./store/types.ts";
 import { recoverSessions, rehydrate } from "./recovery.ts";
+import {
+  count,
+  HELLO_FAIL_LIMIT,
+  HELLO_FLOOD_LIMIT,
+  HELLO_WINDOW_MS,
+  note,
+  rateLimited,
+} from "./limits.ts";
 import { recruitmentRound } from "../arcade/recruitment.ts";
 import { glassBridgeRound } from "../arcade/glass-bridge.ts";
 import { unsealRound } from "../arcade/unseal.ts";
@@ -160,14 +168,7 @@ async function serveFile(res: ServerResponse, rel: string): Promise<boolean> {
 /* Rate limiting — crude on purpose                                    */
 /* ------------------------------------------------------------------ */
 
-const hits = new Map<string, number[]>();
-function rateLimited(key: string, limit: number, windowMs: number): boolean {
-  const now = Date.now();
-  const recent = (hits.get(key) ?? []).filter((t) => now - t < windowMs);
-  recent.push(now);
-  hits.set(key, recent);
-  return recent.length > limit;
-}
+// See ./limits.ts — it lives there so it can be tested without a server.
 
 /* ------------------------------------------------------------------ */
 /* HTTP                                                                */
@@ -1143,10 +1144,22 @@ wss.on("connection", (socket: WebSocket, req: IncomingMessage) => {
 
     if (msg.t === "hello") {
       if (joined) return;
-      if (rateLimited(`hello:${ip}`, 10, 60_000)) {
+      // The flood ceiling, on every attempt, so a hello costs something even
+      // before its code is read.
+      if (rateLimited(`hello:${ip}`, HELLO_FLOOD_LIMIT, HELLO_WINDOW_MS)) {
+        return refuseBare(socket, "rate_limited", "Too many attempts. Wait a minute.");
+      }
+      // The failure ceiling, checked without being recorded: this attempt has
+      // not failed yet, and counting it here would charge a valid join for the
+      // sins of the ones before it.
+      if (count(`helloFail:${ip}`, HELLO_WINDOW_MS) >= HELLO_FAIL_LIMIT) {
         return refuseBare(socket, "rate_limited", "Too many attempts. Wait a minute.");
       }
       joined = handleHello(socket, msg, now);
+      // `handleHello` returns null when it has already refused — a bad code, a
+      // bad token, a taken nickname. That is the signal an attacker produces
+      // and a room does not.
+      if (!joined) note(`helloFail:${ip}`, HELLO_WINDOW_MS);
       if (joined) {
         clearTimeout(helloTimer);
         const { runtime, client } = joined;
