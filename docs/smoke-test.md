@@ -15,13 +15,27 @@ cd app && QUORUM_STORE=memory QUORUM_ADMIN_KEY=localdev PORT=3000 \
 QUORUM_URL=http://localhost:3000 QUORUM_ADMIN_KEY=localdev \
   EVENT=2026-03-12-example-offsite node app/scripts/stage-event.mjs
 
-cd app && npm run swarm -- 9 --url http://localhost:3000 \
+cd app && npm run swarm -- 6 --url http://localhost:3000 \
   --code hvs.xxxx --host-token XXXX
+
+# a whole event: host bot, Desktop, a late joiner, a reconnect
+npm run swarm -- 6 --url http://localhost:3000 \
+  --code hvs.xxxx --host-token XXXX --screen-token YYYY \
+  --late 1 --churn 1 --questions 3
 
 # against the deployed service, before an event
 make up && make stage EVENT=<event>
 npm run swarm -- 60 --url https://quorum.example.com --code … --host-token …
 ```
+
+| Flag | |
+| --- | --- |
+| `--questions N` | how many trivia questions to play (default 5) |
+| `--screen-token` | connect a Desktop and measure it |
+| `--late N` | N bots arrive after the session has started |
+| `--churn N` | N bots drop and rejoin on their token |
+| `--stagger MS` | space the joins, to get past the join limit |
+| `--seed N` | fixes each bot's choices, not the wall clock |
 
 ## Why it exists
 

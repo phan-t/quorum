@@ -42,6 +42,19 @@ interface Opts {
    * get a gameplay run past that; leave it at zero to measure the limit.
    */
   readonly staggerMs: number;
+  /** How many trivia questions to play. The real set is forty. */
+  readonly questions: number;
+  /** The Desktop. Its frames are the heaviest and were never measured. */
+  readonly screenToken: string | null;
+  /** Bots that join after the session has started, as people do. */
+  readonly lateCount: number;
+  /** Bots that drop and come back on their rejoin token, as phones do. */
+  readonly churnCount: number;
+}
+
+/** A progress line, so a long run is not silent. */
+function log(message: string): void {
+  process.stdout.write(`${message}\n`);
 }
 
 function die(message: string): never {
@@ -73,10 +86,21 @@ function parseArgs(argv: readonly string[]): Opts {
   if (!Number.isFinite(seed)) die("--seed must be a number, or the word random.");
   const staggerMs = Number(flag("stagger") ?? 0);
   if (!Number.isFinite(staggerMs) || staggerMs < 0) die("--stagger must be a number of milliseconds.");
+  const questions = Number(flag("questions") ?? 5);
+  if (!Number.isInteger(questions) || questions < 0) die("--questions must be a whole number.");
+  const lateCount = Number(flag("late") ?? 0);
+  const churnCount = Number(flag("churn") ?? 0);
+  if (!Number.isInteger(lateCount) || lateCount < 0) die("--late must be a whole number.");
+  if (!Number.isInteger(churnCount) || churnCount < 0) die("--churn must be a whole number.");
+  if (lateCount + churnCount > count) die("--late plus --churn cannot exceed the bot count.");
   return {
     count, url, code, hostToken, seed,
     joinOnly: argv.includes("--join-only"),
     staggerMs,
+    questions,
+    screenToken: flag("screen-token") ?? null,
+    lateCount,
+    churnCount,
   };
 }
 
@@ -145,6 +169,7 @@ class Conn {
   sent = 0;
   refusedCmds: string[] = [];
   closedWith: number | null = null;
+  reconnects = 0;
   error: string | null = null;
 
   constructor(label: string) {
@@ -521,94 +546,182 @@ function sleep(ms: number): Promise<void> {
 }
 
 /**
- * Walk a whole session from the host's seat.
+ * The host, as a bot rather than a script.
  *
- * Deliberately the same frames the console sends. If the protocol changes
- * under this, the swarm breaks the way a console would, which is the point:
- * a test-only driving endpoint would keep passing while the real console
- * stopped working.
+ * The first version was a list of commands with sleeps between them, which
+ * tests the server's ability to accept commands in an order somebody wrote
+ * down. A real host does not do that: they watch the room and press when the
+ * room is ready. So this waits on state — everyone has answered, the round
+ * has ended itself, the reveal is up — and presses then.
+ *
+ * That difference is not cosmetic. Sleeping past a round that ended early
+ * makes the run longer than the event; sleeping short of one makes the host
+ * press into the wrong phase and be refused, which is how the first version
+ * produced two spurious refusals. Neither is what a rehearsal is for.
  */
-async function runOfShow(host: Conn, bots: readonly Bot[], opts: Opts): Promise<void> {
-  const arcade = (): RenderState["arcade"] => host.state?.arcade;
+class HostBot {
+  readonly conn: Conn;
+  private readonly opts: Opts;
+
+  constructor(conn: Conn, opts: Opts) {
+    this.conn = conn;
+    this.opts = opts;
+  }
+
+  private get state(): RenderState | null {
+    return this.conn.state;
+  }
+
+  private async press(name: HostCommand, note: string, settleMs = 700): Promise<void> {
+    const cid = `host-${note}-${this.conn.sent}`;
+    this.conn.send({ t: "host.cmd", cid, cmd: name });
+    await sleep(settleMs);
+  }
+
+  /** Wait for the room, not the clock. */
+  private async until(ready: () => boolean, budgetMs: number, note: string): Promise<boolean> {
+    await waitFor(ready, budgetMs);
+    const ok = ready();
+    if (!ok) log(`  host: gave up waiting for ${note} after ${budgetMs / 1000}s`);
+    return ok;
+  }
 
   /**
-   * Wait for a round to finish rather than sleeping a guess at its length.
+   * Open the lobby, before anybody tries to join.
    *
-   * Arcade rounds end themselves on their own timer, so a fixed sleep either
-   * cuts a round short or presses `arcade.end` on a round that already ended
-   * — and the engine refuses the second one. Waiting on the phase is what a
-   * host does, and it makes the run honest about how long a round took.
+   * Separate from `run` because ordering is load-bearing: a staged session is
+   * `draft`, a draft refuses every join with `not_joinable`, and a host that
+   * opens the lobby as its first act of the run has already let the whole
+   * room bounce off the door.
    */
-  async function untilRoundOver(budgetMs: number): Promise<void> {
-    await waitFor(() => arcade()?.phase !== "running", budgetMs);
-    if (arcade()?.phase === "running") {
-      // It overran its own clock; end it by hand, which is also a finding.
-      await cmd(host, { name: "arcade.end" }, 1_200, "end-overrun");
-    }
+  async openLobby(): Promise<void> {
+    await this.until(() => this.state !== null, 5_000, "the first state frame");
+    if (this.state === null) die("  the host socket never received a state frame.");
+    if (this.state.phase === "draft") await this.press({ name: "open" }, "open", 1_200);
   }
 
-  await sleep(2_000); // let the joins land
-  if (opts.joinOnly) return;
+  async run(bots: readonly Bot[]): Promise<void> {
+    // Wait for the room to arrive, the way a host watches the head count
+    // stop climbing rather than counting to a number.
+    await this.until(
+      () => (this.state?.roster.length ?? 0) >= Math.min(bots.length, this.opts.count),
+      15_000,
+      "the room to arrive",
+    );
+    if (this.opts.joinOnly) return;
 
-  await cmd(host, { name: "start" }, 1_000, "start");
+    await this.press({ name: "start" }, "start", 900);
 
-  const questions = host.state?.trivia?.of ?? 0;
-  if (questions > 0) {
-    await cmd(host, { name: "segment", kind: "trivia" }, 800, "seg-trivia");
-    // Three questions exercises open/close/reveal/next without making a smoke
-    // test take twenty minutes.
-    const play = Math.min(3, questions);
+    // A holding card while the off-platform thing happens. Every real run of
+    // show has one, and it is the segment the phone sits on longest.
+    await this.press({ name: "holding", title: "Tabletop Exercise", line: "Back shortly" }, "holding");
+    await this.press({ name: "segment", kind: "holding" }, "seg-holding", 1_500);
+
+    await this.trivia();
+    await this.arcade();
+    await this.standings(bots);
+    await this.sendoff();
+
+    await this.press({ name: "segment", kind: "final" }, "seg-final", 1_500);
+  }
+
+  private async trivia(): Promise<void> {
+    const loaded = this.state?.trivia?.of ?? 0;
+    if (loaded === 0) return;
+    await this.press({ name: "segment", kind: "trivia" }, "seg-trivia", 900);
+
+    const play = Math.min(this.opts.questions, loaded);
     for (let i = 0; i < play; i += 1) {
-      await cmd(host, { name: "trivia.open", suddenDeath: false }, 500, `q${i}-open`);
-      // Close when the room has answered, or when the question's own timer
-      // has run — whichever comes first, which is the console's affordance.
-      await waitFor(() => host.state?.trivia?.phase !== "open", 20_000);
-      if (host.state?.trivia?.phase === "open") {
-        await cmd(host, { name: "trivia.close" }, 600, `q${i}-close`);
+      await this.press({ name: "trivia.open", suddenDeath: false }, `q${i}-open`, 400);
+
+      // Close when everyone who could answer has, which is the console's
+      // affordance and what a host actually watches for. Otherwise let the
+      // question's own timer run out.
+      const everyone = (): boolean => {
+        const t = this.state?.trivia;
+        if (!t || t.phase !== "open") return true;
+        const answered = t.answered ?? 0;
+        const eligible = t.eligible ?? 0;
+        return eligible > 0 && answered >= eligible;
+      };
+      await this.until(everyone, 25_000, `question ${i + 1} to be answered`);
+      if (this.state?.trivia?.phase === "open") {
+        await this.press({ name: "trivia.close" }, `q${i}-close`, 600);
       }
-      await cmd(host, { name: "trivia.reveal" }, 1_200, `q${i}-reveal`);
-      if (i + 1 < play) await cmd(host, { name: "trivia.next" }, 700, `q${i}-next`);
+      await this.press({ name: "trivia.reveal" }, `q${i}-reveal`, 1_400);
+      if (i + 1 < play) await this.press({ name: "trivia.next" }, `q${i}-next`, 700);
     }
   }
 
-  await cmd(host, { name: "segment", kind: "arcade" }, 800, "seg-arcade");
-  await cmd(host, { name: "arcade.enter" }, 1_500, "enter");
+  /**
+   * Every round in the plan, not a sample.
+   *
+   * The rounds are listed here rather than read from the staged setup because
+   * the setup is the console's own blob and the server never looks inside it;
+   * a swarm that parsed it would be asserting a shape nothing else does. What
+   * matters for a smoke test is that every round's code runs, so it runs all
+   * of them.
+   */
+  private async arcade(): Promise<void> {
+    await this.press({ name: "segment", kind: "arcade" }, "seg-arcade", 900);
+    await this.press({ name: "arcade.enter" }, "enter", 1_500);
 
-  await cmd(host, { name: "arcade.round", kind: "recruitment", secondsPerItem: 6 }, 900, "r-rec");
-  await cmd(host, { name: "arcade.begin" }, 600, "rec-begin");
-  await untilRoundOver(70_000);
-  await cmd(host, { name: "arcade.reveal" }, 1_500, "rec-reveal");
-  // No "next round" command exists, and `arcade.next` is Recruitment's next
-  // *emoji* — pressing it here is refused with `wrong_round_phase`. Moving on
-  // is choosing the next round, which is what the console does.
+    const rounds: { round: HostCommand; note: string; budgetMs: number }[] = [
+      { round: { name: "arcade.round", kind: "recruitment", secondsPerItem: 6 }, note: "rec", budgetMs: 70_000 },
+      { round: { name: "arcade.round", kind: "plan_apply", target: 120, seconds: 20 }, note: "pa", budgetMs: 45_000 },
+      { round: { name: "arcade.round", kind: "unseal", seconds: 20 }, note: "unseal", budgetMs: 45_000 },
+      { round: { name: "arcade.round", kind: "tug_of_raft", pulls: 2, pullSeconds: 12, bpm: 100 }, note: "tug", budgetMs: 60_000 },
+      { round: { name: "arcade.round", kind: "glass_bridge", waveSeconds: [8, 7, 6] }, note: "glass", budgetMs: 90_000 },
+    ];
 
-  await cmd(host, { name: "arcade.round", kind: "plan_apply", target: 120, seconds: 20 }, 900, "r-pa");
-  await cmd(host, { name: "arcade.begin" }, 600, "pa-begin");
-  await untilRoundOver(45_000);
-  await cmd(host, { name: "arcade.reveal" }, 1_500, "pa-reveal");
+    for (const r of rounds) {
+      await this.press(r.round, `r-${r.note}`, 900);
+      await this.press({ name: "arcade.begin" }, `${r.note}-begin`, 600);
+      const over = await this.until(
+        () => this.state?.arcade?.phase !== "running",
+        r.budgetMs,
+        `the ${r.note} round to end`,
+      );
+      // A round that outran its own clock is a finding, not a reason to hang.
+      if (!over) await this.press({ name: "arcade.end" }, `${r.note}-end-overrun`, 1_200);
+      await this.press({ name: "arcade.reveal" }, `${r.note}-reveal`, 1_500);
+    }
+  }
 
-  // Unseal and the Bridge, so the bot code for them actually runs. Without
-  // these the shape/letter/step branches are dead code that typechecks: they
-  // were written against the protocol and had never once executed.
-  await cmd(host, { name: "arcade.round", kind: "unseal", seconds: 20 }, 900, "r-unseal");
-  await cmd(host, { name: "arcade.begin" }, 600, "unseal-begin");
-  await untilRoundOver(45_000);
-  await cmd(host, { name: "arcade.reveal" }, 1_500, "unseal-reveal");
+  /** Seal, grant a couple of Spot Awards, then reveal — the real ending. */
+  private async standings(bots: readonly Bot[]): Promise<void> {
+    await this.press({ name: "segment", kind: "standings" }, "seg-standings", 900);
+    await this.press({ name: "seal", state: "sealed" }, "seal", 900);
 
-  await cmd(
-    host,
-    { name: "arcade.round", kind: "glass_bridge", waveSeconds: [8, 7, 6] },
-    900,
-    "r-glass",
-  );
-  await cmd(host, { name: "arcade.begin" }, 600, "glass-begin");
-  await untilRoundOver(90_000);
-  await cmd(host, { name: "arcade.reveal" }, 1_500, "glass-reveal");
+    const withPid = bots.map((b) => b.conn.pid).filter((pid): pid is string => pid !== null);
+    const activity = this.state?.activities[0]?.id;
+    if (activity !== undefined) {
+      for (const pid of withPid.slice(0, 2)) {
+        await this.press(
+          { name: "spot.grant", pid, activityId: activity, reason: "best recovery of the afternoon" },
+          `spot-${pid.slice(0, 6)}`,
+          700,
+        );
+      }
+    }
+    await this.press({ name: "seal", state: "revealed" }, "reveal", 2_000);
+  }
 
-  await cmd(host, { name: "segment", kind: "standings" }, 1_000, "seg-standings");
-  await cmd(host, { name: "seal", state: "revealed" }, 1_500, "reveal");
-
-  void bots;
+  /** The send-off, if the event staged one. Walks it to the end. */
+  private async sendoff(): Promise<void> {
+    if (this.state?.sendoff === undefined) return;
+    await this.press({ name: "segment", kind: "sendoff" }, "seg-sendoff", 1_200);
+    // Auto, so the run does not depend on this bot pressing sixty times, and
+    // fast, so a smoke test is not eight minutes of photographs.
+    await this.press({ name: "sendoff.auto", auto: true }, "sendoff-auto", 600);
+    await this.press({ name: "sendoff.speed", seconds: 2 }, "sendoff-speed", 600);
+    await this.press({ name: "sendoff.next" }, "sendoff-start", 1_000);
+    await this.until(
+      () => this.state?.sendoff?.phase === "done" || this.state?.sendoff?.phase === "closing",
+      60_000,
+      "the send-off to finish",
+    );
+  }
 }
 
 /* ------------------------------------------------------------------ */
@@ -618,7 +731,13 @@ async function runOfShow(host: Conn, bots: readonly Bot[], opts: Opts): Promise<
 const pad = (s: string, n: number): string => s.padEnd(n);
 const kb = (n: number): string => `${(n / 1024).toFixed(1)}KB`;
 
-function report(bots: readonly Bot[], host: Conn, opts: Opts, elapsedMs: number): number {
+function report(
+  bots: readonly Bot[],
+  host: Conn,
+  screen: Conn | null,
+  opts: Opts,
+  elapsedMs: number,
+): number {
   const conns = bots.map((b) => b.conn);
   const joined = conns.filter((c) => c.joinedAt !== null);
   const refused = conns.filter((c) => c.refused !== null);
@@ -675,6 +794,11 @@ function report(bots: readonly Bot[], host: Conn, opts: Opts, elapsedMs: number)
     line(`    largest frame ${kb(Math.max(...conns.map((c) => c.largestFrame)))}`);
   }
   line(`    host socket  ${host.frames} frames · ${kb(host.bytes)} · largest ${kb(host.largestFrame)}`);
+  if (screen !== null) {
+    line(`    Desktop      ${screen.frames} frames · ${kb(screen.bytes)} · largest ${kb(screen.largestFrame)}`);
+  } else {
+    line(`    Desktop      not connected — pass --screen-token to measure the heaviest surface`);
+  }
   line();
 
   line("  Play");
@@ -694,6 +818,16 @@ function report(bots: readonly Bot[], host: Conn, opts: Opts, elapsedMs: number)
   line(`    host silent   ${host.pending.size}   (a command with no reply at all)`);
   for (const r of host.refusedCmds.slice(0, 6)) line(`      ${r}`);
   line();
+
+  const reconnected = conns.filter((c) => c.reconnects > 0);
+  if (reconnected.length > 0) {
+    line("  Reconnects");
+    line(`    dropped and came back  ${reconnected.length}`);
+    line(
+      `    still connected after   ${reconnected.filter((c) => c.joinedAt !== null && c.refused === null).length}`,
+    );
+    line();
+  }
 
   line("  Where everyone ended");
   for (const [seg, n] of [...segments].sort((a, b) => b[1] - a[1])) {
@@ -764,6 +898,14 @@ function report(bots: readonly Bot[], host: Conn, opts: Opts, elapsedMs: number)
           : `${host.pending.size} host command(s) got no reply at all`,
     },
     {
+      ok: reconnected.every((c) => c.refused === null),
+      text: reconnected.length === 0
+        ? "no bot was asked to reconnect"
+        : reconnected.every((c) => c.refused === null)
+          ? `all ${reconnected.length} bot(s) that dropped came back as themselves`
+          : `${reconnected.filter((c) => c.refused !== null).length} bot(s) could not rejoin`,
+    },
+    {
       ok: conns.every((c) => c.error === null),
       text: conns.every((c) => c.error === null)
         ? "no socket errored"
@@ -799,56 +941,121 @@ async function main(): Promise<void> {
   const wsUrl = socketUrl(opts.url);
   const started = Date.now();
 
-  process.stdout.write(
-    `  opening ${opts.count} sockets against ${wsUrl}\n`,
-  );
-
-  const host = new Conn("host");
-  await connect(wsUrl, host, { t: "hello", role: "host", hostToken: opts.hostToken }, (s) => {
-    host.state = s;
-  });
-  if (host.joinedAt === null) {
-    die(`  the host socket did not connect: ${host.refused ?? host.error ?? "silent"}`);
+  // Every socket that says hello counts against the same bucket — the bots,
+  // the host, the Desktop, and every reconnect and late arrival. A run that
+  // cannot fit inside ten a minute will report refusals that are the limit,
+  // not the server failing, and it is better to say so before the run than to
+  // explain it in the report afterwards.
+  const hellos = opts.count + 1 + (opts.screenToken !== null ? 1 : 0) + opts.churnCount;
+  log(`  ${opts.count} bots against ${wsUrl}`);
+  if (opts.staggerMs === 0 && hellos > 10) {
+    log(
+      `  warning: this run needs ${hellos} hellos (bots + host${opts.screenToken !== null ? " + Desktop" : ""}${opts.churnCount > 0 ? " + reconnects" : ""}) ` +
+        `and the server admits 10 a minute per IP.`,
+    );
+    log(`           expect refusals. Use --stagger, or ${10 - (hellos - opts.count)} bots or fewer.`);
   }
 
-  // Open the lobby first. A staged session is `draft`, and a draft refuses
-  // every join with `not_joinable` — so connecting the bots before this
-  // measures the refusal path rather than the join path.
-  //
-  // The wait is the point: `welcome` resolves the connect, and the first
-  // `state` follows it. Reading `host.state` straight after connecting finds
-  // null, decides the session is already open, and produces a run where every
-  // bot is refused — which is how this was first written.
-  await waitFor(() => host.state !== null, 5_000);
-  if (host.state === null) die("  the host socket never received a state frame.");
-  if (host.state.phase === "draft") await cmd(host, { name: "open" }, 1_200, "open");
+  const hostConn = new Conn("host");
+  await connect(wsUrl, hostConn, { t: "hello", role: "host", hostToken: opts.hostToken }, (st) => {
+    hostConn.state = st;
+  });
+  if (hostConn.joinedAt === null) {
+    die(`  the host socket did not connect: ${hostConn.refused ?? hostConn.error ?? "silent"}`);
+  }
+
+  // The Desktop, when a token is given. It is the surface with the heaviest
+  // frames — the host console and the big screen both receive a full state on
+  // every roster change — and until now nothing measured it.
+  let screen: Conn | null = null;
+  if (opts.screenToken !== null) {
+    screen = new Conn("screen");
+    await connect(
+      wsUrl,
+      screen,
+      { t: "hello", role: "screen", screenToken: opts.screenToken },
+      (st) => {
+        if (screen !== null) screen.state = st;
+      },
+    );
+    if (screen.joinedAt === null) log(`  the Desktop did not connect: ${screen.refused ?? screen.error ?? "silent"}`);
+  }
 
   const bots = Array.from({ length: opts.count }, (_, i) => {
-    const name = `${NAMES[i % NAMES.length]}${i >= NAMES.length ? `-${Math.floor(i / NAMES.length)}` : ""}`;
-    return new Bot(i, name, opts.seed);
+    const suffix = i >= NAMES.length ? `-${Math.floor(i / NAMES.length)}` : "";
+    return new Bot(i, `${NAMES[i % NAMES.length]}${suffix}`, opts.seed);
   });
 
-  // All at once by default, deliberately: a QR code on a screen produces a
-  // join storm, and staggering by default would test a thing that does not
-  // happen. `--stagger` exists because the server admits ten hellos a minute
-  // per IP and every bot here shares one.
-  const joins = bots.map(async (b, i) => {
-    if (opts.staggerMs > 0) await sleep(i * opts.staggerMs);
-    return connect(
+  const joinBot = async (b: Bot): Promise<void> => {
+    await connect(
       wsUrl,
       b.conn,
-      { t: "hello", role: "participant", joinCode: opts.code, nickname: b.nickname },
-      (s) => b.react(s),
+      {
+        t: "hello",
+        role: "participant",
+        joinCode: opts.code,
+        nickname: b.nickname,
+        ...(b.conn.rejoinToken !== null ? { rejoinToken: b.conn.rejoinToken } : {}),
+      },
+      (st) => b.react(st),
     );
-  });
-  await Promise.all(joins);
+  };
 
-  await runOfShow(host, bots, opts);
-  await sleep(2_000); // let the last acks and broadcasts land
+  const host = new HostBot(hostConn, opts);
+  await host.openLobby();
 
-  const code = report(bots, host, opts, Date.now() - started);
+  // Everyone but the late arrivals, all at once: a QR code on a screen makes
+  // a storm, and staggering by default would test something that does not
+  // happen. `--stagger` exists because ten hellos a minute per IP is the cap.
+  const onTime = bots.slice(0, bots.length - opts.lateCount);
+  const late = bots.slice(bots.length - opts.lateCount);
+  await Promise.all(
+    onTime.map(async (b, i) => {
+      if (opts.staggerMs > 0) await sleep(i * opts.staggerMs);
+      return joinBot(b);
+    }),
+  );
+
+  const show = host.run(bots);
+
+  // People who wander in after it has started. They get Bench Credit rather
+  // than a zero, which is a rule nothing has ever exercised over a socket.
+  if (late.length > 0) {
+    void (async () => {
+      await sleep(12_000);
+      log(`  ${late.length} late joiner(s) arriving`);
+      for (const b of late) {
+        await joinBot(b);
+        await sleep(600);
+      }
+    })();
+  }
+
+  // Phones that drop and come back. `rejoinToken` is what restores the same
+  // participant, and until now the swarm captured it and never used it — so
+  // the reconnect path, which every real event hits, was untested.
+  if (opts.churnCount > 0) {
+    void (async () => {
+      await sleep(30_000);
+      const victims = bots.slice(0, opts.churnCount);
+      log(`  ${victims.length} bot(s) dropping and reconnecting`);
+      for (const b of victims) {
+        b.conn.ws?.close();
+        b.conn.reconnects += 1;
+        await sleep(1_500);
+        await joinBot(b);
+        await sleep(400);
+      }
+    })();
+  }
+
+  await show;
+  await sleep(2_500); // let the last acks and broadcasts land
+
+  const code = report(bots, hostConn, screen, opts, Date.now() - started);
   for (const b of bots) b.conn.ws?.close();
-  host.ws?.close();
+  hostConn.ws?.close();
+  screen?.ws?.close();
   process.exit(code);
 }
 
