@@ -241,7 +241,19 @@ type Posture = "idle" | "actionable" | "betting" | "resting";
 class Bot {
   readonly conn: Conn;
   private readonly rand: () => number;
+  /** Decisions taken, which guards scheduling: one answer per question. */
   private readonly acted = new Set<string>();
+  /**
+   * Frames actually sent, which is what posture reads.
+   *
+   * Not the same set, and the difference produced a false finding. A bot
+   * decides to answer the instant an item opens and then sits in a think
+   * timer of up to nine seconds. Reading `acted` made it look idle for the
+   * whole item — 120 seconds of "nothing to press" across a Recruitment round
+   * the bots in fact answered six times. A person who has not answered yet
+   * still has something to press, and so does a bot.
+   */
+  private readonly done = new Set<string>();
   private seq = 0;
 
   /* ---- experience, sampled ---- */
@@ -252,6 +264,14 @@ class Bot {
   private idleRunMs = 0;
   /** Play frames sent, per arcade round. A round with none is a round sat out. */
   readonly actionsByRound = new Map<number, number>();
+  /**
+   * Idle milliseconds, by where they were spent.
+   *
+   * Without this the report can say a bot waited two minutes and not where,
+   * which is the first thing anybody asks and the only part that tells you
+   * what to change.
+   */
+  readonly idleWhere = new Map<string, number>();
 
   readonly index: number;
   readonly nickname: string;
@@ -296,7 +316,7 @@ class Bot {
     if (st.segment === "trivia") {
       const t = st.trivia;
       if (!t || t.phase !== "open") return "resting";
-      return this.acted.has(`q${t.index}`) ? "idle" : "actionable";
+      return this.done.has(`q${t.index}`) ? "idle" : "actionable";
     }
     if (st.segment !== "arcade") return "resting";
     const a = st.arcade;
@@ -310,7 +330,7 @@ class Bot {
       case "recruitment": {
         const at = a.recruitment?.at;
         if (at === undefined) return "resting";
-        return this.acted.has(`rec${a.roundIndex}-${at}`) ? "idle" : "actionable";
+        return this.done.has(`rec${a.roundIndex}-${at}`) ? "idle" : "actionable";
       }
       case "plan_apply":
       case "tug_of_raft":
@@ -336,6 +356,16 @@ class Bot {
     }
   }
 
+  /** Where the bot is, in words the report can group by. */
+  private where(): string {
+    const st = this.conn.state;
+    if (!st) return "not connected";
+    if (st.segment !== "arcade") return st.segment;
+    const a = st.arcade;
+    if (!a || a.round === null) return "arcade (between rounds)";
+    return `${a.round} (round ${a.roundIndex})`;
+  }
+
   /** Called on a fixed clock, so the number does not depend on broadcasts. */
   sample(elapsedMs: number): void {
     const p = this.posture_();
@@ -343,6 +373,8 @@ class Bot {
     if (p === "idle") {
       this.idleRunMs += elapsedMs;
       this.longestIdleMs = Math.max(this.longestIdleMs, this.idleRunMs);
+      const k = this.where();
+      this.idleWhere.set(k, (this.idleWhere.get(k) ?? 0) + elapsedMs);
     } else {
       this.idleRunMs = 0;
     }
@@ -377,7 +409,12 @@ class Bot {
     // One answer per question, and only while it is open. A few bots never
     // answer, which is a real thing a room does and the thing that makes
     // "14 of 20 answered" a number worth showing.
-    if (this.rand() < 0.08) this.acted.add(`q${t.index}`);
+    // A few never answer at all, which a room does. They are idle from here,
+    // so the decision goes into both sets.
+    if (this.rand() < 0.08) {
+      this.acted.add(`q${t.index}`);
+      this.done.add(`q${t.index}`);
+    }
     if (!this.once(`q${t.index}`)) return;
     const choice = Math.floor(this.rand() * Math.max(1, t.answers.length));
     this.later(this.think(400, 6_000), () => {
@@ -385,6 +422,7 @@ class Bot {
       // The question may have closed while this bot was thinking. Sending
       // anyway is what a real phone does, and the refusal is worth counting.
       if (now?.index !== t.index) return;
+      this.done.add(`q${t.index}`);
       this.act({ t: "trivia.answer", cid: this.cid(), index: t.index, choice });
     });
   }
@@ -431,6 +469,7 @@ class Bot {
     // is also what a room does.
     const guess = PRODUCTS[Math.floor(this.rand() * PRODUCTS.length)] ?? "terraform";
     this.later(this.think(800, 9_000), () => {
+      this.done.add(`rec${round}-${r.at}`);
       this.act({ t: "arcade.answer", cid: this.cid(), item: r.at, answer: guess });
     });
   }
@@ -1123,6 +1162,27 @@ function report(
         `    round ${r}        ${percentile(acts, 50)} actions each (p50)` +
           (satOut > 0 ? ` · ${satOut} bot(s) pressed nothing at all` : ""),
       );
+    }
+
+    // Where the waiting happened. A run that says somebody waited two minutes
+    // and not where is a report that raises a question and answers none.
+    const where = new Map<string, number[]>();
+    for (const b of played) {
+      for (const [k, ms] of b.idleWhere) {
+        const seen = where.get(k) ?? [];
+        seen.push(ms);
+        where.set(k, seen);
+      }
+    }
+    const ranked = [...where.entries()]
+      .map(([k, all]) => ({ k, median: percentile(all, 50) }))
+      .filter((e) => e.median > 0)
+      .sort((a, b) => b.median - a.median);
+    if (ranked.length > 0) {
+      line("    waiting happened in");
+      for (const e of ranked.slice(0, 5)) {
+        line(`      ${pad(e.k, 26)} ${secs(e.median)} (p50)`);
+      }
     }
     line();
   }
