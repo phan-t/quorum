@@ -1363,12 +1363,14 @@ export function reduce(
         streakBonus: 0,
       };
 
+      const answers = { ...trivia.answers, [event.pid]: answer };
+
       return applied(
         {
           ...state,
           trivia: {
             ...trivia,
-            answers: { ...trivia.answers, [event.pid]: answer },
+            answers,
             // First correct answer wins, and only the first: a later correct
             // tap does not overwrite the winner.
             suddenDeathWinner:
@@ -1377,11 +1379,18 @@ export function reduce(
                 : trivia.suddenDeathWinner,
           },
         },
-        // Not `to: "all"`. The answer count belongs on the host console and
-        // the big screen; the only participant who learns anything is the one
-        // who just tapped, and what they learn is "locked in".
+        // Still not `to: "all"`, and the list is the reason. The console and
+        // the big screen have always had the count; the phones that are shown
+        // it are the ones that have locked in, which is exactly the keys of
+        // `answers` — the one who just tapped included. A phone still deciding
+        // is left out on purpose: the count is withheld from it until it taps,
+        // so its frame would be byte-for-byte the one it already holds, and
+        // waking all thirty on every tap is the eight hundred frames a
+        // question that this list exists to avoid.
         [
-          { kind: "broadcast", to: { pid: event.pid }, what: "state" },
+          ...Object.keys(answers).map(
+            (pid): Effect => ({ kind: "broadcast", to: { pid }, what: "state" }),
+          ),
           { kind: "broadcast", to: "host", what: "state" },
           { kind: "broadcast", to: "screen", what: "state" },
           // Persist: the runtime only writes the event log when the engine

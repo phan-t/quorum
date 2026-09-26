@@ -448,11 +448,13 @@ export class SessionRuntime {
           // bytes for thirty people and it cannot go subtly stale.
           //
           // The *audience* is honoured, though, and that is not an
-          // optimisation. A trivia answer is addressed to the one phone that
-          // sent it, the console and the big screen; fanning it to everyone
-          // would be thirty frames per tap, roughly eight hundred frames over
-          // one question, for a count that twenty-nine of those phones are
-          // not shown anyway.
+          // optimisation. A trivia answer is addressed to the console, the big
+          // screen and the phones that have locked in — they are the surfaces
+          // the answered count is on. Fanning it to everyone would be thirty
+          // frames per tap, roughly eight hundred frames over one question,
+          // and the ones it would add are for phones still deciding, which are
+          // not shown the count and would be sent a frame identical to the one
+          // they are already holding.
           if (effect.what === "toast") {
             this.sendAll({
               t: "toast",

@@ -244,8 +244,15 @@ plus a participant-only `triviaMine`. What each role is sent:
 | `distribution` | never | reveal | always |
 | `note` | reveal | reveal | always |
 | `podium` | reveal | reveal | reveal |
-| `answered` / `eligible` | never | always | always |
+| `answered` / `eligible` | once that phone has locked in | always | always |
 | `answeredBy` | never | never | always |
+
+`answered` / `eligible` is the one row that is not about secrecy. A count of
+how many people have answered carries no choice, so there is nothing in it to
+leak; it waits for the phone's own tap because a number climbing under a
+question somebody is still reading is a second clock. After the tap it is the
+only thing on the phone that moves, and DESIGN had put it only on the console
+and the Desktop — which, on a video call, is the tile nobody can read.
 
 The rule is enforced by **omission, not by nulling**: a field a role may not
 see is absent from the object, so `JSON.stringify` never writes the key and the
@@ -419,8 +426,9 @@ Host commands that would be destructive from the wrong state are refused with a
 `refusedCmd` explaining why, not silently ignored — the console shows the
 refusal inline, in the button.
 
-The host and the screen receive everything participants receive plus the
-answered count, and the host alone receives per-participant answer state. *Who*
+The host and the screen receive everything participants receive, and receive the
+answered count unconditionally where a phone waits for its own tap; the host
+alone receives per-participant answer state. *Who*
 has answered, never *what* they answered: the console's job is to decide whether
 to wait, and a grid of choices would be the answer key on a screen the host
 sometimes shares by accident. The per-role table under "Trivia" above is the

@@ -356,8 +356,12 @@ timer. The Desktop shows the same plus the answer count as it climbs.
 1. Host opens the question. Timer starts on the server. Phones show the
    answers; the Desktop shows the question large.
 2. Participants tap once. The tap is final. The phone shows "locked in" and
-   nothing else — no hint of correctness until the reveal, because a phone that
-   turns green is visible to the person next to you.
+   nothing about the answer — no hint of correctness until the reveal, because a
+   phone that turns green is visible to the person next to you. It does show
+   "24 of 27 answered" from that moment, which says how many people have
+   answered and nothing about what any of them chose: answering in three
+   seconds and then watching a still phone for seventeen is the wait this is
+   for.
 3. Timer expires, or the host closes it early (the console shows "24 of 27
    answered" and a close button, because waiting out a 30-second timer when
    everyone has answered is dead air).

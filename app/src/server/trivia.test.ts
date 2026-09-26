@@ -33,7 +33,13 @@ import {
   SessionRegistry,
   type Client,
 } from "./runtime.ts";
-import { distributionOf, renderStateFor, roundAt, triviaPodium } from "./views.ts";
+import {
+  distributionOf,
+  prepareViews,
+  renderStateFor,
+  roundAt,
+  triviaPodium,
+} from "./views.ts";
 import type { RenderState } from "../protocol.ts";
 
 /* ------------------------------------------------------------------ */
@@ -218,6 +224,84 @@ describe("a participant cannot learn the answer before the reveal", () => {
     assert.ok(!wire(idle, "screen").includes("KRYPTON"));
     // The host has it, because the host is about to read it out.
     assert.ok(wire(idle, "host").includes("KRYPTON-CORRECT"));
+  });
+});
+
+describe("the answered count on a phone", () => {
+  /**
+   * ARCHITECTURE's per-role table, the one row in it that is not a secret:
+   * `answered`/`eligible` reach a phone once *that* phone has locked in. The
+   * count is people, not choices, so the property the rest of this file
+   * defends is untouched by it — and these tests say so against the wire as
+   * well as the object, because "the count arrived" and "only the count
+   * arrived" are two different claims.
+   */
+  const open = loaded([
+    { type: "openQuestion", suddenDeath: false },
+    { type: "answerQuestion", pid: "p1", choice: 1, ms: 2_400 },
+  ]);
+
+  it("is withheld from a phone that has not answered", () => {
+    const s = view(open, "participant", "p2").trivia;
+    assert.equal(s?.answered, undefined);
+    assert.equal(s?.eligible, undefined);
+    // Omission, not nulling: the word is not in the bytes on that socket.
+    const frame = wire(open, "participant", "p2");
+    assert.ok(!frame.includes('"answered"'), frame);
+    assert.ok(!frame.includes('"eligible"'), frame);
+  });
+
+  it("reaches a phone that has locked in, and climbs", () => {
+    const s = view(open, "participant", "p1").trivia;
+    assert.equal(s?.answered, 1);
+    assert.equal(s?.eligible, 3);
+    // Still nothing about the answer itself.
+    assert.equal(s?.correct, undefined);
+    assert.equal(s?.distribution, undefined);
+    assert.ok(!wire(open, "participant", "p1").includes("XENON-NOTE"));
+
+    const two = replay(open, [
+      {
+        event: { type: "answerQuestion", pid: "p2", choice: 0, ms: 3_100 },
+        at: T0 + 3_100,
+      },
+    ]);
+    assert.equal(view(two, "participant", "p1").trivia?.answered, 2);
+    assert.equal(view(two, "participant", "p2").trivia?.answered, 2);
+  });
+
+  it("counts the room and not the phones that are awake", () => {
+    // `eligible` is the roster's filter rather than the roster, so somebody
+    // whose socket went quiet is still somebody the room is waiting for.
+    const kicked = replay(open, [
+      { event: { type: "kick", pid: "p3" }, at: T0 + 1_000 },
+    ]);
+    assert.equal(view(kicked, "participant", "p1").trivia?.eligible, 2);
+  });
+
+  it("does not follow a phone that never answered into the close", () => {
+    const closed = replay(open, [
+      { event: { type: "closeQuestion" }, at: T0 + 5_000 },
+    ]);
+    assert.equal(view(closed, "participant", "p1").trivia?.answered, 1);
+    assert.equal(view(closed, "participant", "p2").trivia?.answered, undefined);
+  });
+
+  it("is the same object for every phone that has locked in", () => {
+    // The role-level frame is shared between phones on purpose; the count is
+    // per-phone only in the sense that having it is. Two phones that have both
+    // answered must not cost two projections of it.
+    const two = replay(open, [
+      {
+        event: { type: "answerQuestion", pid: "p2", choice: 0, ms: 3_100 },
+        at: T0 + 3_100,
+      },
+    ]);
+    const prepared = prepareViews(two, new Map(), T0);
+    assert.equal(
+      prepared.participant("p1").trivia,
+      prepared.participant("p2").trivia,
+    );
   });
 });
 

@@ -441,6 +441,9 @@ describe("answerQuestion", () => {
     accept(loaded(questions), [{ type: "openQuestion", suddenDeath: false }], 1000);
 
   test("records the tap, and tells nobody but the tapper, the host and the screen", () => {
+    // The first tap of a question: `answers` has one key in it, so "every
+    // phone that has locked in" and "the tapper" are the same socket. The tap
+    // after this one is where the two part company — see below.
     const s = open();
     const r = run(s, { type: "answerQuestion", pid: "p1", choice: 2, ms: 4_000 }, 5_000);
     assert.ok(r.applied);
@@ -457,6 +460,28 @@ describe("answerQuestion", () => {
       JSON.stringify({ pid: "p1" }),
     ].sort());
     assert.ok(r.effects.some((e) => e.kind === "persist"), "an answer must reach the event log");
+  });
+
+  test("tells the phones that have already locked in, so their count climbs", () => {
+    // The answered count is on the phone from the moment it taps, and a count
+    // that only moves when its own owner taps is a number that never moves.
+    // So the audience is the console, the screen and every phone holding the
+    // count — and no wider than that: a phone still deciding is not shown the
+    // count, and its frame would be the one it already has.
+    const s = accept(open(), [{ type: "answerQuestion", pid: "p1", choice: 2, ms: 1_000 }], 2_000);
+    const r = run(s, { type: "answerQuestion", pid: "p2", choice: 0, ms: 4_000 }, 5_000);
+    assert.ok(r.applied);
+    const audiences = r.effects
+      .filter((e): e is Extract<Effect, { kind: "broadcast" }> => e.kind === "broadcast")
+      .map((e) => JSON.stringify(e.to));
+    assert.deepEqual(audiences.sort(), [
+      JSON.stringify("host"),
+      JSON.stringify("screen"),
+      JSON.stringify({ pid: "p1" }),
+      JSON.stringify({ pid: "p2" }),
+    ].sort());
+    // p3 has not answered, and is deliberately not on the list.
+    assert.ok(!audiences.includes(JSON.stringify({ pid: "p3" })), audiences.join(","));
   });
 
   test("scores nothing until the question closes — a phone must not turn green", () => {

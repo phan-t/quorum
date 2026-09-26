@@ -260,7 +260,14 @@ export function triviaPodium(
  *   earlier. The host has them throughout.
  * - `distribution` is a big-screen thing (DESIGN: "the phone is for *your*
  *   answer"), so a participant never receives it at all.
- * - `answered`/`eligible` go to the surfaces that show a count.
+ * - `answered`/`eligible` go to the surfaces that show a count. The host and
+ *   the big screen always. A phone gets them too, but only once *that* phone
+ *   has locked in, which is a rule about one participant rather than about a
+ *   role, so it is applied in {@link prepareViews} where the pid is known and
+ *   not here. It is safe to send: the count says how many people have
+ *   answered and never what any of them chose, so there is no choice in it to
+ *   leak. Holding it back until the tap is not secrecy either — see
+ *   {@link prepareViews}.
  */
 export function triviaViewFor(
   state: SessionState,
@@ -1100,7 +1107,9 @@ export function sendoffViewFor(
  *
  * Standings, the roster, the activity list and the trivia, arcade and
  * send-off views are functions of `(state, role)` and of nothing else. Only
- * `own`, `triviaMine` and `arcadeMine` differ between two phones. Projecting
+ * `own`, `triviaMine`, `arcadeMine` and the trivia answered count differ
+ * between two phones, and the count has exactly two values for the room — on
+ * for a phone that has locked in, absent for one that has not. Projecting
  * straight per socket therefore recomputed the same standings once per
  * client: at a hundred phones that is a hundred passes over the same scores
  * to produce a hundred byte-identical top fives, on the one path — a credited
@@ -1178,6 +1187,21 @@ export function prepareViews(
   let hostFrame: RenderState | null = null;
   let screenFrame: RenderState | null = null;
   let phoneBase: RenderState | null = null;
+  // The trivia block as a phone that has locked in sees it.
+  //
+  // DESIGN puts "24 of 27 answered" on the console and the Desktop, and over a
+  // compressed video call the Desktop is a small tile — so the one piece of
+  // tension available to somebody who answered in three seconds and has
+  // seventeen left to wait was on the surface they were least able to read. It
+  // is a count of how many have answered and never of what anybody answered,
+  // so it crosses to the phone carrying nothing with it.
+  //
+  // It waits for the tap because of what it would do before one, not because
+  // of what it could give away: a number climbing under a question somebody is
+  // still reading is a second clock, and SPEC already gave them the first one.
+  // Every phone that has locked in sees the same numbers, so this is the
+  // second and last participant-level variant rather than a spread per socket.
+  let phoneCounted: TriviaView | null = null;
   // Built on first use rather than always: the linear scan it replaces was
   // once per phone, and a room that is all screen and console never pays for
   // either.
@@ -1237,10 +1261,19 @@ export function prepareViews(
         }
       }
       const mine = trivia && pid ? triviaMineFor(trivia, pid) : undefined;
+      const counted =
+        trivia && base.trivia && pid && trivia.answers[pid] !== undefined
+          ? (phoneCounted ??= {
+              ...base.trivia,
+              answered: Object.keys(trivia.answers).length,
+              eligible: eligibleCount(state),
+            })
+          : undefined;
       const arcadeMine =
         arcade && pid ? arcadeMineFor(state, arcade, pid) : undefined;
       return {
         ...base,
+        ...(counted ? { trivia: counted } : {}),
         ...(own ? { own } : {}),
         ...(mine ? { triviaMine: mine } : {}),
         ...(arcadeMine ? { arcadeMine } : {}),

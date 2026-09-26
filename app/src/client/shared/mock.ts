@@ -1577,8 +1577,13 @@ class MockSession {
    * contain the word `correct` at all until the reveal. If this and the real
    * server ever disagree about that, the disagreement is the bug worth having
    * found.
+   *
+   * `pid` is here for one field only: the answered count, which a phone sees
+   * once it has locked in and not before. Without it the harness would show a
+   * locked phone that never moves for the rest of the question, which is the
+   * screen this stopped being.
    */
-  triviaView(role: Role): TriviaView | undefined {
+  triviaView(role: Role, pid: string | null = null): TriviaView | undefined {
     const q = this.question();
     if (!q) return undefined;
     const host = role === "host";
@@ -1617,7 +1622,9 @@ class MockSession {
       ...((host || revealed) && q.note !== null ? { note: q.note } : {}),
       ...(host || (role === "screen" && revealed) ? { distribution } : {}),
       ...(revealed ? { podium: this.triviaPodium() } : {}),
-      ...(host || role === "screen"
+      ...(host ||
+      role === "screen" ||
+      (pid !== null && this.answers[pid] !== undefined)
         ? { answered: Object.keys(this.answers).length, eligible: this.participants.length }
         : {}),
     };
@@ -1982,7 +1989,7 @@ class MockSession {
       activities: this.activities(),
     };
 
-    const trivia = this.triviaView(role);
+    const trivia = this.triviaView(role, pid);
     const arcade = this.arcadeView(role);
     const sendoff = this.sendoffView(role);
     const withTrivia = {

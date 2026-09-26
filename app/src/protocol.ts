@@ -474,6 +474,12 @@ export interface TriviaView {
   readonly distribution?: readonly number[];
   readonly note?: string;
   readonly podium?: readonly TriviaPodiumRow[];
+  /**
+   * How many people have answered. The host and the big screen always have it;
+   * a phone has it only once that phone has locked in, so that the wait after
+   * the tap has something moving in it. Never *what* was answered — that is
+   * `distribution`, which a phone never receives at all.
+   */
   readonly answered?: number;
   /** Everyone in the room who could have answered — the "of 27". */
   readonly eligible?: number;

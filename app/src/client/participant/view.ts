@@ -818,7 +818,18 @@ function sceneTrivia(ctx: SceneCtx): Scene {
 
   const grid = h("div", { class: "t-grid" });
   const keys = keyHint(KEY_HINT.trivia);
-  const status = h("p", { class: "t-status label" });
+  // "Locked in." and, once the server has sent the count, the room's progress
+  // beside it. One paragraph rather than two: the laptop grid places `status`
+  // by name, so a second element would need an area of its own and the
+  // two-column layout would have to be re-cut for a line of text.
+  const statusText = h("span", { class: "t-status-text" });
+  // The wait after the tap is seventeen seconds of a phone that does not move.
+  // The count is what the console and the Desktop have always had — and on a
+  // video call the Desktop is a tile nobody can read — so the phone gets it
+  // too. The server sends it only once this phone has locked in, so there is
+  // no "has it answered" check here: what arrived is what may be drawn.
+  const count = h("span", { class: "t-count mono", attrs: { hidden: true } });
+  const status = h("p", { class: "t-status label" }, [statusText, count]);
   // Under the timer and above the tiles, which is where the eye already is
   // while somebody is deciding. In the head, so the laptop grid — which
   // places `head`, `status`, `keys` and `reveal` by name — needs no new area
@@ -918,7 +929,8 @@ function sceneTrivia(ctx: SceneCtx): Scene {
       keys.hidden = true;
       rule.hidden = false;
       builtFor = "";
-      setText(status, "The host is about to open the question.");
+      setText(statusText, "The host is about to open the question.");
+      count.hidden = true;
       reveal.hidden = true;
       return;
     }
@@ -963,7 +975,10 @@ function sceneTrivia(ctx: SceneCtx): Scene {
       // Hidden on the phase, which every screen in the room can already see,
       // and never on anything about this person's answer.
       rule.hidden = true;
-      setText(status, "");
+      setText(statusText, "");
+      // The count belongs to the wait, and the wait is over: what the room did
+      // is the distribution on the big screen from here on.
+      count.hidden = true;
       status.hidden = true;
       reveal.hidden = false;
       const won =
@@ -1009,7 +1024,7 @@ function sceneTrivia(ctx: SceneCtx): Scene {
     status.hidden = false;
     keys.hidden = chosen !== null || trivia.phase !== "open";
     setText(
-      status,
+      statusText,
       chosen !== null
         ? "Locked in."
         : trivia.phase === "open"
@@ -1018,6 +1033,12 @@ function sceneTrivia(ctx: SceneCtx): Scene {
             : "Pick one. It is final."
           : "Time's up.",
     );
+    const answered = trivia.answered;
+    const eligible = trivia.eligible;
+    count.hidden = answered === undefined || eligible === undefined;
+    if (answered !== undefined && eligible !== undefined) {
+      setText(count, ` · ${answered} of ${eligible} answered`);
+    }
   };
 
   /**

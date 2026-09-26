@@ -1738,6 +1738,10 @@ describe("trivia over the wire", () => {
       assert.ok(!frame.raw.includes('"correct"'), `correctness leaked: ${frame.raw}`);
       assert.ok(!frame.raw.includes("OSMIUM-NOTE"), "the note leaked");
       assert.equal(frame.msg.state.triviaMine.state, "unanswered");
+      // Nor the count, yet: a number climbing under a question this phone has
+      // not answered is a second clock on a screen that already has one.
+      assert.equal(frame.msg.state.trivia.answered, undefined);
+      assert.ok(!frame.raw.includes('"eligible"'), frame.raw);
     }
 
     right.conn.send({ t: "trivia.answer", cid: "a1", index: 0, choice: 1 });
@@ -1756,9 +1760,23 @@ describe("trivia over the wire", () => {
       assert.ok(!keys.has("correct"), [...keys].join(","));
       assert.ok(!keys.has("distribution"), [...keys].join(","));
       assert.ok(!frame.raw.includes("OSMIUM-NOTE"));
-      // Not even the count: the climbing number is a big-screen thing.
-      assert.equal(frame.msg.state.trivia.answered, undefined);
+      // The count does arrive, because the tap has happened: how many have
+      // answered, never what any of them answered, which is why `distribution`
+      // is still missing from the same frame. Which number it is depends on
+      // whose tap this frame is for, so what is asserted here is that it is
+      // there at all.
+      assert.equal(typeof frame.msg.state.trivia.answered, "number");
+      assert.equal(frame.msg.state.trivia.eligible, 2);
     }
+
+    // And it climbs on a phone that locked in first, which is the whole point:
+    // the seventeen seconds after an answer used to be a phone that did not
+    // move.
+    const climbed = await right.conn.next(
+      (f) => f.msg?.t === "state" && f.msg.state.trivia?.answered === 2,
+    );
+    assert.equal(climbed.msg.state.trivia.eligible, 2);
+    assert.ok(!climbed.raw.includes('"distribution"'), climbed.raw);
 
     // The console, meanwhile, has everything: it is reading the answer out.
     const hostFrame = host.latest("state")!;

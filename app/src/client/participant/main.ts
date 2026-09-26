@@ -533,6 +533,20 @@ function guardTopFive(state: RenderState): void {
   if (trivia?.distribution !== undefined) {
     console.error("protocol violation: participant received the answer distribution");
   }
+  // The answered count is allowed here, and only after the tap: a count
+  // climbing under a question this phone has not answered yet is a second
+  // clock on a screen that already has one. Nothing secret is at stake, so
+  // this is the quiet member of the family, but it is the same shape of bug —
+  // the server decided, and a frame that disagrees is where it went wrong.
+  if (
+    trivia !== undefined &&
+    (trivia.answered !== undefined || trivia.eligible !== undefined) &&
+    state.triviaMine?.state === "unanswered"
+  ) {
+    console.error(
+      "protocol violation: participant received the room's answer counts before locking in",
+    );
+  }
 
   // The arcade's version, and the one that matters most is the light
   // schedule: a phone holding `nextChangeAt` can tap flat out and stop

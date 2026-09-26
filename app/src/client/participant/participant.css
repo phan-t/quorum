@@ -836,6 +836,16 @@ body.phone #app {
 .t-status[hidden] {
   display: none;
 }
+/* Dimmer than "Locked in.", because the sentence is the state and the count is
+   only what the rest of the room is doing about it. Inline on the same line, so
+   the laptop layout's `status` area holds both and needs no new grid area. */
+.t-count {
+  color: var(--muted);
+  opacity: 0.8;
+}
+.t-count[hidden] {
+  display: none;
+}
 
 .t-reveal {
   flex: 0 1 auto;
