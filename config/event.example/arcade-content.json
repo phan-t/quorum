@@ -10,7 +10,9 @@
     {
       "cue": "🌎📐",
       "answer": "Terraform",
-      "accept": ["tf"],
+      "accept": [
+        "tf"
+      ],
       "note": "You write the end state. The plan is the difference between what you wrote and what is really out there."
     },
     {
@@ -219,6 +221,13 @@
       "verify": true
     },
     {
+      "cue": "Terraform's default parallelism",
+      "threshold": "12",
+      "answer": "under",
+      "note": "10 — concurrent operations as Terraform walks the graph, not concurrent modules or providers. The same ceiling applies to plan, apply and destroy, and raising it moves the bottleneck to the provider's rate limit.",
+      "verify": true
+    },
+    {
       "cue": "Consul's default raft_multiplier",
       "threshold": "3",
       "answer": "over",
@@ -227,31 +236,38 @@
     },
     {
       "cue": "Unseal key shares Vault asks for by default",
-      "threshold": "5",
-      "answer": "under",
-      "note": "3 — of the five shares vault operator init prints, any three reconstruct the root key. Five is the number everyone remembers, and it is the other one.",
+      "threshold": "4",
+      "answer": "over",
+      "note": "5 — and the number people reach for instead is 3, which is how many of those five it takes to unseal. `vault operator init` prints five shares and needs any three: a threshold scheme, not five keys that all have to turn.",
       "verify": true
     },
     {
-      "cue": "The year IBM's acquisition of HashiCorp closed",
-      "threshold": "2024",
+      "cue": "Nomad's default task memory limit, in megabytes",
+      "threshold": "512",
+      "answer": "under",
+      "note": "300 — beside a default of 100 MHz of CPU. Deliberately small: Nomad bin-packs, so a task that never says what it needs is sized like a sidecar rather than a service, and finds out under load.",
+      "verify": true
+    },
+    {
+      "cue": "Vault's default max_request_duration, in seconds",
+      "threshold": "60",
       "answer": "over",
-      "note": "2025 — February, ten months after it was announced. Half a room files this under the year of the announcement, which is what makes it a wager.",
-      "verify": false
+      "note": "90 — per listener, and it is a deadline rather than a timeout: Vault cancels the request's context, so the work stops rather than finishing unwatched. A minute is the number most people reach for.",
+      "verify": true
     },
     {
-      "cue": "The year Terraform reached 1.0",
-      "threshold": "2022",
+      "cue": "Boundary's default session length, in hours",
+      "threshold": "12",
       "answer": "under",
-      "note": "2021 — June, at HashiConf Europe. What 1.0 shipped was not a feature but a promise: upgrade anywhere inside 1.x and the workflow keeps working.",
-      "verify": false
+      "note": "8 — 28,800 seconds, set per target. A working day rather than a calendar one: a session that outlives the shift is a credential nobody remembered to revoke, which is the thing Boundary is for.",
+      "verify": true
     },
     {
-      "cue": "The year Packer was first released",
-      "threshold": "2014",
-      "answer": "under",
-      "note": "2013 — the first project started at HashiCorp. Vagrant is older still, and older than the company.",
-      "verify": false
+      "cue": "Consul's default dns_config.max_stale, in years",
+      "threshold": "5",
+      "answer": "over",
+      "note": "10 — 87,600 hours. Any server may answer a DNS query however far behind it has fallen, because a stale answer beats no answer; tightening it trades availability for freshness.",
+      "verify": true
     }
   ]
 }
