@@ -27,6 +27,7 @@ import type {
   SessionState,
 } from "../engine/types.ts";
 import {
+  ITEM_ANSWERED_GRACE_MS,
   LIGHT_MAX_MS,
   LIGHT_MIN_MS,
   LOCK_GRACE_MS,
@@ -784,6 +785,160 @@ describe("a tap at the socket boundary", () => {
     assert.equal(play?.kind === "recruitment" ? play.answered["p1"] : null, true);
   });
 });
+
+/* ------------------------------------------------------------------ */
+/* The item everybody has already answered                            */
+/* ------------------------------------------------------------------ */
+
+/**
+ * The measured complaint: a Recruitment item runs its full twenty seconds
+ * whether or not anybody is still typing, and a room of nine that finished in
+ * five spends the other fifteen looking at a counter that has stopped moving.
+ * These assert the *armed instant*, because that is the whole of what the
+ * boundary decides — the events it sends, and the engine's refusal of a stale
+ * one, are the same ones the deadline has always sent.
+ */
+describe("Recruitment's item ends when the room has finished it", () => {
+  function recruitingRuntime(): ReturnType<SessionRegistry["add"]>["runtime"] {
+    const registry = new SessionRegistry();
+    const { runtime } = registry.add(entered(), T0);
+    runtime.apply(
+      {
+        type: "startRound",
+        round: "recruitment",
+        config: { kind: "recruitment", items: ITEMS, secondsPerItem: 20 },
+      },
+      T0,
+    );
+    runtime.apply({ type: "beginPlay" }, T0);
+    return runtime;
+  }
+
+  /** `entered()` is three people, and all three are eligible to answer. */
+  function answer(
+    runtime: ReturnType<SessionRegistry["add"]>["runtime"],
+    pid: string,
+    answer: string,
+    at: number,
+  ): void {
+    const client = fakeClient(pid, []);
+    runtime.clients.add(client);
+    assert.equal(runtime.submitAnswer(client, 0, answer, at).applied, true);
+  }
+
+  it("closes the item a grace after the last answer, not at the deadline", () => {
+    const runtime = recruitingRuntime();
+    assert.equal(runtime.armedItemAt, T0 + 20_000);
+    answer(runtime, "p1", "kr", T0 + 3_000);
+    answer(runtime, "p2", "krypton-answer", T0 + 4_000);
+    // Wrong, and still an answer: this is the phone that would otherwise say
+    // "Locked in." for sixteen more seconds with nothing else to read.
+    answer(runtime, "p3", "not-it", T0 + 5_000);
+    assert.equal(runtime.armedItemAt, T0 + 5_000 + ITEM_ANSWERED_GRACE_MS);
+    // The item's own deadline is untouched: the engine still owns it, and a
+    // late frame is still judged against the twenty seconds it was promised.
+    const play = runtime.state.arcade?.play;
+    assert.equal(play?.kind === "recruitment" ? play.itemEndsAt : null, T0 + 20_000);
+    // And it closes early only because the count the Desktop is reading says
+    // so. Both numbers come from the same place, so they cannot disagree.
+    const screen = view(runtime.state, "screen").arcade?.recruitment;
+    assert.equal(screen?.answered, 3);
+    assert.equal(screen?.eligible, 3);
+    runtime.clearArcadeTimers();
+  });
+
+  it("waits out the deadline while anyone has not answered", () => {
+    const runtime = recruitingRuntime();
+    answer(runtime, "p1", "kr", T0 + 3_000);
+    answer(runtime, "p2", "kr", T0 + 4_000);
+    assert.equal(runtime.armedItemAt, T0 + 20_000);
+    runtime.clearArcadeTimers();
+  });
+
+  it("does not push the grace out again on every later event", () => {
+    // Every event re-arms, and the grace is measured from the instant the
+    // arming ran. Without the rule that the armed instant only moves earlier,
+    // a room that answered at three seconds and then breathed on a socket
+    // would have the close pushed two seconds further out each time.
+    const runtime = recruitingRuntime();
+    answer(runtime, "p1", "kr", T0 + 3_000);
+    answer(runtime, "p2", "kr", T0 + 3_000);
+    answer(runtime, "p3", "kr", T0 + 3_000);
+    assert.equal(runtime.armedItemAt, T0 + 3_000 + ITEM_ANSWERED_GRACE_MS);
+    runtime.armArcadeTimers(T0 + 4_000);
+    assert.equal(runtime.armedItemAt, T0 + 3_000 + ITEM_ANSWERED_GRACE_MS);
+    // Nor does a phone arriving inside the grace reopen the beat: the room has
+    // already watched everybody who was in it finish.
+    runtime.apply({ type: "join", pid: "p4", nickname: "Rin" }, T0 + 4_100);
+    assert.equal(runtime.armedItemAt, T0 + 3_000 + ITEM_ANSWERED_GRACE_MS);
+    runtime.clearArcadeTimers();
+  });
+
+  it("arms nothing early for an empty room, which is not everybody", () => {
+    // The host who opens Recruitment before anyone has joined is waiting for
+    // the room, not watching it finish; a zero-of-zero close would run all six
+    // items out in twelve seconds.
+    const registry = new SessionRegistry();
+    const alone = session([
+      { type: "open" },
+      { type: "start" },
+      { type: "setSegment", segment: "arcade" },
+      { type: "enterArcade", activityId: "arcade" },
+    ]);
+    const { runtime } = registry.add(alone, T0);
+    runtime.apply(
+      {
+        type: "startRound",
+        round: "recruitment",
+        config: { kind: "recruitment", items: ITEMS, secondsPerItem: 20 },
+      },
+      T0,
+    );
+    runtime.apply({ type: "beginPlay" }, T0);
+    assert.equal(runtime.armedItemAt, T0 + 20_000);
+    runtime.clearArcadeTimers();
+  });
+
+  it("actually fires, and advances the item the engine decides to advance", async () => {
+    // The one end-to-end pass: a real grace, a real timeout, and the engine's
+    // own `nextItem`. Built on `Date.now()` rather than T0 so the armed
+    // instant is genuinely two seconds away.
+    const registry = new SessionRegistry();
+    const now = Date.now();
+    const { runtime } = registry.add(entered(), now);
+    runtime.apply(
+      {
+        type: "startRound",
+        round: "recruitment",
+        config: { kind: "recruitment", items: ITEMS, secondsPerItem: 20 },
+      },
+      now,
+    );
+    runtime.apply({ type: "beginPlay" }, now);
+    for (const pid of ["p1", "p2", "p3"]) answer(runtime, pid, "kr", Date.now());
+    const play = runtime.state.arcade?.play;
+    const deadline = play?.kind === "recruitment" ? play.itemEndsAt : 0;
+    await until(
+      () => runtime.state.arcade?.play?.kind === "recruitment"
+        && (runtime.state.arcade.play as { at: number }).at === 1,
+      ITEM_ANSWERED_GRACE_MS + 1_000,
+    );
+    // Early, and by roughly the grace rather than by the twenty seconds.
+    assert.ok(
+      Date.now() < deadline - 10_000,
+      "the item waited out its deadline instead of closing on the room",
+    );
+    runtime.clearArcadeTimers();
+  });
+});
+
+async function until(done: () => boolean, ms = 2_000): Promise<void> {
+  const deadline = Date.now() + ms;
+  while (!done()) {
+    if (Date.now() > deadline) throw new Error("timed out waiting for the condition");
+    await new Promise((r) => setTimeout(r, 5));
+  }
+}
 
 /* ------------------------------------------------------------------ */
 /* What a broadcast costs                                              */

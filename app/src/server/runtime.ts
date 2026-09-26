@@ -27,6 +27,7 @@ import type {
   ServerMessage,
 } from "../protocol.ts";
 import {
+  arcadeEligible,
   arcadeStateOf,
   prepareViews,
   renderStateFor,
@@ -252,6 +253,24 @@ export function correctedTapAt(
   return at;
 }
 
+/* ------------------------------------------------------------------ */
+/* Recruitment: the beat after the last answer                        */
+/* ------------------------------------------------------------------ */
+
+/**
+ * How long a Recruitment item stays open once everybody has answered it.
+ *
+ * Not zero, because the person who finished the item is still looking down at
+ * their phone: their answer left the glass, the Desktop's counter reached
+ * "9 of 9 answered", and closing on that instant would move the room on while
+ * the one player who has not yet seen anything is the one who ended the wait.
+ * Two seconds is long enough for "Locked in." to land and be read, and short
+ * enough to be a beat rather than a wait — what is being removed here is
+ * SPEC.md's dead air, "waiting out a 30-second timer when everyone has
+ * answered", and trading fifteen seconds of it for two is the removal.
+ */
+export const ITEM_ANSWERED_GRACE_MS = 2_000;
+
 export interface SessionSecrets {
   readonly hostTokenHash: string;
   readonly screenTokenHash: string;
@@ -288,7 +307,12 @@ export class SessionRuntime {
   #lightTimer: ReturnType<typeof setTimeout> | null = null;
   #lightTimerFor: { round: number; at: number } | null = null;
   #itemTimer: ReturnType<typeof setTimeout> | null = null;
-  #itemTimerFor: { round: number; item: number; at: number } | null = null;
+  #itemTimerFor: {
+    round: number;
+    item: number;
+    at: number;
+    ends: number;
+  } | null = null;
   #floorTimer: ReturnType<typeof setTimeout> | null = null;
   #floorTimerFor: { round: number; at: number } | null = null;
   #stepTimer: ReturnType<typeof setTimeout> | null = null;
@@ -628,8 +652,9 @@ export class SessionRuntime {
    *
    * - **the light**, because the durations are random and the engine has no
    *   randomness;
-   * - **the item**, because Recruitment's six items are twenty seconds each
-   *   and nobody should have to press a button six times to run them;
+   * - **the item**, because Recruitment's six items are twenty seconds each,
+   *   nobody should have to press a button six times to run them, and an item
+   *   everybody has already answered is over before its twenty seconds are;
    * - **the step**, because the Glass Bridge is eighteen deadlines — six
    *   steps for each of three waves — and a host pressing a button eighteen
    *   times is a host who is not watching the room;
@@ -768,22 +793,66 @@ export class SessionRuntime {
     this.#lightTimerFor = null;
   }
 
+  /**
+   * Recruitment's item clock: close the open item at its deadline — or two
+   * seconds after the last person answers it, whichever comes first.
+   *
+   * The early close is the same affordance trivia has had since SPEC.md put a
+   * close button next to "24 of 27 answered", for the same reason: a measured
+   * run of Recruitment spent 94 seconds of the round on a room watching a
+   * counter that had already reached "9 of 9". The cost falls hardest on the
+   * person who answered *wrong*, whose phone says "Locked in." and will say
+   * nothing else until the item ends — the longest wait in the product landing
+   * on whoever most needs the beat to be over.
+   *
+   * The count is the Desktop's own: {@link arcadeEligible}, the "9" the room is
+   * reading, so the item cannot end on a total nobody can see. A player who
+   * cannot answer — drained by an earlier round, since Recruitment itself
+   * drains nobody — is in that total and so keeps the item open for its full
+   * twenty seconds. That is the right way round: the alternative closes the
+   * item while the counter on the wall still says "7 of 9".
+   *
+   * Keyed on the round, the item, the instant it will fire *and* the item's own
+   * deadline, so re-arming stays idempotent now that those last two can differ.
+   * The armed instant only ever moves earlier: every event re-arms, and without
+   * that rule each one after the last answer would push the two-second grace
+   * two seconds further out and the item would never close at all. It also
+   * settles the late joiner — a phone that arrives inside the grace raises the
+   * count it is measured against, and the beat still ends, because the room has
+   * already watched everyone who was here finish.
+   *
+   * And as with every other timer here, the engine is still the only writer:
+   * `nextItem` and `endRound` are the two events the deadline already sent, and
+   * a timeout that slipped through on a round that has moved is refused.
+   */
   #armItemTimer(now: number): void {
     const arcade = arcadeStateOf(this.state);
     const play = arcade?.play;
     if (!arcade || arcade.phase !== "running" || play?.kind !== "recruitment") {
       return this.#clearItemTimer();
     }
+    const eligible = arcadeEligible(this.state);
+    // Nobody is not everybody: a host who opens Recruitment before the room has
+    // joined is waiting for people, not watching them finish, and zero of zero
+    // would run all six items out in twelve seconds. `>=` rather than `===`
+    // because kicking someone who had already answered takes them out of the
+    // total without taking them out of `answered`.
+    const everybody = eligible > 0 && Object.keys(play.answered).length >= eligible;
     const want = {
       round: arcade.roundIndex,
       item: play.at,
-      at: play.itemEndsAt,
+      at: everybody
+        ? Math.min(play.itemEndsAt, now + ITEM_ANSWERED_GRACE_MS)
+        : play.itemEndsAt,
+      ends: play.itemEndsAt,
     };
+    const armed = this.#itemTimerFor;
     if (
-      this.#itemTimerFor !== null &&
-      this.#itemTimerFor.round === want.round &&
-      this.#itemTimerFor.item === want.item &&
-      this.#itemTimerFor.at === want.at
+      armed !== null &&
+      armed.round === want.round &&
+      armed.item === want.item &&
+      armed.ends === want.ends &&
+      armed.at <= want.at
     ) {
       return;
     }
@@ -802,7 +871,7 @@ export class SessionRuntime {
           at.roundIndex !== want.round ||
           at.play?.kind !== "recruitment" ||
           at.play.at !== want.item ||
-          at.play.itemEndsAt !== want.at
+          at.play.itemEndsAt !== want.ends
         ) {
           return;
         }
@@ -1090,7 +1159,11 @@ export class SessionRuntime {
     return this.#lightTimerFor?.at ?? null;
   }
 
-  /** What the item timer is armed for. Null when no item is open. */
+  /**
+   * What the item timer is armed for: the item's deadline, or the earlier
+   * instant an item everybody has answered will close at. Null when no item is
+   * open.
+   */
   get armedItemAt(): number | null {
     return this.#itemTimerFor?.at ?? null;
   }

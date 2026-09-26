@@ -574,9 +574,14 @@ Two emoji, one product, type it. Six items, 20 seconds each, the existing
 Emoji Decode content (`🔐🏦` → Vault, `📡🐪` → Nomad). Text input, matched
 after lowercasing and stripping non-letters, with an accept list (`tf` for
 Terraform). Every correct answer within the timer scores **10**; the first
-three correct in the room score **+5**. No draining. At the end, the big
-screen "recruits" everyone: the grid fills with player numbers and the
-Front-End Man welcomes them.
+three correct in the room score **+5**. No draining. An item closes two
+seconds after the last person answers it rather than running out its twenty,
+for the reason trivia has a close button next to "24 of 27 answered": once the
+Desktop says "9 of 9 answered" the rest of the item is dead air, and it is
+longest for whoever answered *wrong*, whose phone says "Locked in." and has
+nothing else to say until the item ends. At the end, the big screen "recruits"
+everyone: the grid fills with player numbers and the Front-End Man welcomes
+them.
 
 Why it exists: the existing README is right that round one sets whether people
 think they can win. Recruitment is the round everyone scores in, and it hands

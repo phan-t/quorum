@@ -417,8 +417,15 @@ export function arcadeGrid(state: SessionState, arcade: ArcadeState): ArcadeCell
     .sort((a, b) => a.playerNumber - b.playerNumber);
 }
 
-/** Everyone who could be playing: the roster's filter, not the roster. */
-function arcadeEligible(state: SessionState): number {
+/**
+ * Everyone who could be playing: the roster's filter, not the roster.
+ *
+ * Exported because it is the "9" in the Desktop's "9 of 9 answered", and the
+ * item timer closes a Recruitment item on that count reaching itself. Two
+ * copies of this filter would be the boundary ending the beat on arithmetic
+ * the room is not reading.
+ */
+export function arcadeEligible(state: SessionState): number {
   return Object.values(state.participants).filter(
     (p) => !p.kicked && p.nicknameKey !== "",
   ).length;
