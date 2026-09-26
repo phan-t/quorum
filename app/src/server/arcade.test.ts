@@ -791,12 +791,12 @@ describe("a tap at the socket boundary", () => {
 /* ------------------------------------------------------------------ */
 
 /**
- * The measured complaint: a Recruitment item runs its full twenty seconds
- * whether or not anybody is still typing, and a room of nine that finished in
- * five spends the other fifteen looking at a counter that has stopped moving.
- * These assert the *armed instant*, because that is the whole of what the
- * boundary decides — the events it sends, and the engine's refusal of a stale
- * one, are the same ones the deadline has always sent.
+ * The complaint: a Recruitment item runs its full twenty seconds whether or not
+ * anybody is still typing, so a room that has finished spends the remainder
+ * looking at a counter that has stopped moving. These assert the *armed
+ * instant*, because that is the whole of what the boundary decides — the events
+ * it sends, and the engine's refusal of a stale one, are the same ones the
+ * deadline has always sent.
  */
 describe("Recruitment's item ends when the room has finished it", () => {
   function recruitingRuntime(): ReturnType<SessionRegistry["add"]>["runtime"] {
@@ -867,11 +867,30 @@ describe("Recruitment's item ends when the room has finished it", () => {
     assert.equal(runtime.armedItemAt, T0 + 3_000 + ITEM_ANSWERED_GRACE_MS);
     runtime.armArcadeTimers(T0 + 4_000);
     assert.equal(runtime.armedItemAt, T0 + 3_000 + ITEM_ANSWERED_GRACE_MS);
-    // Nor does a phone arriving inside the grace reopen the beat: the room has
-    // already watched everybody who was in it finish.
+    // Nor does a phone arriving inside the grace reopen the beat, even though
+    // it raises the total and so leaves the Desktop reading "3 of 4": two
+    // seconds is not long enough for that phone to answer, and a join every two
+    // seconds would hold the item open for good.
     runtime.apply({ type: "join", pid: "p4", nickname: "Rin" }, T0 + 4_100);
     assert.equal(runtime.armedItemAt, T0 + 3_000 + ITEM_ANSWERED_GRACE_MS);
+    // Asserted rather than only described, because it is the one case where the
+    // item closes on a counter the room can see is not full.
+    const screen = view(runtime.state, "screen").arcade?.recruitment;
+    assert.equal(screen?.answered, 3);
+    assert.equal(screen?.eligible, 4);
     runtime.clearArcadeTimers();
+  });
+
+  it("holds the item open for a beat — a real one, not zero", () => {
+    // Every other expectation here is written as an offset plus the constant,
+    // which is how they stay readable but also means a grace of zero would
+    // satisfy all of them. The beat is the point of the change, so pin its size
+    // once: long enough for the last person to watch their own answer register,
+    // short enough that the room does not notice it as a wait.
+    assert.ok(
+      ITEM_ANSWERED_GRACE_MS >= 1_000 && ITEM_ANSWERED_GRACE_MS <= 3_000,
+      `the grace is ${ITEM_ANSWERED_GRACE_MS}ms, which is not a beat`,
+    );
   });
 
   it("arms nothing early for an empty room, which is not everybody", () => {

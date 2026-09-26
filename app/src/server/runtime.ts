@@ -267,7 +267,10 @@ export function correctedTapAt(
  * Two seconds is long enough for "Locked in." to land and be read, and short
  * enough to be a beat rather than a wait — what is being removed here is
  * SPEC.md's dead air, "waiting out a 30-second timer when everyone has
- * answered", and trading fifteen seconds of it for two is the removal.
+ * answered", and trading the rest of the item for two seconds is the removal.
+ * The tests pin the magnitude as well as the arithmetic, because every expected
+ * instant is written in terms of this constant and a grace of zero would
+ * satisfy all of them while giving back the thing the grace exists for.
  */
 export const ITEM_ANSWERED_GRACE_MS = 2_000;
 
@@ -798,16 +801,16 @@ export class SessionRuntime {
    * seconds after the last person answers it, whichever comes first.
    *
    * The early close is the same affordance trivia has had since SPEC.md put a
-   * close button next to "24 of 27 answered", for the same reason: a measured
-   * run of Recruitment spent 94 seconds of the round on a room watching a
-   * counter that had already reached "9 of 9". The cost falls hardest on the
-   * person who answered *wrong*, whose phone says "Locked in." and will say
-   * nothing else until the item ends — the longest wait in the product landing
-   * on whoever most needs the beat to be over.
+   * close button next to "24 of 27 answered", for the reason SPEC gives there:
+   * once everybody has answered, the rest of the timer is dead air. The cost
+   * falls hardest on the person who answered *wrong*, whose phone says
+   * "Locked in." and will say nothing else until the item ends — so the longest
+   * wait in the item lands on whoever most needs it over.
    *
-   * The count is the Desktop's own: {@link arcadeEligible}, the "9" the room is
-   * reading, so the item cannot end on a total nobody can see. A player who
-   * cannot answer — drained by an earlier round, since Recruitment itself
+   * The count is the Desktop's own: {@link arcadeEligible}, the "9" in the
+   * room's "9 of 9 answered", so the beat ends on the number the room is
+   * reading rather than on a second total only the boundary can see. A player
+   * who cannot answer — drained by an earlier round, since Recruitment itself
    * drains nobody — is in that total and so keeps the item open for its full
    * twenty seconds. That is the right way round: the alternative closes the
    * item while the counter on the wall still says "7 of 9".
@@ -816,10 +819,15 @@ export class SessionRuntime {
    * deadline, so re-arming stays idempotent now that those last two can differ.
    * The armed instant only ever moves earlier: every event re-arms, and without
    * that rule each one after the last answer would push the two-second grace
-   * two seconds further out and the item would never close at all. It also
-   * settles the late joiner — a phone that arrives inside the grace raises the
-   * count it is measured against, and the beat still ends, because the room has
-   * already watched everyone who was here finish.
+   * two seconds further out and the item would never close at all.
+   *
+   * That rule has one consequence worth being plain about, because it is the
+   * one case where the close is not on a counter the room can see full: a phone
+   * that joins inside the grace raises the total, so the item can close on
+   * "3 of 4". It is still the better end of the trade. Two seconds is not long
+   * enough to read an emoji pair and type a product, so holding the item open
+   * for that phone spends the room's time on an answer that was not coming, and
+   * a join every two seconds would hold the item open indefinitely.
    *
    * And as with every other timer here, the engine is still the only writer:
    * `nextItem` and `endRound` are the two events the deadline already sent, and
