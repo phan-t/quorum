@@ -104,13 +104,20 @@
  * decided to be intentional**, and say what it costs, because every one of
  * them is something the demo cannot show.
  *
- * 1. **`hostExtras.trivia.auto` is absent.** protocol.ts names this case
- *    directly: a frame built by something that does not know about Auto is
- *    still a valid host frame, and the console reads the absence as Manual,
- *    which is the safe reading of a frame that cannot say. Cost: the
- *    console's Auto controls and its reveal countdown cannot be watched in
- *    the demo. `#hostCmd` has no case for `trivia.auto` or `trivia.speed`
- *    either, which is *not* deliberate — see the sibling state-timing issue.
+ * 1. **There is no Auto at all.** `hostExtras.trivia.auto` is absent, and
+ *    protocol.ts names that case directly: a frame built by something that
+ *    does not know about Auto is still a valid host frame, and the console
+ *    reads the absence as Manual, which is the safe reading of a frame that
+ *    cannot say. `#hostCmd`'s `trivia.auto` and `trivia.speed` cases exist
+ *    only to say so — they ack "understood, changed nothing" and stop there.
+ *    They used to fall off the end of the switch and be acked `applied:
+ *    true`, which told the console the room was now advancing itself while
+ *    nothing whatever had changed; that part was drift and is fixed, and the
+ *    absence itself is the decision. Building the beat is a feature rather
+ *    than a fix, and it has to be built where it can be watched — a timer, a
+ *    countdown and a stamped `autoAt` — not as a stored flag nothing reads.
+ *    Cost: the console's Auto controls and its reveal countdown cannot be
+ *    watched in the demo, and a host cannot rehearse a set that runs itself.
  *
  * 2. **`hostExtras.trivia` and `RenderState.trivia` are never absent.**
  *    views.ts omits both until `loadTrivia`. Here the question set is a
@@ -146,6 +153,20 @@
  *    director, `speed`, `latency`, the single dropped socket, the skipped
  *    `seq`, and a bot named with a fragment of HTML. They are the reason this
  *    file exists and they are not divergences.
+ *
+ * 7. **Nobody ever disconnects.** The engine has a `disconnect` event: it
+ *    sets `connected: false`, and — the part that moves a round — it houses
+ *    the dropped player's Gganbu pair. Here a socket closing removes the
+ *    connection from the hub and touches the roster not at all, so the only
+ *    two ways out of the room are `participant.release` and
+ *    `participant.kick`, and `houseThePairOf` is wired to exactly those.
+ *    Left that way on purpose: `&drop=1` closes *every* socket at once to
+ *    show the reconnect banner, and a demo that marked the whole room away
+ *    and dissolved every Gganbu pair on the way past would be showing the
+ *    wrong thing loudly. Cost: the one substitution that happens by itself in
+ *    a real room — a phone that dies mid-Gganbu — cannot be watched here, and
+ *    `RosterEntry.conn` only ever reads `away` for the one bot the director
+ *    hand-drops and for somebody the host released.
  */
 
 import type {
@@ -385,6 +406,14 @@ interface MockLounge {
   at: number | null;
   /** Placed from the Floor by a wave waiting to cross: paid at half rate. */
   fromFloor: boolean;
+  /**
+   * When `backing` was last named, or null while the seat is empty.
+   *
+   * Not the same instant as `at`: a seat is taken at the drain and the bet is
+   * placed later, and may be changed until the Floor locks. See
+   * {@link mockBetStands} for what it is for.
+   */
+  placedAt: number | null;
 }
 
 interface MockRecruitPlay {
@@ -406,6 +435,15 @@ interface MockPlanPlay {
   target: number;
   seconds: number;
   finishOrder: string[];
+  /**
+   * When each runner crossed, as a server instant.
+   *
+   * `finishOrder` alone says who and in what order; this says *when*, which
+   * is the only thing that can tell a bet placed before a crossing from a bet
+   * placed after it. The engine's `PlanApplyPlay` carries the same field for
+   * the same reason. See {@link mockBetStands}.
+   */
+  finishedAt: Record<string, number>;
 }
 
 /**
@@ -665,6 +703,28 @@ const MOCK_SENDOFF: MockSendoff = {
     line: "Thank you, Alex. Don't be a stranger.",
   },
 };
+
+/**
+ * Recruitment: 5 for a correct answer, +5 for each of the first three correct
+ * in the room, per item.
+ *
+ * Written out here rather than imported, like every other number in this
+ * file — but this pair is the one that has already drifted once, so it is
+ * worth saying what it is pinned to. `RECRUITMENT_CORRECT` in
+ * engine/arcade.ts was **retuned from 10 to 5**, and carries the arithmetic:
+ * at 10 the round banks 7 × 15 = 105 against Plan / Apply's 40 and the
+ * Bridge's 63, which is more than the other two together and settles the
+ * leaderboard before the arcade is half over. At 5 it is 7 × (5 + 5) = 70 —
+ * still the biggest single round, and the first-three bonus is now half of it
+ * rather than a third, which is the part that rewards being quick *and*
+ * right. The bonus deliberately did not move.
+ *
+ * `floorMax` in engine/arcade.ts and arcade.test.ts hold the ceiling on that
+ * side. `mock.test.ts` holds this side against it.
+ */
+const RECRUITMENT_CORRECT = 5;
+const RECRUITMENT_FIRST_BONUS = 5;
+const RECRUITMENT_FIRST_PLACES = 3;
 
 /** SPEC.md: each step crossed banks 5, and wave 1 banks +3 per step. */
 const GLASS_STEP_BANK = 5;
@@ -1098,6 +1158,65 @@ function mockGganbuPoints(play: MockGganbuPlay, pid: string): number {
   return mockTokensOf(play, pid) + (mockAheadOfRival(play, pid) ? GGANBU_AHEAD_BONUS : 0);
 }
 
+/* ---- the Lounge ------------------------------------------------------- */
+
+/**
+ * Whether a bet was placed before the outcome it names.
+ *
+ * A round's Floor is a public surface — the big screen draws who has crossed
+ * and whose tin is open, because that is the round's theatre — and a bet may
+ * be changed right up until the Floor locks. Put those two together and the
+ * Lounge stops being a bet: drained at 90 resources in Plan / Apply, watch
+ * the big screen until somebody crosses, *then* name them. Fifteen for a
+ * certainty, which is level with an honest third-place crossing and more than
+ * every crossing after it.
+ *
+ * This file had no guard at all. `#endRound` paid purely on membership of
+ * `finishOrder` and `unsealOrder`, and a drained bot with nothing left to
+ * press could back a guaranteed winner — in the console, in the standings and
+ * in the export. `betStands` in engine/arcade.ts is the rule, written here a
+ * second time, and only two rounds need it:
+ *
+ * - **Plan / Apply**, whose crossings are per-player and public as they
+ *   happen. Compared against `finishedAt`.
+ * - **Unseal**, whose open tins are the same shape. `unsealedMs` is measured
+ *   from the Floor opening, so the comparison is against
+ *   `arcadeStartedAt + ms` rather than against a bare instant.
+ *
+ * The Bridge has a rule of its own that is stricter and already here — a bet
+ * may only name a *later* wave and locks the moment that wave walks on — and
+ * Gganbu's outcome is the token count at the buzzer, which is after the Floor
+ * has locked and nobody can still be betting. Recruitment and Tug drain
+ * nobody, so neither has a Lounge to abuse.
+ *
+ * A seat with no `placedAt` stands. Nothing in this file produces one today
+ * — it is the shape a snapshot written before bets were timed would have, and
+ * the engine's note says paying it is the better of the two failures — but
+ * the branch is here because the engine's is, and a guard that differs in its
+ * edge case is the next entry on a sweep like this one.
+ */
+function mockBetStands(
+  play: MockPlay,
+  seat: MockLounge,
+  startedAt: number | null,
+): boolean {
+  if (seat.backing === null) return false;
+  if (seat.placedAt === null) return true;
+  const placedAt = seat.placedAt;
+  if (play.kind === "plan_apply") {
+    const crossedAt = play.finishedAt[seat.backing];
+    return crossedAt === undefined || placedAt < crossedAt;
+  }
+  if (play.kind === "unseal") {
+    const ms = play.unsealedMs[seat.backing];
+    // A round with no `startedAt` has not opened, so nothing has been
+    // unsealed in it.
+    if (ms === undefined || startedAt === null) return true;
+    return placedAt < startedAt + ms;
+  }
+  return true;
+}
+
 /** SPEC.md: 2–6 seconds, drawn at the boundary because the engine is pure. */
 const LIGHT_MIN_MS = 2_000;
 const LIGHT_MAX_MS = 6_000;
@@ -1386,12 +1505,49 @@ class MockSession {
     const seat = this.arcadeLounge[pid];
     this.arcadeLounge[pid] = seat
       ? { ...seat, at }
-      : { backing: null, at, fromFloor: false };
+      : { backing: null, at, fromFloor: false, placedAt: null };
   }
 
   bank(pid: string, points: number): void {
     if (points <= 0) return;
     this.arcadeBanked[pid] = (this.arcadeBanked[pid] ?? 0) + points;
+  }
+
+  /**
+   * Somebody left a Gganbu round. The pair they were half of dissolves and
+   * **both** halves play the house.
+   *
+   * SPEC.md: "a rival who disconnects is replaced by the house."
+   * `houseThePairOf` in reducer.ts runs this at `disconnect`, at `kick` and at
+   * `releaseNickname` — at the instant the rival goes — and this file ran it
+   * only inside `#startRound`, which meant it ran at the one moment nobody
+   * had left yet. `participant.release` set `conn = "away"`, the director
+   * dropped a bot, and neither touched `housed`.
+   *
+   * The survivor's own phone is what makes that a live bug rather than a
+   * bookkeeping one: `housed` is projected, `gganbuMine` draws the rival card
+   * off it, and on the server the card turns into the Front-End Man's the
+   * moment the rival drops. Here it went on naming somebody who had gone
+   * home, all the way to a settlement that compared against them.
+   *
+   * **Both halves**, rather than only the one left behind, because the +10 is
+   * awarded per player against whoever is in front of them and a one-sided
+   * substitution makes the pair's two comparisons disagree — with A on twelve
+   * and B on eleven, housing only B pays both of them. Housing both leaves
+   * one rule to explain: if your gganbu leaves, you both play the house.
+   *
+   * Confined to the card and the running round, as the reducer's is. A round
+   * that has already settled has settled, and re-housing a pair at the reveal
+   * would move the points the room is being shown.
+   */
+  houseThePairOf(pid: string): void {
+    const play = this.arcadePlay;
+    if (play?.kind !== "gganbu") return;
+    if (this.arcadePhase !== "card" && this.arcadePhase !== "running") return;
+    const rival = play.rivals[pid];
+    if (rival === undefined) return;
+    play.housed[pid] = true;
+    play.housed[rival] = true;
   }
 
   /**
@@ -2025,18 +2181,36 @@ class MockSession {
    *
    * Settled at close, not at answer time, because a participant's own state
    * must carry no correctness signal while the question is open.
+   *
+   * It settles into `triviaTotals` and `triviaStreaks` and **stops there**.
+   * The score grid — `raw` and `status` — is written by
+   * {@link publishTriviaScores} at the reveal; see the note on it.
    */
   settleQuestion(): void {
     const q = this.question();
     if (!q) return;
+    // A sudden death settles *nothing*, streaks included. `settleQuestion` in
+    // engine/trivia.ts early-returns on `trivia.suddenDeath` and hands back
+    // `answers`, `totals` and `streaks` untouched — SPEC.md's "no points
+    // change", read strictly: a tiebreak is a decision, not a question, so it
+    // neither pays nor breaks a run.
+    //
+    // This used to fall through into the fold below, which skipped the
+    // *scoring* for a sudden death and then went on zeroing the streak of
+    // everybody who did not answer and everybody who tapped wrong. Visible
+    // twice: immediately as `triviaMine.streak` on the phone, and again on
+    // the next scored question as a streak bonus that should have been paid
+    // and was not. A tiebreak is usually the last thing that happens, which
+    // is why a bug that silently costs somebody 500 points went unseen.
+    if (this.suddenDeath) return;
     for (const p of this.participants) {
       const a = this.answers[p.pid];
       if (!a) {
         this.triviaStreaks[p.pid] = 0;
         continue;
       }
-      if (!a.correct || this.suddenDeath) {
-        if (!a.correct) this.triviaStreaks[p.pid] = 0;
+      if (!a.correct) {
+        this.triviaStreaks[p.pid] = 0;
         // Answering at all puts you in the totals, even at zero, which is
         // what `settleQuestion` in engine/trivia.ts does: it folds over
         // `trivia.answers` and writes `totals[pid] = (totals[pid] ?? 0) +
@@ -2045,13 +2219,7 @@ class MockSession {
         // statement from the absent cell that lets a host bench somebody —
         // and the podium is built off the totals, so the entry is also what
         // puts a wrong-but-present tap on the board below the scorers.
-        //
-        // A sudden death writes nothing at all. It moves no points, so it
-        // must not move the board, and the engine's settle early-returns for
-        // one before it reaches this fold.
-        if (!this.suddenDeath) {
-          this.triviaTotals[p.pid] = this.triviaTotals[p.pid] ?? 0;
-        }
+        this.triviaTotals[p.pid] = this.triviaTotals[p.pid] ?? 0;
         continue;
       }
       const t = Math.min(a.ms, q.timeLimitSec * 1000);
@@ -2063,12 +2231,83 @@ class MockSession {
       a.streakBonus = streakBonus;
       this.triviaTotals[p.pid] = (this.triviaTotals[p.pid] ?? 0) + points + streakBonus;
     }
-    // Sudden death moves no points, so it must not move the scoreboard either.
+  }
+
+  /**
+   * The settled points reach the score grid at the **reveal**, and not a
+   * moment before.
+   *
+   * This used to be the tail of {@link settleQuestion}, which `#closeQuestion`
+   * calls — so between the host pressing Close and the host pressing Reveal,
+   * the participant's own points strip jumped and the public leaderboard
+   * moved, with the answer still off the screen. That is the exact leak
+   * `closeQuestion` in reducer.ts carries a note about fixing: no field said
+   * "correct" and the phone turned green anyway, and the person sitting next
+   * to you can read a number as easily as a colour. The reducer settles into
+   * `trivia.totals` and `streaks` at the close and writes `scores` only in
+   * `revealQuestion`, where the answer is public regardless.
+   *
+   * Three things it will not write, each of them the engine's rule:
+   *
+   * - **A sudden death.** `revealQuestion` skips `withActivityTotals`
+   *   entirely for one, because a tiebreak changes no points and so must move
+   *   no standings.
+   * - **A practice round.** `withActivityTotals` opens with
+   *   `if (state.practice) return state.scores;`. The round happens, the
+   *   round's own totals stand — `triviaTotals` is still written above, which
+   *   is what keeps the podium and the phone's own strip working — and the
+   *   board does not move. That is the whole of what the toggle is for, and
+   *   this file stored the flag, commanded it and projected it without ever
+   *   reading it.
+   * - **Somebody on Bench Credit.** A facilitator who plays along from the
+   *   bench must not be scored back onto the board; `withActivityTotals`
+   *   skips a `bench` bucket for the same reason `setScore` refuses one.
+   *
+   * The walk is over `triviaTotals` rather than over the roster, for the
+   * reason `triviaPodium` walks it: a total exists for somebody who answered,
+   * a wrong tap included at zero, and for nobody else. Writing `played` and a
+   * zero for every silent phone is the absent cell a host needs in order to
+   * bench somebody, filled in with a fiction — and `board()` averages Bench
+   * Credit over the `played` entries, so it moves a number as well as a
+   * colour.
+   */
+  publishTriviaScores(): void {
     if (this.suddenDeath) return;
-    for (const p of this.participants) {
+    if (this.practice) return;
+    for (const [pid, raw] of Object.entries(this.triviaTotals)) {
+      const p = this.find_pid(pid);
+      if (!p) continue;
       if (p.status["trivia"] === "bench") continue;
-      p.raw["trivia"] = this.triviaTotals[p.pid] ?? 0;
+      p.raw["trivia"] = raw;
       p.status["trivia"] = "played";
+    }
+  }
+
+  /**
+   * The same thing for the arcade: the round's totals reach the score grid at
+   * `arcade.reveal` and not at `arcade.end`.
+   *
+   * The timing here was already right — `revealRound` in reducer.ts is where
+   * the arcade's `withActivityTotals` call lives, and this file already
+   * matched it. What was missing is the same choke point's *first line*: a
+   * practice round must leave the board where it is. `arcadeTotals` is still
+   * written at the round's end, so the round happened and the console's
+   * `hostExtras.arcade.totals` still shows what it produced; only the score
+   * grid stays still.
+   *
+   * Two call sites — the host's Reveal and the scripted director's — which is
+   * why it is a method and not a loop written out twice. The director had its
+   * own copy, so a practice toggle set before a demo loop would have been
+   * honoured by one of them.
+   */
+  publishArcadeScores(): void {
+    if (this.practice) return;
+    for (const [pid, raw] of Object.entries(this.arcadeTotals)) {
+      const p = this.find_pid(pid);
+      if (!p) continue;
+      if (p.status["arcade"] === "bench") continue;
+      p.raw["arcade"] = raw;
+      p.status["arcade"] = "played";
     }
   }
 
@@ -3071,6 +3310,9 @@ class MockHub {
         const i = s.participants.findIndex((p) => p.pid === cmd.pid);
         if (i === -1) return reject("unknown_participant", "No such participant.");
         s.participants.splice(i, 1);
+        // Kicked is gone for good, which is a disconnection that does not
+        // come back. Their gganbu plays the house from here.
+        s.houseThePairOf(cmd.pid);
         break;
       }
       case "participant.release": {
@@ -3078,6 +3320,10 @@ class MockHub {
         if (!p) return reject("unknown_participant", "No such participant.");
         p.conn = "away";
         p.nicknameKey = "";
+        // Releasing a nickname takes somebody out of the roster, which is
+        // leaving the room by another door. Their gganbu plays the house for
+        // the same reason a kick's does.
+        s.houseThePairOf(cmd.pid);
         break;
       }
 
@@ -3188,7 +3434,7 @@ class MockHub {
               : "There is nothing to reveal.",
           );
         }
-        s.questionPhase = "revealed";
+        this.#revealQuestion();
         break;
       }
       /* ---- arcade ---- */
@@ -3302,13 +3548,33 @@ class MockHub {
         s.arcadePhase = "reveal";
         // The arcade raw lands in the score grid here and not at the close,
         // so the points strip cannot move before the answer is public.
-        for (const p of s.participants) {
-          if (p.status["arcade"] === "bench") continue;
-          p.raw["arcade"] = s.arcadeTotals[p.pid] ?? 0;
-          p.status["arcade"] = "played";
-        }
+        s.publishArcadeScores();
         break;
       }
+
+      /**
+       * Auto, which this file does not have.
+       *
+       * The console issues both of these, and before this case existed the
+       * frame fell off the end of the switch and was acked `applied: true` —
+       * the console was told the room was now advancing itself and nothing
+       * whatever had changed. That is the same shape as the practice bug, and
+       * the same shape as the one the note above `MOCK_SENDOFF` records.
+       *
+       * Acked as "understood, changed nothing" rather than implemented,
+       * because the absence of Auto here is a **listed deliberate
+       * difference** (see the header): `hostExtras.trivia.auto` is absent
+       * from this file's frames, protocol.ts names that case directly, and
+       * the console reads the absence as Manual, which is the safe reading of
+       * a frame that cannot say. Building the beat would be a feature rather
+       * than a fix, and it would have to be built where it can be watched —
+       * with a timer, a countdown and a stamped `autoAt` — not bolted on as a
+       * stored flag nothing reads, which is precisely the failure this case
+       * exists to stop repeating. See the header's list for what it costs.
+       */
+      case "trivia.auto":
+      case "trivia.speed":
+        return noop();
 
       case "trivia.next": {
         if (s.questionPhase !== "revealed") {
@@ -3386,6 +3652,21 @@ class MockHub {
     s.closesAt = null;
   }
 
+  /**
+   * The reveal, in one place because there are two callers and the second one
+   * is the scripted director.
+   *
+   * The phase flip and the score write belong together: `revealQuestion` in
+   * reducer.ts does both in one event, and the write is deferred to here on
+   * purpose — see {@link MockSession.publishTriviaScores}. A director that
+   * set `questionPhase = "revealed"` by hand, as it used to, would walk the
+   * whole demo loop past the one moment the points are supposed to land.
+   */
+  #revealQuestion(): void {
+    this.session.questionPhase = "revealed";
+    this.session.publishTriviaScores();
+  }
+
   #answer(conn: MockConn, cid: string, index: number, choice: number): void {
     const s = this.session;
     const pid = conn.pid;
@@ -3412,13 +3693,9 @@ class MockHub {
     this.#send(conn, { t: "ack", cid, applied: true });
     // Addressed, not broadcast: the count belongs on the console and the big
     // screen, and the only phone that learns anything is the one that tapped.
-    // Unless that tap ended a sudden death, in which case the room needs the
-    // whole state, because the question just closed.
-    if (s.questionPhase === "open") {
-      this.#sendStateTo((c) => c.role !== "participant" || c.pid === pid);
-    } else {
-      this.#broadcastState();
-    }
+    // The same list carries a sudden death's winner to the big screen, which
+    // is where it is announced — the question stays open behind it.
+    this.#sendStateTo((c) => c.role !== "participant" || c.pid === pid);
   }
 
   /** Shared by real taps and by the bots, so both take the same path. */
@@ -3431,11 +3708,24 @@ class MockHub {
     // clock and nothing the client sent.
     const ms = Math.max(0, Date.now() + SERVER_SKEW_MS - (s.opensAt ?? 0));
     s.answers[pid] = { choice, correct, ms, points: 0, streakBonus: 0 };
+    // First correct answer wins, and only the first: a later correct tap does
+    // not overwrite the winner.
+    //
+    // **It does not close the question.** `answerQuestion` in reducer.ts sets
+    // `suddenDeathWinner` and leaves the phase `open`; nothing in runtime.ts
+    // or views.ts closes it either, because the host presses Close. That is
+    // deliberate on the server — the big screen shows the winner *while the
+    // question is still open*, the rest of the room can still tap, and the
+    // host closes when the room has seen it.
+    //
+    // Closing here, as this used to, made three things wrong at once on a
+    // surface anybody can open: the phase flipped to `closed`, both clocks
+    // went null and everybody else was locked out the instant the first
+    // person was right, and the host's own Close then came back as a refusal
+    // — "No question is open" — on the one question the host most wants to
+    // control the pacing of.
     if (s.suddenDeath && correct && s.suddenDeathWinner === null) {
       s.suddenDeathWinner = pid;
-      // First correct answer wins, and the question is over. The caller
-      // broadcasts; this only moves the state.
-      this.#closeQuestion();
     }
   }
 
@@ -3460,11 +3750,10 @@ class MockHub {
       this.#later(() => {
         if (s.at !== index || s.questionPhase !== "open") return;
         this.#recordAnswer(p.pid, choice);
-        if (s.questionPhase === "open") {
-          this.#sendStateTo((c) => c.role !== "participant" || c.pid === p.pid);
-        } else {
-          this.#broadcastState();
-        }
+        // Addressed, exactly as a real tap is, and for the same reason. A
+        // sudden death used to close itself here and need the whole room
+        // told; it does not close itself any more — see `#recordAnswer`.
+        this.#sendStateTo((c) => c.role !== "participant" || c.pid === p.pid);
       }, delay / this.#cfg.speed);
     });
   }
@@ -3672,6 +3961,7 @@ class MockHub {
       target: cmd.target,
       seconds: cmd.seconds,
       finishOrder: [],
+      finishedAt: {},
     };
   }
 
@@ -4200,6 +4490,8 @@ class MockHub {
         const backing = seat.backing;
         if (backing === null) continue;
         if (s.arcadeStanding[backing] !== "floor") continue;
+        // A bet named after the tin came open is not a bet.
+        if (!mockBetStands(play, seat, s.arcadeStartedAt)) continue;
         if (fastest.has(backing)) s.bank(pid, 8);
         else if (play.unsealOrder.includes(backing)) s.bank(pid, 5);
       }
@@ -4221,6 +4513,11 @@ class MockHub {
         const backing = seat.backing;
         if (backing === null) continue;
         if (s.arcadeStanding[backing] !== "floor") continue;
+        // A bet named after the crossing it names is not a bet. Plan / Apply
+        // only: the Bridge's own wave rule is stricter and has already
+        // refused the same thing at placement time, which is why
+        // `mockBetStands` answers true for it.
+        if (!mockBetStands(play, seat, s.arcadeStartedAt)) continue;
         // Halved for a bet placed from the Floor: a waiting wave is paid for
         // this round twice, once by their own crossing. See
         // GLASS_WAITING_CROSSES in engine/arcade.ts.
@@ -4301,8 +4598,21 @@ class MockHub {
         item.accept.some((a) => mockFold(a) === folded));
     play.answered[pid] = correct;
     if (!correct) return;
-    // 10, plus 5 for each of the first three correct *in the room*, per item.
-    s.bank(pid, 10 + (play.solvedOrder.length < 3 ? 5 : 0));
+    // 5, plus 5 for each of the first three correct *in the room*, per item.
+    //
+    // It was 10 + 5, which is what SPEC.md said when this file was written.
+    // The 10 was retuned down to 5 in engine/arcade.ts and the reason is
+    // written out at length on `RECRUITMENT_CORRECT`: at 10 + 5 the round
+    // banks 7 × 15 = 105 against Plan / Apply's 40 and the Bridge's 63, which
+    // is more than half of the three put together and settles the leaderboard
+    // on its own. At 5 + 5 it is 70, still the biggest single round, and the
+    // first-three bonus is now half of it rather than a third — the part that
+    // rewards being quick *and* right. The engine is the one that moved; this
+    // file is the one that did not, so the demo's Floor max was 105 against
+    // the server's 70, on the console's `banked` and `totals`, the phone's
+    // own strip and the board.
+    const first = play.solvedOrder.length < RECRUITMENT_FIRST_PLACES;
+    s.bank(pid, RECRUITMENT_CORRECT + (first ? RECRUITMENT_FIRST_BONUS : 0));
     play.solvedOrder.push(pid);
   }
 
@@ -4365,6 +4675,12 @@ class MockHub {
     if (to >= play.target) {
       s.bank(pid, 10 + ([15, 10, 5][play.finishOrder.length] ?? 0));
       play.finishOrder.push(pid);
+      // The instant, not just the order: a crossing is on the big screen the
+      // moment it happens, so a bet named after it is not a bet. See
+      // `mockBetStands`. Stamped with the *tap's* instant rather than with
+      // the clock, so that the 250 ms lock grace moves the crossing and the
+      // bet that beats it by the same amount.
+      play.finishedAt[pid] = at;
     }
   }
 
@@ -4773,8 +5089,18 @@ class MockHub {
     // The seat is taken here and not a line earlier: a refused bet must not
     // leave a waiting player sitting in a Lounge they were never drained to.
     const seat =
-      held ?? (s.arcadeLounge[pid] = { backing: null, at: null, fromFloor: true });
+      held ??
+      (s.arcadeLounge[pid] = {
+        backing: null,
+        at: null,
+        fromFloor: true,
+        placedAt: null,
+      });
     seat.backing = backing;
+    // Stamped on every placement, including a change of mind, because the
+    // rule is about the bet that was standing at the buzzer and not about the
+    // first one somebody made. See `mockBetStands`.
+    seat.placedAt = this.#now();
     this.#send(conn, { t: "ack", cid, applied: true });
     this.#broadcastState();
   }
@@ -5274,7 +5600,16 @@ class MockHub {
 
     this.#at(13, () => {
       const p = this.session.participants[2];
-      if (p) p.conn = "away";
+      if (p) {
+        p.conn = "away";
+        // A drop is a drop wherever it comes from: if a Gganbu round were
+        // running, this person's pair would dissolve here. It is not — the
+        // holding card went up four seconds ago and the arcade is three
+        // minutes away — and the call is here anyway, so that the demo's one
+        // scripted disconnection takes the same path as a real one rather
+        // than a shorter one that would quietly stop matching it.
+        this.session.houseThePairOf(p.pid);
+      }
       this.#broadcastRoster();
     });
 
@@ -5332,8 +5667,11 @@ class MockHub {
       const t = 26 + i * QUESTION_SECONDS;
       const sudden = i === 3;
       this.#at(t, () => this.#openQuestion(sudden));
-      // Not for the sudden death: that one closes itself on the first correct
-      // answer, and closing it again would be the race the guard is for.
+      // The sudden death is closed here too, and by the same press. It used
+      // to close itself on the first correct answer, which is not what the
+      // server does — the winner goes up and the phase stays `open` until the
+      // host presses Close, so the room gets to look at it. The guard stays:
+      // a question the close timer already took is not closed twice.
       this.#at(t + 5.5, () => {
         if (this.session.questionPhase !== "open") return;
         this.#closeQuestion();
@@ -5341,7 +5679,7 @@ class MockHub {
       });
       this.#at(t + 6.5, () => {
         if (this.session.questionPhase !== "closed") return;
-        this.session.questionPhase = "revealed";
+        this.#revealQuestion();
         this.#broadcastState();
       });
       if (i < 3) {
@@ -5571,11 +5909,7 @@ class MockHub {
     this.#at(340, () => {
       if (this.session.arcadePhase !== "idle") return;
       this.session.arcadePhase = "reveal";
-      for (const p of this.session.participants) {
-        if (p.status["arcade"] === "bench") continue;
-        p.raw["arcade"] = this.session.arcadeTotals[p.pid] ?? 0;
-        p.status["arcade"] = "played";
-      }
+      this.session.publishArcadeScores();
       this.#broadcastState();
     });
 
