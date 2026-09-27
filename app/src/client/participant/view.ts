@@ -703,8 +703,16 @@ const RAFT_NAME_W = 92;
  *   outright by a reduced-motion preference. A pid this never reports is a
  *   person who joined and never appeared, which is worse than any animation
  *   is good, so each early return below releases before it returns.
+ *
+ * Exported for `raft.test.ts` and for nothing else — no other module builds a
+ * cluster, and the lobby below is the only caller. Two name-loss bugs lived in
+ * the closure state under here and neither was reachable from the pure
+ * decisions in `shared/view.ts`, so the test drives the real thing against a
+ * fake document and a fake clock. Lifting a copy of this text into the test
+ * instead was tried twice by reviewers and is worth nothing: it tests the
+ * copy.
  */
-function raftCluster(onCommitted: (pid: string) => void): {
+export function raftCluster(onCommitted: (pid: string) => void): {
   el: HTMLElement;
   commit: (who: string | null, pid: string | null) => void;
   flush: () => void;
