@@ -152,7 +152,12 @@
  * 6. **The demo affordances have no server counterpart at all**: the scripted
  *    director, `speed`, `latency`, the single dropped socket, the skipped
  *    `seq`, and a bot named with a fragment of HTML. They are the reason this
- *    file exists and they are not divergences.
+ *    file exists and they are not divergences. `MockConfig.bots` belongs to
+ *    this entry from the other end: it is the one field `readMockConfig` never
+ *    sets, so no browser can change the room either mode brings, and it exists
+ *    because `mock.test.ts` cannot compare two rooms while one of them invites
+ *    six strangers a second in. Its cost is only that a demo affordance is now
+ *    a configuration point, and it buys every scenario about a clock.
  *
  * 7. **Nobody ever disconnects.** The engine has a `disconnect` event: it
  *    sets `connected: false`, and — the part that moves a round — it houses
@@ -244,6 +249,42 @@ export interface MockConfig {
   drop: boolean;
   gap: boolean;
   latency: number;
+  /**
+   * How many people the mock brings to its own room, or `undefined` for the
+   * mode's own number.
+   *
+   * `readMockConfig` never sets it, so nothing a browser can type changes what
+   * `?mock=1` or `?mock=manual` does — both still fill the room, because a
+   * console opened on an empty one has nothing to show and a demo that has to
+   * be populated by hand is not a demo.
+   *
+   * It exists for the differential harness in `mock.test.ts`, and it is the
+   * one thing that harness could not do without. That file drives this hub and
+   * the real reducer through the same sequence and compares the two
+   * projections, so the two rooms have to hold the same people; `?mock=manual`
+   * joins six bots starting one second in, and a seventh participant nobody
+   * asked for is a seventh row the engine side does not have. The whole budget
+   * was therefore the first second of a session, and **everything gated on a
+   * clock was out of reach** — a light, a wave cut, an item timer, a step
+   * timer. That is most of the arcade, and it is why the Plan / Apply half of
+   * late-bet protection could be written and never watched.
+   *
+   * `bots: 0` buys the harness a room whose population it owns, which it can
+   * then hold still for as many fake seconds as a round's own timers need.
+   *
+   * Zero is honoured, so this is a `?? `-with-`undefined` and not a truthiness
+   * check: `bots: 0` is the entire point of the field.
+   *
+   * Not done by relying on the accident that already suppressed them. A host
+   * command sets `#directorStopped`, `#at` refuses to fire once it is set, and
+   * the manual room's six joins go through `#at` — so a scenario that pressed
+   * a console button inside the first second already got no bots, and the
+   * harness's clock guard had in fact never fired. That is a side effect of
+   * "a human took the wheel, the script stops arguing with them", it is not a
+   * statement about the room, and a scenario that only joins phones — which
+   * is a scenario worth writing — would still have been handed six strangers.
+   */
+  bots?: number;
 }
 
 /** `null` when the page should talk to a real server. */
@@ -274,6 +315,22 @@ interface MockParticipant {
   nicknameKey: string;
   playerNumber: number;
   conn: "on" | "away";
+  /**
+   * Removed by the host, and kept on the record.
+   *
+   * `Participant.kicked` in engine/types.ts, which the reducer's `kick` sets
+   * alongside `connected: false` and leaves everything else alone. This file
+   * used to **splice the person out of the array**, and that stopped being a
+   * bookkeeping difference the moment the projections started filtering:
+   * `rosterOrder` in engine/arcade.ts — the filter behind the roster, the grid,
+   * the arcade's standings reset, the numbering, the eligible count, the rope's
+   * sides and the Gganbu pairs — reads `!p.kicked && p.nicknameKey !== ""`, so
+   * on the server a kicked person leaves a marked row behind and on the mock
+   * they left a hole. A hole and a mark are not the same thing anywhere a pid
+   * is a key: `arcade.standing` keeps its entry, `scores` keeps its cell, and
+   * `#endRound`'s totals fold and `#normalise`'s ceiling both read them.
+   */
+  kicked: boolean;
   /**
    * activityId -> what the host typed. Benching clears it, exactly as the
    * reducer does: a raw score that is no longer meaningful must not reappear
@@ -1305,6 +1362,15 @@ const BOT_NAMES = [
   "  spaced   out  ",
 ];
 
+/**
+ * How many of those `?mock=manual` brings, so that a console opened on it has
+ * a roster rather than an empty grid.
+ *
+ * Six, which is the smallest room every round is playable in: the Bridge cuts
+ * three waves out of it and Gganbu pairs it without leaving anybody odd.
+ */
+const MANUAL_BOTS = 6;
+
 /** The mock's clock runs ~1.2s ahead of the browser's, on purpose. */
 const SERVER_SKEW_MS = 1_237;
 
@@ -1380,18 +1446,23 @@ class MockSession {
    * Everybody who is in the room: the filter `rosterOf` and `arcadeGrid` in
    * views.ts both open with, written out here rather than imported.
    *
-   * Released, not kicked — the mock splices a kicked person out of the array
-   * outright, which is a state-timing difference of its own and tracked as
-   * one. A release clears the collision key and leaves the person on the
-   * record, because their score is theirs and a phone swap must not cost them
-   * anything; but until they rejoin they are not in the room, and every count
-   * the host reads has to say so. This used to be `this.participants` at six
-   * call sites, so a released person stayed in the grid, stayed in the
-   * roster, and went on inflating the denominator of "N of M have answered"
-   * on both the console and the big screen.
+   * Kicked, or released. A release clears the collision key and leaves the
+   * person on the record, because their score is theirs and a phone swap must
+   * not cost them anything; a kick leaves them on the record too, marked. Both
+   * are out of the room until they rejoin, and every count the host reads has
+   * to say so. This used to be `this.participants` at six call sites, so a
+   * released person stayed in the grid, stayed in the roster, and went on
+   * inflating the denominator of "N of M have answered" on both the console and
+   * the big screen.
+   *
+   * The `!p.kicked` half arrived later than the other, and only because `kick`
+   * stopped splicing: while a kicked person was deleted outright there was
+   * nothing for this filter to catch. It is the same predicate as
+   * `rosterOrder`'s in engine/arcade.ts, in the same order, so the two can be
+   * read against each other.
    */
   inTheRoom(): MockParticipant[] {
-    return this.participants.filter((p) => p.nicknameKey !== "");
+    return this.participants.filter((p) => !p.kicked && p.nicknameKey !== "");
   }
 
   /** Roster order, gapless, assigned once and never changed under anyone. */
@@ -1495,7 +1566,13 @@ class MockSession {
     this.arcadeStanding = {};
     this.arcadeLounge = {};
     this.arcadeBanked = {};
-    for (const p of this.participants) this.arcadeStanding[p.pid] = "floor";
+    // `inTheRoom()` and not `participants`, because the reducer's `startRound`
+    // walks `rosterOrder(state)` — the same filter — and the standings are no
+    // longer only an input to the grid, which was already filtered. `#endRound`
+    // now folds `standing ∪ banked` into the totals the way `settleRound`
+    // does, so a standing handed to somebody who is not in the room is a `0`
+    // on the console's arcade totals that the engine does not write.
+    for (const p of this.inTheRoom()) this.arcadeStanding[p.pid] = "floor";
   }
 
   drain(pid: string, at: number): void {
@@ -2348,10 +2425,17 @@ class MockSession {
     // right, the real server sends the three who tapped and this used to send
     // five, the extra two being somebody who never touched their phone beside
     // a zero. On the phone and the big screen, at every reveal.
+    //
+    // Kicked people are dropped, which `triviaPodium` in views.ts does with an
+    // explicit `!r.p.kicked`. It used to happen here by accident: `kick` spliced
+    // the row out, so `find_pid` came back undefined and the `flatMap` dropped
+    // them for the wrong reason. Now that a kicked person keeps their row the
+    // filter has to say what it means, or the demo's reveal would put somebody
+    // the host has just removed from the room on the big screen.
     const rows = Object.entries(this.triviaTotals)
       .flatMap(([pid, points]) => {
         const p = this.find_pid(pid);
-        return p === undefined ? [] : [{ p, points }];
+        return p === undefined || p.kicked ? [] : [{ p, points }];
       })
       .sort((a, b) => b.points - a.points || a.p.nickname.localeCompare(b.p.nickname));
     if (!rows.some((r) => r.points > 0)) return [];
@@ -2464,9 +2548,21 @@ class MockSession {
     return nickname.trim().replace(/\s+/g, " ").toLowerCase();
   }
 
+  /**
+   * Who holds this nickname, for the collision check at the door.
+   *
+   * Kicked people are skipped, which is the reducer's `join`: "a kicked name is
+   * freed for other people. Burning it forever would punish a real colleague
+   * who happens to share it, and it does not stop the person who was kicked."
+   * It also has to be skipped for a plainer reason — while `kick` spliced, this
+   * returned `undefined` for a kicked name and the next arrival was admitted as
+   * a new person; now that the row stays, an unfiltered lookup would hand a
+   * kicked person's row straight back to whoever typed their name and quietly
+   * un-kick them.
+   */
   find(nickname: string): MockParticipant | undefined {
     const k = this.key(nickname);
-    return this.participants.find((p) => p.nicknameKey === k);
+    return this.participants.find((p) => !p.kicked && p.nicknameKey === k);
   }
 
   add(nickname: string, bot: boolean): MockParticipant {
@@ -2476,6 +2572,7 @@ class MockSession {
       nicknameKey: this.key(nickname),
       playerNumber: this.#nextNumber++,
       conn: "on",
+      kicked: false,
       raw: {},
       status: {},
       bot,
@@ -2516,26 +2613,44 @@ class MockSession {
    * facilitator's absence must not set the ceiling for the room.
    */
   #normalise(activityId: string): Map<string, number> {
+    // `normaliseActivity` in engine/scoring.ts skips a kicked participant at
+    // both ends, and says why at the ceiling: "someone removed for joining under
+    // an offensive name would otherwise scale the whole room down against a
+    // score nobody can see." Reachable here only since `kick` stopped splicing;
+    // before that a kicked person had no row to set a ceiling with. Released is
+    // **not** skipped on either side — their score is theirs.
+    const counts = (p: MockParticipant): boolean =>
+      !p.kicked && p.status[activityId] === "played";
     let top = 0;
     for (const p of this.participants) {
-      if (p.status[activityId] !== "played") continue;
+      if (!counts(p)) continue;
       top = Math.max(top, p.raw[activityId] ?? 0);
     }
     const out = new Map<string, number>();
     for (const p of this.participants) {
-      if (p.status[activityId] !== "played") continue;
+      if (!counts(p)) continue;
       // A top of 0 means nobody scored: everyone gets 0, never NaN.
       out.set(p.pid, top > 0 ? Math.round((100 * (p.raw[activityId] ?? 0)) / top) : 0);
     }
     return out;
   }
 
-  /** The whole board, ranked. Ties share a rank and the next rank skips. */
+  /**
+   * The whole board, ranked. Ties share a rank and the next rank skips.
+   *
+   * `kicked` and **not** `inTheRoom()`: `computeStandings` in engine/scoring.ts
+   * filters on `p.kicked` alone, so a released person keeps their row here and
+   * on the console's score grid, and keeps their place in the standings. That
+   * asymmetry with the roster is deliberate on the server — leaving the room is
+   * not the same as leaving the record — and copying `inTheRoom()` in here
+   * would have made the mock lose a released person's score.
+   */
   board(): MockRow[] {
     const normalised = new Map<string, Map<string, number>>();
     for (const a of ACTIVITIES) normalised.set(a.id, this.#normalise(a.id));
 
-    const rows = this.participants.map((p) => {
+    const onTheRecord = this.participants.filter((p) => !p.kicked);
+    const rows = onTheRecord.map((p) => {
       const played: number[] = [];
       for (const a of ACTIVITIES) {
         const pts = normalised.get(a.id)?.get(p.pid);
@@ -3085,6 +3200,24 @@ class MockHub {
         (p) => `tok-${p.pid}` === msg.rejoinToken,
       );
       if (existing) {
+        // Except a kick, which the token does not undo. SPEC.md, quoted by the
+        // reducer's `join`: they "can rejoin under a different nickname", so the
+        // same name on the same token is the one case that is refused, and any
+        // other name un-kicks them and renames the row. The reducer's
+        // `disconnect` / `reconnect` say the same thing from the other side — a
+        // kicked participant does not come back by reconnecting.
+        //
+        // Unreachable while `kick` spliced, because the row the token names was
+        // gone and the phone fell through to a fresh join. Now that the row
+        // stays, the token would have walked a kicked person straight back in.
+        if (existing.kicked) {
+          if (existing.nicknameKey === this.session.key(nickname)) {
+            return this.#refuse(conn, "kicked", "Pick a different nickname to rejoin.");
+          }
+          existing.kicked = false;
+          existing.nickname = nickname;
+          existing.nicknameKey = this.session.key(nickname);
+        }
         existing.conn = "on";
         this.#admit(conn, existing);
         return;
@@ -3307,9 +3440,22 @@ class MockHub {
         break;
       }
       case "participant.kick": {
-        const i = s.participants.findIndex((p) => p.pid === cmd.pid);
-        if (i === -1) return reject("unknown_participant", "No such participant.");
-        s.participants.splice(i, 1);
+        const p = s.find_pid(cmd.pid);
+        if (!p) return reject("unknown_participant", "No such participant.");
+        // Marked, not spliced. `kick` in reducer.ts sets `kicked: true,
+        // connected: false` and leaves the rest of the row where it was, and
+        // the difference is not bookkeeping: every projection that decides who
+        // is in the room filters `!p.kicked && p.nicknameKey !== ""`, so the
+        // server has a marked row to filter and this file had a hole. A hole
+        // reads the same as a mark in the roster and the grid — both come out
+        // one shorter — and differently everywhere a pid is a key and the row
+        // is the thing that answers the question: the ceiling `#normalise`
+        // scales the room against, the standing `resetFloor` hands out, the
+        // arcade number, the rope side, the Gganbu rival. It also let a kicked
+        // name be typed straight back in and be admitted as the same person,
+        // because the collision lookup had nothing left to find.
+        p.kicked = true;
+        p.conn = "away";
         // Kicked is gone for good, which is a disconnection that does not
         // come back. Their gganbu plays the house from here.
         s.houseThePairOf(cmd.pid);
@@ -3889,8 +4035,11 @@ class MockHub {
         seed,
         // Dealt from the roster in the room now, so the round card can show
         // the two clusters. A latecomer gets a side on their first tap.
+        // `inTheRoom()`, because the reducer deals them from `rosterOrder`:
+        // somebody who has left is not on either end of the rope, and dealing
+        // them a side would shift everybody after them to the other one.
         sides: mockTugSides(
-          s.participants.map((p) => p.pid),
+          s.inTheRoom().map((p) => p.pid),
           seed,
         ),
         // The heartbeat starts at `beginPlay`, not here.
@@ -3914,7 +4063,11 @@ class MockHub {
       // Tug of Raft's sides are: a seed the console chose is a console that can
       // deal somebody their gganbu.
       const seed = Math.floor(Math.random() * 0x1_0000_0000);
-      const pids = s.participants.map((p) => p.pid);
+      // `inTheRoom()`, as the reducer pairs from `rosterOrder`: somebody who has
+      // left is not somebody's gganbu, and pairing them would leave a real
+      // player holding a rival who is not in the room and shift the pairing of
+      // everybody after them.
+      const pids = s.inTheRoom().map((p) => p.pid);
       const rivals = mockGganbuPairs(pids, seed);
       // "A rival who disconnects is replaced by the house" — including one who
       // was already away when the pairs were drawn. A pair with an absent half
@@ -4123,10 +4276,17 @@ class MockHub {
     return ms;
   }
 
-  /** Everyone the open step is waiting for. "Not already across" is load-bearing. */
+  /**
+   * Everyone the open step is waiting for. "Not already across" is load-bearing.
+   *
+   * `inTheRoom()` because `bridgeRunners` in engine/arcade.ts opens with
+   * `rosterOrder(state)`: somebody who has left the room is not somebody the
+   * step waits for, and the close drains whoever did not step.
+   */
   #bridgeRunners(play: MockGlassPlay): string[] {
     const s = this.session;
-    return s.participants
+    return s
+      .inTheRoom()
       .filter(
         (p) =>
           s.arcadeStanding[p.pid] !== "drained" &&
@@ -4315,9 +4475,10 @@ class MockHub {
     const now = this.#now();
     play.pull += 1;
     play.seed = Math.floor(Math.random() * 0x1_0000_0000);
-    // Reshuffled, so nobody is stuck on a losing side.
+    // Reshuffled, so nobody is stuck on a losing side. From the room, as the
+    // round card's deal was and as the reducer's `nextPull` is.
     play.sides = mockTugSides(
-      s.participants.map((p) => p.pid),
+      s.inTheRoom().map((p) => p.pid),
       play.seed,
     );
     play.pullStartedAt = now;
@@ -4420,14 +4581,45 @@ class MockHub {
   }
 
   #nextItem(): void {
-    const play = this.session.arcadePlay;
+    const s = this.session;
+    const play = s.arcadePlay;
     if (play?.kind !== "recruitment") return;
     play.at += 1;
     play.itemEndsAt = this.#now() + play.secondsPerItem * 1000;
+    // The round ends when the *last item* does, so the Floor's clock is
+    // re-derived from the item that is actually open — the arithmetic `nextItem`
+    // in reducer.ts does, and for the reason its comment gives: `#beginPlay`
+    // could only guess at `begin + items × 20 s`, and every item opens a little
+    // after its predecessor's deadline because the timer that opens it has
+    // event-loop lag, so the guess drifts earlier than the truth by the
+    // accumulated lag.
+    //
+    // This was left at `#beginPlay`'s guess, and Recruitment is one of the
+    // three rounds whose Floor timer *is* armed — glass, tug and gganbu are the
+    // exclusions, for the same lag reason. So there were two competing
+    // deadlines: the Floor timer at `begin + 7 × 20 s`, and the seventh item's
+    // own timer later than that by the accumulated lag. The Floor timer won,
+    // and the last item of every Recruitment round lost its tail. The stale
+    // `endsAt` also went on the wire, so the round countdown on the big screen
+    // disagreed with the item countdown beside it.
+    //
+    // Re-armed as well as re-derived, because the runtime re-arms its Floor
+    // timer off the new value and the invariant worth keeping is that the armed
+    // deadline and `arcadeEndsAt` are the same instant. Belt and braces today
+    // and deliberately so: `#armFloorTimer` guards on `arcadeEndsAt` not having
+    // moved, so without this the timer armed at `#beginPlay` simply bails and
+    // the last item's own timer ends the round — which it does anyway, at the
+    // same instant. The wrong number on the wire was the bug; this line is the
+    // one that stops the two clocks in this class from drifting apart, and it
+    // has no test of its own because there is nothing left for it to change.
+    s.arcadeEndsAt =
+      play.itemEndsAt +
+      (play.items.length - 1 - play.at) * play.secondsPerItem * 1000;
     // Both are per item: a fresh three, and everybody may answer again.
     play.solvedOrder = [];
     play.answered = {};
     this.#armItemTimer();
+    this.#armFloorTimer();
     this.#botsAnswerItem();
   }
 
@@ -4526,9 +4718,25 @@ class MockHub {
         else if (crossers.includes(backing)) s.bank(pid, crossed);
       }
     }
-    for (const p of s.participants) {
-      const banked = s.arcadeBanked[p.pid] ?? 0;
-      s.arcadeTotals[p.pid] = (s.arcadeTotals[p.pid] ?? 0) + banked;
+    // Everybody who was **in the round**: the standings fixed at the round's
+    // card, plus anybody who banked without being in them. `settleRound` in
+    // engine/arcade.ts folds exactly that union and says why — the second half
+    // is a latecomer, somebody who joined after the round started, was put on
+    // the Floor by playing, and scored; without them a person who joined at
+    // minute two and won the round has their points quietly dropped.
+    //
+    // This walked `s.participants`, which is neither half of it. Narrow in
+    // practice, because `resetFloor()` gives everybody in the room a standing
+    // — but wrong at both ends the moment the roster moves inside a round. A
+    // latecomer's banked points went nowhere, and somebody who left the roster
+    // mid-round picked up a `0` entry the engine does not write, which is the
+    // difference between "played and scored nothing" and the absent cell a
+    // host benches somebody from.
+    for (const pid of new Set([
+      ...Object.keys(s.arcadeStanding),
+      ...Object.keys(s.arcadeBanked),
+    ])) {
+      s.arcadeTotals[pid] = (s.arcadeTotals[pid] ?? 0) + (s.arcadeBanked[pid] ?? 0);
     }
     s.arcadePhase = "idle";
     s.arcadeEndsAt = null;
@@ -5571,14 +5779,20 @@ class MockHub {
       });
     }
 
+    // `bots` is the harness's seam and nothing else: see MockConfig. Unset is
+    // the mode's own number, which is what every browser gets.
+    const wanted = this.#cfg.bots;
+
     if (!this.#cfg.director) {
       // Manual mode still needs a room, or the console has nothing to show.
       // The session stays in `draft` so the host drives `open` themselves.
-      for (let i = 0; i < 6; i++) this.#at(1 + i * 0.4, () => this.#botJoins());
+      const n = wanted ?? MANUAL_BOTS;
+      for (let i = 0; i < n; i++) this.#at(1 + i * 0.4, () => this.#botJoins());
       return;
     }
 
-    for (let i = 0; i < BOT_NAMES.length; i++) {
+    const n = Math.min(wanted ?? BOT_NAMES.length, BOT_NAMES.length);
+    for (let i = 0; i < n; i++) {
       this.#at(1.5 + i * 1.1, () => this.#botJoins());
     }
 

@@ -24,9 +24,18 @@
  * query. Time is `node:test`'s fake clock: the mock is `setTimeout` from top
  * to bottom, and a fake clock makes the whole thing — the connect handshake,
  * the round timers, the scripted director's seven minutes — deterministic and
- * instant. It also keeps the scenarios below under the one-second mark at
- * which `?mock=manual` starts joining its own bots, so the only participants
- * in a round are the ones a test put there.
+ * instant.
+ *
+ * `room()` asks the hub for `bots: 0`, so the only participants in a round are
+ * the ones a test put there. That is newer than it looks and it is what made
+ * half of this file possible: `?mock=manual` joins six bots starting one second
+ * in, the budget for a whole scenario was therefore the first second of a
+ * session, and **everything gated on a clock was unreachable** — the Plan /
+ * Apply light, a wave cut, an item timer, a step timer, which is most of the
+ * arcade. With the room's population under the scenario's control,
+ * {@link Room.advance} can hold a room still for as long as a round's own
+ * timers need. See {@link noStrangers} for what replaced the deadline the old
+ * harness guarded, and why that deadline had in fact never been crossed.
  *
  * ## What is checked
  *
@@ -46,6 +55,15 @@
  *   breaking nobody's streak; a Lounge bet placed after the result it names
  *   paying nothing; Recruitment's 5 + 5; and a Gganbu pair dissolving the
  *   moment half of it leaves.
+ * - **#27** the tail of the same sweep, and the first scenarios in this file
+ *   that run a round's own clock out. The Plan / Apply half of late-bet
+ *   protection, which needed the APPLY light and was the reason the harness
+ *   had to grow `advance` at all; the round's totals folded over `standing ∪
+ *   banked` rather than over the roster; Recruitment's Floor clock re-derived
+ *   at every item; and a kick marking the person where it used to delete them.
+ *   Plus the drift #27 found on the way and was wrong about — the console's
+ *   `standings` are `topFive` and not the public five, which was already true
+ *   and is now watched.
  *
  * Two of #24's eight are not here, and both for the same reason — the mock
  * cannot be driven into the state they are about. Its question set is a
@@ -56,14 +74,11 @@
  * match `roundAt`, and it is unverified by anything until the mock grows a
  * loader.
  *
- * #25's late-bet scenario is driven through Unseal and not through Plan /
- * Apply, and that is a gap rather than a choice. `betStands` covers exactly
- * those two rounds; a Plan / Apply drain needs the APPLY light, the light is
- * on a two-to-six second timer, and the whole budget here is the one second
- * below. `mockBetStands`' `plan_apply` arm and the `finishedAt` stamp that
- * feeds it are therefore written and unwatched, which is the state every bug
- * this file exists for was found in. Whoever grows the harness a way to run a
- * timer out should start there.
+ * #27's seventeen lettered guard and refusal differences are **not** here and
+ * are not fixed: they are the second half of that issue. Two of them are why a
+ * scenario below reads oddly — a Plan / Apply latecomer cannot tap on the mock
+ * (guard a), so the `banked` half of the totals union is exercised through a
+ * Recruitment answer instead.
  *
  * ## Writing another one
  *
@@ -84,6 +99,17 @@
  * "the engine drained exactly p1 and p2" — before comparing the two sides.
  * If that line is hard to write, the scenario probably is not exercising the
  * field it names.
+ *
+ * **A scenario about a clock has to spend some.** The same rule one step along,
+ * and the reason the rule above is worth writing twice. `#nextItem`'s
+ * re-derived `endsAt` and `#beginPlay`'s guess are *the same number* with no
+ * time between them, and four trivia answers in the same millisecond of the
+ * fake clock all round to the same points, so the whole room normalises to 100
+ * and no ceiling can move — the second of those was caught by exactly the
+ * "assert something an idle room could not satisfy" line the rule above asks
+ * for, and only by that. Both scenarios spend {@link Room.advance} between the
+ * acts, not because the code under test is slow but because the difference they
+ * are about does not exist until the clock has moved.
  */
 
 import { describe, it } from "node:test";
@@ -186,26 +212,79 @@ interface Room {
    * `phones`, so `phones[6]` is `p7`.
    */
   join(nickname: string): Wire;
+  /**
+   * Hold the room still and let its own clocks run.
+   *
+   * This is what a scenario about a timer is made of, and until `MockConfig`
+   * grew a `bots` field there was no way to write one: `?mock=manual` starts
+   * joining six bots one second in, so the budget for a whole scenario was the
+   * first second of a session and **everything gated on a clock was out of
+   * reach** — the Plan / Apply light, a wave cut, an item timer, a step timer.
+   * That is most of the arcade, and it is why the Plan / Apply half of late-bet
+   * protection sat written and unwatched while the Unseal half was tested.
+   *
+   * Fake milliseconds, a second at a time, for the reason the director suite
+   * ticks a second at a time: one enormous tick is the same arithmetic and a
+   * great deal harder to reason about when a timer re-arms itself, which every
+   * one of the arcade's does.
+   *
+   * It does **not** make the mock's own timer durations predictable. The light
+   * is a fresh `2_000 + random(4_000)` at every turn, and a scenario has no
+   * business knowing which. Advance in steps and read the light off the frame:
+   * {@link untilTheLightIs} does exactly that.
+   */
+  advance(ms: number): void;
 }
 
 /**
- * How long a room may be driven before the mock starts adding people to it.
+ * Nobody in the room but the people a scenario put there.
  *
- * `?mock=manual` has no director but still joins six bots, the first at one
- * second and the rest every 400 ms after, so that a console opened on it has
- * something to show. Every scenario here has to finish inside that, because a
- * seventh participant nobody asked for is a seventh row the engine side does
- * not have. Each `cmd` and each `send` costs two milliseconds of fake clock
- * and a `join` costs thirteen, so the budget is generous — but a test that
- * wants to watch a timer fire cannot have one, and must end the round by hand
- * instead.
+ * This used to be a clock budget, and the clock was the problem. `?mock=manual`
+ * has no director but still joins six bots, the first at one second and the rest
+ * every 400 ms after, so that a console opened on it has something to show —
+ * and a seventh participant nobody asked for is a seventh row the engine side
+ * does not have. So every scenario had to finish inside the first second, and a
+ * scenario that wanted to watch a timer fire could not exist. Plan / Apply's
+ * light is two to six seconds; an item is twenty; a wave is six at its
+ * shortest. The arcade is made of clocks, and none of them were reachable.
+ *
+ * `MockConfig.bots` is the fix, and {@link room} passes `bots: 0`: the mock
+ * brings nobody, the scenario owns the roster, and {@link Room.advance} can run
+ * a round's own timers out. What is left to guard is not a deadline but the
+ * thing the deadline stood for, so this checks it directly — every nickname in
+ * the room is one the scenario handed out.
+ *
+ * Better than the deadline in three ways. It survives `advance`. It survives a
+ * `release` and a `kick`, both of which take somebody *out* of the roster and
+ * would have tripped a size comparison. And it says what went wrong rather than
+ * what time it is.
+ *
+ * Worth recording why the old guard never fired: `#hostCmd` sets
+ * `#directorStopped`, `#at` refuses to run once it is set, and the manual room's
+ * six joins go through `#at` — so any scenario that pressed a console button
+ * inside the first second already got no bots, by accident. Every scenario here
+ * does. The guard was watching a deadline that nothing was ever going to cross,
+ * which is the least useful kind of green.
  */
-const BOTS_ARRIVE_AT_MS = 1_000;
+function noStrangers(
+  roster: readonly { nickname: string }[],
+  invited: ReadonlySet<string>,
+): void {
+  for (const p of roster) {
+    assert.ok(
+      invited.has(p.nickname),
+      `${p.nickname} is in the room and no scenario put them there, so the ` +
+        "two rooms no longer hold the same people",
+    );
+  }
+}
 
 async function room(t: TestContext, phoneCount: number): Promise<Room> {
   t.mock.timers.enable({ apis: ["setTimeout", "setInterval", "Date"] });
   const mod = await freshMock();
-  const factory = mod.mockTransport(MANUAL);
+  // `bots: 0` — see {@link noStrangers}. Not in MANUAL itself, because the
+  // director suite spreads MANUAL and wants the whole scripted cast.
+  const factory = mod.mockTransport({ ...MANUAL, bots: 0 });
   const tick = (ms: number): void => t.mock.timers.tick(ms);
 
   const open = (hello: Extract<ClientMessage, { t: "hello" }>): Wire => {
@@ -237,33 +316,22 @@ async function room(t: TestContext, phoneCount: number): Promise<Room> {
     return wire;
   };
 
-  const started = Date.now();
   const host = open({ t: "hello", role: "host", hostToken: "mock-host" });
   const screen = open({ t: "hello", role: "screen", screenToken: "mock-screen" });
   // The mock draws its own join code at construction and puts it on the
   // console's frame, so a phone has to be told what the console was told.
   const joinCode = host.state().joinCode;
   assert.ok(joinCode, "the console frame carries no join code");
+  const invited = new Set<string>();
   const phones: Wire[] = [];
   for (let i = 0; i < phoneCount; i += 1) {
-    phones.push(
-      open({
-        t: "hello",
-        role: "participant",
-        joinCode,
-        nickname: `Player ${i + 1}`,
-      }),
-    );
+    const nickname = `Player ${i + 1}`;
+    invited.add(nickname);
+    phones.push(open({ t: "hello", role: "participant", joinCode, nickname }));
   }
 
   let cid = 0;
-  const guardTheClock = (): void => {
-    assert.ok(
-      Date.now() - started < BOTS_ARRIVE_AT_MS,
-      "the scenario ran past the point where the mock joins its own bots, so " +
-        "the two rooms no longer hold the same people",
-    );
-  };
+  const guard = (): void => noStrangers(host.state().roster, invited);
   return {
     host,
     screen,
@@ -277,13 +345,14 @@ async function room(t: TestContext, phoneCount: number): Promise<Room> {
         last === undefined || last.cid !== `cid-${cid}`,
         `the mock refused ${command.name}: ${last?.t === "refusedCmd" ? last.message : ""}`,
       );
-      guardTheClock();
+      guard();
     },
     settle() {
       tick(2);
-      guardTheClock();
+      guard();
     },
     join(nickname) {
+      invited.add(nickname);
       const wire = open({
         t: "hello",
         role: "participant",
@@ -291,10 +360,39 @@ async function room(t: TestContext, phoneCount: number): Promise<Room> {
         nickname,
       });
       phones.push(wire);
-      guardTheClock();
+      guard();
       return wire;
     },
+    advance(ms) {
+      for (let left = ms; left > 0; left -= 1_000) tick(Math.min(1_000, left));
+      guard();
+    },
   };
+}
+
+/**
+ * Hold the room until the Plan / Apply light shows `want`.
+ *
+ * The light is the reason the harness needed {@link Room.advance} at all, and
+ * the reason a scenario cannot simply tick a fixed number: `#lightMs` draws a
+ * fresh `2_000 + random(4_000)` at every turn, deliberately, because SPEC.md's
+ * light is not a metronome. So this advances in small steps and reads the light
+ * off the console's own frame, which is also the surface the room reads it off.
+ *
+ * A hundred milliseconds at a time, so the caller knows the turn happened within
+ * a tenth of a second of being found — which is what lets a scenario reason
+ * about the 250 ms lock grace on either side of it.
+ *
+ * Fails rather than looping forever. The cap is comfortably more than two full
+ * turns of the longest light, so reaching it means the light has stopped turning
+ * and every claim after this point would have been made against a dead round.
+ */
+function untilTheLightIs(r: Room, want: "plan" | "apply"): void {
+  for (let waited = 0; waited <= 20_000; waited += 100) {
+    if (r.host.state().arcade?.planApply?.light === want) return;
+    r.advance(100);
+  }
+  assert.fail(`the light never turned to ${want}`);
 }
 
 /* ------------------------------------------------------------------ */
@@ -2204,6 +2302,194 @@ describe("Recruitment banks what the engine banks", () => {
 });
 
 /* ------------------------------------------------------------------ */
+/* #27.2 — whose points the round's totals fold over                   */
+/* ------------------------------------------------------------------ */
+
+describe("a round's totals are folded over the people who were in it", () => {
+  /**
+   * `settleRound` in engine/arcade.ts folds `standing ∪ banked` and spells out
+   * both halves: the standings fixed at the round's card, plus anybody who
+   * banked without being in them — a latecomer, "somebody who joined after the
+   * round started, was put on the Floor by playing, and scored", whose points
+   * would otherwise be quietly dropped.
+   *
+   * `#endRound` here folded `s.participants`, which is neither half. It looks
+   * equivalent and is not, because `resetFloor()` is what makes it look
+   * equivalent and `resetFloor()` runs at the round's card: anybody the roster
+   * gained or lost *inside* the round makes the two disagree.
+   *
+   * The consequence is not arithmetic, it is a cell. A raw of `0` on the
+   * console's arcade totals means "played and scored nothing", and an absent
+   * entry means "did not play" — which is the cell a host needs in order to
+   * bench somebody. So the old fold wrote "played, 0" against a person who
+   * arrived after the round and against a person who had left the room, and
+   * "played, 0" also changes Bench Credit, which `board()` averages over the
+   * entries that say `played`.
+   *
+   * Both halves in one room, because each catches a different wrong fold:
+   *
+   * - **p5 is released before the round card**, so `rosterOrder` leaves them out
+   *   of the engine's standings and `inTheRoom()` leaves them out of the mock's.
+   *   A fold over `s.participants` gives them a zero the engine does not write.
+   *   This one also watches `resetFloor()`, which walked `participants` too —
+   *   with the fold fixed and the reset not, the zero comes back by another door.
+   * - **p7 joins mid-round and does nothing**, which is the same zero from the
+   *   other end of the round.
+   * - **p8 joins mid-round and answers**, which is the `banked` half of the
+   *   union: they are in neither side's standings and must be in both sides'
+   *   totals. Without them a fold over `standing` alone would pass.
+   *
+   * Recruitment rather than Plan / Apply for p8's sake: `tap` is where the two
+   * implementations still disagree about a latecomer with no standing — the
+   * reducer admits them and this file refuses them, which is a guard difference
+   * of its own and not this one — while a Recruitment answer is accepted by both.
+   */
+  it("gives a round's zero to the people who were in it and nobody else, as the engine does", async (t) => {
+    const pair = roundPair("recruitment");
+    const item = RECRUITMENT_ITEMS[0];
+    assert.ok(item !== undefined, "there are no recruitment items");
+
+    const r = await room(t, 6);
+    r.cmd({ name: "open" });
+    r.cmd({ name: "start" });
+    r.cmd({ name: "arcade.enter" });
+    // Out of the room before the card goes up, and therefore out of the round.
+    r.cmd({ name: "participant.release", pid: "p5" });
+    r.cmd(pair.cmd);
+    r.cmd({ name: "arcade.begin" });
+
+    // The two latecomers. `join` puts them at the end of `phones`, so
+    // `phones[6]` is p7 and `phones[7]` is p8.
+    r.join("Player 7");
+    const late = r.join("Player 8");
+    r.phones[0]?.send({ t: "arcade.answer", cid: "a1", item: 0, answer: item.answer });
+    late.send({ t: "arcade.answer", cid: "a8", item: 0, answer: item.answer });
+    r.cmd({ name: "arcade.end" });
+
+    let engine = engineRoom(6, [
+      { type: "releaseNickname", pid: "p5" },
+      { type: "startRound", round: "recruitment", config: pair.config },
+      { type: "beginPlay" },
+      { type: "join", pid: "p7", nickname: "Player 7" },
+      { type: "join", pid: "p8", nickname: "Player 8" },
+      { type: "submitAnswer", pid: "p1", answer: item.answer },
+      { type: "submitAnswer", pid: "p8", answer: item.answer },
+      { type: "endRound" },
+    ]);
+
+    const totals = (state: RenderState): Readonly<Record<string, number>> =>
+      state.hostExtras?.arcade?.totals ?? {};
+    const real = totals(engineView(engine));
+    // The engine's own answer, printed, and made to be worth comparing: the
+    // room is not all zeroes, not all present, and not all absent. Two people
+    // scored, four were in the round and did not, and two of the eight rows the
+    // roster has ever held are not in the fold at all.
+    assert.deepEqual(
+      real,
+      { p1: 10, p2: 0, p3: 0, p4: 0, p6: 0, p8: 10 },
+      "the engine's own totals",
+    );
+    assert.deepEqual(totals(r.host.state()), real, "the round's totals");
+    // Said again as the thing a host would notice, so a failure reads as the
+    // bug rather than as a diff: the released person and the silent latecomer
+    // have no cell, and the scoring latecomer has one.
+    for (const pid of ["p5", "p7"]) {
+      assert.ok(!(pid in totals(r.host.state())), `${pid} has a round they were not in`);
+    }
+    assert.ok("p8" in totals(r.host.state()), "the latecomer's points were dropped");
+  });
+});
+
+/* ------------------------------------------------------------------ */
+/* #27.3 — Recruitment's round clock, re-derived per item              */
+/* ------------------------------------------------------------------ */
+
+describe("Recruitment's round ends when its last item does", () => {
+  /**
+   * `nextItem` in reducer.ts recomputes `endsAt` from the item that is actually
+   * open — `itemEndsAt + (items.length − 1 − at) × secondsPerItem × 1000` — and
+   * its comment says why: `beginPlay` can only guess at `begin + items × 20 s`,
+   * every item opens a little after its predecessor's deadline because the timer
+   * that opens it has event-loop lag, so the guess drifts earlier than the truth
+   * by the accumulated lag. The runtime re-arms its Floor timer off the new
+   * value.
+   *
+   * `#nextItem` here bumped `at`, restamped `itemEndsAt`, re-armed the item
+   * timer, and left `arcadeEndsAt` at `#beginPlay`'s guess. Recruitment is one
+   * of the three rounds whose Floor timer *is* armed — glass, tug and gganbu are
+   * excluded, for the same lag reason — so there were two competing deadlines,
+   * and the earlier one wins: the last item lost the tail of its twenty seconds.
+   * The stale `endsAt` also went on the wire, so the round countdown on the big
+   * screen disagreed with the item countdown beside it.
+   *
+   * The claim is made on the projection and as a *difference* of two fields on
+   * the same frame, because the two implementations do not share a clock and an
+   * absolute instant from one means nothing to the other. `endsAt − itemEndsAt`
+   * is the arithmetic itself: how much round is left after the open item, which
+   * is zero once the last item is open and six items' worth on the first.
+   *
+   * A second of held clock before every press, which is what this scenario could
+   * not do before `MockConfig.bots`. Without it the two fields agree by accident
+   * — with no time between `#beginPlay` and the first press, the stale guess and
+   * the honest arithmetic are the same number — and the mutation comes back
+   * green. The lag *is* the test.
+   */
+  it("re-derives the Floor's clock at every item, as the engine does", async (t) => {
+    const pair = roundPair("recruitment");
+    const r = await room(t, 6);
+    r.cmd({ name: "open" });
+    r.cmd({ name: "start" });
+    r.cmd({ name: "arcade.enter" });
+    r.cmd(pair.cmd);
+    r.cmd({ name: "arcade.begin" });
+
+    let engine = engineRoom(6, [
+      { type: "startRound", round: "recruitment", config: pair.config },
+      { type: "beginPlay" },
+    ]);
+
+    /** How much round is left after the open item closes, off one frame. */
+    const tail = (state: RenderState): number => {
+      const arcade = state.arcade;
+      const itemEndsAt = arcade?.recruitment?.itemEndsAt;
+      assert.ok(arcade !== undefined, "no arcade on the frame");
+      assert.ok(itemEndsAt !== undefined, "the open item has no clock");
+      assert.ok(arcade.endsAt !== null, "the Floor has no clock");
+      return arcade.endsAt - itemEndsAt;
+    };
+
+    const items = pair.config.kind === "recruitment" ? pair.config.items.length : 0;
+    assert.ok(items > 2, "a one-item round cannot show this at all");
+    const seen: { at: number; mock: number; real: number }[] = [];
+    for (let at = 1; at < items; at += 1) {
+      // The lag, which is the whole point: a real host presses this when the
+      // item's own timer goes, a little after it, and the guess `#beginPlay`
+      // made drifts earlier than the truth by exactly this much.
+      r.advance(1_000);
+      r.cmd({ name: "arcade.next" });
+      engine = replay(engine, [
+        { event: { type: "nextItem" }, at: T0 + at * 1_000 },
+      ]);
+      seen.push({ at, mock: tail(r.host.state()), real: tail(engineView(engine)) });
+    }
+
+    // The engine's own arithmetic, printed: six items' worth of round left
+    // behind the second item, and none at all behind the last. A round whose
+    // every tail were the same number would pass against anything.
+    const secondsPerItem =
+      pair.config.kind === "recruitment" ? pair.config.secondsPerItem : 0;
+    assert.deepEqual(
+      seen.map((s) => s.real),
+      Array.from({ length: items - 1 }, (_, i) => (items - 2 - i) * secondsPerItem * 1_000),
+      "the engine's own tails",
+    );
+    for (const { at, mock, real } of seen) {
+      assert.equal(mock, real, `the Floor's clock diverges at item ${at + 1}`);
+    }
+  });
+});
+
+/* ------------------------------------------------------------------ */
 /* #25.4 — a bet placed after the result it names                      */
 /* ------------------------------------------------------------------ */
 
@@ -2364,6 +2650,158 @@ describe("a bet placed after the result it names pays nothing", () => {
     // shattered tin is worth zero — so these two numbers are the Lounge and
     // nothing else.
     assert.equal(real["p3"], 8, "the engine did not pay the honest bet");
+    assert.equal(real["p4"], 0, "the engine paid the late bet");
+    assert.deepEqual(totals(r.host.state()), real, "the round's totals");
+  });
+
+  /**
+   * The other half, and the half the harness existed to make reachable.
+   *
+   * `mockBetStands`' `plan_apply` arm and the `finishedAt` stamp in `#recordTap`
+   * that feeds it were written at the same time as the Unseal arm above and had
+   * nothing watching them, for one reason: a Plan / Apply drain needs the APPLY
+   * light, the light runs on its own two-to-six second timer, and every
+   * scenario in this file had to finish inside the first second of a session
+   * before the mock joined its own bots. So the code was written, read, and
+   * never run — which is the state every divergence this file exists for was
+   * found in. `MockConfig.bots` and {@link Room.advance} are what changed.
+   *
+   * A smaller target than the tuned 120, because the crossing is four taps here
+   * rather than a hundred and twenty and the light does not wait: the same
+   * config goes to both sides, `checkpointsFor` and `mockCheckpoints` both give
+   * quarter marks, and four is the smallest target whose three checkpoints are
+   * three distinct numbers. The round is the guard, not the arithmetic.
+   *
+   * The scenario is the same shape as the Unseal one above and for the same
+   * reason: **two** drained backers on the same runner, one betting before the
+   * crossing and one after. One alone would pass against an implementation with
+   * no guard at all, and two early ones would pass against one that refused
+   * everything.
+   */
+  it("pays the early backer and not the one who waited for the crossing, as the engine does", async (t) => {
+    // Target four: see the note above. Ninety seconds, so the Floor's own timer
+    // is nowhere near — the only clock this scenario runs out is the light's.
+    const cmd = {
+      name: "arcade.round",
+      kind: "plan_apply",
+      target: 4,
+      seconds: 90,
+    } as const;
+    const config: ArcadeRoundConfig = { kind: "plan_apply", target: 4, seconds: 90 };
+
+    const r = await room(t, 6);
+    r.cmd({ name: "open" });
+    r.cmd({ name: "start" });
+    r.cmd({ name: "arcade.enter" });
+    r.cmd(cmd);
+    r.cmd({ name: "arcade.begin" });
+    const round = r.host.state().arcade?.roundIndex ?? -1;
+
+    let engine = engineRoom(6, [
+      { type: "startRound", round: "plan_apply", config },
+      { type: "beginPlay" },
+    ]);
+    // The engine has no clock: the light is a `setLight` event carrying the
+    // instant, and a tap carries its own corrected instant. So the engine side
+    // is written as the ordering it is a claim about, and the mock side is
+    // driven by holding the room until its own light turns. The two clocks are
+    // never compared — only the two settlements are.
+    const plan = (at: number, until: number): void => {
+      engine = replay(engine, [
+        { event: { type: "setLight", light: "plan", until }, at },
+      ]);
+    };
+    const apply = (at: number, until: number): void => {
+      engine = replay(engine, [
+        { event: { type: "setLight", light: "apply", until }, at },
+      ]);
+    };
+    const tap = (pid: string, at: number): void => {
+      engine = replay(engine, [{ event: { type: "tap", pid, at }, at }]);
+    };
+
+    // The light turns pink. Three hundred milliseconds past the turn before
+    // anybody taps, because `#tapInstant` pulls a tap inside 250 ms of the lock
+    // back to the last instant of the PLAN before it — SPEC.md's grace for
+    // network latency — and a tap inside it is forgiven rather than drained.
+    // `untilTheLightIs` finds the turn within 100 ms of it happening, so this
+    // is the first instant at which a drain is the thing being tested.
+    untilTheLightIs(r, "apply");
+    r.advance(300);
+    apply(T0 + 10_000, T0 + 16_000);
+
+    // p3 and p4 tap into the lock and are drained. Not p1, who is the runner.
+    r.phones[2]?.send({ t: "arcade.tap", cid: "lock-p3", round });
+    r.phones[3]?.send({ t: "arcade.tap", cid: "lock-p4", round });
+    tap("p3", T0 + 11_000);
+    tap("p4", T0 + 11_001);
+
+    const drained = (state: RenderState): readonly string[] =>
+      (state.arcade?.grid ?? []).filter((c) => c.struck).map((c) => c.pid);
+    assert.deepEqual(
+      drained(engineView(engine)),
+      ["p3", "p4"],
+      "the engine drained somebody else, so the Lounge below is not what it looks like",
+    );
+    assert.deepEqual(
+      drained(r.host.state()),
+      drained(engineView(engine)),
+      "the two rooms drained different people, so the Lounges differ before the bets do",
+    );
+
+    // Green again, which is when a runner may move and a backer may bet.
+    untilTheLightIs(r, "plan");
+    plan(T0 + 16_000, T0 + 30_000);
+
+    // The honest bet: placed while p1 is still short of the line.
+    r.phones[2]?.send({ t: "arcade.back", cid: "back-p3", pid: "p1" });
+    engine = replay(engine, [
+      { event: { type: "backPlayer", pid: "p3", backing: "p1" }, at: T0 + 17_000 },
+    ]);
+    assert.equal(
+      engineView(engine).arcade?.planApply?.crossed,
+      0,
+      "somebody was already across when the honest bet was placed",
+    );
+
+    // p1 crosses, which is on the big screen the instant it happens: the finish
+    // order is on the Plan / Apply view for every role.
+    for (let i = 0; i < 4; i += 1) {
+      r.phones[0]?.send({ t: "arcade.tap", cid: `run-${i}`, round });
+      tap("p1", T0 + 18_000 + i);
+    }
+    assert.equal(
+      engineView(engine).arcade?.planApply?.crossed,
+      1,
+      "p1 did not cross, so there is no result to bet after",
+    );
+    assert.equal(
+      r.host.state().arcade?.planApply?.crossed,
+      1,
+      "p1 crossed on the engine and not on the mock, so the two Floors differ",
+    );
+
+    // And the bet that is not a bet, named after the crossing it names.
+    r.phones[3]?.send({ t: "arcade.back", cid: "back-p4", pid: "p1" });
+    engine = replay(engine, [
+      { event: { type: "backPlayer", pid: "p4", backing: "p1" }, at: T0 + 19_000 },
+    ]);
+
+    r.cmd({ name: "arcade.end" });
+    engine = replay(engine, [{ event: { type: "endRound" }, at: T0 + 20_000 }]);
+
+    const totals = (state: RenderState): Readonly<Record<string, number>> =>
+      state.hostExtras?.arcade?.totals ?? {};
+    const real = totals(engineView(engine));
+    // The engine's own arithmetic, printed, so a change of tuning is a
+    // conversation here rather than a literal quietly edited. p1 banks three
+    // checkpoints at 5 and the first crossing at 10 + 15. p3 is paid 15 for
+    // backing the winner; p4 backed the same winner for the same 15 and is paid
+    // nothing, and that difference is the whole of the guard. Neither of them
+    // banked anything on the Floor — their one tap was into the lock — so the
+    // two numbers are the Lounge and nothing else.
+    assert.equal(real["p1"], 3 * 5 + 10 + 15, "the engine did not pay the crossing");
+    assert.equal(real["p3"], 15, "the engine did not pay the honest bet");
     assert.equal(real["p4"], 0, "the engine paid the late bet");
     assert.deepEqual(totals(r.host.state()), real, "the round's totals");
   });
@@ -2565,6 +3003,288 @@ describe("a practice arcade round moves no board either", () => {
       publicBoard(r.screen.state()),
       publicBoard(engineScreen(engine)),
       "the standings",
+    );
+  });
+});
+
+/* ------------------------------------------------------------------ */
+/* #27.4 — a kick marks the person, it does not delete them            */
+/* ------------------------------------------------------------------ */
+
+describe("a kicked person keeps their row and loses their place", () => {
+  /**
+   * `kick` in reducer.ts sets `kicked: true, connected: false` and leaves the
+   * rest of the row alone. `#hostCmd`'s `participant.kick` **spliced them out of
+   * the array**, and that was a bookkeeping difference right up until the
+   * projections started filtering: `rosterOrder` in engine/arcade.ts and
+   * `computeStandings` in engine/scoring.ts read `kicked`, so on the server a
+   * kick leaves a marked row to filter and here it left a hole.
+   *
+   * A hole and a mark agree about anything that only counts the room — the
+   * roster is one shorter either way — which is why this went unnoticed. They
+   * disagree the moment the *row* is the thing that answers the question, and
+   * two places need it:
+   *
+   * 1. **The collision lookup at the door.** The reducer frees a kicked
+   *    nickname for other people and refuses it to the person who was kicked,
+   *    on their own rejoin token: SPEC.md's "can rejoin under a different
+   *    nickname". With the row deleted there was nothing left to recognise, so
+   *    a kicked phone reconnecting — which is what a kicked phone does, it
+   *    still holds its token — fell through to a fresh join and was let
+   *    straight back in under the same name. That is the one thing a kick is
+   *    for.
+   * 2. **The ceiling `#normalise` scales the room against.** `normaliseActivity`
+   *    skips a kicked participant at both ends and says why: "someone removed
+   *    for joining under an offensive name would otherwise scale the whole room
+   *    down against a score nobody can see."
+   *
+   * Everything else the mark makes visible — the standings, the score grid, the
+   * podium, the round's standings reset, the numbering, the rope's sides, the
+   * Gganbu pairs — was right by accident while the row was deleted and has to
+   * be filtered now that it is not. The second test below is the guard on that,
+   * and it is the reason a fix this small is worth a scenario at all.
+   */
+  it("refuses their own rejoin token under the name they were kicked for, as the engine does", async (t) => {
+    const r = await room(t, 6);
+    r.cmd({ name: "open" });
+    r.cmd({ name: "start" });
+    let engine = engineRoom(6);
+
+    const names = (state: RenderState): readonly string[] =>
+      state.roster.map((p) => p.nickname);
+    assert.deepEqual(names(engineView(engine)), [
+      "Player 1",
+      "Player 2",
+      "Player 3",
+      "Player 4",
+      "Player 5",
+      "Player 6",
+    ]);
+
+    r.cmd({ name: "participant.kick", pid: "p3" });
+    engine = replay(engine, [{ event: { type: "kick", pid: "p3" }, at: T0 + 100 }]);
+    assert.deepEqual(
+      names(engineView(engine)),
+      ["Player 1", "Player 2", "Player 4", "Player 5", "Player 6"],
+      "the engine did not remove them from the room",
+    );
+    assert.deepEqual(names(r.host.state()), names(engineView(engine)), "after the kick");
+
+    // The kicked phone comes back, which is what a phone does: it still holds
+    // the token it was given. Same token, same name — the one case that is
+    // refused, on both sides.
+    r.phones[2]?.send({
+      t: "hello",
+      role: "participant",
+      joinCode: r.host.state().joinCode ?? "",
+      nickname: "Player 3",
+      rejoinToken: "tok-p3",
+    });
+    engine = replay(engine, [
+      { event: { type: "join", pid: "p3", nickname: "Player 3" }, at: T0 + 200 },
+    ]);
+    assert.deepEqual(
+      names(engineView(engine)),
+      ["Player 1", "Player 2", "Player 4", "Player 5", "Player 6"],
+      "the engine let them back in, so there is nothing here to compare",
+    );
+    assert.deepEqual(
+      names(r.host.state()),
+      names(engineView(engine)),
+      "the room after a kicked phone reconnected under the same name",
+    );
+    // And said as the thing itself, because a roster comparison would also pass
+    // if the mock had refused *every* rejoin: the refusal names the reason.
+    const refused = (r.phones[2]?.frames ?? []).filter((f) => f.t === "refused").at(-1);
+    assert.equal(refused?.t === "refused" ? refused.reason : null, "kicked");
+
+    // A different name, and they are back: the same person, un-kicked and
+    // renamed, which is `join`'s `existing.kicked ? { nickname, nicknameKey }`.
+    r.phones[2]?.send({
+      t: "hello",
+      role: "participant",
+      joinCode: r.host.state().joinCode ?? "",
+      nickname: "Player 9",
+      rejoinToken: "tok-p3",
+    });
+    engine = replay(engine, [
+      { event: { type: "join", pid: "p3", nickname: "Player 9" }, at: T0 + 300 },
+    ]);
+    assert.ok(
+      names(engineView(engine)).includes("Player 9"),
+      "the engine refused a rejoin under a new name, which is not the rule",
+    );
+    assert.deepEqual(
+      names(r.host.state()),
+      names(engineView(engine)),
+      "the room after the same phone rejoined under a new name",
+    );
+  });
+
+  /**
+   * The projections, now that there is a row for them to find.
+   *
+   * Every one of these was right while `kick` deleted the row and would be
+   * wrong the moment it stopped, so this is the scenario that makes the change
+   * above safe rather than the one that proves it was needed. The claim worth
+   * making loudest is the ceiling: the person kicked is the person on the top
+   * score, so an unfiltered `#normalise` scales the whole room against a raw
+   * nobody can see and *every other row's* trivia column drops.
+   */
+  it("keeps them out of the board, the grid, the podium and the ceiling, as the engine does", async (t) => {
+    const r = await room(t, 6);
+    r.cmd({ name: "open" });
+    r.cmd({ name: "start" });
+    const openedAt = Date.now();
+    r.cmd({ name: "trivia.open", suddenDeath: false });
+    const question = questionFromFrame(r.host.state());
+    const right = question.correct[0] ?? 0;
+    const wrong = right === 0 ? 1 : 0;
+
+    // p1 answers first and fastest, so p1 is the ceiling. p2 and p3 answer
+    // correctly a little later, p4 is wrong, p5 and p6 are silent — a room
+    // where dropping the top row visibly moves every other number.
+    const taps: readonly { i: number; pid: string; choice: number }[] = [
+      { i: 0, pid: "p1", choice: right },
+      { i: 1, pid: "p2", choice: right },
+      { i: 2, pid: "p3", choice: right },
+      { i: 3, pid: "p4", choice: wrong },
+    ];
+    const answers: Event[] = [];
+    for (const tap of taps) {
+      // Three seconds between taps, which is the other thing `advance` is for.
+      // Without it every tap lands in the same millisecond of the fake clock,
+      // SPEC.md's "an answer at the buzzer is worth half an instant one" rounds
+      // all four to the same 1000, and the whole room normalises to 100 — a
+      // ceiling nobody can move is a ceiling this scenario cannot be about.
+      if (tap.i > 0) r.advance(3_000);
+      const ms = Date.now() - openedAt;
+      answers.push({ type: "answerQuestion", pid: tap.pid, choice: tap.choice, ms });
+      r.phones[tap.i]?.send({
+        t: "trivia.answer",
+        cid: `q${tap.pid}`,
+        index: 0,
+        choice: tap.choice,
+      });
+    }
+    r.cmd({ name: "trivia.close" });
+    r.cmd({ name: "trivia.reveal" });
+
+    let engine = engineTriviaRoom(6, [question]);
+    engine = replay(engine, [
+      { event: { type: "openQuestion", suddenDeath: false }, at: T0 },
+      ...answers.map((event) => ({ event, at: T0 })),
+      { event: { type: "closeQuestion" }, at: T0 + 1_000 },
+      { event: { type: "revealQuestion" }, at: T0 + 1_100 },
+    ]);
+
+    // The room before the kick, so the numbers below are a change and not a
+    // coincidence: p1 is on 100 and somebody else is not.
+    const before = triviaGrid(engineView(engine));
+    assert.equal(
+      before.find((row) => row.pid === "p1")?.points,
+      100,
+      "p1 is not the ceiling",
+    );
+    const p2Before = before.find((row) => row.pid === "p2")?.points ?? 0;
+    assert.ok(p2Before > 0 && p2Before < 100, "p2 is level with the ceiling already");
+
+    r.cmd({ name: "participant.kick", pid: "p1" });
+    engine = replay(engine, [{ event: { type: "kick", pid: "p1" }, at: T0 + 2_000 }]);
+
+    const real = engineView(engine);
+    // The ceiling moved to p2, which is the whole of `normaliseActivity`'s note
+    // about a removed score not scaling the room. Printed, because a mock that
+    // kept p1 in the ceiling would leave p2 below 100 and that is the failure
+    // this line names.
+    assert.equal(
+      triviaGrid(real).find((row) => row.pid === "p2")?.points,
+      100,
+      "the engine still scales the room against the person it removed",
+    );
+    assert.deepEqual(
+      triviaGrid(r.host.state()),
+      triviaGrid(real),
+      "the console's score grid",
+    );
+    // Through `publicBoard`, for the reason the note on it gives: the two rooms
+    // are not holding the same *list* of activities, so a whole-row compare
+    // fails on a `ttx: null` key that says nothing about a kick.
+    assert.deepEqual(
+      publicBoard(r.host.state()),
+      publicBoard(real),
+      "the console's standings",
+    );
+    assert.deepEqual(
+      r.host.state().hostExtras?.participantCount,
+      real.hostExtras?.participantCount,
+      "the console's count of the room",
+    );
+    // The podium: p1 scored, so the engine has a podium with p1 off it and the
+    // rest of the rows still there. An empty podium would match anything.
+    const realPodium = engineScreen(engine).trivia?.podium ?? [];
+    assert.ok(
+      realPodium.length > 0,
+      "the engine's podium is empty, so this compares nothing",
+    );
+    assert.ok(
+      !realPodium.some((row) => row.nickname === "Player 1"),
+      "the engine left the kicked person on the podium",
+    );
+    assert.deepEqual(r.screen.state().trivia?.podium, realPodium, "the big screen's podium");
+  });
+});
+
+/* ------------------------------------------------------------------ */
+/* #27, found on the way — the console's own standings                 */
+/* ------------------------------------------------------------------ */
+
+describe("the console's standings are not the public five", () => {
+  /**
+   * views.ts gives the console `topFive(all)` and the big screen
+   * `publicStandings(all)`, and the difference is two rules: the public five is
+   * a hard cap where the console's expands a tie at fifth, and the public five
+   * is **empty until somebody has scored** where the console's is not. The note
+   * on it is one line — "the host sees everything: they cannot run the session
+   * blind, and sealing is about what the *room* sees".
+   *
+   * #27 lists this as a drift found on the way, with the mock building the
+   * host's `standings` from `#publicRows`. It does not: `render` has used
+   * `#topFive(board)` for the host since the scoring surfaces were built, and
+   * the two implementations agree. So this is the test that says so rather than
+   * a fix — the claim was worth checking and is worth keeping checked, because
+   * the two helpers sit four lines apart in this file and the wrong one would be
+   * an easy thing to reach for.
+   *
+   * An unscored room of seven, which is the shape that separates the two rules
+   * at both ends at once: seven is more than the cap, and unscored is where the
+   * zero gate bites. `#publicRows` would send nothing at all here.
+   */
+  it("shows the host an unscored room the engine would not show the screen", async (t) => {
+    const r = await room(t, 7);
+    r.cmd({ name: "open" });
+    r.cmd({ name: "start" });
+    const engine = engineRoom(7);
+
+    const real = engineView(engine);
+    // The engine's own answer first, and it is the interesting one: the console
+    // is handed all seven rows of a room where nobody has a point, and the big
+    // screen is handed none.
+    assert.equal(real.standings.length, 7, "the engine's console standings");
+    assert.equal(
+      engineScreen(engine).standings.length,
+      0,
+      "the engine's big screen is showing an unscored board, so the two rules have merged",
+    );
+    assert.deepEqual(
+      publicBoard(r.host.state()),
+      publicBoard(real),
+      "the console's standings",
+    );
+    assert.deepEqual(
+      publicBoard(r.screen.state()),
+      publicBoard(engineScreen(engine)),
+      "the big screen's standings",
     );
   });
 });
