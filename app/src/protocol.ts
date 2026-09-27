@@ -1579,6 +1579,13 @@ export interface RenderState {
        * in `client/shared` — is still a valid host frame, and the console
        * reads the absence as Manual, which is the safe reading of a frame that
        * cannot say. The server always sends it.
+       *
+       * This is not the only place the dev mock is deliberately unlike the
+       * server, and it used to be the only one written down — so a reader who
+       * found one of the others had no way to tell it from drift. They are
+       * now listed together under "Where the mock is deliberately different"
+       * in `client/shared/mock.ts`, this one included; the list is the place
+       * to look, and the place to add to.
        */
       readonly auto?: {
         readonly on: boolean;
