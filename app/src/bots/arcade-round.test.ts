@@ -1259,12 +1259,47 @@ const HERMIT = 0;
 /* The round                                                            */
 /* ------------------------------------------------------------------ */
 
-describe("sixty bots play Recruitment and Plan / Apply", () => {
-  const recruit = expectRecruitment();
-  const pa = expectPlanApply();
-  const played = play();
-  const finalState = played.runtime.state;
+/** Everything the arcade round's tests read. Built once, by {@link arcadeRound}. */
+interface ArcadeRound {
+  readonly recruit: ExpectedRecruitment;
+  readonly pa: ExpectedPlanApply;
+  readonly played: Played;
+  /** After both rounds have been revealed: the state a room ends on. */
+  readonly finalState: SessionState;
+}
 
+let arcade: ArcadeRound | null = null;
+
+/**
+ * Run the oracles and play the round: once, lazily, on the first test that
+ * asks for it.
+ *
+ * These four used to be `const`s in the `describe` body below. A `describe`
+ * body runs while node is still *collecting* tests, so a throw there is not a
+ * test failure — the runner drops the suite, the sixteen tests below are never
+ * registered, and the summary still says `fail 0` with the total silently
+ * sixteen short (issue #15). The exit code catches it; nothing a person reads
+ * does. Called from inside a test, the same throw is attributed and counted.
+ *
+ * `before()` is not the fix either: a failed hook cancels its tests, and
+ * cancelled tests are reported under `cancelled`, so `fail 0` survives that
+ * too. The work has to happen inside a test to be counted as one.
+ *
+ * The memo is what keeps sixty bots from replaying per test. It is left unset
+ * on a throw on purpose, so every test that needs the round fails on its own
+ * account rather than one failing and fifteen passing against a half-built
+ * fixture.
+ */
+function arcadeRound(): ArcadeRound {
+  return (arcade ??= (() => {
+    const recruit = expectRecruitment();
+    const pa = expectPlanApply();
+    const played = play();
+    return { recruit, pa, played, finalState: played.runtime.state };
+  })());
+}
+
+describe("sixty bots play Recruitment and Plan / Apply", () => {
   test("the launch content is what SPEC says it is", () => {
     assert.equal(RECRUITMENT_ITEMS.length, ITEMS.length);
     RECRUITMENT_ITEMS.forEach((it, i) => {
@@ -1280,6 +1315,7 @@ describe("sixty bots play Recruitment and Plan / Apply", () => {
   });
 
   test("the plan is what it says it is", () => {
+    const { recruit, pa } = arcadeRound();
     assert.equal(BOTS.length, 60);
     assert.equal(new Set(BOTS.map((b) => b.pid)).size, 60);
     assert.equal(EARLY.length, 59);
@@ -1325,6 +1361,7 @@ describe("sixty bots play Recruitment and Plan / Apply", () => {
   });
 
   test("Recruitment: every answer's points, the first three per item, and the refusals", () => {
+    const { recruit, played } = arcadeRound();
     recruit.items.forEach((want, item) => {
       const got = played.items[item]?.arcade?.play;
       assert.ok(got && got.kind === "recruitment", `item ${item + 1} state`);
@@ -1367,6 +1404,7 @@ describe("sixty bots play Recruitment and Plan / Apply", () => {
   });
 
   test("Recruitment: the banked points, and nobody is drained", () => {
+    const { recruit, played } = arcadeRound();
     const arcade = played.recruitmentEnded.arcade;
     assert.ok(arcade);
     assert.equal(arcade.phase, "idle");
@@ -1385,6 +1423,7 @@ describe("sixty bots play Recruitment and Plan / Apply", () => {
   });
 
   test("the latecomer is Player 060 and nobody was renumbered", () => {
+    const { pa, played, finalState } = arcadeRound();
     const arcade = finalState.arcade;
     assert.ok(arcade);
     assert.equal(arcade.playerNumbers[LATECOMER.pid], 60);
@@ -1399,6 +1438,7 @@ describe("sixty bots play Recruitment and Plan / Apply", () => {
   });
 
   test("Plan / Apply: every tap's outcome", () => {
+    const { pa, played } = arcadeRound();
     assert.equal(played.tapOutcomes.length, pa.taps.length);
     pa.taps.forEach((want, i) => {
       const got = played.tapOutcomes[i];
@@ -1435,6 +1475,7 @@ describe("sixty bots play Recruitment and Plan / Apply", () => {
   });
 
   test("Plan / Apply: the grace, at the wire's numbers", () => {
+    const { pa, played } = arcadeRound();
     const of = (pid: ParticipantId) => pa.taps.filter((t) => t.pid === pid);
     // Hotel: +499 corrects to +249 and is a resource; +500 corrects to +250 and drains.
     const hotel = of("p007");
@@ -1460,6 +1501,7 @@ describe("sixty bots play Recruitment and Plan / Apply", () => {
   });
 
   test("Plan / Apply: the Floor closes on the corrected instant", () => {
+    const { pa, played } = arcadeRound();
     const overtime = pa.taps.find((t) => t.pid === "p025" && t.recv === PA_ENDS + 100);
     const fibre = pa.taps.find((t) => t.pid === "p026" && t.recv === PA_ENDS + 100);
     const after = pa.taps.find((t) => t.pid === "p027" && t.recv === PA_END_ROUND + 100);
@@ -1472,6 +1514,7 @@ describe("sixty bots play Recruitment and Plan / Apply", () => {
   });
 
   test("Plan / Apply: the Lounge's bets and refusals", () => {
+    const { pa, played } = arcadeRound();
     assert.equal(played.backOutcomes.length, pa.backs.length);
     pa.backs.forEach((want, i) => {
       const got = played.backOutcomes[i];
@@ -1499,6 +1542,7 @@ describe("sixty bots play Recruitment and Plan / Apply", () => {
   });
 
   test("Plan / Apply: the banked points, Floor and Lounge", () => {
+    const { pa, played } = arcadeRound();
     const arcade = played.planApplyEnded.arcade;
     assert.ok(arcade);
     for (const [pid, want] of pa.banked) {
@@ -1518,6 +1562,7 @@ describe("sixty bots play Recruitment and Plan / Apply", () => {
   });
 
   test("the totals are cumulative across rounds, and the hand-computed ones", () => {
+    const { recruit, pa, played, finalState } = arcadeRound();
     const totals = finalState.arcade?.totals ?? {};
     for (const b of BOTS) {
       const want = (recruit.banked.get(b.pid) ?? 0) + (pa.banked.get(b.pid) ?? 0);
@@ -1550,6 +1595,7 @@ describe("sixty bots play Recruitment and Plan / Apply", () => {
   });
 
   test("draining lasts one round: everyone was back on the Floor with banked cleared and totals kept", () => {
+    const { recruit, played } = arcadeRound();
     // Recruitment's totals were in place when Plan / Apply's card went up,
     // and its banked column was empty.
     const log = played.runtime.log;
@@ -1566,6 +1612,7 @@ describe("sixty bots play Recruitment and Plan / Apply", () => {
   });
 
   test("the raw scores land at the reveal and normalise like any other activity", () => {
+    const { recruit, pa, played, finalState } = arcadeRound();
     // Before the reveal: Recruitment's totals only.
     const before = played.planApplyEnded.scores["arcade"] ?? {};
     for (const [pid, want] of recruit.banked) {
@@ -1591,6 +1638,7 @@ describe("sixty bots play Recruitment and Plan / Apply", () => {
   });
 
   test("a phone is never sent the light schedule, the answer key or the Floor's results", () => {
+    const { played } = arcadeRound();
     assert.deepEqual(played.wire.leaks.slice(0, 20), [], `${played.wire.leaks.length} leaks`);
     // The raw serialised frame, once on green and once on pink.
     for (const frame of [played.phoneFramePlan, played.phoneFrameApply]) {
@@ -1609,6 +1657,7 @@ describe("sixty bots play Recruitment and Plan / Apply", () => {
   });
 
   test("an ordinary tap costs no frames, and a milestone costs three, not sixty", (t) => {
+    const { pa, played } = arcadeRound();
     assert.equal(played.ordinaryTapFrames, 0, "a non-milestone tap fanned frames out");
     const w = played.planApplyWire;
     const n = BOTS.length;
@@ -1723,6 +1772,7 @@ describe("sixty bots play Recruitment and Plan / Apply", () => {
   });
 
   test("the whole run replays from its event log to the same state", () => {
+    const { played } = arcadeRound();
     const again = replay(
       played.initial,
       played.runtime.log.map((r) => ({ event: r.event, at: r.at })),
@@ -1805,7 +1855,11 @@ describe("checkpoints are quarter marks of the target", () => {
 /* ------------------------------------------------------------------ */
 
 describe("known discrepancies against SPEC", () => {
-  const base = newSession({ sid: "s", title: "t", joinCode: "RAFT", activities: ACTIVITIES });
+  // A declaration, not a call: nothing in this body may run at collection time
+  // (see {@link arcadeRound}), and a throw out of `newSession` here would take
+  // both tests below with it and be counted as no failures at all.
+  const base = (): SessionState =>
+    newSession({ sid: "s", title: "t", joinCode: "RAFT", activities: ACTIVITIES });
   const toPlay: readonly Event[] = [
     { type: "open" },
     { type: "join", pid: "p1", nickname: "Priya" },
@@ -1816,7 +1870,7 @@ describe("known discrepancies against SPEC", () => {
     { type: "beginPlay" },
     { type: "setLight", light: "plan", until: T0 + 3_000 },
   ];
-  const planning = (): SessionState => replay(base, toPlay.map((event) => ({ event, at: T0 })));
+  const planning = (): SessionState => replay(base(), toPlay.map((event) => ({ event, at: T0 })));
 
   test(
     "a tap made during APPLY that reaches the server after the light has gone back to PLAN is a drain",

@@ -238,10 +238,24 @@ describe("the committed example set", () => {
   // used to be pinned to this file now plays the frozen fixture in
   // `bots/acceptance-set.ts`, and the file itself is played, content and all,
   // by the second `describe` in `bots/trivia-round.test.ts`.
-  const text = readFileSync(
-    new URL("../../../config/event.example/trivia-questions.json", import.meta.url),
-    "utf8",
-  );
+  /**
+   * The file, read on the first test that asks for it — never at collection
+   * time.
+   *
+   * This was a bare `readFileSync` in the `describe` body, which is the one
+   * line in this block that can throw for a reason the block is *about*: a
+   * renamed, moved or deleted example. A `describe` body runs while node is
+   * still collecting tests, so that throw would have discarded this suite
+   * whole — its ten tests never registered, `fail 0` printed, and the run's
+   * total quietly ten short (issue #15). Called from inside a test, the same
+   * missing file fails a test that says what it was looking for.
+   */
+  let file: string | null = null;
+  const text = (): string =>
+    (file ??= readFileSync(
+      new URL("../../../config/event.example/trivia-questions.json", import.meta.url),
+      "utf8",
+    ));
 
   /**
    * The correct answer of every question, read off the file by a person.
@@ -298,7 +312,7 @@ describe("the committed example set", () => {
     // `ok` returns every question, tiebreakers included and flagged; the split
     // into a scored set and a sudden-death pool happens downstream. So this
     // reads the whole file, which is what a person transcribing it did.
-    const all = ok(text);
+    const all = ok(text());
     // Every question in the file is named above, so a question *added* to the
     // example fails here until somebody reads it and writes down its answer.
     // That is the intent: adding a question is a content edit, and vouching
@@ -337,7 +351,7 @@ describe("the committed example set", () => {
     // is exactly what this file stopped doing. The one count worth pinning is
     // the game's shape, below, and it is pinned because three documents state
     // it in prose.
-    assert.ok(ok(text).length > 0);
+    assert.ok(ok(text()).length > 0);
   });
 
   it("is a 24-question game with four tiebreakers behind it", () => {
@@ -350,7 +364,7 @@ describe("the committed example set", () => {
     // drift is here — and changing these is a decision that has to be written
     // down in those three documents too, which is why it is pinned while the
     // questions themselves are free to move.
-    const loaded = ok(text);
+    const loaded = ok(text());
     assert.equal(loaded.filter((q) => q.tiebreak !== true).length, 24);
     assert.equal(loaded.filter((q) => q.tiebreak === true).length, 4);
   });
@@ -360,7 +374,7 @@ describe("the committed example set", () => {
     // set where a lit tile is the whole reveal. Round values are what put a
     // card up in front of the room, so every scored question needs one; a
     // tiebreaker is never part of a round and must not claim to be.
-    const loaded = ok(text);
+    const loaded = ok(text());
     assert.ok(
       loaded.filter((q) => q.note !== null).length >= 10,
       "at least ten questions carry a note",
@@ -377,14 +391,14 @@ describe("the committed example set", () => {
     // held to the same bound even though sudden death never reads the field,
     // because a 30 in the file reads as a considered 30 to whoever edits it
     // next and this set has nothing that needs one.
-    for (const [i, q] of ok(text).entries()) {
+    for (const [i, q] of ok(text()).entries()) {
       assert.ok(q.timeLimitSec >= 10, `question ${i + 1} is under ten seconds`);
       assert.ok(q.timeLimitSec <= 20, `question ${i + 1} runs ${q.timeLimitSec}s`);
     }
   });
 
   it("marks exactly one correct answer per question, inside its own answers", () => {
-    for (const [i, q] of ok(text).entries()) {
+    for (const [i, q] of ok(text()).entries()) {
       assert.equal(q.correct.length, 1, `question ${i + 1}`);
       const at = q.correct[0] ?? -1;
       assert.ok(at >= 0 && at < q.answers.length, `question ${i + 1} points outside its answers`);
@@ -399,7 +413,7 @@ describe("the committed example set", () => {
     // `config/event.example/README.md`: the example deliberately sets none, so
     // every question is worth the same 1000 before speed weighting and a host
     // reading the file can see the scoring without doing any sums.
-    for (const [i, q] of ok(text).entries()) {
+    for (const [i, q] of ok(text()).entries()) {
       assert.equal(q.answers.length, 4, `question ${i + 1} offers ${q.answers.length} answers`);
       assert.equal(q.basePoints, 1000, `question ${i + 1} overrides basePoints`);
     }
@@ -410,12 +424,12 @@ describe("the committed example set", () => {
     // and the edit that goes wrong that way is a paste that leaves a question in
     // twice. Two identical stems are a tile the room has already seen and a
     // second helping of points for whoever remembers the first.
-    const stems = ok(text).map((q) => q.text.toLowerCase());
+    const stems = ok(text()).map((q) => q.text.toLowerCase());
     assert.equal(new Set(stems).size, stems.length, "a question stem appears twice");
   });
 
   it("round-trips: what it loads re-exports and loads the same", () => {
-    const first = ok(text);
+    const first = ok(text());
     const letters = ["A", "B", "C", "D"];
     const again = ok(
       JSON.stringify({

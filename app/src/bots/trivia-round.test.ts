@@ -590,19 +590,63 @@ const ZOE = 8_333;
 /* The round                                                            */
 /* ------------------------------------------------------------------ */
 
-describe("thirty bots play the frozen acceptance set", () => {
-  const questions = loadSet();
-  const expected = expectRound();
-  const played = playRound(questions);
-  const finalState = played.closed[SET.length - 1];
-  assert.ok(finalState);
-  // After the last reveal. Points settle at the close but only reach `scores`
-  // at the reveal — deliberately, so a phone's points strip cannot move while
-  // the answer is still private — so anything asserting on `scores` or on
-  // standings has to read the revealed state, not the closed one.
-  const revealedState = played.runtime.state;
+/** Everything the acceptance round's tests read. Built once, by {@link acceptanceRound}. */
+interface Acceptance {
+  readonly questions: readonly Question[];
+  readonly expected: readonly ExpectedQuestion[];
+  readonly played: Played;
+  /** After the twentieth question closed, before its reveal. */
+  readonly finalState: SessionState;
+  /**
+   * After the last reveal. Points settle at the close but only reach `scores`
+   * at the reveal — deliberately, so a phone's points strip cannot move while
+   * the answer is still private — so anything asserting on `scores` or on
+   * standings has to read the revealed state, not the closed one.
+   */
+  readonly revealedState: SessionState;
+}
 
+let acceptance: Acceptance | null = null;
+
+/**
+ * Play the round: once, lazily, on the first test that asks for it.
+ *
+ * These five bindings used to be `const`s in the `describe` body below, which
+ * is the obvious place for them and a trap. A `describe` body runs while node
+ * is still *collecting* tests, so a throw there is not a test failure — the
+ * runner discards the whole suite, the thirteen tests below are never
+ * registered, and the summary reports `fail 0` with the total silently
+ * thirteen short. Corrupting one timer in the frozen fixture took a run from
+ * `tests 20 / pass 20 / fail 0` to `tests 7 / pass 7 / fail 0`, and across the
+ * whole build from 1343 to 1330 with nothing failing (issue #15). The exit
+ * code was right. Every number a person actually reads was wrong.
+ *
+ * Called from inside a test, the same throw lands in that test, gets counted,
+ * and the other twelve still run and still report honestly. The memo is what
+ * stops that costing thirty bots × twenty questions on every one of them.
+ * Note that a throw leaves the memo unset on purpose, so each test that needs
+ * the round replays it and fails on its own account: repeating the work is the
+ * right trade in the one case where the build is already red.
+ *
+ * `before()` would have moved the throw somewhere it could be attributed too,
+ * but not somewhere it is *counted*: a failed hook cancels its tests, and
+ * cancelled tests are reported under `cancelled`, leaving `fail 0` in place.
+ * Inside the tests is the only shape that makes the headline number true.
+ */
+function acceptanceRound(): Acceptance {
+  return (acceptance ??= (() => {
+    const questions = loadSet();
+    const expected = expectRound();
+    const played = playRound(questions);
+    const finalState = played.closed[SET.length - 1];
+    assert.ok(finalState, "the acceptance round closed all twenty questions");
+    return { questions, expected, played, finalState, revealedState: played.runtime.state };
+  })());
+}
+
+describe("thirty bots play the frozen acceptance set", () => {
   test("the importer read the file the way a person reads it", () => {
+    const { questions } = acceptanceRound();
     // `SET` is a hand transcription of the questions this round plays, and
     // that is the whole of its value: it is an independent reading of the
     // file rather than a copy of whatever the importer produced.
@@ -626,6 +670,7 @@ describe("thirty bots play the frozen acceptance set", () => {
   });
 
   test("the plan is what it says it is", () => {
+    const { expected } = acceptanceRound();
     assert.equal(BOTS.length, 30);
     assert.equal(new Set(BOTS.map((b) => b.pid)).size, 30);
     // At least one bot never answers, at least one streak reaches the cap,
@@ -650,6 +695,7 @@ describe("thirty bots play the frozen acceptance set", () => {
   });
 
   test("every question: each answer's points and streak bonus", () => {
+    const { expected, played } = acceptanceRound();
     SET.forEach((_, qi) => {
       const want = expected[qi];
       const got = played.closed[qi]?.trivia;
@@ -673,6 +719,7 @@ describe("thirty bots play the frozen acceptance set", () => {
   });
 
   test("every question: the streaks", () => {
+    const { expected, played } = acceptanceRound();
     SET.forEach((_, qi) => {
       const want = expected[qi];
       const got = played.closed[qi]?.trivia;
@@ -686,6 +733,7 @@ describe("thirty bots play the frozen acceptance set", () => {
   });
 
   test("every question: the running totals", () => {
+    const { expected, played } = acceptanceRound();
     SET.forEach((_, qi) => {
       const want = expected[qi];
       const got = played.closed[qi]?.trivia;
@@ -695,6 +743,7 @@ describe("thirty bots play the frozen acceptance set", () => {
   });
 
   test("a tap after the close is refused as question_not_open", () => {
+    const { expected, played } = acceptanceRound();
     const want = expected.flatMap((q, qi) => q.refused.map((pid) => `${qi}:${pid}`)).sort();
     const got = played.refusals.map((r) => `${r.qi}:${r.pid}`).sort();
     assert.deepEqual(got, want);
@@ -703,6 +752,7 @@ describe("thirty bots play the frozen acceptance set", () => {
   });
 
   test("the hand-computed totals", () => {
+    const { expected, finalState } = acceptanceRound();
     const totals = finalState.trivia?.totals ?? {};
     assert.equal(totals["p001"], PRIYA, "Priya");
     assert.equal(totals["p002"], KENJI, "Kenji");
@@ -719,6 +769,7 @@ describe("thirty bots play the frozen acceptance set", () => {
   });
 
   test("the streak bonus stops at 500", () => {
+    const { played } = acceptanceRound();
     const priya = played.closed.map((s) => s.trivia?.answers["p001"]?.streakBonus);
     assert.deepEqual(priya.slice(0, 6), [0, 100, 200, 300, 400, 500]);
     assert.ok(priya.slice(5).every((b) => b === 500), "sixth and later: 500, flat");
@@ -739,6 +790,7 @@ describe("thirty bots play the frozen acceptance set", () => {
   });
 
   test("the latency correction is capped and absent when unmeasured", () => {
+    const { played, finalState } = acceptanceRound();
     // Hotel and Fibre tap at the same instant on every question.
     for (const s of played.closed) {
       const hotel = s.trivia?.answers["p007"];
@@ -758,6 +810,7 @@ describe("thirty bots play the frozen acceptance set", () => {
   });
 
   test("the late joiner scores from their first question only", () => {
+    const { expected, played, finalState } = acceptanceRound();
     for (let qi = 0; qi < 10; qi += 1) {
       assert.equal(played.closed[qi]?.trivia?.answers["p012"], undefined, `Q${qi + 1}`);
     }
@@ -769,6 +822,7 @@ describe("thirty bots play the frozen acceptance set", () => {
   });
 
   test("the raw scores and normalisation the scoreboard sees", () => {
+    const { expected, revealedState } = acceptanceRound();
     const scores = revealedState.scores["trivia"] ?? {};
     const last = expected[SET.length - 1];
     assert.ok(last);
@@ -788,6 +842,7 @@ describe("thirty bots play the frozen acceptance set", () => {
   });
 
   test("the podium is the top five by total, ties by name", () => {
+    const { expected, finalState } = acceptanceRound();
     const revealed = replay(finalState, [{ event: { type: "revealQuestion" }, at: T0 }]);
     assert.ok(revealed.trivia);
     const podium = triviaPodium(revealed, revealed.trivia);
@@ -804,6 +859,7 @@ describe("thirty bots play the frozen acceptance set", () => {
   });
 
   test("the whole round replays from its event log to the same state", () => {
+    const { played } = acceptanceRound();
     const again = replay(
       played.initial,
       played.runtime.log.map((r) => ({ event: r.event, at: r.at })),
@@ -815,6 +871,138 @@ describe("thirty bots play the frozen acceptance set", () => {
 /* ------------------------------------------------------------------ */
 /* The committed example: played, never transcribed                     */
 /* ------------------------------------------------------------------ */
+
+const ACE: ParticipantId = "pAce";
+const HALF: ParticipantId = "pHalf";
+const MISS: ParticipantId = "pMiss";
+
+/** Everything the committed example's tests read. Built once, by {@link exampleRound}. */
+interface ExampleRound {
+  /** The file as the importer read it: scored questions and tiebreakers together. */
+  readonly loaded: readonly Question[];
+  readonly flagged: readonly Question[];
+  readonly scored: readonly Question[];
+  readonly played: {
+    readonly runtime: ReturnType<SessionRegistry["add"]>["runtime"];
+    readonly initial: SessionState;
+    readonly closed: readonly SessionState[];
+    readonly finalState: SessionState;
+    readonly suddenDeath: SessionState;
+  };
+}
+
+let example: ExampleRound | null = null;
+
+/**
+ * Read the committed example and play it: once, lazily, on the first test that
+ * asks for it.
+ *
+ * Out of the `describe` body for the reason {@link acceptanceRound} spells
+ * out, and this one had the sharper edge of the two: it reads a file off disk.
+ * A renamed or malformed `config/event.example/trivia-questions.json` — the
+ * exact edit the five tests below exist to catch — would have thrown at
+ * collection time and taken those five tests out of the totals instead of
+ * failing any of them.
+ */
+function exampleRound(): ExampleRound {
+  return (example ??= (() => {
+    const loaded = loadCommittedExample();
+    const flagged = loaded.filter((q) => q.tiebreak === true);
+    const scored = loaded.filter((q) => q.tiebreak !== true);
+    return { loaded, flagged, scored, played: playExample(loaded, scored) };
+  })());
+}
+
+/**
+ * Half's tap: the middle of this question's timer.
+ *
+ * Nudged off an exact half for the same reason the ordinary bots re-roll one
+ * — the engine is known to round some exact halves the wrong way (see the
+ * `describe` below). On this file's 1000-point questions the midpoint is worth
+ * exactly 750 and the nudge never fires; it is here so that a set of, say,
+ * 750-point questions would not fail this test for a bug it is not about.
+ */
+function midpointMs(q: Question): number {
+  const limitMs = q.timeLimitSec * 1000;
+  let ms = Math.floor(limitMs / 2);
+  while (isExactHalf(q.basePoints, ms, limitMs)) ms += 1;
+  return ms;
+}
+
+/**
+ * The round itself: three bots, the whole file as the upload endpoint hands
+ * it over, played through the runtime and stopped at sudden death.
+ */
+function playExample(
+  loaded: readonly Question[],
+  scored: readonly Question[],
+): ExampleRound["played"] {
+  const registry = new SessionRegistry();
+  const initial = newSession({
+    sid: "ses-example",
+    title: "Example Team Offsite",
+    joinCode: "RAFT",
+    activities: ACTIVITIES,
+  });
+  const { runtime } = registry.add(initial, T0);
+  const clients = new Map<ParticipantId, Client>();
+  let now = T0;
+  const must = (event: Event, at: number, what: string): void => {
+    const out = runtime.apply(event, at);
+    assert.ok(out.applied, `${what}: ${out.rejection?.code ?? "not applied"}`);
+  };
+
+  must({ type: "open" }, now, "open");
+  for (const [pid, nickname] of [[ACE, "Ace"], [HALF, "Half"], [MISS, "Miss"]] as const) {
+    must({ type: "join", pid, nickname }, (now += 500), `join ${nickname}`);
+    const client = fakeClient(pid, []);
+    clients.set(pid, client);
+    runtime.clients.add(client);
+  }
+  must({ type: "start" }, (now += 1_000), "start");
+  must({ type: "setSegment", segment: "trivia" }, (now += 1_000), "segment");
+  // The whole file goes in, tiebreakers and all, exactly as the upload
+  // endpoint hands it over; the reducer is what lifts the flagged ones out.
+  must({ type: "loadTrivia", activityId: "trivia", questions: loaded }, (now += 1_000), "load");
+
+  const closed: SessionState[] = [];
+  scored.forEach((q, qi) => {
+    const opensAt = (now += 2_000);
+    must({ type: "openQuestion", suddenDeath: false }, opensAt, `open Q${qi + 1}`);
+    // The room gets this question's own timer, whatever the file says it is.
+    assert.equal(
+      runtime.state.trivia?.closesAt,
+      opensAt + q.timeLimitSec * 1000,
+      `Q${qi + 1} closesAt`,
+    );
+    const correct = q.correct[0] ?? 0;
+    const taps: readonly (readonly [ParticipantId, number, number])[] = [
+      [ACE, correct, 0],
+      [MISS, wrongOf(correct), 1_000],
+      [HALF, correct, midpointMs(q)],
+    ];
+    for (const [pid, choice, delayMs] of taps) {
+      const client = clients.get(pid);
+      assert.ok(client, `${pid} has a socket`);
+      const out = runtime.answer(client, qi, choice, opensAt + delayMs);
+      assert.ok(out.applied, `Q${qi + 1} ${pid}: ${out.rejection?.code ?? "not applied"}`);
+    }
+    now = opensAt + q.timeLimitSec * 1000 + 400;
+    must({ type: "closeQuestion" }, now, `close Q${qi + 1}`);
+    closed.push(runtime.state);
+    must({ type: "revealQuestion" }, (now += 1_000), `reveal Q${qi + 1}`);
+    if (qi + 1 < scored.length) must({ type: "nextQuestion" }, (now += 1_000), `next after Q${qi + 1}`);
+  });
+  // Everything the scoreboard reads is settled here, before sudden death
+  // touches the state, so the standings below are the ones a room would see
+  // at the end of the round.
+  const finalState = runtime.state;
+
+  must({ type: "openQuestion", suddenDeath: true }, (now += 1_000), "open sudden death");
+  const suddenDeath = runtime.state;
+
+  return { runtime, initial, closed, finalState, suddenDeath };
+}
 
 /**
  * The set a host copies, played end to end, with nothing about its content
@@ -846,99 +1034,8 @@ describe("thirty bots play the frozen acceptance set", () => {
  * and an event that needs one needs it to work.
  */
 describe("the committed example set plays a whole round through the runtime", () => {
-  const loaded = loadCommittedExample();
-  const flagged = loaded.filter((q) => q.tiebreak === true);
-  const scored = loaded.filter((q) => q.tiebreak !== true);
-
-  const ACE: ParticipantId = "pAce";
-  const HALF: ParticipantId = "pHalf";
-  const MISS: ParticipantId = "pMiss";
-
-  /**
-   * Half's tap: the middle of this question's timer.
-   *
-   * Nudged off an exact half for the same reason the ordinary bots re-roll one
-   * — the engine is known to round some exact halves the wrong way (see the
-   * `describe` below). On this file's 1000-point questions the midpoint is worth
-   * exactly 750 and the nudge never fires; it is here so that a set of, say,
-   * 750-point questions would not fail this test for a bug it is not about.
-   */
-  function midpointMs(q: Question): number {
-    const limitMs = q.timeLimitSec * 1000;
-    let ms = Math.floor(limitMs / 2);
-    while (isExactHalf(q.basePoints, ms, limitMs)) ms += 1;
-    return ms;
-  }
-
-  const played = (() => {
-    const registry = new SessionRegistry();
-    const initial = newSession({
-      sid: "ses-example",
-      title: "Example Team Offsite",
-      joinCode: "RAFT",
-      activities: ACTIVITIES,
-    });
-    const { runtime } = registry.add(initial, T0);
-    const clients = new Map<ParticipantId, Client>();
-    let now = T0;
-    const must = (event: Event, at: number, what: string): void => {
-      const out = runtime.apply(event, at);
-      assert.ok(out.applied, `${what}: ${out.rejection?.code ?? "not applied"}`);
-    };
-
-    must({ type: "open" }, now, "open");
-    for (const [pid, nickname] of [[ACE, "Ace"], [HALF, "Half"], [MISS, "Miss"]] as const) {
-      must({ type: "join", pid, nickname }, (now += 500), `join ${nickname}`);
-      const client = fakeClient(pid, []);
-      clients.set(pid, client);
-      runtime.clients.add(client);
-    }
-    must({ type: "start" }, (now += 1_000), "start");
-    must({ type: "setSegment", segment: "trivia" }, (now += 1_000), "segment");
-    // The whole file goes in, tiebreakers and all, exactly as the upload
-    // endpoint hands it over; the reducer is what lifts the flagged ones out.
-    must({ type: "loadTrivia", activityId: "trivia", questions: loaded }, (now += 1_000), "load");
-
-    const closed: SessionState[] = [];
-    scored.forEach((q, qi) => {
-      const opensAt = (now += 2_000);
-      must({ type: "openQuestion", suddenDeath: false }, opensAt, `open Q${qi + 1}`);
-      // The room gets this question's own timer, whatever the file says it is.
-      assert.equal(
-        runtime.state.trivia?.closesAt,
-        opensAt + q.timeLimitSec * 1000,
-        `Q${qi + 1} closesAt`,
-      );
-      const correct = q.correct[0] ?? 0;
-      const taps: readonly (readonly [ParticipantId, number, number])[] = [
-        [ACE, correct, 0],
-        [MISS, wrongOf(correct), 1_000],
-        [HALF, correct, midpointMs(q)],
-      ];
-      for (const [pid, choice, delayMs] of taps) {
-        const client = clients.get(pid);
-        assert.ok(client, `${pid} has a socket`);
-        const out = runtime.answer(client, qi, choice, opensAt + delayMs);
-        assert.ok(out.applied, `Q${qi + 1} ${pid}: ${out.rejection?.code ?? "not applied"}`);
-      }
-      now = opensAt + q.timeLimitSec * 1000 + 400;
-      must({ type: "closeQuestion" }, now, `close Q${qi + 1}`);
-      closed.push(runtime.state);
-      must({ type: "revealQuestion" }, (now += 1_000), `reveal Q${qi + 1}`);
-      if (qi + 1 < scored.length) must({ type: "nextQuestion" }, (now += 1_000), `next after Q${qi + 1}`);
-    });
-    // Everything the scoreboard reads is settled here, before sudden death
-    // touches the state, so the standings below are the ones a room would see
-    // at the end of the round.
-    const finalState = runtime.state;
-
-    must({ type: "openQuestion", suddenDeath: true }, (now += 1_000), "open sudden death");
-    const suddenDeath = runtime.state;
-
-    return { runtime, initial, closed, finalState, suddenDeath };
-  })();
-
   test("the flagged questions come out of the scored set and become the sudden-death pool", () => {
+    const { flagged, scored, played } = exampleRound();
     // `config/event.example/README.md` says the file is a scored game with
     // tiebreakers behind it, and this is that sentence as behaviour: the game
     // is the unflagged questions, in file order, and the flagged ones are
@@ -951,6 +1048,7 @@ describe("the committed example set plays a whole round through the runtime", ()
   });
 
   test("each answer's points and streak bonus are what SPEC says for that question's own timer", () => {
+    const { scored, played } = exampleRound();
     let aceTotal = 0;
     let halfTotal = 0;
     scored.forEach((q, qi) => {
@@ -997,6 +1095,7 @@ describe("the committed example set plays a whole round through the runtime", ()
   });
 
   test("the round the file describes ends with the scoreboard the file earns", () => {
+    const { played } = exampleRound();
     // Top raw normalises to 100 (SCORING.md), and the rest fall out of it. No
     // literal here is about the example's content: the totals come from the
     // round that was just played, so this reads the same whatever is in it.
@@ -1012,6 +1111,7 @@ describe("the committed example set plays a whole round through the runtime", ()
   });
 
   test("a tiebreaker out of the file can be asked, and sudden death has no timer", () => {
+    const { flagged, played } = exampleRound();
     const trivia = played.suddenDeath.trivia;
     assert.ok(trivia);
     assert.equal(trivia.suddenDeath, true);
@@ -1022,6 +1122,7 @@ describe("the committed example set plays a whole round through the runtime", ()
   });
 
   test("the whole round replays from its event log to the same state", () => {
+    const { played } = exampleRound();
     // The same guarantee the acceptance round asserts, over the real file: a
     // set that could not be rebuilt from its log is a set a recovered session
     // would score differently.
@@ -1042,7 +1143,11 @@ describe("known discrepancies against SPEC", () => {
     text: "q", answers: ["a", "b", "c", "d"], timeLimitSec: 10, correct: [1],
     note: null, round: null, basePoints: 1000,
   };
-  const base = newSession({ sid: "s", title: "t", joinCode: "RAFT", activities: ACTIVITIES });
+  // A declaration, not a call: nothing in this body may run at collection time
+  // (see {@link acceptanceRound}), and a throw out of `newSession` here would
+  // take both tests below with it and be counted as no failures at all.
+  const base = (): SessionState =>
+    newSession({ sid: "s", title: "t", joinCode: "RAFT", activities: ACTIVITIES });
   const lobby: readonly Event[] = [
     { type: "open" },
     { type: "join", pid: "p1", nickname: "Priya" },
@@ -1064,7 +1169,7 @@ describe("known discrepancies against SPEC", () => {
         { type: "answerQuestion", pid: "p1", choice: 1, ms: 2_570 },
         { type: "closeQuestion" },
       ];
-      const s = replay(base, events.map((event) => ({ event, at: T0 })));
+      const s = replay(base(), events.map((event) => ({ event, at: T0 })));
       assert.equal(s.trivia?.answers["p1"]?.points, 872);
     },
   );
@@ -1081,7 +1186,7 @@ describe("known discrepancies against SPEC", () => {
         { type: "answerQuestion", pid: "p1", choice: 1, ms: 2_000 },
         { type: "answerQuestion", pid: "p2", choice: 0, ms: 2_000 },
       ];
-      const open = replay(base, events.map((event) => ({ event, at: T0 })));
+      const open = replay(base(), events.map((event) => ({ event, at: T0 })));
       const closed = replay(open, [{ event: { type: "closeQuestion" }, at: T0 + 10_400 }]);
       const view = (s: SessionState, pid: string) =>
         renderStateFor(s, { role: "participant", pid, lastSeen: new Map(), now: T0 });
