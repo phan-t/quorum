@@ -50,12 +50,102 @@
  * still on the Floor, two Spot Awards with reasons, and finally the seal and
  * the reveal.
  *
+ * ## Two implementations, on purpose
+ *
  * The arithmetic here is SCORING.md's and SPEC.md's, implemented a second
  * time on purpose — the mock is a stand-in for the server and must not borrow
  * the engine to agree with it. The projection is implemented a second time
  * for the same reason, which matters more here than anywhere: if the mock
  * copied views.ts, the one thing it could never catch is views.ts putting the
- * correct answer on a phone.
+ * correct answer on a phone. Two rounds' worth of secrecy rules — the Glass
+ * Bridge never pairing a player with a pane, Unseal's cues reaching nobody —
+ * are exactly the kind of thing a shared projection would agree with itself
+ * about and be wrong.
+ *
+ * So this is not a copy waiting to be deleted. It is an oracle, and the
+ * decision to keep it was taken deliberately rather than by default: deriving
+ * the mock from the reducer would delete the oracle *and* be a rewrite rather
+ * than a refactor, because the engine is pure and immutable over a
+ * `SessionState` while this is a mutable class with its own play shapes, and
+ * there is no seam where one could be dropped into the other.
+ *
+ * **What keeps the two honest is `mock.test.ts`.** It drives this file
+ * through its own socket on a fake clock, drives the engine through `replay`
+ * over the same sequence, and compares the two projections field by field. An
+ * independent second implementation with nothing watching it is not an oracle,
+ * it is a second thing to be wrong: the first three divergences were found by
+ * somebody reading the two files side by side, none of them by anything
+ * failing, and a demo that lies is worse than no demo — `?mock=1` is the only
+ * way anybody sees the console and the Desktop without staging a real
+ * session, so "the demo shows X" stops being evidence that the product does
+ * X. Any change here that a surface can see wants a scenario there.
+ *
+ * ### The one thing that is shared, and the test for sharing more
+ *
+ * `finalRevealMs` comes from `view.ts`. It is a **pacing contract between
+ * surfaces** rather than an implementation of a rule: the Desktop and the
+ * phone already both read it, because two copies of it would have thirty
+ * phones announcing a winner while the room looks at an empty first place,
+ * and the demo loop has to reserve exactly what the Desktop will spend.
+ *
+ * That is the test for anything else proposed for sharing. Does the shared
+ * thing encode a **rule** this file exists to check independently? Do not
+ * share it. Is it a **number two surfaces must agree on to the millisecond**?
+ * Share it. Content is not a rule either, which is why `src/arcade/`'s items,
+ * `src/engine/sendoff.ts`'s plan builder and so on are imported: a second copy
+ * of the same seven emoji items is how one of them silently rots.
+ *
+ * ## Where the mock is deliberately different
+ *
+ * Everything else that differs from the server is a bug. These are the
+ * exceptions, written down because a reader who does not know about them
+ * files them — the alternative to this list is working them out from two
+ * files of five thousand lines each. **Add to it whenever a difference is
+ * decided to be intentional**, and say what it costs, because every one of
+ * them is something the demo cannot show.
+ *
+ * 1. **`hostExtras.trivia.auto` is absent.** protocol.ts names this case
+ *    directly: a frame built by something that does not know about Auto is
+ *    still a valid host frame, and the console reads the absence as Manual,
+ *    which is the safe reading of a frame that cannot say. Cost: the
+ *    console's Auto controls and its reveal countdown cannot be watched in
+ *    the demo. `#hostCmd` has no case for `trivia.auto` or `trivia.speed`
+ *    either, which is *not* deliberate — see the sibling state-timing issue.
+ *
+ * 2. **`hostExtras.trivia` and `RenderState.trivia` are never absent.**
+ *    views.ts omits both until `loadTrivia`. Here the question set is a
+ *    constant loaded at construction and there is no command that loads or
+ *    unloads one, so the real server's "no trivia loaded" frame is not
+ *    reachable through this socket at all. Cost: console code branching on
+ *    `state.trivia === undefined` or `hostExtras.trivia === undefined` cannot
+ *    be exercised against `?mock=1`.
+ *
+ * 3. **The Glass Bridge's idle-and-reveal tail reads empty.**
+ *    `#closeGlassStep` finishes with `play.stepped = {}` and `#endRound`
+ *    calls it, so `hostExtras.arcade.answeredBy` drops to nothing and
+ *    `glassMine` reports `committed: false` once the round is over. The
+ *    engine's `closeGlassStep` does not clear `stepped` — `nextStep` and
+ *    `nextWave` do it themselves and `closeRound` keeps the last step's map,
+ *    so the real end-of-round card says `committed: true, held: <bool>`.
+ *    Left alone on purpose: moving the clear is a change to settlement
+ *    ordering and wants its own look, not a line changed in passing.
+ *
+ * 4. **There is no sudden-death pool.** The engine runs sudden death off
+ *    tiebreakers held outside the scored set and reads them through
+ *    `currentQuestion`; `question()` here indexes the scored set directly, so
+ *    a tiebreak shows the next unasked question. See the TODO on it. The two
+ *    fields that say a tiebreaker is *outside* the set — `index` and `round`
+ *    — do agree, and are tested.
+ *
+ * 5. **The clock is 1.2 seconds ahead of the browser's** (`SERVER_SKEW_MS`),
+ *    and the instants on the wire are the mock's clock, not the page's. A
+ *    surface that forgets to correct for the offset is then caught in the
+ *    demo rather than in the room.
+ *
+ * 6. **The demo affordances have no server counterpart at all**: the scripted
+ *    director, `speed`, `latency`, the single dropped socket, the skipped
+ *    `seq`, and a bot named with a fragment of HTML. They are the reason this
+ *    file exists and they are not divergences.
  */
 
 import type {
@@ -605,7 +695,21 @@ function mockWaveCuts(numbers: readonly number[]): [number, number] {
   return [cut1, Math.max(cut1, cut2)];
 }
 
-function mockWaveOf(playerNumber: number, cuts: readonly [number, number]): GlassWave {
+/**
+ * Which wave a number crosses in.
+ *
+ * `undefined` is wave 3, as `waveOf` in the engine has it: no arcade number
+ * means somebody who joined after the round started and after the cuts were
+ * taken, and the last wave is the only one it is fair to put them in — wave 1
+ * walks blind and they have watched none of it. Taking a `number` and being
+ * handed a `?? 0` fallback instead returned **wave 1**, because zero is below
+ * every cut.
+ */
+function mockWaveOf(
+  playerNumber: number | undefined,
+  cuts: readonly [number, number],
+): GlassWave {
+  if (playerNumber === undefined) return 3;
   if (playerNumber <= cuts[0]) return 1;
   if (playerNumber <= cuts[1]) return 2;
   return 3;
@@ -695,14 +799,16 @@ function mockSplitTins(items: readonly UnsealItem[]): {
 function mockTinIndexFor(
   play: MockUnsealPlay,
   shape: UnsealShape,
-  playerNumber: number,
+  playerNumber: number | undefined,
 ): number {
   const of: number[] = [];
   play.tins.forEach((t, i) => {
     if (t.shape === shape) of.push(i);
   });
   if (of.length === 0) return -1;
-  const n = playerNumber < 1 ? 1 : playerNumber;
+  // `undefined` and anything below one both take the first tin of the shape,
+  // which is what `tinIndexFor` in the engine does with the same input.
+  const n = playerNumber === undefined || playerNumber < 1 ? 1 : playerNumber;
   return of[(n - 1) % of.length] ?? -1;
 }
 
@@ -1121,6 +1227,19 @@ class MockSession {
       that reshuffled on every reload could not be compared with itself. */
   sendoffPlan: readonly SendoffSlide[] = buildPlan(MOCK_SENDOFF as SendoffContent, 1);
   sendoffAt = 0;
+  /**
+   * When the slide on screen went up. The engine's `SendoffState.slideAt`,
+   * stamped on the way into `run` and cleared on the way out.
+   *
+   * `advanceAt` is derived from this rather than from `Date.now()` at
+   * projection time, which is what this file used to do. The field's whole
+   * job — protocol.ts is explicit about it — is to be an absolute instant a
+   * surface can count down to, and recomputing it on every render meant every
+   * broadcast reset the countdown to full. A join, a bot answering, a Spot
+   * Award: any unrelated frame pushed the send-off's "advances in Ns" back
+   * out, so under Auto it never counted down at all on the mock.
+   */
+  sendoffSlideAt: number | null = null;
   sendoffAuto = false;
   sendoffSeconds = DEFAULT_AUTO_SECONDS;
 
@@ -1138,11 +1257,29 @@ class MockSession {
   arcadeEndsAt: number | null = null;
   arcadePlay: MockPlay | null = null;
 
+  /**
+   * Everybody who is in the room: the filter `rosterOf` and `arcadeGrid` in
+   * views.ts both open with, written out here rather than imported.
+   *
+   * Released, not kicked — the mock splices a kicked person out of the array
+   * outright, which is a state-timing difference of its own and tracked as
+   * one. A release clears the collision key and leaves the person on the
+   * record, because their score is theirs and a phone swap must not cost them
+   * anything; but until they rejoin they are not in the room, and every count
+   * the host reads has to say so. This used to be `this.participants` at six
+   * call sites, so a released person stayed in the grid, stayed in the
+   * roster, and went on inflating the denominator of "N of M have answered"
+   * on both the console and the big screen.
+   */
+  inTheRoom(): MockParticipant[] {
+    return this.participants.filter((p) => p.nicknameKey !== "");
+  }
+
   /** Roster order, gapless, assigned once and never changed under anyone. */
   assignArcadeNumbers(): void {
     let next = 1;
     for (const n of Object.values(this.arcadeNumbers)) next = Math.max(next, n + 1);
-    for (const p of this.participants) {
+    for (const p of this.inTheRoom()) {
       if (this.arcadeNumbers[p.pid] === undefined) {
         this.arcadeNumbers[p.pid] = next++;
       }
@@ -1150,8 +1287,26 @@ class MockSession {
     }
   }
 
+  /**
+   * The number a surface draws, which is not quite the number the rules run
+   * on.
+   *
+   * Every projection in views.ts spells the fallback out — `playerNumbers[pid]
+   * ?? p.playerNumber ?? 0` — so somebody who joined after the round started
+   * and has no arcade number yet is drawn with their join-order number rather
+   * than as `000`. `000` sorts to the front of the grid and reads as a person
+   * who is somehow before player one.
+   *
+   * The *rules* must not take the fallback. `waveOf` and `tinIndexFor` in the
+   * engine are both handed `arcade.playerNumbers[pid]` raw and both have a
+   * documented answer for `undefined` — wave 3, and the first tin of the
+   * shape. Feeding them a join-order number instead would put a latecomer in
+   * whichever wave their join order happened to land in, which for the Glass
+   * Bridge means possibly the blind first one. So those call sites read
+   * `arcadeNumbers` directly and this is for the wire.
+   */
   arcadeNumber(pid: string): number {
-    return this.arcadeNumbers[pid] ?? 0;
+    return this.arcadeNumbers[pid] ?? this.find_pid(pid)?.playerNumber ?? 0;
   }
 
   /**
@@ -1185,6 +1340,9 @@ class MockSession {
     // re-uploading not being the point of a restart.
     this.sendoffPhase = "title";
     this.sendoffAt = 0;
+    // Back at the title card, where nothing is running: the reducer nulls
+    // `slideAt` on the same transition.
+    this.sendoffSlideAt = null;
 
     this.at = 0;
     this.questionPhase = "idle";
@@ -1242,13 +1400,26 @@ class MockSession {
    * this is a rendering rule kept honest by the shape of the cell.
    */
   arcadeGrid(): ArcadeCell[] {
-    const live = this.arcadePhase === "running" || this.arcadePhase === "reveal";
+    // `struck` is the standing and nothing else. It was gated on
+    // `phase === "running" || "reveal"` as well, and that gate has a hole in
+    // the middle of it: `#endRound` leaves the phase `idle`, so the strike
+    // came off at the end of the round and back on at the reveal a few
+    // seconds later. On the big screen that is a grid of pink strikes
+    // blinking out and in while the host is talking — and the big screen is
+    // the surface the demo exists to show. `views.ts` removed the same gate
+    // for the same reason and carries the same note; this file kept it, so
+    // `?mock=1` went on reproducing a bug the real grid no longer has.
+    //
+    // The standing is the whole rule and needs no help from the phase: a
+    // drain lasts exactly one round, because `resetFloor()` puts everybody
+    // back on the Floor at the next round's card, so "drained" and "drained
+    // this round" are the same set.
     const backers: Record<string, number> = {};
     for (const seat of Object.values(this.arcadeLounge)) {
       if (seat.backing === null) continue;
       backers[seat.backing] = (backers[seat.backing] ?? 0) + 1;
     }
-    return this.participants
+    return this.inTheRoom()
       .map((p) => {
         const standing = this.arcadeStanding[p.pid] ?? "floor";
         return {
@@ -1256,7 +1427,7 @@ class MockSession {
           playerNumber: this.arcadeNumber(p.pid),
           standing,
           backers: backers[p.pid] ?? 0,
-          struck: live && standing === "drained",
+          struck: standing === "drained",
         };
       })
       .sort((a, b) => a.playerNumber - b.playerNumber);
@@ -1326,7 +1497,7 @@ class MockSession {
         ...(privileged
           ? {
               answered: Object.keys(play.answered).length,
-              eligible: this.participants.length,
+              eligible: this.inTheRoom().length,
               solved: Object.values(play.answered).filter(Boolean).length,
             }
           : {}),
@@ -1628,7 +1799,12 @@ class MockSession {
                 leaders: Object.entries(play.resources)
                   .filter(
                     ([pid, n]) =>
-                      n > 0 && (this.arcadeStanding[pid] ?? "floor") === "floor",
+                      n > 0 &&
+                      (this.arcadeStanding[pid] ?? "floor") === "floor" &&
+                      // In the room, not merely on the record: a released
+                      // runner keeps their resources and is no longer
+                      // somebody the ticker should be naming.
+                      (this.find_pid(pid)?.nicknameKey ?? "") !== "",
                   )
                   .map(([pid, n]) => ({
                     playerNumber: this.arcadeNumber(pid),
@@ -1769,7 +1945,7 @@ class MockSession {
    * pane exactly as well as one that broke.
    */
   glassMine(play: MockGlassPlay, pid: string): ArcadeMineGlass {
-    const wave = mockWaveOf(this.arcadeNumber(pid), play.waveCuts);
+    const wave = mockWaveOf(this.arcadeNumbers[pid], play.waveCuts);
     const position = play.position[pid] ?? 0;
     const committed = pid in play.stepped;
     return {
@@ -1793,6 +1969,9 @@ class MockSession {
     this.seal = "live";
     this.sendoffPhase = "title";
     this.sendoffAt = 0;
+    // Back at the title card, where nothing is running: the reducer nulls
+    // `slideAt` on the same transition.
+    this.sendoffSlideAt = null;
     this.holding = null;
     this.joinsLocked = false;
     this.spots = [];
@@ -1858,6 +2037,21 @@ class MockSession {
       }
       if (!a.correct || this.suddenDeath) {
         if (!a.correct) this.triviaStreaks[p.pid] = 0;
+        // Answering at all puts you in the totals, even at zero, which is
+        // what `settleQuestion` in engine/trivia.ts does: it folds over
+        // `trivia.answers` and writes `totals[pid] = (totals[pid] ?? 0) +
+        // points + bonus` for every one of them, a wrong tap included. A zero
+        // entry is "played and scored nothing", which is a different
+        // statement from the absent cell that lets a host bench somebody —
+        // and the podium is built off the totals, so the entry is also what
+        // puts a wrong-but-present tap on the board below the scorers.
+        //
+        // A sudden death writes nothing at all. It moves no points, so it
+        // must not move the board, and the engine's settle early-returns for
+        // one before it reaches this fold.
+        if (!this.suddenDeath) {
+          this.triviaTotals[p.pid] = this.triviaTotals[p.pid] ?? 0;
+        }
         continue;
       }
       const t = Math.min(a.ms, q.timeLimitSec * 1000);
@@ -1878,10 +2072,18 @@ class MockSession {
     }
   }
 
-  /** The run of consecutive questions sharing a `Round`, if there is one. */
+  /**
+   * The run of consecutive questions sharing a `Round`, if there is one.
+   *
+   * The empty string is "no round" as much as `null` is: a CSV with a `Round`
+   * column and a blank cell loads as `""`, and `roundAt` in views.ts refuses
+   * both. Unreachable with this file's own questions, every one of which has
+   * `round: null` — but a guard that is only in one of two implementations is
+   * a divergence waiting for the day somebody gives the mock a loader.
+   */
   round(index: number): TriviaRound | null {
     const here = this.questions[index];
-    if (!here || here.round === null) return null;
+    if (!here || here.round === null || here.round === "") return null;
     let first = index;
     while (first > 0 && this.questions[first - 1]?.round === here.round) first -= 1;
     let last = index;
@@ -1897,8 +2099,21 @@ class MockSession {
   }
 
   triviaPodium(): TriviaPodiumRow[] {
-    const rows = this.participants
-      .map((p) => ({ p, points: this.triviaTotals[p.pid] ?? 0 }))
+    // Off the totals, not off the roster. A total exists for somebody who has
+    // **answered** — correctly or not, see the note in `settleQuestion` — and
+    // for nobody else, so the podium is the people who have played, which is
+    // the whole of what a podium is.
+    //
+    // Walking the participants with `?? 0` padded it out to five rows however
+    // few had played: after a question two people in a room of nine got
+    // right, the real server sends the three who tapped and this used to send
+    // five, the extra two being somebody who never touched their phone beside
+    // a zero. On the phone and the big screen, at every reveal.
+    const rows = Object.entries(this.triviaTotals)
+      .flatMap(([pid, points]) => {
+        const p = this.find_pid(pid);
+        return p === undefined ? [] : [{ p, points }];
+      })
       .sort((a, b) => b.points - a.points || a.p.nickname.localeCompare(b.p.nickname));
     if (!rows.some((r) => r.points > 0)) return [];
     const out: TriviaPodiumRow[] = [];
@@ -1944,7 +2159,10 @@ class MockSession {
 
     const view: TriviaView = {
       activityId: "trivia",
-      index: this.at,
+      // A tiebreaker is not "question 4 of 20". It is outside the scored set,
+      // and the surfaces say so by being given no position in it. Sending
+      // `this.at` put the next unasked question's number under a tiebreak.
+      index: this.suddenDeath ? -1 : this.at,
       of: this.questions.length,
       phase: this.questionPhase,
       text: visible ? q.text : "",
@@ -1955,7 +2173,10 @@ class MockSession {
       basePoints: q.basePoints,
       suddenDeath: this.suddenDeath,
       suddenDeathWinner: winner,
-      round: this.round(this.at),
+      // And for the same reason it has no index, it carries no round card: a
+      // tiebreak run inside a round used to keep that round's name and its
+      // "3 of 5" on screen, as though the tiebreaker were part of the run.
+      round: this.suddenDeath ? null : this.round(this.at),
     };
 
     const distribution = new Array<number>(q.answers.length).fill(0);
@@ -1973,7 +2194,10 @@ class MockSession {
       ...(host ||
       role === "screen" ||
       (pid !== null && this.answers[pid] !== undefined)
-        ? { answered: Object.keys(this.answers).length, eligible: this.participants.length }
+        ? {
+            answered: Object.keys(this.answers).length,
+            eligible: this.inTheRoom().length,
+          }
         : {}),
     };
   }
@@ -2129,7 +2353,7 @@ class MockSession {
   }
 
   roster(): RosterEntry[] {
-    return this.participants.map((p) => ({
+    return this.inTheRoom().map((p) => ({
       pid: p.pid,
       nickname: p.nickname,
       playerNumber: p.playerNumber,
@@ -2210,6 +2434,16 @@ class MockSession {
     const at = (phase: SendoffPhase, index: number): boolean => {
       this.sendoffPhase = phase;
       this.sendoffAt = index;
+      // Stamped on the way in and cleared on the way out, exactly as
+      // `stepSendoff` in the reducer does it, so a surface that reloads
+      // mid-run knows how long the slide has been up rather than restarting
+      // its clock in front of everyone.
+      // The skewed clock, like every other instant this file puts on the
+      // wire: `serverTime` is skewed, the arcade's clocks are skewed, and the
+      // skew is there on purpose so a surface that forgets to correct for it
+      // is caught in the demo. `advanceAt` was the one instant computed off
+      // the browser's own clock, which quietly exempted it.
+      this.sendoffSlideAt = phase === "run" ? Date.now() + SERVER_SKEW_MS : null;
       return true;
     };
 
@@ -2298,8 +2532,11 @@ class MockSession {
       auto: this.sendoffAuto,
       autoSeconds: this.sendoffSeconds,
       advanceAt:
-        phase === "run" && this.sendoffAuto && here !== undefined
-          ? Date.now() + slideMs(here, content, this.sendoffSeconds)
+        phase === "run" &&
+        this.sendoffAuto &&
+        this.sendoffSlideAt !== null &&
+        here !== undefined
+          ? this.sendoffSlideAt + slideMs(here, content, this.sendoffSeconds)
           : null,
     };
     if (role !== "host") return view;
@@ -2359,8 +2596,11 @@ class MockSession {
         joinCode: this.joinCode,
         hostExtras: {
           joinCode: this.joinCode,
-          participantCount: this.participants.length,
-          awayCount: this.participants.filter((p) => p.conn === "away").length,
+          // Both off the roster, which is the filtered list — the console's
+          // "12 in the room, 2 away" is a statement about the room and not
+          // about the record.
+          participantCount: this.roster().length,
+          awayCount: this.roster().filter((p) => p.conn === "away").length,
           scores: this.#scoreRows(board),
           spots: this.spots.map((s) => ({
             seq: s.seq,
@@ -2809,6 +3049,11 @@ class MockHub {
         }
         if (s.sendoffAuto === cmd.auto) return noop();
         s.sendoffAuto = cmd.auto;
+        // Restamped, as `setSendoffAuto` in the reducer restamps it and for
+        // the reason given there: switching to Auto gives the slide on screen
+        // its full time, rather than advancing it the instant the host
+        // presses because it has already been up for a while.
+        if (s.sendoffPhase === "run") s.sendoffSlideAt = Date.now() + SERVER_SKEW_MS;
         break;
       case "sendoff.speed": {
         if (s.sendoff === null) {
@@ -3242,6 +3487,19 @@ class MockHub {
     // Every round starts with everyone back on the Floor. Cumulative
     // elimination is the show; it is the wrong shape for a work afternoon.
     s.resetFloor();
+    // And everyone in the room has a number by the time the card goes up.
+    // `startRound` in the reducer re-runs `assignPlayerNumbers` on every
+    // round for exactly this reason, and assignment is append-only, so
+    // numbers already read off a phone never move — only somebody who joined
+    // since is given one.
+    //
+    // Without this the mock handed a latecomer nothing at all, and `000` then
+    // followed them everywhere: sorted to the front of the grid, printed on
+    // their own phone, and — worst — read by `mockWaveOf` as wave 1, putting
+    // somebody who arrived mid-round into the Glass Bridge's blind first
+    // wave. The engine puts them in wave 3, which is the honest answer for
+    // somebody who was not there when the waves were cut.
+    s.assignArcadeNumbers();
     // Counted here, at the start, and not at the round's end where this used
     // to live.
     //
@@ -3582,7 +3840,7 @@ class MockHub {
       .filter(
         (p) =>
           s.arcadeStanding[p.pid] !== "drained" &&
-          mockWaveOf(s.arcadeNumber(p.pid), play.waveCuts) === play.wave &&
+          mockWaveOf(s.arcadeNumbers[p.pid], play.waveCuts) === play.wave &&
           (play.position[p.pid] ?? 0) < play.board.length,
       )
       .map((p) => p.pid);
@@ -3681,7 +3939,7 @@ class MockHub {
     if (pid in play.stepped) return false;
     const answer = play.key[play.step];
     if (!answer) return false;
-    const wave = mockWaveOf(s.arcadeNumber(pid), play.waveCuts);
+    const wave = mockWaveOf(s.arcadeNumbers[pid], play.waveCuts);
     const held = choice === answer.real;
     // Decision time, measured from the step's own start. Six of these added
     // up are what "the fastest full crossing" means, because the three waves
@@ -4159,7 +4417,7 @@ class MockHub {
       if (s.arcadePhase === "running" && pid in play.pick) {
         return refuse("already_picked", "You are holding that tin.");
       }
-      const at = mockTinIndexFor(play, what.shape, s.arcadeNumber(pid));
+      const at = mockTinIndexFor(play, what.shape, s.arcadeNumbers[pid]);
       if (at === -1) return refuse("invalid_choice", "There is no tin of that shape.");
       play.pick[pid] = at;
       this.#send(conn, { t: "ack", cid, applied: true });
@@ -4335,7 +4593,7 @@ class MockHub {
     // Nobody steps out of turn: the whole round is the asymmetry between the
     // waves, and a wave-3 player taking wave 1's step would be taking wave
     // 1's information as well.
-    const wave = mockWaveOf(s.arcadeNumber(pid), play.waveCuts);
+    const wave = mockWaveOf(s.arcadeNumbers[pid], play.waveCuts);
     if (wave !== play.wave) {
       return refuse(
         "not_your_wave",
@@ -4463,7 +4721,7 @@ class MockHub {
     const waiting =
       waitingBridge !== null &&
       s.arcadeStanding[pid] === "floor" &&
-      mockWaveOf(s.arcadeNumber(pid), waitingBridge.waveCuts) !==
+      mockWaveOf(s.arcadeNumbers[pid], waitingBridge.waveCuts) !==
         waitingBridge.wave;
     const held = s.arcadeLounge[pid];
     if (!held && !waiting) {
@@ -4484,10 +4742,10 @@ class MockHub {
     const bridge = s.arcadePlay;
     if (bridge?.kind === "glass_bridge") {
       const on = held?.backing;
-      if (on && mockWaveOf(s.arcadeNumber(on), bridge.waveCuts) <= bridge.wave) {
+      if (on && mockWaveOf(s.arcadeNumbers[on], bridge.waveCuts) <= bridge.wave) {
         return refuse("backing_locked", "Your runner is on the bridge. The bet stands.");
       }
-      const target = mockWaveOf(s.arcadeNumber(backing), bridge.waveCuts);
+      const target = mockWaveOf(s.arcadeNumbers[backing], bridge.waveCuts);
       // A waiting wave bets the other way round: on the wave crossing now,
       // and only before anybody in it has stood on a pane. Not merely before
       // step 1 — a fall is public the instant it happens, so a window open
@@ -4575,7 +4833,7 @@ class MockHub {
         (p) =>
           p.bot &&
           s.arcadeStanding[p.pid] !== "drained" &&
-          mockWaveOf(s.arcadeNumber(p.pid), play.waveCuts) === wave &&
+          mockWaveOf(s.arcadeNumbers[p.pid], play.waveCuts) === wave &&
           (play.position[p.pid] ?? 0) < play.board.length,
       )
       .forEach((p, i) => {
@@ -4629,7 +4887,7 @@ class MockHub {
         (x) =>
           s.arcadeStanding[x.pid] === "floor" &&
           x.pid !== p.pid &&
-          mockWaveOf(s.arcadeNumber(x.pid), play.waveCuts) > play.wave,
+          mockWaveOf(s.arcadeNumbers[x.pid], play.waveCuts) > play.wave,
       );
       const pick = later[Math.floor(Math.random() * later.length)];
       if (pick) {
@@ -4663,7 +4921,7 @@ class MockHub {
       .filter((p) => p.bot)
       .forEach((p, i) => {
         const shape = UNSEAL_ORDER[i % UNSEAL_ORDER.length] ?? "circle";
-        const at = mockTinIndexFor(play, shape, s.arcadeNumber(p.pid));
+        const at = mockTinIndexFor(play, shape, s.arcadeNumbers[p.pid]);
         if (at === -1) return;
         play.pick[p.pid] = at;
         const tin = play.tins[at];
