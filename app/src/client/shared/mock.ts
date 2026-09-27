@@ -140,7 +140,12 @@
  * 4. **There is no sudden-death pool.** The engine runs sudden death off
  *    tiebreakers held outside the scored set and reads them through
  *    `currentQuestion`; `question()` here indexes the scored set directly, so
- *    a tiebreak shows the next unasked question. See the TODO on it. The two
+ *    a tiebreak shows the next unasked question — and, now that a tiebreak may
+ *    also be opened out of a revealed question, the question the room has just
+ *    been given the answer to. Where the set is *left* afterwards is no longer
+ *    part of this: `tiebreakHeld` holds `at`, the phase and the answers, and
+ *    `trivia.next` hands all three back exactly as `nextQuestion` does. See the
+ *    TODO on it. The two
  *    fields that say a tiebreaker is *outside* the set — `index` and `round`
  *    — do agree, and are tested.
  *
@@ -172,6 +177,44 @@
  *    a real room — a phone that dies mid-Gganbu — cannot be watched here, and
  *    `RosterEntry.conn` only ever reads `away` for the one bot the director
  *    hand-drops and for somebody the host released.
+ *
+ * 8. **No instant is latency-corrected.** Every moment this file judges — a
+ *    trivia response time, a Glass Bridge decision time, a Gganbu stake
+ *    beating a prompt's close, a Plan / Apply tap against the light — is the
+ *    instant the frame *arrived* at `#receive`. The real boundary reconstructs
+ *    when the thumb came off the glass: `receivedAt - latencyCorrection(rtt)`,
+ *    from a per-socket round-trip estimate it keeps from `ping`, capped at 250
+ *    ms (see `correctedTapAt` in server/runtime.ts). There is no such estimate
+ *    here, because `&latency=N` is a fixed delay this file adds to itself and
+ *    a mock correcting for its own configuration would be arithmetic checking
+ *    itself.
+ *
+ *    The consequence with a name is guard **(c)** of #27: `play.applySince` is
+ *    absent, so a tap is judged against `light === "apply" && at >=
+ *    lightChangedAt` rather than the reducer's `lockInForceAt`. On the server a
+ *    tap made 1.9 s into a two-second lock over a slow link lands after the
+ *    light has gone back to green and is still drained — the phone was plainly
+ *    pink, and SPEC.md is flat about it. Here it is forgiven. Adding
+ *    `applySince` on its own would be a field nothing could ever read: with no
+ *    correction, `at` is either the arrival instant or — inside the 250 ms
+ *    grace `#tapInstant` does implement — an instant deliberately placed
+ *    *before* the lock, and neither can land inside a lock that has closed.
+ *
+ *    Cost: under `&latency=250` the demo under-reports drains, and the
+ *    fairness the latency correction buys — the reason the arcade works over a
+ *    video call at all — is not visible in the demo in either direction. The
+ *    grace is the one half of it that is here, and it does duty for both.
+ *
+ * 9. **Recruitment's answer has no standing check.** `submitAnswer` in
+ *    reducer.ts refuses a drained player; `#recordItemAnswer` does not ask.
+ *    No state reaches the difference: nothing drains in Recruitment — SPEC.md
+ *    is explicit that two elimination rounds back to back is a downer — and
+ *    `resetFloor()` puts the whole room back on the Floor at every round card,
+ *    so a drain from an earlier round cannot follow anybody into an item round.
+ *    Left absent rather than added, because a guard no scenario can reach is a
+ *    guard nothing watches, and this file has had enough of those. Cost: none
+ *    today, and the day a round that drains gains items, this file will credit
+ *    an answer the server refuses.
  */
 
 import type {
@@ -1400,6 +1443,35 @@ class MockSession {
   suddenDeath = false;
   suddenDeathWinner: string | null = null;
   answers: Record<string, MockAnswer> = {};
+  /**
+   * Where the scored set was when a tiebreak interrupted it.
+   *
+   * `TriviaState.tiebreakHeld` in types.ts, and the reducer's reason for it
+   * read strictly: a sudden death is **not** a question of the set, so `at`
+   * must not move when one opens and must not move when one is put away. This
+   * file used to clear a tiebreak with `at += 1`, which quietly cost the room
+   * the next scored question — and a tiebreak is usually the last thing that
+   * happens in a set, so the question it burned was usually one nobody missed.
+   *
+   * The phase and the answers are held with it because `nextQuestion` hands
+   * all three back: a tiebreak run straight off a reveal has to come back
+   * `revealed`, or the host lands on a question already written to the score
+   * grid and can open — and score — it a second time. The answers come back
+   * for the big screen's distribution, which is drawn from them.
+   *
+   * A second tiebreak in a row keeps the first one's hold, for the reason the
+   * reducer gives: the thing to come back to is the scored question, not the
+   * tiebreak that has just been asked.
+   *
+   * Note what this is **not**: a sudden-death pool. The mock still shows
+   * `questions[at]` under a tiebreak — deliberate difference 4 in the header —
+   * and this only fixes where the set is left afterwards.
+   */
+  tiebreakHeld: {
+    at: number;
+    phase: QuestionPhase;
+    answers: Record<string, MockAnswer>;
+  } | null = null;
   triviaTotals: Record<string, number> = {};
   triviaStreaks: Record<string, number> = {};
 
@@ -1465,7 +1537,21 @@ class MockSession {
     return this.participants.filter((p) => !p.kicked && p.nicknameKey !== "");
   }
 
-  /** Roster order, gapless, assigned once and never changed under anyone. */
+  /**
+   * Roster order, gapless, assigned once and never changed under anyone.
+   *
+   * Numbers and **nothing else**. This used to also do
+   * `arcadeStanding[pid] ??= "floor"`, which was dead at every call site —
+   * `resetFloor()` runs immediately before or after each of them and walks the
+   * same `inTheRoom()` set — and stopped being dead the moment `arcade.enter`
+   * learned to re-enter. `enterArcade` in reducer.ts hands a latecomer a
+   * `playerNumber` and touches `standing` not at all, deliberately: they
+   * joined after the round's card and are not in the round. A standing here
+   * would have put them in `#endRound`'s `standing ∪ banked` fold and written
+   * them a `0` on the console's arcade totals — "played and scored nothing"
+   * against somebody who was not there — which is the exact cell the fold was
+   * fixed for in the first place.
+   */
   assignArcadeNumbers(): void {
     let next = 1;
     for (const n of Object.values(this.arcadeNumbers)) next = Math.max(next, n + 1);
@@ -1473,7 +1559,6 @@ class MockSession {
       if (this.arcadeNumbers[p.pid] === undefined) {
         this.arcadeNumbers[p.pid] = next++;
       }
-      this.arcadeStanding[p.pid] ??= "floor";
     }
   }
 
@@ -1517,6 +1602,14 @@ class MockSession {
     this.phase = "lobby";
     this.segment = "lobby";
     this.seal = "live";
+    // `restartSession` in reducer.ts sets this false and says why: "a restart
+    // is the room starting again, and leaving practice on is how a real round
+    // silently scores nothing". Neither this nor {@link reset} touched it, so
+    // a host who rehearsed the arcade in practice and then restarted for the
+    // real thing got a clean console over a session that was still not
+    // counting — which is precisely the half-cleared state this method exists
+    // to rule out, and the one the console has no way to notice.
+    this.practice = false;
     this.holding = null;
     this.joinsLocked = false;
     this.spots = [];
@@ -1540,6 +1633,7 @@ class MockSession {
     this.closesAt = null;
     this.suddenDeath = false;
     this.suddenDeathWinner = null;
+    this.tiebreakHeld = null;
     this.answers = {};
     this.triviaTotals = {};
     this.triviaStreaks = {};
@@ -2200,6 +2294,14 @@ class MockSession {
     this.phase = "draft";
     this.segment = "lobby";
     this.seal = "live";
+    // See {@link restart}: the demo loop starting over is the room starting
+    // over, and practice is not a thing a new session inherits. This half of
+    // #27 (j) has no test and cannot have the same one: `reset()` goes back to
+    // `draft`, which no engine event does — it is the scripted loop's own
+    // restart, a demo affordance with no counterpart to compare against — and
+    // the loop never turns practice on. It is here for the symmetry, so that the
+    // two ways this file starts over agree with each other.
+    this.practice = false;
     this.sendoffPhase = "title";
     this.sendoffAt = 0;
     // Back at the title card, where nothing is running: the reducer nulls
@@ -2219,6 +2321,7 @@ class MockSession {
     this.closesAt = null;
     this.suddenDeath = false;
     this.suddenDeathWinner = null;
+    this.tiebreakHeld = null;
     this.answers = {};
     this.triviaTotals = {};
     this.triviaStreaks = {};
@@ -3320,8 +3423,22 @@ class MockHub {
         }
         s.phase = "running";
         break;
+      // Both arms of this were the wrong way round, which is two refusals
+      // swapped for each other rather than one being missing. `close` in
+      // reducer.ts says it in one line: "closing an unopened session is
+      // meaningless; closing a lobby that never started is a real thing a host
+      // does when an event is abandoned." So a second Close is **idempotent**
+      // — the global closed-session guard exempts `close` for that reason —
+      // and a Close in `draft` is the error. Here a second Close was refused
+      // with "Already closed.", which is a red toast on a console for a button
+      // that had already done what it says, and a Close in `draft` closed a
+      // session that was never open: `seal = "revealed"` and `segment =
+      // "final"` on a room nobody had joined.
       case "close":
-        if (s.phase === "closed") return reject("wrong_phase", "Already closed.");
+        if (s.phase === "closed") return noop();
+        if (s.phase === "draft") {
+          return reject("wrong_phase", "The session was never opened.");
+        }
         s.phase = "closed";
         s.segment = "final";
         s.seal = "revealed";
@@ -3359,24 +3476,88 @@ class MockHub {
         s.restart();
         break;
       }
+      /**
+       * The segment, with no phase guard — because `setSegment` in reducer.ts
+       * has none, and `client/host/runbook.ts` says so in as many words:
+       * "Nothing on the server knows about this. The engine holds no sequence
+       * at all — `setSegment` takes any segment at any time and sets it."
+       *
+       * The guard that used to be here refused every segment button until the
+       * host had pressed Start, which is not how the console is driven: the
+       * rail is live in the lobby, a host sets up the holding card before the
+       * room arrives, and `?mock=manual` is the only place that walk is ever
+       * rehearsed. So the demo refused a press the room will accept, which is
+       * the worst direction for this file to be wrong in — a host who learns
+       * the order of presses from the mock learns a wrong one.
+       *
+       * Idempotent, like the three below it: the reducer returns `unchanged`
+       * for a segment that is already showing. See the note on `seal`.
+       */
       case "segment":
-        if (s.phase !== "running") {
-          return reject("wrong_phase", "Start the session first.");
-        }
+        if (s.segment === cmd.kind) return noop();
         s.segment = cmd.kind;
         break;
-      case "holding":
-        s.holding =
+      case "holding": {
+        const next =
           cmd.title === "" && cmd.line === ""
             ? null
             : { title: cmd.title, line: cmd.line };
+        const held = s.holding;
+        // `setHolding` compares the two cards field by field rather than by
+        // identity, because the console sends the whole card on every keystroke
+        // of the editor and an unchanged one must not fan out.
+        const same =
+          held === next ||
+          (held !== null &&
+            next !== null &&
+            held.title === next.title &&
+            held.line === next.line);
+        if (same) return noop();
+        s.holding = next;
         break;
+      }
+      /**
+       * Four setters that the engine acks `false` for when nothing moved, and
+       * this file acked `true` for and then broadcast to the room.
+       *
+       * `setSegment`, `setSeal`, `setHolding` and `setJoinsLocked` all open
+       * with an equality check and return `unchanged`. Here they had none, and
+       * the difference is on the wire twice over: the console was told its
+       * press had changed something when it had not, and thirty phones were
+       * sent a frame identical to the one they were holding. Both matter to a
+       * console — `applied: false` is how it knows a toggle it pressed was
+       * already in that position — and the second is the shape of bug the mock
+       * exists to make visible, because a surface that repaints on every frame
+       * looks fine here and flickers in the room.
+       *
+       * The fifth of the five is `pickShape`, in `#arcadeUnseal`.
+       */
       case "seal":
+        if (s.seal === cmd.state) return noop();
         s.seal = cmd.state;
         break;
+      /**
+       * The join lock, to the console **only**.
+       *
+       * `setJoinsLocked` is the one setter in the reducer whose broadcast is
+       * not `to: "all"`: it emits `{ to: "host", what: "state" }` and nothing
+       * else. That is a budget decision rather than a rule — the lock is drawn
+       * on the console's lobby panel and nowhere else — but it is a decision
+       * with a consequence, because `joinsLocked` is on *every* role's frame:
+       * a phone's copy of it goes stale on the real server until the next
+       * broadcast for some other reason.
+       *
+       * This file fell off the bottom of the switch and broadcast to the room,
+       * so a phone here always held a fresh value. A surface that started
+       * drawing the lock would then work perfectly in the demo and be stale in
+       * the room, which is exactly the lie `?mock=1` must not tell.
+       */
       case "lobby.lock":
+        if (s.joinsLocked === cmd.locked) return noop();
         s.joinsLocked = cmd.locked;
-        break;
+        this.#send(conn, { t: "ack", cid, applied: true });
+        this.#sendStateTo((c) => c.role === "host");
+        return;
       // Practice. The mock had no case for it at all, so the frame fell off
       // the end of the switch, was acked as applied, and changed nothing — the
       // one thing a mock must never do, because it is the console's only way
@@ -3554,8 +3735,29 @@ class MockHub {
       /* ---- trivia ---- */
 
       case "trivia.open": {
-        if (s.questionPhase !== "idle") {
-          return reject("wrong_question_phase", "That question is already open.");
+        // `openQuestion` in reducer.ts admits a sudden death out of `revealed`
+        // as well as out of `idle`, and its comment calls that the point of the
+        // fix: "a tie is settled *after* the last question, when the phase is
+        // `revealed` and `nextQuestion` has nothing left to advance to." That
+        // is the commonest tiebreak there is — the set has been played, two
+        // people are level, and the host settles it — and this file refused it,
+        // so the one sudden death a demo would actually stage was unreachable.
+        //
+        // Still refused over an open question, because two live questions is
+        // two live questions, and over a closed one, which would skip a reveal
+        // the room is waiting for.
+        if (
+          !(
+            s.questionPhase === "idle" ||
+            (cmd.suddenDeath && s.questionPhase === "revealed")
+          )
+        ) {
+          return reject(
+            "wrong_question_phase",
+            s.questionPhase === "closed"
+              ? "Reveal this question before settling a tie."
+              : "This question is already in play.",
+          );
         }
         if (!s.question()) return reject("no_more_questions", "That was the last one.");
         this.#send(conn, { t: "ack", cid, applied: true });
@@ -3589,7 +3791,26 @@ class MockHub {
         if (s.phase !== "running") {
           return reject("wrong_phase", "Start the session first.");
         }
-        if (s.arcadeOn) return noop();
+        // Re-entering is not an error and is not a no-op either: it is the
+        // host's documented way of handing a number to somebody who joined
+        // after the arcade started. `enterArcade` in reducer.ts re-runs
+        // `assignPlayerNumbers` and returns `unchanged` only when that added
+        // nobody — numbers already handed out never move, because assignment
+        // is append-only.
+        //
+        // `if (s.arcadeOn) return noop()` made the one press that fixes a
+        // latecomer's `000` do nothing at all, on the surface where the
+        // facilitator would go looking for it. Note what is *not* done here:
+        // no `resetFloor()`, and `assignArcadeNumbers` no longer hands out a
+        // standing either — see the note on it. The latecomer joined after the
+        // round's card and is not in the round, which is the engine's answer
+        // too.
+        if (s.arcadeOn) {
+          const before = Object.keys(s.arcadeNumbers).length;
+          s.assignArcadeNumbers();
+          if (Object.keys(s.arcadeNumbers).length === before) return noop();
+          break;
+        }
         s.arcadeOn = true;
         s.assignArcadeNumbers();
         s.resetFloor();
@@ -3689,7 +3910,20 @@ class MockHub {
       }
       case "arcade.reveal": {
         if (s.arcadeRound === null || s.arcadePhase !== "idle") {
-          return reject("wrong_round_phase", "There is nothing to reveal.");
+          // Two refusals, not one. `revealRound` in reducer.ts distinguishes
+          // the round that is still being played from the round that does not
+          // exist, and the distinction is the whole use of the message: "End
+          // the round before revealing it." tells the host which button to
+          // press instead, and "There is nothing to reveal." tells them the
+          // press was meaningless. One message for both cases makes the
+          // commonest mis-press of the arcade — Reveal before End, with the
+          // room watching — read as a broken console.
+          return reject(
+            "wrong_round_phase",
+            s.arcadePhase === "running"
+              ? "End the round before revealing it."
+              : "There is nothing to reveal.",
+          );
         }
         s.arcadePhase = "reveal";
         // The arcade raw lands in the score grid here and not at the close,
@@ -3723,8 +3957,42 @@ class MockHub {
         return noop();
 
       case "trivia.next": {
-        if (s.questionPhase !== "revealed") {
-          return reject("wrong_question_phase", "Reveal this one first.");
+        // `nextQuestion` in reducer.ts refuses **only** `open`: "advancing past
+        // an open question would drop answers already given and score nobody.
+        // Everything else is allowed — advancing from `idle` is how a host skips
+        // a question they do not want to ask, which the ⚠️ VERIFY discipline in
+        // the question bank makes a real need."
+        //
+        // Requiring `revealed` here took that skip away, and took it away on the
+        // only console anybody rehearses on: a host who wants to drop question
+        // eleven has to open it, close it and reveal it to the room first, which
+        // is three presses and an answer read out to skip a question.
+        if (s.questionPhase === "open") {
+          return reject(
+            "wrong_question_phase",
+            "Close the question before moving on.",
+          );
+        }
+        // Clearing a sudden death is not advancing the set, and this is the
+        // half that cost points rather than presses. `at` did not move when the
+        // tiebreak opened, so it must not move when the tiebreak is put away —
+        // `at += 1` here burned the next scored question, and because a tiebreak
+        // is usually the last thing that happens in a set it usually burned one
+        // nobody was going to notice was missing. It is also the only way out of
+        // a tiebreak run *after* the last question, where there is nothing to
+        // advance to and the old guard's `no_more_questions` was all a host got.
+        //
+        // The question comes back in the phase it was in, answers included: one
+        // restored to `revealed` cannot be opened — and scored — a second time.
+        if (s.suddenDeath) {
+          const held = s.tiebreakHeld;
+          s.at = held?.at ?? s.at;
+          s.questionPhase = held?.phase ?? "idle";
+          s.answers = held?.answers ?? {};
+          s.tiebreakHeld = null;
+          s.suddenDeath = false;
+          s.suddenDeathWinner = null;
+          break;
         }
         if (s.at + 1 >= s.questions.length) {
           return reject("no_more_questions", "That was the last question.");
@@ -3732,7 +4000,6 @@ class MockHub {
         s.at += 1;
         s.questionPhase = "idle";
         s.answers = {};
-        s.suddenDeath = false;
         s.suddenDeathWinner = null;
         break;
       }
@@ -3757,6 +4024,15 @@ class MockHub {
     const q = s.question();
     if (!q) return;
     const now = Date.now() + SERVER_SKEW_MS;
+    // Where the set was, put aside *before* anything moves, and handed back by
+    // `trivia.next`. See {@link MockSession.tiebreakHeld}: a second tiebreak in
+    // a row keeps the first one's hold, because the thing to come back to is
+    // the scored question and not the tiebreak just asked.
+    s.tiebreakHeld = suddenDeath
+      ? s.suddenDeath
+        ? s.tiebreakHeld
+        : { at: s.at, phase: s.questionPhase, answers: s.answers }
+      : null;
     s.questionPhase = "open";
     s.suddenDeath = suddenDeath;
     s.suddenDeathWinner = null;
@@ -4739,6 +5015,18 @@ class MockHub {
       s.arcadeTotals[pid] = (s.arcadeTotals[pid] ?? 0) + (s.arcadeBanked[pid] ?? 0);
     }
     s.arcadePhase = "idle";
+    // Both clocks, as `endRound` in reducer.ts nulls both. `arcadeStartedAt` was
+    // left standing until the *next* `#startRound`, so `ArcadeView.startedAt`
+    // went out non-null through the whole of idle and the whole of the reveal —
+    // a round that had finished still saying when its Floor opened. Nothing
+    // reads it today, which is why it went unseen; it is on the wire for every
+    // role, which is why it is a difference rather than bookkeeping.
+    //
+    // After the settlement above, never before it: `mockBetStands` is judged
+    // against `arcadeStartedAt`, and nulling it a few lines earlier would make
+    // every Lounge bet in the round look like it was placed before the Floor
+    // opened.
+    s.arcadeStartedAt = null;
     s.arcadeEndsAt = null;
     // `arcadeRoundIndex` is deliberately not touched here. It moves in
     // `#startRound`, where the reducer moves it, and the comment there says
@@ -4856,10 +5144,41 @@ class MockHub {
     if (s.arcadePhase !== "running" || play?.kind !== "plan_apply") {
       return refuse("wrong_round_phase", "Nothing to tap.");
     }
-    if (s.arcadeStanding[pid] !== "floor") {
+    // `=== "drained"`, not `!== "floor"`, and the difference is one person: a
+    // latecomer, who has no standing at all because `resetFloor()` ran before
+    // they arrived. `tap` in reducer.ts refuses only the drained and spells out
+    // why — "absent means *joined after the round started*, and such a person
+    // is put on the Floor by playing … without this they were refused a tap for
+    // being in the Lounge *and* refused a bet for being on the Floor, two
+    // contradictory sentences on one phone, and nothing they could do about
+    // either."
+    //
+    // That is what this file did. It is also why a scenario in mock.test.ts had
+    // to reach the `banked` half of `#endRound`'s totals union through a
+    // Recruitment answer: a Plan / Apply latecomer could not score here at all.
+    if (s.arcadeStanding[pid] === "drained") {
       return refuse("not_on_the_floor", "You are in the Lounge. Back a player.");
     }
-    this.#recordTap(pid, this.#tapInstant(this.#now(), play));
+    // The Floor's own clock, which the engine checks on every tap and this file
+    // did not check at all.
+    //
+    // Nothing in this file can reach it today, and it is here anyway. The
+    // window the engine's guard exists for is between `endsAt` and the frame
+    // that ends the round, and on the real server that is a real gap — the
+    // `endRound` "arrives from the boundary a moment later", as the comment on
+    // the same guard in `backPlayer` puts it. Here the Floor timer is a
+    // `setTimeout` in this process with no boundary in front of it, and
+    // Plan / Apply is one of the three rounds whose Floor timer *is* armed, so
+    // the round is already `idle` and the phase check above has the tap. The
+    // guard is kept for the same reason `#nextItem` keeps its `#armFloorTimer()`
+    // call: the invariant is worth holding, and the day somebody gives this
+    // round a lagged ending is not the day to discover it was missing. Its
+    // sibling in `#arcadeBack` is the one with a window, and that one is tested.
+    const received = this.#now();
+    if (s.arcadeEndsAt !== null && received >= s.arcadeEndsAt) {
+      return refuse("floor_locked", "The Floor is closed.");
+    }
+    this.#recordTap(pid, this.#tapInstant(received, play));
     this.#send(conn, { t: "ack", cid, applied: true });
     this.#sendStateTo((c) => c.role !== "participant" || c.pid === pid);
   }
@@ -4943,6 +5262,18 @@ class MockHub {
       }
       const at = mockTinIndexFor(play, what.shape, s.arcadeNumbers[pid]);
       if (at === -1) return refuse("invalid_choice", "There is no tin of that shape.");
+      // The fifth of the five idempotence checks — see the note on `seal` in
+      // `#hostCmd`. `pickShape` ends on `if (play.pick[event.pid] === at) return
+      // unchanged()`, and the reachable case is the round card: picking is free
+      // there ("change your mind freely while the tin is still closed"), so a
+      // phone tapping the same shape twice is an ordinary thing to do. Once the
+      // Floor is open `already_picked` has it first. Without this the big
+      // screen's four filling tiles were repainted for a pick that had not
+      // moved, on a card where every phone in the room is tapping.
+      if (play.pick[pid] === at) {
+        this.#send(conn, { t: "ack", cid, applied: false });
+        return;
+      }
       play.pick[pid] = at;
       this.#send(conn, { t: "ack", cid, applied: true });
       // The four tiles filling up is the round card's whole animation, and it
@@ -5058,34 +5389,70 @@ class MockHub {
     // No drained check, and that is not an omission: nobody drains here.
     const at = this.#now();
     if (at >= play.pullEndsAt) return refuse("floor_locked", "The pull is over.");
-    this.#send(conn, { t: "ack", cid, applied: true });
-    if (this.#recordBeat(pid, at)) {
+    const beat = this.#recordBeat(pid, at);
+    // Two answers, not one, because `tapBeat` in reducer.ts gives two: it
+    // *applies* whenever something moved — a side dealt, an election wound
+    // forward — and it *broadcasts* only when a beat was credited. The ack used
+    // to be a flat `applied: true` for every tap the round accepted, so an
+    // off-beat tap, which SPEC.md says achieves nothing, told the phone it had
+    // achieved something.
+    this.#send(conn, { t: "ack", cid, applied: beat.applied });
+    if (beat.credited) {
       this.#sendStateTo((c) => c.role !== "participant" || c.pid === pid);
     }
   }
 
-  /** Judge and credit one tap. True when anything moved. */
-  #recordBeat(pid: string, at: number): boolean {
+  /**
+   * Judge and credit one tap: whether anything moved, and whether a beat was
+   * credited.
+   *
+   * The two are not the same question and `tapBeat` in reducer.ts answers both.
+   * Its last three clauses — `if (!credited && sides === play.sides && last ===
+   * was) return unchanged()` — say what "moved" means: a credit, a side dealt to
+   * somebody who was not in the room when they were dealt, or an election wound
+   * forward past its end. And its effects list says what a frame is for:
+   * `credited ? [...three broadcasts, PERSIST] : []`. **Nothing is sent for a
+   * tap that moved without being credited**, which is the part this file had
+   * wrong in both directions at once.
+   *
+   * #27 read the reducer as broadcasting a late-dealt side and reads it wrong;
+   * it does not, and it says why two lines further down — "thirty players at 100
+   * bpm is fifty credits a second, and a fan-out each would be fifteen hundred
+   * frames a second to move a rope by a pixel". A side dealt on an uncredited
+   * tap reaches the room on the *next* credited one, on the server as here, and
+   * that is the budget working as designed rather than a divergence. What was a
+   * divergence is the other half: this returned true whenever `last` had moved,
+   * so an election winding forward — which happens to every silent player every
+   * three and a bit beats — fanned the whole rope out for a tap that achieved
+   * nothing.
+   */
+  #recordBeat(
+    pid: string,
+    at: number,
+  ): { applied: boolean; credited: boolean } {
+    const still = { applied: false, credited: false };
     const s = this.session;
     const play = s.arcadePlay;
-    if (play?.kind !== "tug_of_raft") return false;
-    if (at < play.pullStartedAt) return false;
+    if (play?.kind !== "tug_of_raft") return still;
+    // A frame from before the heartbeat started has no beat to be on.
+    if (at < play.pullStartedAt) return still;
     // Somebody who was not in the room when the sides were dealt gets one
     // now, rather than being told to watch.
+    let dealt = false;
     if (play.sides[pid] === undefined) {
       play.sides[pid] = mockLateSide(play.seed, pid);
+      dealt = true;
     }
     const was = play.lastBeat[pid] ?? -1;
     const judged = mockResolveBeat(play, was, at);
     const credited = !judged.inElection && judged.onBeat && judged.beat > was;
     const last = credited ? judged.beat : judged.lastBeat;
-    if (!credited && last === was) return false;
     play.lastBeat[pid] = last;
     if (credited) {
       play.onBeats[pid] = (play.onBeats[pid] ?? 0) + 1;
       play.creditedAt[pid] = at;
     }
-    return true;
+    return { applied: credited || dealt || last !== was, credited };
   }
 
   #arcadeStep(
@@ -5237,6 +5604,43 @@ class MockHub {
     if (conn.role !== "participant" || pid === null) {
       return refuse("forbidden", "Only a participant plays the arcade.");
     }
+    /**
+     * `backPlayer` in reducer.ts, guard for guard and in its order.
+     *
+     * The order used to be its own: the phase came *last*, after
+     * `not_in_the_lounge`, `cannot_back_yourself` and
+     * `cannot_back_a_drained_player`, and it came wearing `floor_locked`. So a
+     * phone pressing Back between rounds — which is when a Lounge card is
+     * still on the glass, because the strike stays up through idle and reveal —
+     * was told "You are on the Floor." by a room that had no Floor open. The
+     * engine's answer is `wrong_round_phase`, "The Lounge is not open.", and it
+     * is the second thing checked rather than the last.
+     *
+     * Three more differences went with the order, and each is a sentence on
+     * somebody's phone:
+     *
+     * - **`not_in_arcade` was unreachable.** With the arcade off there is no
+     *   seat and no waiting wave, so the first gate answered "You are on the
+     *   Floor." for a room that is not in the arcade at all.
+     * - **`unknown_participant` was never returned.** Backing a pid nobody
+     *   holds fell through to the standing check, which reads `undefined !==
+     *   "floor"`, and came back as "They are in the Lounge too." about a person
+     *   who does not exist.
+     * - **The first gate asked the wrong question.** `!held` is "has no Lounge
+     *   seat"; the engine asks `standing !== "drained"`. They differ for the one
+     *   player who has a seat without a drain — a waiting wave who bet from the
+     *   Floor — who could therefore keep re-betting after their own wave began
+     *   to cross, and be refused by the wave rules further down instead of by
+     *   this one.
+     *
+     * The messages are the engine's too, including the nickname in the drained
+     * one: `refusedCmd.message` is what the phone puts on the glass, so a
+     * refusal this file words differently is a difference a player reads.
+     */
+    if (!s.arcadeOn) return refuse("not_in_arcade", "The arcade is not open.");
+    if (s.arcadePhase !== "running") {
+      return refuse("wrong_round_phase", "The Lounge is not open.");
+    }
     // On the Bridge a wave that is waiting its turn may bet on the wave in
     // front of it, which is the only way two thirds of the room have
     // anything to press for two minutes. It is a seat without a drain.
@@ -5247,17 +5651,37 @@ class MockHub {
       s.arcadeStanding[pid] === "floor" &&
       mockWaveOf(s.arcadeNumbers[pid], waitingBridge.waveCuts) !==
         waitingBridge.wave;
-    const held = s.arcadeLounge[pid];
-    if (!held && !waiting) {
-      return refuse("not_in_the_lounge", "You are on the Floor.");
+    if (s.arcadeStanding[pid] !== "drained" && !waiting) {
+      return refuse("not_in_the_lounge", "You are on the Floor. Play.");
     }
-    if (backing === pid) return refuse("cannot_back_yourself", "Back somebody else.");
+    // "Change it freely until the Floor locks." The Floor locks when the round
+    // clock runs out, and on the Bridge — and on Tug and Gganbu — that is a
+    // window a player can sit in: `#armFloorTimer` deliberately does not arm for
+    // those three, because their own step, pull and prompt timers own the
+    // ending and eighteen deadlines' worth of lag would otherwise close the
+    // round on top of the last one. So between `arcadeEndsAt` and the timer that
+    // actually ends the round, this file accepted a bet the server refuses —
+    // which on the bridge is a bet placed while wave 3 is mid-crossing.
+    if (s.arcadeEndsAt !== null && this.#now() >= s.arcadeEndsAt) {
+      return refuse("floor_locked", "The Floor has locked.");
+    }
+    if (backing === pid) {
+      return refuse(
+        "cannot_back_yourself",
+        "You are in the Lounge. Back somebody still playing.",
+      );
+    }
+    const backed = s.find_pid(backing);
+    if (!backed || backed.kicked) {
+      return refuse("unknown_participant", `No participant ${backing}.`);
+    }
     if (s.arcadeStanding[backing] !== "floor") {
-      return refuse("cannot_back_a_drained_player", "They are in the Lounge too.");
+      return refuse(
+        "cannot_back_a_drained_player",
+        `${backed.nickname} is in the Lounge too.`,
+      );
     }
-    if (s.arcadePhase !== "running") {
-      return refuse("floor_locked", "The Floor has closed.");
-    }
+    const held = s.arcadeLounge[pid];
     // SPEC.md narrows the Lounge on the bridge: "Drained players back someone
     // in a **later** wave." Without the first half, every backer waits for
     // wave 1 to produce a crosser and backs them, which is a certainty rather
@@ -5293,6 +5717,16 @@ class MockHub {
           `Wave ${target} is already on the bridge. Back a later wave.`,
         );
       }
+    }
+    // Backing the runner you are already backing is not a change of mind.
+    // `backPlayer` ends on `if (seat?.backing === event.backing) return
+    // unchanged()`, and it matters more here than the other idempotence checks:
+    // `placedAt` is restamped on every placement, and `betStands` judges the bet
+    // on `placedAt` — so a phone that re-sent the same bet after the crossing
+    // would have turned a standing bet into a late one and lost the points.
+    if (held?.backing === backing) {
+      this.#send(conn, { t: "ack", cid, applied: false });
+      return;
     }
     // The seat is taken here and not a line earlier: a refused bet must not
     // leave a waiting player sitting in a Lounge they were never drained to.
@@ -5633,7 +6067,7 @@ class MockHub {
         // Inside the window, because the bot is tapping *to* the beat.
         const at = play.pullStartedAt + beat * play.beatMs;
         if (Math.abs(now - at) > play.beatMs * TUG_TOLERANCE) return;
-        if (this.#recordBeat(p.pid, now)) moved = true;
+        if (this.#recordBeat(p.pid, now).credited) moved = true;
       });
       if (moved) this.#broadcastState();
     }, 60 / this.#cfg.speed);
