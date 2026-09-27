@@ -887,6 +887,54 @@ describe("grantSpot", () => {
     assert.ok(has(r.effects, isPersist));
   });
 
+  /**
+   * #31. SPEC.md's toast is "Spot Award — Kenji — best recovery of the
+   * afternoon", so the recipient has to reach a surface — and the effect is
+   * how it gets there. The pid rather than the nickname, because this reducer
+   * is pure and because a name rendered here is a name as of the grant:
+   * `setNickname` moves it and `kick` frees it for the next joiner, and the
+   * event log would keep replaying the old one for ever. server/runtime.ts
+   * resolves it at projection time (`spotToastText`).
+   *
+   * `detail` staying the bare trimmed reason is half the claim, not decoration.
+   * The Desktop draws its own "Spot Award" label and the boundary prepends the
+   * name, so a reducer that helpfully rendered either into `detail` would put
+   * it on the big screen twice.
+   */
+  test("the toast carries the recipient as a pid, and the reason without them", () => {
+    const s = running();
+    const r = run(s, { type: "grantSpot", activityId: "ttx", pid: "p2", reason: "  best recovery  " }, 99);
+    const toast = r.effects.find((e) => e.kind === "broadcast" && e.what === "toast");
+    assert.ok(toast !== undefined && toast.kind === "broadcast", "a toast effect");
+    assert.equal(toast.subject, "p2", "the toast does not say who it is about");
+    assert.equal(toast.detail, "best recovery");
+    // The name is *not* in the rendered half, and the nickname here is a real
+    // one off the roster rather than a literal: if the fixture's nicknames
+    // change this still checks the thing it names.
+    const nickname = participant(r.state, "p2").nickname;
+    assert.ok(
+      !(toast.detail ?? "").includes(nickname),
+      "the nickname is baked into `detail`, which is what `subject` exists to avoid",
+    );
+  });
+
+  /**
+   * The other award's pid, not the first one's, and not the granting host's.
+   * A `subject` hard-wired to anything — `state.participants` order, the last
+   * spot, a constant — passes the test above, which grants to the only
+   * interesting pid in the room.
+   */
+  test("each award's toast names its own recipient", () => {
+    const s = running();
+    const subjects = (["p1", "p3"] as const).map((pid) => {
+      const r = run(s, { type: "grantSpot", activityId: "ttx", pid, reason: "r" }, 99);
+      const toast = r.effects.find((e) => e.kind === "broadcast" && e.what === "toast");
+      assert.ok(toast !== undefined && toast.kind === "broadcast", `a toast effect for ${pid}`);
+      return toast.subject;
+    });
+    assert.deepEqual(subjects, ["p1", "p3"]);
+  });
+
   test("each award has a distinct seq so it can be revoked individually", () => {
     const s = accept(running(), [
       { type: "grantSpot", activityId: "ttx", pid: "p1", reason: "a" },

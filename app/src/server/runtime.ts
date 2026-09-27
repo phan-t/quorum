@@ -156,6 +156,57 @@ export function latencyCorrection(rttMs: number | null): number {
 }
 
 /* ------------------------------------------------------------------ */
+/* Toasts                                                               */
+/* ------------------------------------------------------------------ */
+
+/**
+ * The line a `toast` broadcast puts on the wire.
+ *
+ * SPEC.md: "10 points each, granted from the console with a **required
+ * reason**, which the Desktop shows as a toast: *Spot Award — Kenji — best
+ * recovery of the afternoon*." The Desktop draws the **Spot Award** label
+ * itself, in its own `.label` span beside the text (`showToast` in
+ * client/screen/main.ts), so the text this composes is the rest of that
+ * sentence — `Kenji — best recovery of the afternoon` — and not the whole of
+ * it. Putting the label in here would print it twice.
+ *
+ * **Why the name is resolved here and not in the reducer.** The effect carries
+ * `subject`, a pid, and this is the layer that turns it into a name. The
+ * engine is pure and has no business rendering copy, but that is the smaller
+ * reason. The larger one is that a name rendered at `grantSpot` is a name
+ * copied at a moment, and the moment passes: a kicked participant who rejoins
+ * comes back under a different nickname on the same pid, and `kick` and
+ * `releaseNickname` free the old name for the next person through the door.
+ * Looking it up as the frame goes out means the toast says who they are now,
+ * and — since effects are recomputed, never stored — an event log replayed a
+ * year later renders the same way the live room did.
+ *
+ * **A pid that does not resolve** falls back to the bare reason. It should not
+ * happen — `grantSpot` refuses `unknown_participant` for a pid that is absent
+ * or kicked, so the subject is in `participants` by the time the effect
+ * exists, and participants are never spliced out. But the alternative to a
+ * fallback is `undefined — <reason>` or a leading dash over a hole where a
+ * name should be, and a toast is read out loud in front of the room. Degrading
+ * to what the wire carried before #31 is the quiet failure; a stray `undefined`
+ * on the big screen is the loud one.
+ *
+ * #31, split out of #29. The question #29 left open — whether the nameless
+ * toast was deliberate restraint or a gap — is settled by the spec's own
+ * example, which names Kenji. So client/shared/mock.ts, which named the
+ * recipient until #29 matched it down to the server, had it right all along;
+ * it now composes the line the same way this does.
+ */
+export function spotToastText(state: SessionState, effect: Effect): string {
+  const reason = effect.kind === "broadcast" ? (effect.detail ?? "") : "";
+  const subject = effect.kind === "broadcast" ? effect.subject : undefined;
+  const nickname =
+    subject === undefined ? undefined : state.participants[subject]?.nickname;
+  if (nickname === undefined) return reason;
+  if (reason === "") return nickname;
+  return `${nickname} — ${reason}`;
+}
+
+/* ------------------------------------------------------------------ */
 /* Plan / Apply: the light, and the grace after the lock                */
 /* ------------------------------------------------------------------ */
 
@@ -539,11 +590,15 @@ export class SessionRuntime {
           // not shown the count and would be sent a frame identical to the one
           // they are already holding.
           if (effect.what === "toast") {
+            // `this.state` is the state *after* the event, which is the one
+            // the name must come out of: a toast about somebody who joined in
+            // the same breath would otherwise find nobody. See
+            // {@link spotToastText} for why the pid is resolved here at all.
             this.sendAll({
               t: "toast",
               seq: this.state.seq,
               kind: "spot",
-              text: effect.detail ?? "",
+              text: spotToastText(this.state, effect),
             });
           } else {
             stateTo.push(effect.to);
