@@ -149,7 +149,7 @@ export function gganbuRecapRows(
 }
 
 /**
- * The one sentence that says which notes to re-check, by number.
+ * The one sentence that says which answers to re-check, by number.
  *
  * By number and not by name, because the host is looking at a numbered list
  * two lines below it and a cue repeated here would be a second thing to read.
@@ -157,20 +157,46 @@ export function gganbuRecapRows(
  * no sentence about checking them, and a line saying "none" is a line the host
  * reads before finding out it said nothing.
  *
- * SPEC.md fixes the count at three of the six, so the usual output names three
- * prompts; the function counts rather than assuming, because the flag belongs
- * to whoever wrote the bank and a later bank may flag a different number.
+ * The flag belongs to whoever wrote the bank, so this counts rather than
+ * assuming a number. SPEC.md fixed the count at three of the six when this was
+ * written; the shipped bank flags all six, for the reason its own "Why all six
+ * carry the flag" section gives, and counting is what let that change land here
+ * without an edit.
+ *
+ * ## Why all-flagged is a different sentence
+ *
+ * Counting produced "Check prompts 1, 2, 3, 4, 5 and 6" once the bank flagged
+ * everything, which is an enumeration of the whole list sitting directly under
+ * the whole list — and every one of those rows already draws its own VERIFY
+ * chip. Naming them again is the panel repeating itself in longer form.
+ *
+ * What the chips cannot say is *why*, so that is what is left when the numbers
+ * go. The enumeration still runs for any bank that flags some but not all,
+ * which is the case the numbers were for.
+ *
+ * One flagged prompt in a one-prompt bank keeps the numbered form: "every
+ * answer here" is a strange way to describe a list of one.
+ *
+ * ## Not "read the note out"
+ *
+ * This used to end "before you read the note out". The notes left this panel —
+ * the Desktop puts one up beside its prompt at the reveal, which is where they
+ * are read from now — so the sentence was pointing the host at a surface that
+ * no longer carries them. "Before the reveal" names the moment instead of the
+ * surface, and stays true wherever the note is drawn.
  */
 export function gganbuVerifyNotice(
   recap: readonly ArcadeGganbuRecap[] | undefined,
 ): string {
-  const flagged = gganbuRecapRows(recap, -1)
-    .filter((r) => r.verify)
-    .map((r) => String(r.n));
+  const rows = gganbuRecapRows(recap, -1);
+  const flagged = rows.filter((r) => r.verify).map((r) => String(r.n));
   if (flagged.length === 0) return "";
+  if (flagged.length === rows.length && rows.length > 1) {
+    return "Every answer here is a default a release can move. Check against the source before the reveal.";
+  }
   const which =
     flagged.length === 1
       ? `prompt ${flagged[0]}`
       : `prompts ${flagged.slice(0, -1).join(", ")} and ${flagged[flagged.length - 1]}`;
-  return `Check ${which} against the source before you read the note out: those answers can move.`;
+  return `Check ${which} against the source before the reveal: those answers can move.`;
 }

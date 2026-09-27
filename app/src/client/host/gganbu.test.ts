@@ -20,7 +20,15 @@ import {
   gganbuVerifyNotice,
 } from "./gganbu.ts";
 
-/** Three of six carry the flag, exactly as the shipped bank does. */
+/**
+ * Three of six carry the flag.
+ *
+ * Not the shipped bank, which flags all six and whose prompts are all
+ * configuration defaults — this fixture still has the release years in it. It
+ * is kept that way on purpose: a partly-flagged bank is the case the numbered
+ * sentence exists for, and a fixture that matched the shipped bank would test
+ * only the all-flagged branch. The all-flagged case is built from this one.
+ */
 const RECAP: readonly ArcadeGganbuRecap[] = [
   {
     cue: "Terraform's default parallelism",
@@ -196,7 +204,7 @@ describe("the recap the console gets and nobody else does", () => {
   it("names the flagged prompts by number, and only those", () => {
     assert.equal(
       gganbuVerifyNotice(RECAP),
-      "Check prompts 2, 3 and 5 against the source before you read the note out: those answers can move.",
+      "Check prompts 2, 3 and 5 against the source before the reveal: those answers can move.",
     );
   });
 
@@ -210,7 +218,35 @@ describe("the recap the console gets and nobody else does", () => {
   it("reads in the singular for one flagged prompt", () => {
     assert.equal(
       gganbuVerifyNotice([RECAP[1] as ArcadeGganbuRecap]),
-      "Check prompt 1 against the source before you read the note out: those answers can move.",
+      "Check prompt 1 against the source before the reveal: those answers can move.",
+    );
+  });
+
+  it("drops the numbers when every prompt carries the flag", () => {
+    // The shipped bank's case. Each row draws its own VERIFY chip, so naming
+    // all of them is the list repeating itself; what the chips cannot say is
+    // why, and that is what the sentence keeps.
+    const notice = gganbuVerifyNotice(RECAP.map((r) => ({ ...r, verify: true })));
+    assert.equal(
+      notice,
+      "Every answer here is a default a release can move. Check against the source before the reveal.",
+    );
+    assert.ok(!/\d/.test(notice), "the all-flagged sentence names no numbers");
+  });
+
+  it("still names numbers when the flag is on some but not all", () => {
+    // The guard is all-flagged, not merely several-flagged: one unflagged row
+    // is enough to make which-ones a real question again.
+    const allButOne = RECAP.map((r, i) => ({ ...r, verify: i !== 0 }));
+    assert.match(gganbuVerifyNotice(allButOne), /^Check prompts \d/);
+  });
+
+  it("keeps the numbered form for a flagged bank of one", () => {
+    // All-flagged and one-prompt at the same time. "Every answer here" is a
+    // strange way to describe a list of one, so the count wins over the ratio.
+    assert.equal(
+      gganbuVerifyNotice([{ ...(RECAP[0] as ArcadeGganbuRecap), verify: true }]),
+      "Check prompt 1 against the source before the reveal: those answers can move.",
     );
   });
 });
