@@ -23,6 +23,8 @@ import { buildPlan, DEFAULT_AUTO_SECONDS } from "../engine/sendoff.ts";
 import type { SendoffPhase, SessionState } from "../engine/types.ts";
 import type { SessionRegistry, SessionRuntime } from "./runtime.ts";
 import {
+  REOPEN_WINDOW_MS,
+  retiredByAge,
   SNAPSHOT_SELF_DESCRIBING_VERSION,
   SNAPSHOT_VERSION,
   type LoadedSession,
@@ -148,6 +150,14 @@ export function vintageOf(snapshot: unknown): Vintage {
  * during a blue/green deploy means the old task is still writing, and is exactly
  * why the answer is "no old row for N consecutive boots" rather than "no old row
  * once".
+ *
+ * One exception, added with #23: a `closed` session past `REOPEN_WINDOW_MS` is
+ * skipped before it is rebuilt, so it is never re-stamped and its row keeps
+ * whatever version it was written at until its `ttl` clears it. The census
+ * still counts it — it runs over everything `loadRecoverable` returned, retired
+ * or not — so the procedure stays honest and simply takes longer to converge:
+ * the last thing holding a shim up may be a finished session waiting out its
+ * retention rather than anything this process can re-stamp.
  *
  * A new field on a round in flight adds a constant here, one shim, and a
  * `SNAPSHOT_VERSION` bump. It does not add a function nobody can prove is dead.
@@ -476,6 +486,25 @@ function sidOf(row: unknown): string {
   return typeof sid === "string" && sid !== "" ? sid : "(a row with no sid)";
 }
 
+/**
+ * Whether this row is a finished session old enough to leave where it is.
+ *
+ * Read off the row rather than off a rebuilt state, and read *before* the
+ * rebuild, which is the point: a retired session is one this process should
+ * not rehydrate, should not run the migration shims over, and should not write
+ * back. Doing the age check after any of that would keep the cost it exists to
+ * avoid. `sidOf`'s defensiveness for the same reason — this runs on whatever
+ * the store handed back, and it must not be the thing that throws.
+ */
+function retiredRow(row: unknown, now: number): boolean {
+  const meta = (row as { meta?: { phase?: unknown; updatedAt?: unknown } } | null | undefined)
+    ?.meta;
+  const phase = meta?.phase;
+  const updatedAt = meta?.updatedAt;
+  if (typeof phase !== "string" || typeof updatedAt !== "number") return false;
+  return retiredByAge(phase as LoadedSession["meta"]["phase"], updatedAt, now);
+}
+
 export async function recoverSessions(
   store: SessionStore,
   registry: SessionRegistry,
@@ -508,8 +537,34 @@ export async function recoverSessions(
 
   const out: RecoveredSession[] = [];
   const failed: { sid: string; why: string }[] = [];
+  const retired: string[] = [];
   for (const session of rows) {
     const sid = sidOf(session);
+
+    // A session that finished long enough ago is left in the table, and this
+    // process does not take it on. #23.
+    //
+    // The registry used to hold every closed session for the life of the task,
+    // because `loadRecoverable` returns them and this loop restored whatever it
+    // was returned. Three things followed, and only the first is cosmetic: the
+    // admin session listing became unreadable during the event it is used at;
+    // the write below re-stamped `updatedAt` on every boot so the 90-day `ttl`
+    // never arrived; and `shutdown` wrote all of them back on SIGTERM, which
+    // re-created rows an operator had deleted by hand an hour earlier.
+    //
+    // Skipped *here*, before `rehydrate`, so the row is not replayed and not
+    // put through the migration shims either — a session that finished in
+    // August has no business being migrated on every restart.
+    //
+    // Not a failure and not a deletion. The row is untouched, its scores and
+    // its event log are still downloadable by sid because the export path
+    // reads the store directly, and its `ttl` is finally free to run out. The
+    // only thing it loses is `reopen`, which is the capability this window is
+    // sized around: see `REOPEN_WINDOW_MS`.
+    if (retiredRow(session, now)) {
+      retired.push(sid);
+      continue;
+    }
     // One row must not be able to take down the service.
     //
     // This loop runs inside `main.ts` *before* the server listens, so anything
@@ -561,6 +616,34 @@ export async function recoverSessions(
         );
       }
 
+      // And the same pair one field over, which is #22.
+      //
+      // The join code is recorded twice as well: `registry.restore` keys
+      // `byCode` off the *snapshot's* `state.joinCode`, and META carries its
+      // own, which is what a log-only rebuild seeds `newSession` with a few
+      // lines up in `rehydrate`. So the two are read on different paths and
+      // nothing used to make them agree.
+      //
+      // A divergence is worse here than the sid one reads, because it is
+      // invisible from every surface: the session comes up, the console
+      // works, the boot log is clean, and the join link printed on the card
+      // in the host's hand resolves to nothing while the room is live under a
+      // code nobody has. `byJoinCode` is the only lookup a phone ever does.
+      //
+      // Refused rather than reconciled, for the reason the sid check gives:
+      // choosing which of two disagreeing records to believe about "what code
+      // gets you into this room" is a choice with no basis, and getting it
+      // wrong sends a phone into the wrong session rather than into none.
+      const metaJoinCode = session.meta.joinCode;
+      if (built.state.joinCode !== metaJoinCode) {
+        throw new Error(
+          `the META row gives this session the join code ${metaJoinCode} but ` +
+            `its snapshot gives ${built.state.joinCode}; the registry would ` +
+            `have keyed it by the snapshot's, so the code on META — the one a ` +
+            `log-only rebuild would have used — would open nothing`,
+        );
+      }
+
       const state = markEveryoneDisconnected(built.state, now);
       const runtime = registry.restore(session, state);
 
@@ -572,7 +655,7 @@ export async function recoverSessions(
       // current `SNAPSHOT_VERSION`, so one clean boot re-stamps every row it
       // loaded and the census above is a measure of what has happened *since*.
       runtime.persistence.snapshot(state, now);
-      runtime.persistence.meta(runtime.meta(now));
+      runtime.persistence.meta(runtime.meta());
 
       out.push({
         // The sid the registry actually keyed this session by, which is the
@@ -605,7 +688,21 @@ export async function recoverSessions(
         `without them; the rows are still in the table and nothing was deleted.`,
     );
   }
-  if (out.length === 0 && failed.length === 0) log("  recovery: no live sessions to restore");
+  if (retired.length > 0) {
+    // One line, not one per session: the whole point is that these are rows
+    // nobody has to think about. Named in full anyway, because the first
+    // question about a session that is not in the listing is whether the
+    // process dropped it or never saw it.
+    const days = Math.round(REOPEN_WINDOW_MS / 86_400_000);
+    log(
+      `  recovery: ${retired.length} closed session(s) last changed more than ` +
+        `${days} day(s) ago — left in the table, not restored, and no longer ` +
+        `reopenable: ${retired.join(", ")}`,
+    );
+  }
+  if (out.length === 0 && failed.length === 0 && retired.length === 0) {
+    log("  recovery: no live sessions to restore");
+  }
   for (const r of out) {
     log(
       `  recovery: ${r.sid} restored from ${r.from}` +

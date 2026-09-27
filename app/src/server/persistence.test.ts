@@ -122,13 +122,22 @@ describe("the write path", () => {
     assert.equal(after?.events.length, before);
   });
 
-  it("drops the join code when the session closes", async () => {
+  it("stores the join code twice and no more, with the two agreeing", async () => {
+    // This used to assert a third copy: a `CODE#<joinCode>` row written on
+    // create and deleted on close. It came out with #22, because nothing
+    // outside this test ever read it — the lookup a phone uses is
+    // `SessionRegistry.byCode`, an in-memory map rebuilt at boot. What is left
+    // is the pair that is actually consulted, and the property that matters
+    // about a pair is that it agrees: recovery keys the registry off the
+    // snapshot's and a log-only rebuild seeds from META's.
     const store = new MemoryStore();
     const s = await playAnAfternoon(store);
-    assert.equal(store.codeCount(), 1);
     s.created.runtime.apply({ type: "close" }, Date.now());
     await s.persister.drain();
-    assert.equal(store.codeCount(), 0, "a finished session should not still be joinable");
+
+    const loaded = await store.loadSession(s.sid);
+    assert.equal(loaded?.meta.joinCode, s.created.runtime.state.joinCode);
+    assert.equal(loaded?.snapshot?.state.joinCode, loaded?.meta.joinCode);
   });
 
   it("does not block the game when the store is failing", async () => {
@@ -413,33 +422,39 @@ describe("restarting a session, durably", () => {
     assert.equal(registry2.byJoinCode(back.state.joinCode)?.state.sid, s.sid);
   });
 
-  it("puts the join code back when a closed session is restarted", async () => {
+  it("answers the join code again after a restarted session is recovered", async () => {
+    // The behaviour the deleted `CODE#` row was supposed to protect, asserted
+    // where it actually lives: a restart wipes the room, and the code on the
+    // card in the host's hand still has to open it after a redeploy.
     const store = new MemoryStore();
     const s = await playAnAfternoon(store);
+    const code = s.created.runtime.state.joinCode;
     s.created.runtime.apply({ type: "close" }, Date.now());
-    await s.persister.drain();
-    assert.equal(store.codeCount(), 0, "closing drops it");
-
     s.created.runtime.apply({ type: "restartSession" }, Date.now());
     await s.persister.drain();
-    assert.equal(store.codeCount(), 1, "restarting puts it back");
+
+    const registry2 = new SessionRegistry(new Persister(store, () => {}));
+    await recoverSessions(store, registry2, () => {});
+    assert.equal(registry2.byJoinCode(code)?.state.sid, s.sid);
+    assert.equal(registry2.bySessionId(s.sid)?.state.phase, "lobby");
   });
 
-  it("puts the join code back on a reopen too, keeping every score", async () => {
+  it("answers the join code after a reopen too, keeping every score", async () => {
     const store = new MemoryStore();
     const s = await playAnAfternoon(store);
+    const code = s.created.runtime.state.joinCode;
     const wanted = computeStandings(s.created.runtime.state);
     s.created.runtime.apply({ type: "close" }, Date.now());
     await s.persister.drain();
 
     s.created.runtime.apply({ type: "reopen" }, Date.now());
     await s.persister.drain();
-    assert.equal(store.codeCount(), 1);
 
     const registry2 = new SessionRegistry(new Persister(store, () => {}));
     await recoverSessions(store, registry2, () => {});
     const back = registry2.bySessionId(s.sid);
     assert.equal(back?.state.phase, "running");
+    assert.equal(registry2.byJoinCode(code)?.state.sid, s.sid);
     assert.deepEqual(computeStandings(back!.state), wanted);
   });
 

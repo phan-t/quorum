@@ -1,8 +1,8 @@
 # One table, single-table design, on-demand.
 #
-# PK/SK only, no GSI: every read is either a query on SESSION#<sid> or a get on
-# CODE#<joinCode>, and both are the partition key. See ARCHITECTURE.md's data
-# model table for the item shapes.
+# PK/SK only, no GSI: every read is a query on SESSION#<sid>, or a get by exact
+# key inside that partition, so the partition key is always in hand. See
+# ARCHITECTURE.md's data model table for the item shapes.
 
 resource "aws_dynamodb_table" "quorum" {
   name = var.name_prefix
