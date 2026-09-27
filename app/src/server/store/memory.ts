@@ -17,6 +17,7 @@ import {
   checkAssetKey,
   checkAssetSize,
   checkPromoSize,
+  RECOVERABLE_PHASES,
   SNAPSHOT_VERSION,
   type AssetSummary,
   type LoadedSession,
@@ -187,11 +188,14 @@ export class MemoryStore implements SessionStore {
   async loadRecoverable(): Promise<LoadedSession[]> {
     const out: LoadedSession[] = [];
     for (const [sid, row] of this.rows) {
-      // Mirrors the DynamoDB scan, `draft` included — see the note there.
-      // These two must agree, or the tests pass against behaviour production
-      // does not have.
+      // The same list the DynamoDB scan filters on, because it is literally
+      // the same list. This used to accept any defined phase and claim in a
+      // comment that it mirrored the scan; it selected the same rows only
+      // because `SessionPhase` has exactly these four members, so the claim
+      // was true by luck and would have gone quietly false on the fifth.
       const phase = row.meta?.phase;
       if (phase === undefined) continue;
+      if (!RECOVERABLE_PHASES.includes(phase)) continue;
       const s = this.assemble(sid, row);
       if (s) out.push(s);
     }

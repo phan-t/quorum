@@ -44,6 +44,7 @@ import {
   eventSortKey,
   promoPk,
   sessionPk,
+  RECOVERABLE_PHASES,
   SNAPSHOT_VERSION,
   ttlAt,
   type AssetSummary,
@@ -478,15 +479,19 @@ export class DynamoStore implements SessionStore {
           // true, bound it by `updatedAt` rather than by phase — a close from
           // six weeks ago does not need reopening, one from six minutes ago
           // very much does.
+          // Built from `RECOVERABLE_PHASES` rather than spelled out, so this
+          // filter and the memory store's cannot drift. The list itself, and
+          // the argument for each phase in it, live on that constant.
           FilterExpression:
-            "SK = :meta AND #phase IN (:draft, :lobby, :running, :closed)",
+            `SK = :meta AND #phase IN (${RECOVERABLE_PHASES.map(
+              (_, i) => `:p${i}`,
+            ).join(", ")})`,
           ExpressionAttributeNames: { "#phase": "phase" },
           ExpressionAttributeValues: {
             ":meta": "META",
-            ":draft": "draft",
-            ":lobby": "lobby",
-            ":running": "running",
-            ":closed": "closed",
+            ...Object.fromEntries(
+              RECOVERABLE_PHASES.map((phase, i) => [`:p${i}`, phase]),
+            ),
           },
           ProjectionExpression: "sid",
           ...(start ? { ExclusiveStartKey: start } : {}),

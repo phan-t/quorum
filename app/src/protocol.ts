@@ -42,6 +42,18 @@ export type RefusedReason =
   | "bad_token"
   | "not_joinable"
   | "rate_limited"
+  /**
+   * The session's stored state throws when anything reads it, so it is
+   * quarantined and refuses connections.
+   *
+   * Distinct from `not_joinable`, which is a session saying no on purpose — a
+   * locked lobby, a closed room. This one is the server admitting it cannot
+   * render the session at all. It is a refusal rather than a silent failure
+   * because every attempt to serve a session in this state used to take the
+   * whole process down, and a phone retrying forever is what turned that into
+   * a restart loop.
+   */
+  | "session_fault"
   | "malformed";
 
 /* ------------------------------------------------------------------ */

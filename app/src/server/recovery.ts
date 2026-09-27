@@ -534,6 +534,33 @@ export async function recoverSessions(
       // migration fired where the version said it should not have, which is a
       // constant in this file being wrong, not a session being wrong.
       for (const note of built.notes) log(`  recovery: ${sid}: ${note}`);
+
+      // Two sids are in play here and nothing used to check they agree.
+      //
+      // `sid` above is the META row's, and it is what every line in this log
+      // is named by. `registry.restore` keys the live registry off the
+      // *snapshot's* `state.sid` instead. In the ordinary case they are the
+      // same string and the difference is invisible — which is the problem: a
+      // partial write that lands META and not SNAPSHOT, or a snapshot restored
+      // under another id, brings the session up under a key the boot log never
+      // mentions. `bySessionId(<the sid in the log>)` then returns nothing, and
+      // it returns nothing at the one moment the log is all you have.
+      //
+      // Refused rather than reconciled. Preferring one silently would be
+      // picking which of two disagreeing records to believe about the question
+      // "which session is this", and there is no basis for that choice; a row
+      // whose own two halves disagree is a row nobody can reason about. So it
+      // goes through the same door as any other unrebuildable row: named,
+      // skipped, and the rest of the boot comes up without it. The throw is
+      // deliberate — the catch below is what turns it into that.
+      if (built.state.sid !== sid) {
+        throw new Error(
+          `the META row calls this session ${sid} but its snapshot calls it ` +
+            `${built.state.sid}; the registry would have keyed it by the ` +
+            `snapshot's and the log by META's, so no lookup would find it`,
+        );
+      }
+
       const state = markEveryoneDisconnected(built.state, now);
       const runtime = registry.restore(session, state);
 
@@ -548,7 +575,13 @@ export async function recoverSessions(
       runtime.persistence.meta(runtime.meta(now));
 
       out.push({
-        sid,
+        // The sid the registry actually keyed this session by, which is the
+        // one that answers a lookup. The check above has just established that
+        // it equals META's, so this is the same string either way — written
+        // this way because the log has to name the key, not the label, and a
+        // future edit that relaxes the check should not silently change which
+        // of the two this line reports.
+        sid: state.sid,
         runtime,
         from: built.from,
         replayed: built.replayed,

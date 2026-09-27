@@ -540,6 +540,19 @@ export function refusalCopy(
         detail: serverMessage || "Ask whoever sent it for a fresh one.",
         retry: false,
       };
+    case "session_fault":
+      return {
+        title: "This session can't be loaded",
+        detail:
+          serverMessage ||
+          "Something is wrong with its saved state. Reloading will not help — tell the organiser.",
+        // The one refusal that must not retry. A faulted session refuses every
+        // connection, so a phone that keeps trying is a phone that never stops,
+        // and the reconnect loop is half of what made this fault dangerous in
+        // the first place: it is how one unreadable session turned into a
+        // service that restarted every ten seconds.
+        retry: false,
+      };
     case "malformed":
       return {
         title: "Something went wrong",

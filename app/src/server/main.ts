@@ -766,6 +766,15 @@ function handleHttp(req: IncomingMessage, res: ServerResponse): void {
       ok: true,
       sessionsLive: registry.liveCount(),
       socketsOpen: registry.socketCount(),
+      // Sessions whose clock stopped because a timer callback threw. Not part
+      // of `ok` for the same reason `degraded` is not: the room is still
+      // playable by hand, and pulling the task would end every other session
+      // to fix one. It is here to be seen, not to fail a health check.
+      sessionsStalled: registry.stalledCount(),
+      // Non-zero means something got past every named guard. See "The last
+      // line" below: the process deliberately stayed up, and this is the only
+      // place that says so without reading the log.
+      uncaught: uncaughtCount(),
       version: VERSION,
       store: persist.kind,
       persist: {
@@ -1250,224 +1259,264 @@ wss.on("connection", (socket: WebSocket, req: IncomingMessage) => {
     client.pingSentAt = null;
   });
 
-  socket.on("message", (data) => {
-    const msg = parseClientMessage(String(data));
-    if (!msg) return;
-    const now = Date.now();
-
-    if (msg.t === "hello") {
-      if (joined) return;
-      // The flood ceiling, on every attempt, so a hello costs something even
-      // before its code is read.
-      if (rateLimited(`hello:${ip}`, HELLO_FLOOD_LIMIT, HELLO_WINDOW_MS)) {
-        return refuseBare(socket, "rate_limited", "Too many attempts. Wait a minute.");
+  /**
+   * Everything a socket frame can reach, with the throw contained.
+   *
+   * A `ws` listener that throws is fatal: the emitter calls it synchronously
+   * and does not catch, and `main.ts` installs no `uncaughtException` handler,
+   * so the process exits 1. Under ECS that is a restart, which recovers the
+   * same rows, and the phone that sent the frame is still reconnecting with a
+   * ten-second cap — so the poisoned session gets another go at the process
+   * every ten seconds, forever.
+   *
+   * The catch lives here rather than around each `case` because the sid is in
+   * hand here and the decision is the same whatever the frame was: this
+   * session's state cannot be read, so quarantine it and close the socket.
+   * The socket is closed with a reason rather than left open, because a client
+   * that stays connected to a session that refuses to render is a phone
+   * showing a spinner with nothing behind it.
+   */
+  const guarded = (what: string, body: () => void): void => {
+    try {
+      body();
+    } catch (err) {
+      const runtime = joined?.runtime;
+      if (runtime) runtime.recordFault(what, err);
+      else console.error(`  fault: ${what} threw before a session was joined — ${String(err)}`);
+      try {
+        socket.close(1011, "session_fault");
+      } catch {
+        /* already gone */
       }
-      // The failure ceiling, checked without being recorded: this attempt has
-      // not failed yet, and counting it here would charge a valid join for the
-      // sins of the ones before it.
-      if (count(`helloFail:${ip}`, HELLO_WINDOW_MS) >= HELLO_FAIL_LIMIT) {
-        return refuseBare(socket, "rate_limited", "Too many attempts. Wait a minute.");
-      }
-      joined = handleHello(socket, msg, now);
-      // `handleHello` returns null when it has already refused — a bad code, a
-      // bad token, a taken nickname. That is the signal an attacker produces
-      // and a room does not.
-      if (!joined) note(`helloFail:${ip}`, HELLO_WINDOW_MS);
-      if (joined) {
-        clearTimeout(helloTimer);
-        const { runtime, client } = joined;
-        runtime.clients.add(client);
-        runtime.sendState(client, now);
-        // The new client's own state already carries the roster; sending it
-        // again would give a host two identical frames at connect.
-        runtime.broadcastRoster(now, client);
-        // First measurement straight away: a phone that rejoins mid-question
-        // would otherwise answer with no estimate and no correction at all.
-        probe(client, now);
-      }
-      return;
     }
+  };
 
-    if (!joined) return;
-    const { runtime, client } = joined;
-    client.lastSeen = now;
+  socket.on("message", (data) =>
+    guarded("a socket frame", () => {
+      const msg = parseClientMessage(String(data));
+      if (!msg) return;
+      const now = Date.now();
 
-    switch (msg.t) {
-      case "ping":
-        runtime.send(client, { t: "pong", t0: msg.t0, t1: now });
-        return;
-      case "resync":
-        runtime.sendState(client, now);
-        return;
-      case "trivia.answer": {
-        if (client.role !== "participant") {
-          runtime.send(client, {
-            t: "refusedCmd",
-            cid: msg.cid,
-            code: "forbidden",
-            message: "Only a participant can answer.",
-          });
-          return;
+      if (msg.t === "hello") {
+        if (joined) return;
+        // The flood ceiling, on every attempt, so a hello costs something even
+        // before its code is read.
+        if (rateLimited(`hello:${ip}`, HELLO_FLOOD_LIMIT, HELLO_WINDOW_MS)) {
+          return refuseBare(socket, "rate_limited", "Too many attempts. Wait a minute.");
         }
-        // `now` is the timestamp taken at the top of this handler, before any
-        // work: the response time is measured from when the frame arrived,
-        // not from when the server got round to it.
-        const out = runtime.answer(client, msg.index, msg.choice, now);
-        if (out.rejection) {
-          runtime.send(client, {
-            t: "refusedCmd",
-            cid: msg.cid,
-            code: out.rejection.code,
-            message: out.rejection.message,
-          });
-        } else {
-          runtime.send(client, { t: "ack", cid: msg.cid, applied: out.applied });
+        // The failure ceiling, checked without being recorded: this attempt has
+        // not failed yet, and counting it here would charge a valid join for the
+        // sins of the ones before it.
+        if (count(`helloFail:${ip}`, HELLO_WINDOW_MS) >= HELLO_FAIL_LIMIT) {
+          return refuseBare(socket, "rate_limited", "Too many attempts. Wait a minute.");
+        }
+        joined = handleHello(socket, msg, now);
+        // `handleHello` returns null when it has already refused — a bad code, a
+        // bad token, a taken nickname. That is the signal an attacker produces
+        // and a room does not.
+        if (!joined) note(`helloFail:${ip}`, HELLO_WINDOW_MS);
+        if (joined) {
+          clearTimeout(helloTimer);
+          const { runtime, client } = joined;
+          runtime.clients.add(client);
+          runtime.sendState(client, now);
+          // The new client's own state already carries the roster; sending it
+          // again would give a host two identical frames at connect.
+          runtime.broadcastRoster(now, client);
+          // First measurement straight away: a phone that rejoins mid-question
+          // would otherwise answer with no estimate and no correction at all.
+          probe(client, now);
         }
         return;
       }
-      case "arcade.answer":
-      case "arcade.tap":
-      case "arcade.step":
-      case "arcade.shape":
-      case "arcade.letter":
-      case "arcade.docs":
-      case "arcade.beat":
-      case "arcade.wager":
-      case "arcade.back": {
-        if (client.role !== "participant") {
-          runtime.send(client, {
-            t: "refusedCmd",
-            cid: msg.cid,
-            code: "forbidden",
-            message: "Only a participant plays the arcade.",
-          });
+
+      if (!joined) return;
+      const { runtime, client } = joined;
+      client.lastSeen = now;
+
+      switch (msg.t) {
+        case "ping":
+          runtime.send(client, { t: "pong", t0: msg.t0, t1: now });
+          return;
+        case "resync":
+          runtime.sendState(client, now);
+          return;
+        case "trivia.answer": {
+          if (client.role !== "participant") {
+            runtime.send(client, {
+              t: "refusedCmd",
+              cid: msg.cid,
+              code: "forbidden",
+              message: "Only a participant can answer.",
+            });
+            return;
+          }
+          // `now` is the timestamp taken at the top of this handler, before any
+          // work: the response time is measured from when the frame arrived,
+          // not from when the server got round to it.
+          const out = runtime.answer(client, msg.index, msg.choice, now);
+          if (out.rejection) {
+            runtime.send(client, {
+              t: "refusedCmd",
+              cid: msg.cid,
+              code: out.rejection.code,
+              message: out.rejection.message,
+            });
+          } else {
+            runtime.send(client, { t: "ack", cid: msg.cid, applied: out.applied });
+          }
           return;
         }
-        // `now` is the timestamp taken at the top of this handler, before any
-        // work. For a tap that is the whole game: it is measured from when
-        // the frame arrived, not from when the server got round to it.
-        const out =
-          msg.t === "arcade.tap"
-            ? runtime.tap(client, msg.round, now)
-            : msg.t === "arcade.answer"
-              ? runtime.submitAnswer(client, msg.item, msg.answer, now)
-              : msg.t === "arcade.step"
-                ? runtime.step(client, msg.round, msg.step, msg.choice, now)
-                : msg.t === "arcade.shape"
-                  ? runtime.unseal(
-                      client,
-                      msg.round,
-                      { type: "pickShape", shape: msg.shape },
-                      now,
-                    )
-                  : msg.t === "arcade.letter"
+        case "arcade.answer":
+        case "arcade.tap":
+        case "arcade.step":
+        case "arcade.shape":
+        case "arcade.letter":
+        case "arcade.docs":
+        case "arcade.beat":
+        case "arcade.wager":
+        case "arcade.back": {
+          if (client.role !== "participant") {
+            runtime.send(client, {
+              t: "refusedCmd",
+              cid: msg.cid,
+              code: "forbidden",
+              message: "Only a participant plays the arcade.",
+            });
+            return;
+          }
+          // `now` is the timestamp taken at the top of this handler, before any
+          // work. For a tap that is the whole game: it is measured from when
+          // the frame arrived, not from when the server got round to it.
+          const out =
+            msg.t === "arcade.tap"
+              ? runtime.tap(client, msg.round, now)
+              : msg.t === "arcade.answer"
+                ? runtime.submitAnswer(client, msg.item, msg.answer, now)
+                : msg.t === "arcade.step"
+                  ? runtime.step(client, msg.round, msg.step, msg.choice, now)
+                  : msg.t === "arcade.shape"
                     ? runtime.unseal(
                         client,
                         msg.round,
-                        { type: "tapLetter", letter: msg.letter },
+                        { type: "pickShape", shape: msg.shape },
                         now,
                       )
-                    : msg.t === "arcade.docs"
-                      ? runtime.unseal(client, msg.round, { type: "readDocs" }, now)
-                      : msg.t === "arcade.beat"
-                        ? runtime.beat(client, msg.round, now)
-                        : msg.t === "arcade.wager"
-                          ? runtime.wager(
-                              client,
-                              msg.round,
-                              msg.pick,
-                              msg.amount,
-                              now,
-                            )
-                          : runtime.back(client, msg.pid, now);
-        if (out.rejection) {
-          runtime.send(client, {
-            t: "refusedCmd",
-            cid: msg.cid,
-            code: out.rejection.code,
-            message: out.rejection.message,
-          });
-        } else {
-          runtime.send(client, { t: "ack", cid: msg.cid, applied: out.applied });
-        }
-        return;
-      }
-      case "host.cmd": {
-        if (client.role !== "host") {
-          runtime.send(client, {
-            t: "refusedCmd",
-            cid: msg.cid,
-            code: "forbidden",
-            message: "Only the host can do that.",
-          });
-          return;
-        }
-        const event = msg.cmd ? commandToEvent(msg.cmd, runtime) : null;
-        if (!event) {
-          runtime.send(client, {
-            t: "refusedCmd",
-            cid: msg.cid,
-            code: "malformed",
-            message: "Unrecognised command.",
-          });
-          return;
-        }
-        const out = runtime.apply(event, now);
-        // A question has just gone up. Take a fresh round trip off every
-        // phone while nobody is tapping yet; see probeParticipants.
-        if (
-          out.applied &&
-          (msg.cmd?.name === "trivia.open" || msg.cmd?.name === "arcade.begin")
-        ) {
-          probeParticipants(runtime, now);
-        }
-        // Kicking or releasing has to reach the device, not just the state:
-        // a kicked participant whose socket stays open keeps watching, and a
-        // released name is meant to free the *old* phone.
-        if (
-          out.applied &&
-          (cmd_pid(msg.cmd) !== null)
-        ) {
-          const pid = cmd_pid(msg.cmd)!;
-          for (const c of [...runtime.clients]) {
-            if (c.pid !== pid) continue;
-            runtime.clients.delete(c);
-            runtime.refuse(
-              c.socket,
-              msg.cmd?.name === "participant.kick" ? "kicked" : "not_joinable",
-              msg.cmd?.name === "participant.kick"
-                ? "The host removed you. Rejoin with a different nickname."
-                : "Your nickname was released. Join again to come back.",
-            );
+                    : msg.t === "arcade.letter"
+                      ? runtime.unseal(
+                          client,
+                          msg.round,
+                          { type: "tapLetter", letter: msg.letter },
+                          now,
+                        )
+                      : msg.t === "arcade.docs"
+                        ? runtime.unseal(client, msg.round, { type: "readDocs" }, now)
+                        : msg.t === "arcade.beat"
+                          ? runtime.beat(client, msg.round, now)
+                          : msg.t === "arcade.wager"
+                            ? runtime.wager(
+                                client,
+                                msg.round,
+                                msg.pick,
+                                msg.amount,
+                                now,
+                              )
+                            : runtime.back(client, msg.pid, now);
+          if (out.rejection) {
+            runtime.send(client, {
+              t: "refusedCmd",
+              cid: msg.cid,
+              code: out.rejection.code,
+              message: out.rejection.message,
+            });
+          } else {
+            runtime.send(client, { t: "ack", cid: msg.cid, applied: out.applied });
           }
-          runtime.broadcastRoster(now);
+          return;
         }
-        if (out.rejection) {
-          runtime.send(client, {
-            t: "refusedCmd",
-            cid: msg.cid,
-            code: out.rejection.code,
-            message: out.rejection.message,
-          });
-        } else {
-          runtime.send(client, { t: "ack", cid: msg.cid, applied: out.applied });
+        case "host.cmd": {
+          if (client.role !== "host") {
+            runtime.send(client, {
+              t: "refusedCmd",
+              cid: msg.cid,
+              code: "forbidden",
+              message: "Only the host can do that.",
+            });
+            return;
+          }
+          const event = msg.cmd ? commandToEvent(msg.cmd, runtime) : null;
+          if (!event) {
+            runtime.send(client, {
+              t: "refusedCmd",
+              cid: msg.cid,
+              code: "malformed",
+              message: "Unrecognised command.",
+            });
+            return;
+          }
+          const out = runtime.apply(event, now);
+          // A question has just gone up. Take a fresh round trip off every
+          // phone while nobody is tapping yet; see probeParticipants.
+          if (
+            out.applied &&
+            (msg.cmd?.name === "trivia.open" || msg.cmd?.name === "arcade.begin")
+          ) {
+            probeParticipants(runtime, now);
+          }
+          // Kicking or releasing has to reach the device, not just the state:
+          // a kicked participant whose socket stays open keeps watching, and a
+          // released name is meant to free the *old* phone.
+          if (
+            out.applied &&
+            (cmd_pid(msg.cmd) !== null)
+          ) {
+            const pid = cmd_pid(msg.cmd)!;
+            for (const c of [...runtime.clients]) {
+              if (c.pid !== pid) continue;
+              runtime.clients.delete(c);
+              runtime.refuse(
+                c.socket,
+                msg.cmd?.name === "participant.kick" ? "kicked" : "not_joinable",
+                msg.cmd?.name === "participant.kick"
+                  ? "The host removed you. Rejoin with a different nickname."
+                  : "Your nickname was released. Join again to come back.",
+              );
+            }
+            runtime.broadcastRoster(now);
+          }
+          if (out.rejection) {
+            runtime.send(client, {
+              t: "refusedCmd",
+              cid: msg.cid,
+              code: out.rejection.code,
+              message: out.rejection.message,
+            });
+          } else {
+            runtime.send(client, { t: "ack", cid: msg.cid, applied: out.applied });
+          }
+          return;
         }
-        return;
       }
-    }
-  });
+    }),
+  );
 
-  socket.on("close", () => {
-    clearTimeout(helloTimer);
-    if (!joined) return;
-    const { runtime, client } = joined;
-    runtime.clients.delete(client);
-    if (client.pid) {
-      // Still a participant, just not connected. Their score does not move.
-      runtime.apply({ type: "disconnect", pid: client.pid }, Date.now());
-    }
-    runtime.broadcastRoster(Date.now());
-  });
+  socket.on("close", () =>
+    // Guarded for the same reason, and it matters more than it looks: the
+    // close path applies `disconnect`, so a session whose state throws took
+    // the process down when a phone *left* as readily as when it arrived —
+    // including the phone the previous throw had just closed.
+    guarded("a socket closing", () => {
+      clearTimeout(helloTimer);
+      if (!joined) return;
+      const { runtime, client } = joined;
+      runtime.clients.delete(client);
+      if (client.pid) {
+        // Still a participant, just not connected. Their score does not move.
+        runtime.apply({ type: "disconnect", pid: client.pid }, Date.now());
+      }
+      runtime.broadcastRoster(Date.now());
+    }),
+  );
 
   socket.on("error", () => socket.close());
 });
@@ -1487,6 +1536,28 @@ function handleHello(
   msg: Extract<ReturnType<typeof parseClientMessage>, { t: "hello" }>,
   now: number,
 ): Pending | null {
+  /**
+   * A quarantined session takes no new connections, whoever is asking.
+   *
+   * Without this the guard around the socket listeners turns a crash loop into
+   * a busy loop: the state still throws, every reconnect still hits it, and a
+   * room of thirty phones retrying every ten seconds spends the task's CPU on
+   * catching the same exception. Refusing is also the honest answer — the
+   * server genuinely cannot render this session — and it gives the phone a
+   * reason to show instead of a spinner over nothing.
+   *
+   * Checked after the token comparison for the host and the screen, so a
+   * quarantined session cannot be used as an oracle for guessing tokens: a
+   * wrong token gets `bad_token` whether or not the session is faulted.
+   */
+  const quarantined = (): Pending | null =>
+    refuseBare(
+      socket,
+      "session_fault",
+      "This session cannot be loaded. Its saved state is unreadable, and the " +
+        "organiser will need to look at it.",
+    );
+
   if (msg.role === "host" || msg.role === "screen") {
     const token = msg.role === "host" ? msg.hostToken : msg.screenToken;
     const runtime = registry
@@ -1498,6 +1569,7 @@ function handleHello(
         ),
       );
     if (!runtime) return refuseBare(socket, "bad_token", "That link is not valid.");
+    if (runtime.faulted) return quarantined();
     const client: Client = { socket, role: msg.role, lastSeen: now, seq: 0, rtt: [], pingSentAt: null };
     runtime.send(client, {
       t: "welcome",
@@ -1511,6 +1583,7 @@ function handleHello(
 
   const runtime = registry.byJoinCode(msg.joinCode);
   if (!runtime) return refuseBare(socket, "no_such_code", "No session with that code.");
+  if (runtime.faulted) return quarantined();
 
   // A rejoin reuses the original pid, so the player keeps their number and score.
   const pid: ParticipantId =
@@ -1840,10 +1913,25 @@ function commandToEvent(cmd: HostCommand, runtime: SessionRuntime): Event | null
   }
 }
 
-/** Repaint the roster so amber appears without anyone having to do anything. */
+/**
+ * Repaint the roster so amber appears without anyone having to do anything.
+ *
+ * Per-session try/catch, because this is a bare `setInterval` and a throw out
+ * of it is as fatal as a throw out of a socket listener. It is also the one
+ * path that reaches a session with nobody doing anything at all: a poisoned
+ * row with a host still connected used to be swept every few seconds, which
+ * made it a timer that fires forever rather than once.
+ */
 setInterval(() => {
   const now = Date.now();
-  for (const r of registry.all()) if (r.clients.size > 0) r.sweep(now);
+  for (const r of registry.all()) {
+    if (r.clients.size === 0 || r.faulted) continue;
+    try {
+      r.sweep(now);
+    } catch (err) {
+      r.recordFault("the roster sweep", err);
+    }
+  }
 }, AWAY_AFTER_MS / 2).unref();
 
 /**
@@ -1855,6 +1943,56 @@ setInterval(() => {
   const now = Date.now();
   for (const r of registry.all()) for (const c of r.clients) probe(c, now);
 }, WS_PING_EVERY_MS).unref();
+
+/* ------------------------------------------------------------------ */
+/* The last line                                                        */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Stay up on an exception nobody caught, and say so loudly.
+ *
+ * The usual advice is the opposite — log and exit, because a process that has
+ * thrown from an unknown place may be in an unknown state — and for most
+ * services it is right. It is wrong here, for a reason specific to what this
+ * process is.
+ *
+ * This is one stateful task with `desired_count = 1`. Exiting does not shed a
+ * request; it drops every socket in the building, and ECS then starts a
+ * replacement that recovers the same rows from the same table. If the thing
+ * that threw is reachable from a recovered row — which is the case that put
+ * this here — the replacement throws in the same place, and the room watches
+ * the service restart every ten seconds until someone empties the table by
+ * hand. A September 2026 deploy did a version of exactly that.
+ *
+ * So the trade is: an unknown state in one process against a certain outage
+ * for everybody. The named guards above are what make this the *last* line
+ * rather than the only one — every path known to reach a session's state
+ * catches with the sid in hand, and this catches what is left, which by
+ * construction is something nobody predicted.
+ *
+ * Not `ok: false` on `/healthz`. Failing the health check is how the ALB is
+ * told to replace the task, which is the restart this exists to avoid.
+ */
+let uncaught = 0;
+process.on("uncaughtException", (err) => {
+  uncaught += 1;
+  console.error(
+    `  UNCAUGHT (${uncaught}): the process stayed up on purpose; see the guards ` +
+      `in main.ts. This is a bug and the session it came from is probably ` +
+      `unusable — ${String(err)}`,
+  );
+  if (err instanceof Error && err.stack) console.error(err.stack);
+});
+
+process.on("unhandledRejection", (reason) => {
+  uncaught += 1;
+  console.error(`  UNCAUGHT REJECTION (${uncaught}): ${String(reason)}`);
+});
+
+/** For `/healthz`: non-zero means something got past every named guard. */
+export function uncaughtCount(): number {
+  return uncaught;
+}
 
 /* ------------------------------------------------------------------ */
 /* Boot and shutdown                                                    */

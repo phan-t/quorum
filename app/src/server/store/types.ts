@@ -10,7 +10,43 @@
  * recorded next to the item they affect.
  */
 
-import type { Event, SessionState } from "../../engine/types.ts";
+import type { Event, SessionPhase, SessionState } from "../../engine/types.ts";
+
+/**
+ * The phases `loadRecoverable` brings back, for both stores.
+ *
+ * One constant because there were two lists, in two files, with a comment in
+ * each claiming they mirrored the other and nothing making it so. The DynamoDB
+ * scan named all four phases; the memory store took any phase that was defined
+ * at all. They selected the same rows only because `SessionPhase` happens to be
+ * exactly these four — so the tests ran against a filter production does not
+ * have, and would have started lying the day a fifth phase was added, in the
+ * direction that hides the difference rather than shows it.
+ *
+ * The `satisfies` is the other half: add a phase to `SessionPhase` and this
+ * list still compiles, because a subset is a legitimate answer here. Add one
+ * and *mean* for it to be recoverable, and the two stores now change together
+ * or not at all.
+ *
+ * Why each is in the list:
+ *
+ * - **draft**, because a session exists before it is opened, and that gap is
+ *   exactly when a host sets one up in advance. Leaving it out meant a task
+ *   replacement rebuilt the registry without the session and the console got
+ *   `bad_token` for a link that was correct. That bit a real setup the day
+ *   before an event.
+ * - **closed**, because `reopen` exists to undo an accidental close, and a
+ *   close that outlived the process could not be undone at all. Also not
+ *   hypothetical: the deploy that followed one is what put a session out of
+ *   reach.
+ * - **lobby** and **running**, which are the live ones and need no argument.
+ */
+export const RECOVERABLE_PHASES = [
+  "draft",
+  "lobby",
+  "running",
+  "closed",
+] as const satisfies readonly SessionPhase[];
 
 /**
  * The shape version stamped on every `SNAPSHOT` row this code writes.

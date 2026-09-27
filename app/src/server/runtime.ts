@@ -347,6 +347,20 @@ export class SessionRuntime {
    * sent a frame addressed to the socket it arrived on before it existed.
    */
   #flushTimer: ReturnType<typeof setTimeout> | null = null;
+  /**
+   * The last time this session's state threw, or null if it never has.
+   *
+   * Kept rather than only logged because a log line is something you find once
+   * you already suspect, and this is a fault whose whole signature is that
+   * nothing looks wrong: the session simply stops advancing. `/healthz` counts
+   * these across the registry so the number is on a surface somebody watches.
+   *
+   * Not only timers, though a timer is where it was first noticed. A state
+   * that throws when a clock reads it throws when a socket reads it too, and
+   * the socket path is the one that can be re-entered forever by a phone that
+   * reconnects — see {@link faulted}.
+   */
+  #fault: { label: string; at: number; why: string } | null = null;
   #dirtyRoom = false;
   #dirtyHost = false;
   #dirtyScreen = false;
@@ -632,7 +646,7 @@ export class SessionRuntime {
     this.clearQuestionTimer();
     this.#closeTimerFor = want;
     const timer = setTimeout(
-      () => {
+      this.#onTimer("question", () => {
         this.#closeTimer = null;
         this.#closeTimerFor = null;
         const at = triviaStateOf(this.state);
@@ -645,13 +659,127 @@ export class SessionRuntime {
           return; // the host got there first, or moved on
         }
         this.apply({ type: "closeQuestion" }, Date.now());
-      },
+      }),
       Math.max(0, want.closesAt - now),
     );
     // Never the reason the process stays up: SIGTERM has thirty seconds and
     // an unfired question timer must not spend any of them.
     timer.unref?.();
     this.#closeTimer = timer;
+  }
+
+  /**
+   * The one place a timer callback is allowed to throw.
+   *
+   * Every `setTimeout` in this class goes through here, and the reason is that
+   * a timer is the one caller of {@link apply} with nobody above it. A socket
+   * frame throws into the connection handler; an HTTP request throws into the
+   * request handler; both lose one caller. A timer throws into Node's event
+   * loop, which has no handler, so the process exits 1 — and under ECS that is
+   * a restart, which recovers the same row, which arms the same timer.
+   *
+   * That loop is the failure this guard exists for. `recoverSessions` already
+   * refuses to let one bad row take the boot down, but its per-session catch
+   * has returned long before the timers it armed ever fire: recovery genuinely
+   * succeeded, the server is listening, and the process dies a tick later with
+   * nothing about it in the recovery log. The shims cover the shape recovery
+   * reads. Nothing covered the shape a callback reads a moment afterwards.
+   *
+   * ## Why catching here rather than an `uncaughtException` handler
+   *
+   * A process-wide handler would also stop the exit, and it would be the wrong
+   * fix: it catches the throw where the sid is no longer in scope, so the
+   * operator gets a stack trace and no way to tell which of thirty sessions
+   * stopped. Here the sid and the timer's name are both in hand. A handler in
+   * `main.ts` is still worth having as a second line, and it is not this.
+   *
+   * ## What a fault costs
+   *
+   * This session's clock stops. The callback has already cleared its own timer
+   * field by the time anything downstream can throw, so nothing re-arms and
+   * nothing retries: the round stops advancing and the host has to move it on
+   * by hand. Every other session keeps its clocks. That is the same trade
+   * `recoverSessions` makes one row at a time, and it is the right one — the
+   * alternative on offer is not "this session works", it is "no service".
+   *
+   * Other timers on the same session are deliberately left armed. A state
+   * poisoned enough to break one will probably break the next, which costs a
+   * second log line and nothing else; disarming them wholesale would turn one
+   * bad callback into a session that has certainly stopped rather than one
+   * that may only have stumbled.
+   */
+  #onTimer(label: string, body: () => void): () => void {
+    return () => {
+      try {
+        body();
+      } catch (err) {
+        this.recordFault(`${label} timer`, err);
+      }
+    };
+  }
+
+  /**
+   * Record that something reading this session's state threw, and say so.
+   *
+   * Public because the timer callbacks are not the only caller that has to
+   * survive it. The socket listeners in `main.ts` call this too: a `ws`
+   * listener that throws is **fatal** — the emitter calls it synchronously and
+   * does not catch, so with no `uncaughtException` handler the process exits 1.
+   * That was measured, not assumed, and it is why the first version of this
+   * guard did not close the crash loop it was written for. It stopped the row
+   * killing the process on the boot tick; the same row then killed it on the
+   * first phone that reconnected, and phones reconnect forever with a ten
+   * second cap. Same loop, longer period.
+   *
+   * `err` is stringified defensively. `String(err)` can itself throw — a
+   * null-prototype object has no `toString` — and a report that throws while
+   * reporting is the original bug wearing a different hat.
+   */
+  recordFault(label: string, err: unknown): void {
+    let why: string;
+    try {
+      why = String(err);
+    } catch {
+      why = "(an error that could not be converted to a string)";
+    }
+    let sid = "(a session with no readable sid)";
+    try {
+      const s: unknown = this.state?.sid;
+      if (typeof s === "string" && s !== "") sid = s;
+    } catch {
+      /* leave the placeholder */
+    }
+    const first = this.#fault === null;
+    this.#fault = { label, at: Date.now(), why };
+    // Only the first one in full. A faulted session is re-entered by every
+    // reconnect and every sweep, and a line per attempt buries the line that
+    // said what happened under a thousand saying it again.
+    if (first) {
+      console.error(
+        `  fault: ${sid}: ${label} threw, so this session is quarantined and ` +
+          `will refuse new connections; every other session is unaffected — ${why}`,
+      );
+    }
+  }
+
+  /** The last fault on this session, for `/healthz` and `/status`. */
+  get fault(): { label: string; at: number; why: string } | null {
+    return this.#fault;
+  }
+
+  /**
+   * Whether this session refuses new connections.
+   *
+   * A session whose state throws when it is read cannot be served: every
+   * `hello` builds a projection from that state, so every reconnect is another
+   * attempt on the process. Quarantining is what makes the fault terminal for
+   * the session instead of for the task — the row stays in the table, the
+   * export path still reads it directly, and a host who needs it can take it
+   * up with the snapshot rather than by reloading a page that kills the
+   * service each time they try.
+   */
+  get faulted(): boolean {
+    return this.#fault !== null;
   }
 
   clearQuestionTimer(): void {
@@ -726,13 +854,13 @@ export class SessionRuntime {
     this.#clearSlideTimer();
     this.#slideTimerFor = want;
     const timer = setTimeout(
-      () => {
+      this.#onTimer("send-off", () => {
         this.#slideTimer = null;
         this.#slideTimerFor = null;
         const at = this.state.sendoff;
         if (!at || at.phase !== "run" || !at.auto || at.at !== want.at) return;
         this.apply({ type: "sendoffNext" }, Date.now());
-      },
+      }),
       Math.max(0, want.fireAt - now),
     );
     timer.unref?.();
@@ -812,7 +940,7 @@ export class SessionRuntime {
     this.#clearBeatTimer();
     this.#beatTimerFor = want;
     const timer = setTimeout(
-      () => {
+      this.#onTimer("trivia auto", () => {
         this.#beatTimer = null;
         this.#beatTimerFor = null;
         const at = triviaStateOf(this.state);
@@ -830,7 +958,7 @@ export class SessionRuntime {
         const stepped = this.apply({ type: "nextQuestion" }, Date.now());
         if (!stepped.applied) return;
         this.apply({ type: "openQuestion", suddenDeath: false }, Date.now());
-      },
+      }),
       Math.max(0, want.fireAt - now),
     );
     // Never the reason the process stays up, for the reason the close timer
@@ -877,11 +1005,11 @@ export class SessionRuntime {
     this.#clearLightTimer();
     this.#lightTimerFor = want;
     const timer = setTimeout(
-      () => {
+      this.#onTimer("arcade light", () => {
         this.#lightTimer = null;
         this.#lightTimerFor = null;
         this.flipLight(Date.now(), want);
-      },
+      }),
       Math.max(0, want.at - now),
     );
     timer.unref?.();
@@ -993,7 +1121,7 @@ export class SessionRuntime {
     this.#itemTimerFor = want;
     const last = play.at + 1 >= play.items.length;
     const timer = setTimeout(
-      () => {
+      this.#onTimer("arcade item", () => {
         this.#itemTimer = null;
         this.#itemTimerFor = null;
         const at = arcadeStateOf(this.state);
@@ -1011,7 +1139,7 @@ export class SessionRuntime {
         // The last item does not advance to a seventh; it ends the round, and
         // the host reveals when they are ready to read the notes out.
         this.apply(last ? { type: "endRound" } : { type: "nextItem" }, now2);
-      },
+      }),
       Math.max(0, want.at - now),
     );
     timer.unref?.();
@@ -1073,7 +1201,7 @@ export class SessionRuntime {
     const lastStep = play.step + 1 >= play.board.length;
     const lastWave = play.wave >= 3;
     const timer = setTimeout(
-      () => {
+      this.#onTimer("glass bridge step", () => {
         this.#stepTimer = null;
         this.#stepTimerFor = null;
         const at = arcadeStateOf(this.state);
@@ -1096,7 +1224,7 @@ export class SessionRuntime {
               : { type: "endRound" },
           Date.now(),
         );
-      },
+      }),
       Math.max(0, want.at - now),
     );
     timer.unref?.();
@@ -1158,7 +1286,7 @@ export class SessionRuntime {
     this.#pullTimerFor = want;
     const last = play.pull + 1 >= play.pulls;
     const timer = setTimeout(
-      () => {
+      this.#onTimer("tug pull", () => {
         this.#pullTimer = null;
         this.#pullTimerFor = null;
         const at = arcadeStateOf(this.state);
@@ -1178,7 +1306,7 @@ export class SessionRuntime {
             : { type: "nextPull", seed: pickSeed(this.rng) },
           Date.now(),
         );
-      },
+      }),
       Math.max(0, want.at - now),
     );
     timer.unref?.();
@@ -1245,7 +1373,7 @@ export class SessionRuntime {
     this.#promptTimerFor = want;
     const last = play.at + 1 >= play.board.length;
     const timer = setTimeout(
-      () => {
+      this.#onTimer("gganbu prompt", () => {
         this.#promptTimer = null;
         this.#promptTimerFor = null;
         const at = arcadeStateOf(this.state);
@@ -1260,7 +1388,7 @@ export class SessionRuntime {
           return; // the host got there first, or the round moved on
         }
         this.apply(last ? { type: "endRound" } : { type: "nextPrompt" }, Date.now());
-      },
+      }),
       Math.max(0, want.at - now),
     );
     timer.unref?.();
@@ -1336,7 +1464,7 @@ export class SessionRuntime {
     this.#clearFloorTimer();
     this.#floorTimerFor = want;
     const timer = setTimeout(
-      () => {
+      this.#onTimer("arcade floor", () => {
         this.#floorTimer = null;
         this.#floorTimerFor = null;
         const at = arcadeStateOf(this.state);
@@ -1349,7 +1477,7 @@ export class SessionRuntime {
           return;
         }
         this.apply({ type: "endRound" }, Date.now());
-      },
+      }),
       Math.max(0, want.at - now),
     );
     timer.unref?.();
@@ -1946,10 +2074,13 @@ export class SessionRuntime {
     // tapping still gets a frame on every tick. Re-arming would let a busy
     // rope starve itself indefinitely.
     if (this.#flushTimer !== null) return;
-    const timer = setTimeout(() => {
-      this.#flushTimer = null;
-      this.flushFrames(Date.now());
-    }, BEAT_FLUSH_MS);
+    const timer = setTimeout(
+      this.#onTimer("frame flush", () => {
+        this.#flushTimer = null;
+        this.flushFrames(Date.now());
+      }),
+      BEAT_FLUSH_MS,
+    );
     timer.unref?.();
     this.#flushTimer = timer;
   }
@@ -2116,14 +2247,36 @@ export class SessionRegistry {
     }
     this.bySid.set(state.sid, runtime);
     this.byCode.set(state.joinCode, state.sid);
-    // A restart mid-question: re-arm from the recovered state before anyone
-    // reconnects, so a deadline that passed during the gap closes on the first
-    // tick rather than leaving a question open forever with nobody to close it.
-    runtime.armQuestionTimer();
-    // And the arcade's, for the same reason: a round that was running when
-    // the process went away comes back with its light turning and its Floor
-    // still due to close.
-    runtime.armArcadeTimers();
+    try {
+      // A restart mid-question: re-arm from the recovered state before anyone
+      // reconnects, so a deadline that passed during the gap closes on the
+      // first tick rather than leaving a question open forever with nobody to
+      // close it.
+      runtime.armQuestionTimer();
+      // And the arcade's, for the same reason: a round that was running when
+      // the process went away comes back with its light turning and its Floor
+      // still due to close.
+      runtime.armArcadeTimers();
+    } catch (err) {
+      // Arming reads the state, so it can throw on a poisoned row — and some
+      // of it throws *synchronously*, before any timer is scheduled: a
+      // recruitment round whose `play.items` is missing dies inside
+      // `#armItemTimer` on `play.items.length`, right here.
+      //
+      // The two `set` calls above have already happened at that point, and
+      // this throw leaves `recoverSessions` to log the row as COULD NOT BE
+      // REBUILT and skip it. Both were true at once: the boot log said the
+      // session was not recovered, and the session was live in the registry
+      // with a join code that resolved to it. A phone could walk into a room
+      // the log said did not exist.
+      //
+      // So the registration is undone. Registering after arming instead would
+      // leave a scheduled timer pointing at a runtime nobody can reach, which
+      // is the same inconsistency facing the other way.
+      this.bySid.delete(state.sid);
+      this.byCode.delete(state.joinCode);
+      throw err;
+    }
     return runtime;
   }
 
@@ -2153,6 +2306,19 @@ export class SessionRegistry {
 
   socketCount(): number {
     return this.all().reduce((n, r) => n + r.clients.size, 0);
+  }
+
+  /**
+   * Sessions whose clock has stopped because a timer callback threw.
+   *
+   * On `/healthz` because the fault is silent by construction: the process
+   * stays up, the sockets stay open, the state is still served, and the only
+   * symptom is a round that does not advance — which looks, from outside,
+   * exactly like a host who has not pressed the button yet. A count here is
+   * what turns "somebody eventually notices" into something a check can see.
+   */
+  stalledCount(): number {
+    return this.all().filter((r) => r.faulted).length;
   }
 }
 
