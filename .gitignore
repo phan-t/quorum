@@ -25,3 +25,8 @@ config/events/
 
 # macOS
 .DS_Store
+
+# Agent worktrees. Created under the repo so they share its git dir, removed
+# when the agent finishes — but a `git add -A` while one is live would commit
+# a whole second checkout of the repo into itself.
+.claude/worktrees/
