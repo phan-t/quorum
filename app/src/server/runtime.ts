@@ -11,6 +11,7 @@ import { reduce } from "../engine/reducer.ts";
 import { DEFAULT_SPOT_CAP } from "../activities/import.ts";
 import { lockInForceAt } from "../engine/arcade.ts";
 import { slideMs } from "../engine/sendoff.ts";
+import { autoBeat, autoFiresAt } from "../engine/trivia.ts";
 import type {
   Activity,
   Audience,
@@ -18,6 +19,7 @@ import type {
   Event,
   OverUnder,
   ParticipantId,
+  QuestionPhase,
   SessionState,
   UnsealShape,
 } from "../engine/types.ts";
@@ -306,6 +308,13 @@ export class SessionRuntime {
   /** The send-off's auto-advance, and which slide it is armed for. */
   #slideTimer: ReturnType<typeof setTimeout> | null = null;
   #slideTimerFor: { at: number; fireAt: number } | null = null;
+  /** Trivia's auto-advance, and which beat of which question it is armed for. */
+  #beatTimer: ReturnType<typeof setTimeout> | null = null;
+  #beatTimerFor: {
+    index: number;
+    phase: QuestionPhase;
+    fireAt: number;
+  } | null = null;
   #closeTimerFor: { index: number; closesAt: number } | null = null;
   /** The arcade's three clocks. See {@link armArcadeTimers}. */
   #lightTimer: ReturnType<typeof setTimeout> | null = null;
@@ -568,6 +577,12 @@ export class SessionRuntime {
     // or walks out of the segment altogether cannot leave a slide clock
     // running behind them.
     this.#armSlideTimer(now);
+    // And trivia's, for the same reason again: whether the set is walking
+    // itself is a function of the state, so deriving the clock here means
+    // there is no path — Manual, a host pressing Reveal by hand, a sudden
+    // death, walking out of the segment — that can leave one armed for a beat
+    // that is no longer coming.
+    this.armBeatTimer(now);
     return rejection ? { applied: result.applied, rejection } : { applied: result.applied };
   }
 
@@ -728,6 +743,112 @@ export class SessionRuntime {
     if (this.#slideTimer !== null) clearTimeout(this.#slideTimer);
     this.#slideTimer = null;
     this.#slideTimerFor = null;
+  }
+
+  /**
+   * Trivia's beat clock: the reveal, and then the next question.
+   *
+   * The question already closes itself — {@link armQuestionTimer} — so what
+   * this adds is the two beats after it. Twenty-four questions is seventy-two
+   * presses, and sixty of them are the host pressing the only thing the
+   * console was offering.
+   *
+   * The rule about *whether* there is a beat is `autoBeat` in
+   * engine/trivia.ts and is not restated here; this file holds no game rules.
+   * What lives here is the clock and the two races every other timer in this
+   * class handles the same way:
+   *
+   * - **The host gets there first.** `apply` re-arms at the end of every
+   *   event, so a manual Reveal mid-wait clears this and re-arms for the beat
+   *   that now follows. The two cannot both land, and the host pressing early
+   *   is exactly the send-off's answer to the same question: the press does
+   *   the thing, the state moves, and auto counts from the new state.
+   * - **A stale timer.** It is keyed on the question index *and* its phase
+   *   *and* the deadline, and re-checks all three before doing anything, so a
+   *   callback in flight when the host moved on does nothing. Node's loop is
+   *   single-threaded: by the time it runs, the state is settled.
+   * - **Both anyway.** `revealQuestion` on something already revealed is a
+   *   rejection from the reducer, not a second transition. The engine stays
+   *   the only writer of the rule.
+   *
+   * `advance` is two events in one callback, `nextQuestion` then
+   * `openQuestion`, because a set running itself has to put the next question
+   * *up* — see the note on {@link autoBeat}. They go through `apply`
+   * separately, so each is logged, persisted and broadcast as itself, and the
+   * open re-arms the question's own close timer on the way out. If the first
+   * is refused the second is not attempted.
+   *
+   * A restart re-arms from the recovered state, the way `armQuestionTimer`
+   * does: a deadline in the future is scheduled for the instant it always
+   * meant, and one in the past fires immediately. That is sharper here than
+   * it is for a close — it can open a question the moment the process comes
+   * back — and it is still right, because the question it opens gets its full
+   * `timeLimitSec` from the instant it opens rather than from the instant it
+   * was due. Nobody loses answering time; a phone still reconnecting is in
+   * the same position as a phone that reconnects mid-question at any other
+   * moment. In practice the case is narrow: Auto is off on every session that
+   * comes back through `restartSession`, and a process restart mid-set lands
+   * in this branch only if the state was in the two-to-eighteen-second window
+   * between a close and the next question.
+   */
+  // Public, as `armQuestionTimer` is and for the same two reasons: /status
+  // wants to say what is armed, and a test wants to re-arm against a deadline
+  // it has moved into the past rather than waiting three real seconds.
+  armBeatTimer(now = Date.now()): void {
+    const trivia = triviaStateOf(this.state);
+    const fireAt = trivia === null ? null : autoFiresAt(trivia);
+    if (trivia === null || fireAt === null) return this.#clearBeatTimer();
+
+    const want = { index: trivia.at, phase: trivia.phase, fireAt };
+    const armed = this.#beatTimerFor;
+    if (
+      armed !== null &&
+      armed.index === want.index &&
+      armed.phase === want.phase &&
+      armed.fireAt === want.fireAt
+    ) {
+      return; // already armed for exactly this beat
+    }
+    this.#clearBeatTimer();
+    this.#beatTimerFor = want;
+    const timer = setTimeout(
+      () => {
+        this.#beatTimer = null;
+        this.#beatTimerFor = null;
+        const at = triviaStateOf(this.state);
+        if (at === null || at.at !== want.index || at.phase !== want.phase) {
+          return; // the host got there first, or moved on
+        }
+        // Asked again rather than remembered, so a state that changed under
+        // the timer — Auto switched off, a sudden death opened — decides now.
+        const beat = autoBeat({ ...at, of: at.questions.length });
+        if (beat === null) return;
+        if (beat === "reveal") {
+          this.apply({ type: "revealQuestion" }, Date.now());
+          return;
+        }
+        const stepped = this.apply({ type: "nextQuestion" }, Date.now());
+        if (!stepped.applied) return;
+        this.apply({ type: "openQuestion", suddenDeath: false }, Date.now());
+      },
+      Math.max(0, want.fireAt - now),
+    );
+    // Never the reason the process stays up, for the reason the close timer
+    // is not: SIGTERM has thirty seconds and an unfired beat must not spend
+    // any of them.
+    timer.unref?.();
+    this.#beatTimer = timer;
+  }
+
+  #clearBeatTimer(): void {
+    if (this.#beatTimer !== null) clearTimeout(this.#beatTimer);
+    this.#beatTimer = null;
+    this.#beatTimerFor = null;
+  }
+
+  /** The beat the timer is armed for, for tests and for /status. */
+  get armedBeatAt(): number | null {
+    return this.#beatTimerFor?.fireAt ?? null;
   }
 
   armArcadeTimers(now = Date.now()): void {

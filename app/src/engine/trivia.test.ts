@@ -21,7 +21,19 @@ import type {
   TriviaState,
 } from "./types.ts";
 import { newSession, reduce, replay } from "./reducer.ts";
-import { currentQuestion, questionPoints, streakBonus } from "./trivia.ts";
+import {
+  autoBeat,
+  autoBeatMs,
+  autoFiresAt,
+  clampBeatSeconds,
+  currentQuestion,
+  DEFAULT_BEAT_SECONDS,
+  MAX_BEAT_SECONDS,
+  MIN_BEAT_SECONDS,
+  questionPoints,
+  streakBonus,
+} from "./trivia.ts";
+import type { TriviaAutoAt } from "./trivia.ts";
 import { DEFAULT_TIEBREAKERS } from "./tiebreak.ts";
 import { computeStandings } from "./scoring.ts";
 
@@ -1393,5 +1405,273 @@ describe("the tiebreak pool", () => {
     assert.equal(t.suddenDeathWinner, "p2");
     assert.equal(t.tiebreakUsed, 1);
     assert.deepEqual(t.totals, {});
+  });
+});
+
+/* ------------------------------------------------------------------ */
+/* Auto                                                                */
+/* ------------------------------------------------------------------ */
+
+/**
+ * The beat rule, as arithmetic.
+ *
+ * `autoBeat` is the whole safety argument for Auto, so it is tested as a pure
+ * function over every phase rather than only through the beats a scenario
+ * happens to walk. Every expected value here is read off the rule in the
+ * doc comment and never by calling the code twice.
+ */
+describe("autoBeat: what the set does on its own", () => {
+  const at = (
+    over: Partial<TriviaAutoAt> = {},
+  ): TriviaAutoAt => ({
+    auto: true,
+    suddenDeath: false,
+    phase: "closed",
+    at: 0,
+    of: 3,
+    ...over,
+  });
+
+  test("does nothing at all in manual, in every phase", () => {
+    for (const phase of ["idle", "open", "closed", "revealed"] as const) {
+      assert.equal(autoBeat(at({ auto: false, phase })), null, phase);
+    }
+  });
+
+  test("reveals a closed question and then opens the next", () => {
+    assert.equal(autoBeat(at({ phase: "closed" })), "reveal");
+    assert.equal(autoBeat(at({ phase: "revealed" })), "advance");
+  });
+
+  test("never opens a question from cold, so turning Auto on does nothing", () => {
+    // The hazard the whole feature turns on: a host who presses Auto at
+    // question one, or who walks back to an idle question by hand, must not
+    // have a question put in front of the room by a clock.
+    assert.equal(autoBeat(at({ phase: "idle" })), null);
+  });
+
+  test("leaves an open question to its own timer", () => {
+    assert.equal(autoBeat(at({ phase: "open" })), null);
+  });
+
+  test("never moves a sudden death, in any phase", () => {
+    for (const phase of ["idle", "open", "closed", "revealed"] as const) {
+      assert.equal(autoBeat(at({ suddenDeath: true, phase })), null, phase);
+    }
+  });
+
+  test("stops on the last reveal rather than reaching past the end", () => {
+    // Three questions, sitting on the third: there is nothing to advance to.
+    assert.equal(autoBeat(at({ phase: "revealed", at: 2, of: 3 })), null);
+    assert.equal(autoBeat(at({ phase: "revealed", at: 1, of: 3 })), "advance");
+    // It still reveals the last one — stopping is about advancing, not about
+    // leaving the room without the answer to the question they just played.
+    assert.equal(autoBeat(at({ phase: "closed", at: 2, of: 3 })), "reveal");
+  });
+});
+
+describe("autoBeatMs: one slider, two waits", () => {
+  test("the reveal beat is exactly the number on the slider", () => {
+    assert.equal(autoBeatMs("reveal", 5, 0), 5000);
+    assert.equal(autoBeatMs("reveal", 5, 500), 5000, "the note does not move it");
+    assert.equal(autoBeatMs("reveal", 12, 0), 12_000);
+  });
+
+  test("the wait after the reveal is longer, and longer again with a note", () => {
+    // base × 2 + chars × 45ms at the default beat. Hand-computed.
+    assert.equal(autoBeatMs("advance", 5, 0), 10_000);
+    assert.equal(autoBeatMs("advance", 5, 100), 10_000 + 4_500);
+    assert.ok(
+      autoBeatMs("advance", 5, 137) > autoBeatMs("reveal", 5, 137),
+      "reading a note must never be the shorter of the two",
+    );
+  });
+
+  test("the slider scales both, so faster is faster everywhere", () => {
+    const slow = autoBeatMs("advance", 10, 137);
+    const fast = autoBeatMs("advance", 3, 137);
+    assert.ok(fast < slow);
+    // 10s is exactly twice the default, so the note's share doubles too.
+    assert.equal(autoBeatMs("advance", 10, 100), 20_000 + 9_000);
+  });
+
+  test("one pathological note cannot hold the room for a minute", () => {
+    assert.equal(autoBeatMs("advance", 5, 100_000), 5000 * 6);
+  });
+
+  test("a beat that is not a number falls back rather than becoming NaN", () => {
+    // A snapshot written before Auto existed has no `autoSeconds`, and
+    // `undefined * 1000` is a timer armed for never.
+    assert.equal(
+      autoBeatMs("reveal", undefined as unknown as number, 0),
+      DEFAULT_BEAT_SECONDS * 1000,
+    );
+    assert.equal(clampBeatSeconds(Number.NaN), DEFAULT_BEAT_SECONDS);
+  });
+
+  test("the slider is clamped and rounded, both ends", () => {
+    assert.equal(clampBeatSeconds(0), MIN_BEAT_SECONDS);
+    assert.equal(clampBeatSeconds(-4), MIN_BEAT_SECONDS);
+    assert.equal(clampBeatSeconds(9999), MAX_BEAT_SECONDS);
+    assert.equal(clampBeatSeconds(6.4), 6);
+  });
+});
+
+describe("Auto, through the reducer", () => {
+  test("a set loads in manual, whatever the last one was set to", () => {
+    const t = trivia(loaded());
+    assert.equal(t.auto, false);
+    assert.equal(t.autoSeconds, DEFAULT_BEAT_SECONDS);
+    assert.equal(t.autoAt, null);
+  });
+
+  test("the close and the reveal each stamp the beat they start", () => {
+    let s = accept(loaded(), [{ type: "openQuestion", suddenDeath: false }], 1000);
+    s = accept(s, [{ type: "closeQuestion" }], 5000);
+    assert.equal(trivia(s).autoAt, 5000);
+    s = accept(s, [{ type: "revealQuestion" }], 9000);
+    assert.equal(trivia(s).autoAt, 9000, "the second beat counts from the reveal");
+    s = accept(s, [{ type: "nextQuestion" }], 12_000);
+    assert.equal(trivia(s).autoAt, null, "an idle question has no beat pending");
+  });
+
+  test("turning Auto on gives whatever is on screen its full beat", () => {
+    // The bug this prevents: a question that closed eight seconds ago
+    // revealing itself the instant the host presses Auto.
+    let s = accept(loaded(), [{ type: "openQuestion", suddenDeath: false }], 1000);
+    s = accept(s, [{ type: "closeQuestion" }], 5000);
+    s = accept(s, [{ type: "setTriviaAuto", auto: true }], 13_000);
+    assert.equal(trivia(s).autoAt, 13_000);
+    assert.equal(autoFiresAt(trivia(s)), 13_000 + DEFAULT_BEAT_SECONDS * 1000);
+  });
+
+  test("the slider does not restart the wait it is shortening", () => {
+    let s = accept(loaded(), [{ type: "openQuestion", suddenDeath: false }], 1000);
+    s = accept(s, [{ type: "closeQuestion" }], 5000);
+    s = accept(s, [{ type: "setTriviaAuto", auto: true }], 5000);
+    s = accept(s, [{ type: "setTriviaSpeed", seconds: 3 }], 7000);
+    assert.equal(trivia(s).autoAt, 5000, "still counting from the close");
+    assert.equal(autoFiresAt(trivia(s)), 8000);
+  });
+
+  test("the slider is clamped by the engine and nowhere else", () => {
+    let s = accept(loaded(), [{ type: "setTriviaSpeed", seconds: 900 }]);
+    assert.equal(trivia(s).autoSeconds, MAX_BEAT_SECONDS);
+    s = accept(s, [{ type: "setTriviaSpeed", seconds: -1 }]);
+    assert.equal(trivia(s).autoSeconds, MIN_BEAT_SECONDS);
+  });
+
+  test("a speed that is not a number is refused", () => {
+    const s = loaded();
+    assertRefused(
+      s,
+      run(s, { type: "setTriviaSpeed", seconds: Number.NaN }),
+      "invalid_round_config",
+    );
+  });
+
+  test("opening a sudden death switches Auto off, it does not merely suppress it", () => {
+    // A suppressed Auto leaves the console's button reading "Manual" — auto is
+    // on — while nothing happens, and then the host clears the tiebreak and
+    // the set starts itself again mid-announcement. Off is the honest version.
+    let s = playQuestion(loaded(), { p1: { choice: 2, ms: 100 } }, { reveal: true });
+    s = accept(s, [{ type: "setTriviaAuto", auto: true }], 30_000);
+    assert.equal(trivia(s).auto, true);
+    s = accept(s, [{ type: "openQuestion", suddenDeath: true }], 31_000);
+    assert.equal(trivia(s).auto, false);
+    // And it is still off once the tie is settled and the set comes back.
+    s = accept(s, [{ type: "closeQuestion" }], 40_000);
+    s = accept(s, [{ type: "revealQuestion" }], 41_000);
+    s = accept(s, [{ type: "nextQuestion" }], 42_000);
+    assert.equal(trivia(s).auto, false);
+    assert.equal(autoFiresAt(trivia(s)), null);
+  });
+
+  test("Auto cannot be switched on during a sudden death", () => {
+    let s = playQuestion(loaded(), { p1: { choice: 2, ms: 100 } }, { reveal: true });
+    s = accept(s, [{ type: "openQuestion", suddenDeath: true }], 31_000);
+    assertRefused(s, run(s, { type: "setTriviaAuto", auto: true }, 32_000), "wrong_question_phase");
+    // Off is always allowed: off is always the safe direction.
+    assert.equal(run(s, { type: "setTriviaAuto", auto: false }, 32_000).state.seq, s.seq);
+  });
+
+  test("nothing is pending on an open question, or on the last reveal", () => {
+    // Two questions, so the second reveal is the end of the set.
+    let s = accept(loaded([q(), q()]), [{ type: "setTriviaAuto", auto: true }]);
+    s = accept(s, [{ type: "openQuestion", suddenDeath: false }], 1000);
+    assert.equal(autoFiresAt(trivia(s)), null, "the question's own timer owns this");
+    s = accept(s, [{ type: "closeQuestion" }], 5000);
+    assert.ok(autoFiresAt(trivia(s)) !== null);
+    s = accept(s, [{ type: "revealQuestion" }], 6000);
+    assert.ok(autoFiresAt(trivia(s)) !== null, "one question left, so it advances");
+    s = accept(s, [{ type: "nextQuestion" }], 7000);
+    assert.equal(autoFiresAt(trivia(s)), null, "an idle question waits for a press");
+    s = accept(s, [{ type: "openQuestion", suddenDeath: false }], 8000);
+    s = accept(s, [{ type: "closeQuestion" }], 12_000);
+    s = accept(s, [{ type: "revealQuestion" }], 13_000);
+    assert.equal(
+      autoFiresAt(trivia(s)),
+      null,
+      "the last reveal stays up; Auto must not reach for a question that is not there",
+    );
+  });
+
+  test("the note's length is the reveal's length", () => {
+    const long = q({ note: "x".repeat(200) });
+    let s = accept(loaded([long, q()]), [{ type: "setTriviaAuto", auto: true }]);
+    s = accept(s, [{ type: "openQuestion", suddenDeath: false }], 1000);
+    s = accept(s, [{ type: "closeQuestion" }], 5000);
+    s = accept(s, [{ type: "revealQuestion" }], 6000);
+    assert.equal(
+      autoFiresAt(trivia(s)),
+      6000 + autoBeatMs("advance", DEFAULT_BEAT_SECONDS, 200),
+    );
+  });
+
+  test("Auto and the slider survive a replay of the log", () => {
+    // The engine is the only writer and the log is the record, so a console
+    // that reconnects and a process that restarts both come back to the mode
+    // the host left it in. This is that property, stated where it is decided.
+    const log: readonly { event: Event; at: number }[] = [
+      { event: { type: "open" }, at: 10 },
+      { event: { type: "join", pid: "p1", nickname: "p1" }, at: 20 },
+      { event: { type: "start" }, at: 30 },
+      {
+        event: { type: "loadTrivia", activityId: "trivia", questions: [q(), q()] },
+        at: 40,
+      },
+      { event: { type: "setTriviaAuto", auto: true }, at: 50 },
+      { event: { type: "setTriviaSpeed", seconds: 8 }, at: 60 },
+      { event: { type: "openQuestion", suddenDeath: false }, at: 70 },
+      { event: { type: "closeQuestion" }, at: 20_070 },
+    ];
+    const s = replay(
+      newSession({ sid: "s", title: "t", joinCode: "RAFT", activities: ACTIVITIES }),
+      log,
+    );
+    const t = trivia(s);
+    assert.equal(t.auto, true);
+    assert.equal(t.autoSeconds, 8);
+    // Absolute, so the re-armed timer fires at the instant it always meant.
+    assert.equal(autoFiresAt(t), 20_070 + 8000);
+  });
+
+  test("a restart puts Auto away and keeps the slider", () => {
+    let s = accept(loaded(), [{ type: "setTriviaSpeed", seconds: 9 }]);
+    s = accept(s, [{ type: "setTriviaAuto", auto: true }]);
+    s = accept(s, [{ type: "restartSession" }], 99_000);
+    const t = trivia(s);
+    assert.equal(t.auto, false, "a host recovering from something owns the wheel");
+    assert.equal(t.autoSeconds, 9);
+    assert.equal(t.autoAt, null);
+  });
+
+  test("Auto with no question set loaded is refused, not ignored", () => {
+    const base = accept(
+      newSession({ sid: "s1", title: "H", joinCode: "RAFT", activities: ACTIVITIES }),
+      [{ type: "open" }, { type: "start" }],
+    );
+    assertRefused(base, run(base, { type: "setTriviaAuto", auto: true }), "no_questions_loaded");
+    assertRefused(base, run(base, { type: "setTriviaSpeed", seconds: 5 }), "no_questions_loaded");
   });
 });

@@ -30,7 +30,11 @@ import {
   unsealFloorView,
   unsealMeView,
 } from "../engine/arcade.ts";
-import { currentQuestion } from "../engine/trivia.ts";
+import {
+  autoFiresAt,
+  clampBeatSeconds,
+  currentQuestion,
+} from "../engine/trivia.ts";
 import { longestSlide, partsOf, slideMs } from "../engine/sendoff.ts";
 import type {
   ArcadeState,
@@ -1468,6 +1472,24 @@ export function prepareViews(
                 trivia: {
                   answeredBy: Object.keys(trivia.answers),
                   loaded: trivia.questions.length,
+                  // Auto is the console's own setting and goes on the
+                  // console's socket only — see the note on this block in
+                  // protocol.ts for why it is not on the shared TriviaView
+                  // the way the send-off's is.
+                  //
+                  // Read through the clamp and a `=== true`, because a
+                  // snapshot written before Auto existed carries neither
+                  // field and the console must not be handed `undefined`
+                  // where it expects a number to put in a slider.
+                  auto: {
+                    on: trivia.auto === true,
+                    seconds: clampBeatSeconds(trivia.autoSeconds),
+                    // Null whenever nothing is pending, which `autoFiresAt`
+                    // decides from the same `autoBeat` the server's timer
+                    // arms off. One rule: the console cannot draw a countdown
+                    // to something the server is not going to do.
+                    advanceAt: autoFiresAt(trivia),
+                  },
                 },
               }
             : {}),

@@ -304,6 +304,22 @@ export type HostCommand =
   | { name: "trivia.close" }
   | { name: "trivia.reveal" }
   | { name: "trivia.next" }
+  /**
+   * Auto / Manual, and the beat in seconds.
+   *
+   * The send-off's pair, for the segment with the other fixed run of beats.
+   * Auto reveals a closed question and then opens the next one, and does
+   * nothing else — it never opens the first question, never touches a sudden
+   * death, and stops at the end of the set. `autoBeat` in engine/trivia.ts is
+   * the rule; this is only the wire.
+   *
+   * Two commands rather than one settings blob, the same as the send-off's:
+   * the button and the slider are pressed at different moments, and a slider
+   * drag that also re-sent the mode would fight a host who had just switched
+   * back to manual.
+   */
+  | { name: "trivia.auto"; auto: boolean }
+  | { name: "trivia.speed"; seconds: number }
   /* ---- arcade (phase 4) ---- */
   /** Hand out the player numbers and put the room in the arcade. */
   | { name: "arcade.enter" }
@@ -1532,6 +1548,41 @@ export interface RenderState {
       readonly answeredBy: readonly ParticipantId[];
       /** How many questions are loaded. Zero means the CSV has not landed. */
       readonly loaded: number;
+      /**
+       * Auto / Manual and the beat, for the console's own control.
+       *
+       * **Host-only**, unlike the send-off's, which is on the shared
+       * {@link SendoffView}. The difference is what the room would do with it.
+       * A send-off surface draws the wait — the montage is the content, and a
+       * Desktop that knows when the slide turns can cross-fade to it. Trivia's
+       * beats are the host's hand: the room's experience of Auto is that the
+       * answer goes up promptly, which is indistinguishable from a host who
+       * presses promptly. A countdown to the reveal on a phone would be a
+       * second clock under a question that has just closed, and DESIGN is
+       * against second clocks. So it is a console setting and it stays on the
+       * console's socket.
+       *
+       * One block rather than three fields beside `loaded`, and optional: a
+       * frame built by something that does not know about Auto — the dev mock
+       * in `client/shared` — is still a valid host frame, and the console
+       * reads the absence as Manual, which is the safe reading of a frame that
+       * cannot say. The server always sends it.
+       */
+      readonly auto?: {
+        readonly on: boolean;
+        /** The slider, in seconds. See `DEFAULT_BEAT_SECONDS`. */
+        readonly seconds: number;
+        /**
+         * When the pending beat fires, in server time, or null when nothing
+         * is pending — in manual, during a sudden death, on an open or idle
+         * question, and on the last reveal of the set.
+         *
+         * An absolute epoch and never a duration, the discipline `closesAt`
+         * keeps: a console that gets the frame late still counts down to the
+         * instant the server means.
+         */
+        readonly advanceAt: number | null;
+      };
     };
     /**
      * The arcade in full: who is where, who is backing whom, and every
@@ -1926,6 +1977,17 @@ function parseHostCommand(v: unknown): HostCommand | null {
       return { name: "trivia.reveal" };
     case "trivia.next":
       return { name: "trivia.next" };
+    case "trivia.auto":
+      return typeof c["auto"] === "boolean"
+        ? { name: "trivia.auto", auto: c["auto"] }
+        : null;
+    case "trivia.speed":
+      // Range-checked in the engine, which is the only place that may decide
+      // what the slider means. This asks only whether it is a number at all —
+      // the same division of labour as `sendoff.speed`.
+      return typeof c["seconds"] === "number" && Number.isFinite(c["seconds"])
+        ? { name: "trivia.speed", seconds: c["seconds"] }
+        : null;
     case "arcade.enter":
       return { name: "arcade.enter" };
     case "arcade.round": {

@@ -322,6 +322,48 @@ export interface TriviaState {
   readonly totals: Readonly<Record<ParticipantId, number>>;
   /** Consecutive correct answers, for the streak bonus. Reset by a miss. */
   readonly streaks: Readonly<Record<ParticipantId, number>>;
+  /**
+   * Whether the set walks itself between questions.
+   *
+   * The same switch the send-off has and for the same reason: a fixed run of
+   * beats, most of which the host presses through without deciding anything.
+   * Twenty-four questions is open / close / reveal / next seventy-two times,
+   * and the question already closes on its own — so what is left to hand to a
+   * clock is the reveal and the move to the next question.
+   *
+   * What it deliberately does **not** do is open a question the host has not
+   * opened. Auto never puts the first thing in front of the room, it stops
+   * dead at a sudden death, and it stops at the end of the set. See
+   * `autoBeat` in engine/trivia.ts, which is the whole of the rule.
+   *
+   * Off by default, and off on every set that loads.
+   */
+  readonly auto: boolean;
+  /**
+   * The beat, in seconds: how long the room waits between a question closing
+   * and its answer going up. The console's slider.
+   *
+   * The wait *after* the reveal is longer and is derived from this and from
+   * the note's own length — see `autoBeatMs`. One control rather than two,
+   * for the reason the send-off gives: a host setting two numbers in front of
+   * a room is a host not watching the room.
+   */
+  readonly autoSeconds: number;
+  /**
+   * When the beat auto is counting from began, so a surface joining late — or
+   * a process that has just restarted — places itself in the wait rather than
+   * restarting it.
+   *
+   * Stamped on the way into `closed` and `revealed`, which are the only two
+   * phases auto acts from, and null everywhere else. The send-off's
+   * `slideAt`, for the same job.
+   *
+   * Absent on a snapshot written before Auto existed, and that needs no
+   * migration: `auto` reads back falsy, which is Auto off, which is the state
+   * every recovered session should be in anyway. See the note on
+   * SNAPSHOT_VERSION about when a bump is owed — this is not one of those.
+   */
+  readonly autoAt: number | null;
 }
 
 export interface SessionState {
@@ -1139,6 +1181,15 @@ export type Event =
   | { type: "closeQuestion" }
   | { type: "revealQuestion" }
   | { type: "nextQuestion" }
+  /**
+   * The console's Auto / Manual button, and its slider.
+   *
+   * Two events rather than one settings blob, for the send-off's reason: the
+   * button and the slider are pressed at different moments, and a slider drag
+   * that also re-sent the mode would fight a host who had just switched back.
+   */
+  | { type: "setTriviaAuto"; auto: boolean }
+  | { type: "setTriviaSpeed"; seconds: number }
   // arcade
   | { type: "enterArcade"; activityId: ActivityId }
   | { type: "startRound"; round: ArcadeRoundKind; config: ArcadeRoundConfig }

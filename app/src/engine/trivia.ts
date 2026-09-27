@@ -14,6 +14,7 @@
 import type {
   ParticipantId,
   Question,
+  QuestionPhase,
   TriviaAnswer,
   TriviaState,
 } from "./types.ts";
@@ -224,6 +225,11 @@ export function idleQuestion(
     suddenDeath: false,
     suddenDeathWinner: null,
     answers: {},
+    // Auto acts from `closed` and `revealed` and from nowhere else, so an idle
+    // question has no beat to count. Cleared rather than left stale: a stamp
+    // from the question before it is a deadline in the past, and a timer armed
+    // off one fires the instant it is armed.
+    autoAt: null,
   };
 }
 
@@ -239,4 +245,158 @@ export function triviaHasBegun(t: TriviaState): boolean {
   return (
     t.at > 0 || t.phase !== "idle" || Object.keys(t.totals).length > 0
   );
+}
+
+/* ---- auto-advance ---------------------------------------------------- */
+
+/**
+ * The beat, in seconds: the pause between a question closing and its answer
+ * going up.
+ *
+ * Five rather than the send-off's four. A photograph is glanced at and done;
+ * this beat is the moment the host says "let's see", and under about three
+ * seconds it reads as the console having jumped rather than as a pause. Over
+ * about eight it is dead air. Five is the middle of that, and — the reason
+ * that matters more than the pacing — it is long enough that a host who
+ * pressed Auto by mistake sees the console counting and presses Manual before
+ * anything has happened in front of the room.
+ */
+export const DEFAULT_BEAT_SECONDS = 5;
+export const MIN_BEAT_SECONDS = 3;
+export const MAX_BEAT_SECONDS = 15;
+
+/**
+ * How long the reveal holds, per character of its note, at the default beat.
+ *
+ * The send-off reads a farewell message out at 60 ms a character. A trivia
+ * note is scanned off a screen while the host talks over it and while the
+ * room is also looking at four bars and a top five, so it is quicker: 45 ms a
+ * character is roughly 265 words a minute. The real set's notes run 75 to 190
+ * characters, which is 3.4 to 8.6 seconds on top of the fixed part.
+ */
+const REVEAL_MS_PER_CHAR = 45;
+
+/** What auto would do next, or nothing. */
+export type TriviaBeat =
+  /** Close → reveal. The answer goes up. */
+  | "reveal"
+  /** Reveal → the next question, open. Two engine events; see the note. */
+  | "advance";
+
+/**
+ * The parts of a trivia state this decision looks at, and nothing else.
+ *
+ * Plain fields rather than {@link TriviaState} so the console can ask the same
+ * question of the view it was sent. There is one rule about when the room
+ * moves on its own and it is worth exactly one implementation — a console that
+ * drew "advancing in 5s" from a second, similar-looking rule would be a
+ * console that says one thing while the server does another.
+ */
+export interface TriviaAutoAt {
+  readonly auto: boolean;
+  readonly suddenDeath: boolean;
+  readonly phase: QuestionPhase;
+  /** Index of the scored question in play. */
+  readonly at: number;
+  /** How many scored questions there are. */
+  readonly of: number;
+}
+
+/**
+ * What auto does next, or null for "nothing; the host presses".
+ *
+ * This is the whole safety argument for the feature, so it is one pure
+ * function and every clause in it is a refusal:
+ *
+ * - **Off unless the host turned it on.** `loadTrivia` sets `auto: false` and
+ *   nothing else does.
+ * - **Never a sudden death.** A tiebreak is a decision hanging over a room
+ *   with a result on it; the host settles it and announces it, on their own
+ *   clock. Opening one also switches Auto *off* in the reducer, so the button
+ *   says what is true — this clause is the second lock, for a state that
+ *   arrives by replay or recovery rather than through `openQuestion`.
+ * - **Never opens a question from cold.** There is no beat out of `idle`, so
+ *   flipping Auto on at question one does nothing at all: the first question
+ *   goes up on a press, and so does any question the host has walked back to
+ *   by hand. The earliest thing Auto can do is one full beat after the next
+ *   close, and every beat it performs is one the host was going to press
+ *   anyway. That is what makes it safe to have on a console in front of
+ *   thirty people.
+ * - **Never off the end.** `advance` is offered only while there is a next
+ *   question, so the last reveal in the set stays on the screen and the host
+ *   walks out of trivia themselves.
+ * - **Never while a question is open.** That beat already has a clock — the
+ *   question's own — and it belongs to `armQuestionTimer`.
+ *
+ * `advance` is two engine events, `nextQuestion` then `openQuestion`, because
+ * a set that runs itself has to put the next question *up*; stopping on an
+ * idle question would be a mode that pauses every other beat. The console's
+ * Skip does the same thing with two `sendoff.next` frames: the composite step
+ * is two of the steps that already exist, not a third kind of step the engine
+ * has to learn.
+ */
+export function autoBeat(t: TriviaAutoAt): TriviaBeat | null {
+  if (!t.auto) return null;
+  if (t.suddenDeath) return null;
+  if (t.phase === "closed") return "reveal";
+  if (t.phase === "revealed") return t.at + 1 < t.of ? "advance" : null;
+  return null;
+}
+
+/**
+ * The slider's value, made safe.
+ *
+ * Rounded and clamped, and a value that is not a number at all comes back as
+ * the default rather than as NaN — which matters beyond a malformed frame,
+ * because a snapshot written before Auto existed has no `autoSeconds` on it
+ * and `undefined * 1000` is a timer armed for never.
+ */
+export function clampBeatSeconds(seconds: number): number {
+  if (!Number.isFinite(seconds)) return DEFAULT_BEAT_SECONDS;
+  return Math.min(MAX_BEAT_SECONDS, Math.max(MIN_BEAT_SECONDS, Math.round(seconds)));
+}
+
+/**
+ * How long one beat holds, in milliseconds.
+ *
+ * **One slider, two waits, and they are not the same number.** The pause
+ * before the answer is a pause for effect and is exactly what the host set.
+ * The wait after it is the room reading — the correct tile, the distribution,
+ * the note, then the activity's top five — and it is derived, the same way the
+ * send-off derives a message slide's hold from the message rather than asking
+ * for a second slider. A second slider would be two numbers to get wrong in
+ * front of a room, and the number a host actually has an opinion about is the
+ * short one.
+ *
+ * `beat × 2` is the fixed part of a reveal, which every question has whether
+ * or not it carries a note; the note adds its own reading time on top. Capped
+ * at six beats so one pathological note cannot hold the room for a minute, and
+ * the whole thing scales with the slider, so "faster" is faster everywhere.
+ */
+export function autoBeatMs(
+  beat: TriviaBeat,
+  autoSeconds: number,
+  noteChars: number,
+): number {
+  const seconds = clampBeatSeconds(autoSeconds);
+  const base = seconds * 1000;
+  if (beat === "reveal") return base;
+  const scale = seconds / DEFAULT_BEAT_SECONDS;
+  const chars = Number.isFinite(noteChars) ? Math.max(0, noteChars) : 0;
+  return Math.min(base * 6, base * 2 + chars * REVEAL_MS_PER_CHAR * scale);
+}
+
+/**
+ * When the current beat fires, as an absolute server epoch, or null when
+ * nothing is pending.
+ *
+ * Absolute and not a duration, for the discipline `closesAt` keeps: a console
+ * that receives the frame late still counts down to the instant the server
+ * means, and a process that restarts re-arms for the moment it always meant.
+ */
+export function autoFiresAt(t: TriviaState): number | null {
+  const beat = autoBeat({ ...t, of: t.questions.length });
+  if (beat === null || t.autoAt === null) return null;
+  const question = currentQuestion(t);
+  return t.autoAt + autoBeatMs(beat, t.autoSeconds, question?.note?.length ?? 0);
 }

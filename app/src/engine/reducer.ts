@@ -81,7 +81,8 @@ import {
   MAX_AUTO_SECONDS,
   MIN_AUTO_SECONDS,
 } from "./sendoff.ts";
-import { clampMs, currentQuestion, idleQuestion, isCorrect,
+import { clampBeatSeconds, clampMs, currentQuestion, DEFAULT_BEAT_SECONDS,
+  idleQuestion, isCorrect,
   partitionTiebreakers, settleQuestion,
   triviaHasBegun,
 } from "./trivia.ts";
@@ -761,6 +762,17 @@ export function reduce(
                   answers: {},
                   totals: {},
                   streaks: {},
+                  // Auto goes off, the slider keeps where the host set it.
+                  // A restart is the host recovering from something in front
+                  // of a room; the very last thing that state should do is
+                  // start walking the set again on its own while they work
+                  // out what happened. Turning it back on is one press.
+                  auto: false,
+                  // Through the clamp, because a snapshot written before Auto
+                  // existed has nothing here and a restart must not carry an
+                  // `undefined` forward into the arithmetic.
+                  autoSeconds: clampBeatSeconds(state.trivia.autoSeconds),
+                  autoAt: null,
                 },
           arcade: null,
           joinsLocked: false,
@@ -1244,6 +1256,12 @@ export function reduce(
             answers: {},
             totals: {},
             streaks: {},
+            // Manual, for the reason the send-off loads manual: a set that
+            // starts walking itself the moment a file lands is a set that has
+            // moved past a question before anybody decided it should.
+            auto: false,
+            autoSeconds: DEFAULT_BEAT_SECONDS,
+            autoAt: null,
           },
         },
         [BROADCAST_STATE, PERSIST],
@@ -1342,6 +1360,25 @@ export function reduce(
             // question on thirty phones and reading its answer out.
             ...(event.suddenDeath ? { at: trivia.questions.length } : {}),
             answers: {},
+            // A sudden death takes the clock off the set.
+            //
+            // `autoBeat` already refuses to act during one, but refusing is
+            // not enough on a console in front of a room: a suppressed Auto
+            // leaves the button reading "Manual" — meaning auto is on — while
+            // nothing happens, and then the host clears the tiebreak, lands
+            // back on a revealed question, and the set starts itself again in
+            // the middle of them announcing who won. Switching it off is the
+            // honest version of the same rule: the button flips back to
+            // "Auto", the host can see that they now have the wheel, and
+            // turning it on again is one press once the tie is settled.
+            //
+            // Not a toggle the host asked for, so it is worth being precise
+            // about what it costs them: one press, at the one moment in the
+            // afternoon when they were going to be pressing anyway.
+            ...(event.suddenDeath ? { auto: false } : {}),
+            // Nothing pending while a question is open — the question's own
+            // timer owns that beat.
+            autoAt: null,
           },
         },
         [BROADCAST_STATE, PERSIST],
@@ -1473,6 +1510,11 @@ export function reduce(
         answers: settled.answers,
         totals: settled.totals,
         streaks: settled.streaks,
+        // The beat auto counts the reveal from. Stamped whether or not auto is
+        // on, so that switching it on mid-wait has an instant to measure from
+        // — and restamped by `setTriviaAuto` so that switching on does not
+        // reveal immediately off a stamp that is already old.
+        autoAt: now,
       };
       // The settled points live on `trivia` and go no further yet.
       //
@@ -1507,7 +1549,10 @@ export function reduce(
           ),
         );
       }
-      const revealed: TriviaState = { ...trivia, phase: "revealed" };
+      // `autoAt: now` restarts the clock for the second beat: the room has
+      // just been given the answer, the note and the top five, and the wait
+      // before the next question is measured from this instant.
+      const revealed: TriviaState = { ...trivia, phase: "revealed", autoAt: now };
       // Sudden death changes no points at all, so it moves no standings.
       return applied(
         {
@@ -1573,6 +1618,16 @@ export function reduce(
               phase: held?.phase ?? "idle",
               answers: held?.answers ?? {},
               tiebreakHeld: null,
+              // The held question comes back in the phase it was in, so the
+              // beat comes back with it: a question restored to `revealed`
+              // has a wait after it and one restored to `idle` does not.
+              // Stamped `now` rather than carried over, so the wait is a full
+              // one measured from the moment the room got back to the set —
+              // `openQuestion` switched auto off when the tiebreak started, so
+              // in practice nothing is counting this until the host presses
+              // Auto again, and when they do they get the whole beat.
+              autoAt:
+                held?.phase === "closed" || held?.phase === "revealed" ? now : null,
             },
           },
           [BROADCAST_STATE, PERSIST],
@@ -1585,11 +1640,94 @@ export function reduce(
         );
       }
       // idleQuestion() clears the per-question answers. Totals and streaks
-      // are the set's running state and survive.
+      // are the set's running state and survive. `auto` and `autoSeconds` are
+      // the host's setting for the segment, not for the question, so they are
+      // among the things that survive too — a set that had to be switched back
+      // to Auto after every question would be worse than no Auto at all.
       return applied({ ...state, trivia: idleQuestion(trivia, at) }, [
         BROADCAST_STATE,
         PERSIST,
       ]);
+    }
+
+    /**
+     * Auto on or off, mid-set.
+     *
+     * Not a property of the question file and not fixed when it loads: a host
+     * runs the first few by hand while the room learns the shape of it, then
+     * hands the rest to a clock, then takes it back for the last one. So it is
+     * a button on the console, exactly as the send-off's is.
+     *
+     * **Turning it on is not itself an action.** `autoBeat` has no beat out of
+     * `idle` or `open`, so pressing this while a question is up, or before the
+     * first one, changes nothing the room can see; the earliest consequence is
+     * one full beat after the next close. That is the property that makes it
+     * safe to put next to Close early on a live console.
+     */
+    case "setTriviaAuto": {
+      const trivia = state.trivia;
+      if (!trivia) {
+        return unchanged(
+          reject("host", "no_questions_loaded", "Load a question set first."),
+        );
+      }
+      // Refused *on*, allowed *off*. A tiebreak is settled and announced by a
+      // person; there is no version of "let it run itself" that belongs in one.
+      // Off is always allowed because off is always the safe direction.
+      if (event.auto && trivia.suddenDeath) {
+        return unchanged(
+          reject(
+            "host",
+            "wrong_question_phase",
+            "Not during a sudden death. Settle the tie first.",
+          ),
+        );
+      }
+      if (trivia.auto === event.auto) return unchanged();
+      return applied(
+        {
+          ...state,
+          trivia: {
+            ...trivia,
+            auto: event.auto,
+            // Restamped, for the reason the send-off restamps `slideAt`: a
+            // question that closed eight seconds ago must not reveal itself
+            // the instant the host presses Auto. Switching on gives whatever
+            // is on screen its full beat, which is also the host's chance to
+            // press Manual again.
+            autoAt:
+              trivia.phase === "closed" || trivia.phase === "revealed"
+                ? now
+                : trivia.autoAt,
+          },
+        },
+        [BROADCAST_STATE, PERSIST],
+      );
+    }
+
+    case "setTriviaSpeed": {
+      const trivia = state.trivia;
+      if (!trivia) {
+        return unchanged(
+          reject("host", "no_questions_loaded", "Load a question set first."),
+        );
+      }
+      if (!Number.isFinite(event.seconds)) {
+        return unchanged(
+          reject("host", "invalid_round_config", "That speed is not a number."),
+        );
+      }
+      const seconds = clampBeatSeconds(event.seconds);
+      if (trivia.autoSeconds === seconds) return unchanged();
+      // `autoAt` is deliberately *not* restamped. Dragging the slider is the
+      // host saying "this is too slow", and restarting the wait they are
+      // trying to shorten is the opposite of what they asked for. The runtime
+      // re-arms against the new deadline, which may already be in the past —
+      // in which case the beat fires now, which is the answer to "too slow".
+      return applied(
+        { ...state, trivia: { ...trivia, autoSeconds: seconds } },
+        [BROADCAST_STATE, PERSIST],
+      );
     }
 
     /* ---------------- arcade ---------------- */

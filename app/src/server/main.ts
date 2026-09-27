@@ -1672,6 +1672,10 @@ function commandToEvent(cmd: HostCommand, runtime: SessionRuntime): Event | null
       return { type: "revealQuestion" };
     case "trivia.next":
       return { type: "nextQuestion" };
+    case "trivia.auto":
+      return { type: "setTriviaAuto", auto: cmd.auto };
+    case "trivia.speed":
+      return { type: "setTriviaSpeed", seconds: cmd.seconds };
     case "arcade.enter":
       return { type: "enterArcade", activityId: arcadeActivityId(runtime) };
     case "arcade.round":

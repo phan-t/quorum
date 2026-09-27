@@ -609,3 +609,177 @@ describe("the question timer", () => {
     assert.equal(runtime.armedCloseAt, null);
   });
 });
+
+/**
+ * Auto's clock, and what the console is told about it.
+ *
+ * The rule about *whether* a beat exists is `autoBeat`, tested as arithmetic
+ * in engine/trivia.test.ts. What is tested here is the two things only the
+ * server can be wrong about: that the clock is armed for exactly the beats the
+ * rule names and disarmed for the ones it does not, and that the mode reaches
+ * the console and nobody else.
+ */
+describe("the trivia beat timer", () => {
+  /** Move the pending beat into the past and re-arm, so it fires now. */
+  function overdue(runtime: { state: SessionState; armBeatTimer(now?: number): void }): void {
+    runtime.state = {
+      ...runtime.state,
+      trivia: { ...runtime.state.trivia!, autoAt: Date.now() - 60_000 },
+    };
+    runtime.armBeatTimer();
+  }
+
+  it("arms nothing while the set is in manual", () => {
+    const registry = new SessionRegistry();
+    const { runtime } = registry.add(loaded(), Date.now());
+    runtime.apply({ type: "openQuestion", suddenDeath: false }, Date.now());
+    runtime.apply({ type: "closeQuestion" }, Date.now());
+    assert.equal(runtime.armedBeatAt, null);
+  });
+
+  it("arms the reveal once the question closes, and fires it", async () => {
+    const registry = new SessionRegistry();
+    const { runtime } = registry.add(loaded(), Date.now());
+    runtime.apply({ type: "setTriviaAuto", auto: true }, Date.now());
+    runtime.apply({ type: "openQuestion", suddenDeath: false }, Date.now());
+    assert.equal(runtime.armedBeatAt, null, "an open question is the other timer's");
+
+    runtime.apply({ type: "closeQuestion" }, Date.now());
+    assert.notEqual(runtime.armedBeatAt, null);
+    overdue(runtime);
+    await until(() => runtime.state.trivia?.phase === "revealed");
+    assert.equal(runtime.state.trivia?.phase, "revealed");
+  });
+
+  it("opens the next question, rather than stopping on an idle one", async () => {
+    const registry = new SessionRegistry();
+    const { runtime } = registry.add(loaded(), Date.now());
+    runtime.apply({ type: "setTriviaAuto", auto: true }, Date.now());
+    runtime.apply({ type: "openQuestion", suddenDeath: false }, Date.now());
+    runtime.apply({ type: "closeQuestion" }, Date.now());
+    runtime.apply({ type: "revealQuestion" }, Date.now());
+    assert.notEqual(runtime.armedBeatAt, null);
+
+    overdue(runtime);
+    await until(() => runtime.state.trivia?.at === 1);
+    assert.equal(runtime.state.trivia?.at, 1);
+    assert.equal(
+      runtime.state.trivia?.phase,
+      "open",
+      "a set that runs itself has to put the next question up",
+    );
+    // And the question's own close timer came back armed with it.
+    assert.equal(runtime.armedCloseAt, runtime.state.trivia?.closesAt);
+  });
+
+  it("stops at the end of the set rather than reaching for a question that is not there", async () => {
+    const registry = new SessionRegistry();
+    const { runtime } = registry.add(loaded(), Date.now());
+    runtime.apply({ type: "setTriviaAuto", auto: true }, Date.now());
+    // Walk to the last of the three and reveal it.
+    for (let i = 0; i < 3; i += 1) {
+      runtime.apply({ type: "openQuestion", suddenDeath: false }, Date.now());
+      runtime.apply({ type: "closeQuestion" }, Date.now());
+      runtime.apply({ type: "revealQuestion" }, Date.now());
+      if (i < 2) runtime.apply({ type: "nextQuestion" }, Date.now());
+    }
+    assert.equal(runtime.state.trivia?.at, 2);
+    assert.equal(runtime.armedBeatAt, null, "nothing is armed on the last reveal");
+    // Nothing fires, however long anybody waits.
+    await new Promise((r) => setTimeout(r, 60));
+    assert.equal(runtime.state.trivia?.phase, "revealed");
+    assert.equal(runtime.state.trivia?.at, 2);
+  });
+
+  it("disarms the moment the host presses Manual mid-wait", () => {
+    const registry = new SessionRegistry();
+    const { runtime } = registry.add(loaded(), Date.now());
+    runtime.apply({ type: "setTriviaAuto", auto: true }, Date.now());
+    runtime.apply({ type: "openQuestion", suddenDeath: false }, Date.now());
+    runtime.apply({ type: "closeQuestion" }, Date.now());
+    assert.notEqual(runtime.armedBeatAt, null);
+    runtime.apply({ type: "setTriviaAuto", auto: false }, Date.now());
+    assert.equal(runtime.armedBeatAt, null);
+  });
+
+  it("arms nothing for a sudden death, and puts Auto away when one opens", () => {
+    const registry = new SessionRegistry();
+    const { runtime } = registry.add(loaded(), Date.now());
+    runtime.apply({ type: "setTriviaAuto", auto: true }, Date.now());
+    runtime.apply({ type: "openQuestion", suddenDeath: false }, Date.now());
+    runtime.apply({ type: "closeQuestion" }, Date.now());
+    runtime.apply({ type: "revealQuestion" }, Date.now());
+
+    runtime.apply({ type: "openQuestion", suddenDeath: true }, Date.now());
+    assert.equal(runtime.state.trivia?.auto, false, "the button flips back to Auto");
+    runtime.apply({ type: "closeQuestion" }, Date.now());
+    assert.equal(runtime.armedBeatAt, null, "a tiebreak is never revealed by a clock");
+    runtime.apply({ type: "revealQuestion" }, Date.now());
+    assert.equal(runtime.armedBeatAt, null);
+  });
+
+  it("re-arms for the instant it always meant after a restart", () => {
+    // The recovery case: the process comes back holding a state whose beat is
+    // already stamped, and the clock is a function of that state.
+    const registry = new SessionRegistry();
+    const now = Date.now();
+    const recovered = session(
+      [
+        { type: "open" },
+        { type: "join", pid: "p1", nickname: "Priya" },
+        { type: "start" },
+        { type: "setSegment", segment: "trivia" },
+        { type: "loadTrivia", activityId: "trivia", questions: QUESTIONS },
+        { type: "setTriviaAuto", auto: true },
+        { type: "setTriviaSpeed", seconds: 7 },
+        { type: "openQuestion", suddenDeath: false },
+        { type: "closeQuestion" },
+      ],
+      now,
+    );
+    const { runtime } = registry.add(recovered, now);
+    runtime.armBeatTimer(now);
+    assert.equal(runtime.state.trivia?.auto, true, "Auto is engine state and comes back");
+    assert.equal(runtime.state.trivia?.autoSeconds, 7);
+    assert.equal(runtime.armedBeatAt, now + 7_000);
+  });
+});
+
+describe("Auto on the wire", () => {
+  const closed = loaded([
+    { type: "setTriviaAuto", auto: true },
+    { type: "setTriviaSpeed", seconds: 6 },
+    { type: "openQuestion", suddenDeath: false },
+    { type: "closeQuestion" },
+  ]);
+
+  it("reaches the console with the instant the beat fires", () => {
+    const auto = view(closed, "host").hostExtras?.trivia?.auto;
+    assert.equal(auto?.on, true);
+    assert.equal(auto?.seconds, 6);
+    // Absolute, never a duration: a console that gets the frame late still
+    // counts down to the instant the server means.
+    assert.equal(auto?.advanceAt, T0 + 6_000);
+  });
+
+  it("reaches nobody else", () => {
+    // `hostExtras` is host-only, but the claim worth asserting is about the
+    // bytes: the phone and the big screen are not told the room is on a clock,
+    // because a countdown to the reveal is a second clock under a question
+    // that has just closed.
+    for (const role of ["participant", "screen"] as const) {
+      const frame = wire(closed, role, role === "participant" ? "p1" : undefined);
+      assert.ok(!frame.includes('"advanceAt"'), `${role}: ${frame}`);
+      assert.ok(!frame.includes('"autoSeconds"'), `${role}: ${frame}`);
+    }
+  });
+
+  it("says nothing is pending when nothing is", () => {
+    const manual = loaded([
+      { type: "openQuestion", suddenDeath: false },
+      { type: "closeQuestion" },
+    ]);
+    assert.equal(view(manual, "host").hostExtras?.trivia?.auto?.on, false);
+    assert.equal(view(manual, "host").hostExtras?.trivia?.auto?.advanceAt, null);
+  });
+});
