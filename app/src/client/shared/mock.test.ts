@@ -37,6 +37,17 @@
  * timers need. See {@link noStrangers} for what replaced the deadline the old
  * harness guarded, and why that deadline had in fact never been crossed.
  *
+ * One property of that fake clock is load-bearing and easy to read past.
+ * `tick(n)` advances `Date.now()` to the **end** of the tick and only then runs
+ * the timers that came due inside it, so a callback never sees its own deadline
+ * — it sees the tick's end. Every instant the mock stamps under
+ * {@link Room.advance} is therefore late by up to a whole tick, which is up to a
+ * second: `lightChangedAt`, `stepStartedAt`, `pullStartedAt` and `unsealedMs`
+ * are all stamped from `#now()` inside a timer. A scenario that compares one of
+ * those against an instant it worked out itself has to allow for the skew or
+ * spend its clock in smaller ticks than `advance` does. The same property is
+ * what makes #27's guard **(b)** reachable at all — see the note on it below.
+ *
  * ## What is checked
  *
  * - **#17** the round counter moves on the same transition in both.
@@ -71,7 +82,10 @@
  *   the glass — or the `applied` flag of the ack, which is how the console tells
  *   a toggle that did something from one that was already in that position. See
  *   {@link Answer} and {@link engineAnswer}. Some of them are also about *whether
- *   a frame went out at all*, which is what {@link stateFrames} is for.
+ *   a frame went out at all*, which is what {@link stateFrames} is for. The last
+ *   two are **(b)**, the Floor's own clock on a tap, a letter and a bet, which a
+ *   wrong reading of the fake clock kept out of this file for a release; the note
+ *   on (b) below is what that reading was and why it was wrong.
  *
  * Two of #24's eight are not here, and both for the same reason — the mock
  * cannot be driven into the state they are about. Its question set is a
@@ -82,7 +96,7 @@
  * match `roundAt`, and it is unverified by anything until the mock grows a
  * loader.
  *
- * Three of #27's seventeen rows are **not** scenarios here, and each for its own
+ * Two of #27's seventeen rows are **not** scenarios here, and each for its own
  * reason. They are written down rather than left to be rediscovered, because a
  * difference nobody wrote down is what the issue is about.
  *
@@ -94,21 +108,34 @@
  *   Recruitment, so no answer can come from the Lounge. Both were left alone
  *   rather than guarded, because an unreachable guard is another piece of code
  *   nothing watches.
- * - **(b)**, the Floor's clock on a tap and on a bet, **is** fixed in `mock.ts`
- *   and has no scenario, which is the one gap in this section. The window it
- *   guards is real in a browser and not on a fake clock. `node:test`'s timers
- *   fire at their exact deadline and dispatch in due order, and every deadline
- *   the mock re-derives — the Floor timer, the item timer, the step timer — is
- *   computed from the same instant, so there is no moment at which the round is
- *   still `running` and its own clock has passed. This was checked rather than
- *   assumed: a probe walked a Plan / Apply round to its last millisecond and a
- *   Glass Bridge round through all eighteen of its steps, and in both the round
- *   was `idle` on the first tick at which `endsAt` had passed. In a real browser
- *   `setTimeout` fires late and a backgrounded tab clamps it to whole seconds —
- *   which the note at the top of `mock.ts` already warns about — so the window
- *   is not only real there, it is seconds wide. The guard is the reducer's own
- *   and is kept for that reason; this paragraph is the honest statement that
- *   nothing runs it.
+ *
+ * **(b)**, the Floor's clock on a tap, a letter and a bet, was the third of them
+ * for a release, and the paragraph that excused it is kept here in corrected
+ * form rather than deleted, because the argument was plausible, was written down
+ * twice — here and above the guard in `#arcadeTap` — and was wrong. It ran: the
+ * window the guard protects is between `endsAt` and the frame that ends the
+ * round; `node:test`'s timers fire at their exact deadline and dispatch in due
+ * order; so there is no moment at which the round is still `running` and its own
+ * clock has passed, and a window that is seconds wide in a browser is zero wide
+ * here.
+ *
+ * The premise is false, for the reason set out under "How the mock is driven"
+ * above: `tick(n)` moves the clock to the end of the tick *before* it runs the
+ * timers that came due inside it. So a frame handed to `transport.send` before
+ * `endsAt` and the Floor timer armed for `endsAt` both come due inside one tick,
+ * the frame runs first because its `runAt` is earlier, and it runs with the
+ * mock's clock already past `endsAt` and `arcadePhase` still `running`. The
+ * window is the tick's length minus the frame's lead, and 463 ms of it is what
+ * the scenarios in the last section of this file use.
+ *
+ * What hid it was an ordering and not a clock. The probe ticked *past* `endsAt`
+ * and only then sent, which is a frame arriving at an `idle` round and can only
+ * ever be answered `wrong_round_phase`; sending first and ticking second always
+ * reaches the window. All three of (b)'s guards have scenarios now — the
+ * Plan / Apply tap, the Unseal letter and the `#arcadeBack` bet. The claim that
+ * the bet guard was "the one with a window, and that one is tested" was false in
+ * both halves: until those scenarios, this file did not contain the string "The
+ * Floor has locked." at all.
  *
  * Two of the seventeen also turned out not to be differences, and are recorded
  * here in the same spirit. **(m)**, the totals fold, was the tail item #27's own
@@ -272,10 +299,23 @@ interface Room {
    * That is most of the arcade, and it is why the Plan / Apply half of late-bet
    * protection sat written and unwatched while the Unseal half was tested.
    *
-   * Fake milliseconds, a second at a time, for the reason the director suite
-   * ticks a second at a time: one enormous tick is the same arithmetic and a
-   * great deal harder to reason about when a timer re-arms itself, which every
-   * one of the arcade's does.
+   * Fake milliseconds, a second at a time, and **not** because one enormous
+   * tick would be the same arithmetic. This used to claim it was, which is
+   * false in two ways that a scenario can trip over.
+   *
+   * A timer created *during* a tick does not run in that tick, so a re-arming
+   * chain — which every one of the arcade's timers is — advances one link per
+   * tick however long the tick is. Measured, on a one-second timer that re-arms
+   * itself: one `tick(20_000)` fires it **once**, at 20 000; twenty
+   * `tick(1_000)`s fire it ten times, at 1 000 through 10 000. So the size of
+   * the tick decides how far the room actually gets, and the big tick gets
+   * nowhere.
+   *
+   * And `tick(n)` moves `Date.now()` to the **end** of the tick before it runs
+   * anything, so every instant the mock stamps inside that tick is the tick's
+   * end rather than the deadline that woke it. Ticking a second at a time keeps
+   * that error under a second, which is the most this can do about it; see the
+   * note on the tick's end in the header.
    *
    * It does **not** make the mock's own timer durations predictable. The light
    * is a fresh `2_000 + random(4_000)` at every turn, and a scenario has no
@@ -5033,6 +5073,502 @@ describe("a waiting wave stops being able to bet the moment it walks on", () => 
       answerTo(watcher.wire, "crossing-bet"),
       refused.answer,
       "a second bet from a wave that is now on the bridge",
+    );
+  });
+});
+
+/* ------------------------------------------------------------------ */
+/* #27 (b) — the Floor's clock, on a tap, a letter and a bet            */
+/* ------------------------------------------------------------------ */
+
+describe("a press that arrives after the Floor's clock is refused by the clock", () => {
+  /**
+   * (b), and the reason it sat unwatched for a release.
+   *
+   * The three guards are one sentence each — `endsAt !== null && now >= endsAt`,
+   * in `#arcadeTap`, in `#arcadeUnseal` and in `#arcadeBack` — and they were
+   * written, read, and then argued to be unreachable. The argument was written
+   * down twice, in this file's header and in the comment above the tap guard, and
+   * it was wrong in a way worth recording, because it is the argument anybody
+   * would make: `node:test`'s timers fire at their exact deadline, so there is no
+   * moment at which the round is still `running` and its own clock has already
+   * passed, so nothing can ever be refused by the clock rather than by the phase.
+   *
+   * That is not how the fake clock works. `tick(n)` advances `Date.now()` to the
+   * **end** of the tick and *then* runs every timer that came due inside it, in
+   * `runAt` order. A callback never sees its own deadline; it sees the tick's
+   * end. So a frame queued at `endsAt − 537` and a Floor timer armed for `endsAt`
+   * both come due inside one `tick(1_000)`, the frame runs first because its
+   * `runAt` is earlier — and it runs with `#now()` already at `endsAt + 463`,
+   * with `arcadePhase` still `running` because the timer that clears it has not
+   * had its turn. That is the window, exactly, and it is a third of a second
+   * wide on the cheapest clock this file has.
+   *
+   * What hid it was an ordering, not a clock. The original probe ticked *past*
+   * `endsAt` and only then sent, which is a frame arriving at an `idle` round and
+   * can only ever answer `wrong_round_phase`. Sending first and ticking second
+   * always reaches the window. {@link Wire.send} cannot do it — it is
+   * `transport.send(msg)` followed by `tick(2)`, and those two milliseconds land
+   * the frame long before the deadline — so these scenarios reach past it to
+   * `transport.send` and spend the tick themselves. That is the only place in
+   * this file that does, and it is why.
+   *
+   * Which is also the proof that the window was entered rather than merely
+   * stepped over: every one of these three presses has a *different* refusal
+   * waiting for it one line up. A tap at an ended round is `wrong_round_phase` /
+   * "Nothing to tap."; a bet at one is "The Lounge is not open." So each
+   * scenario presses twice — once inside the window, once after the round has
+   * gone `idle` — and the two answers are not the same answer. A scenario that
+   * had missed the window would collect the second answer where it expects the
+   * first.
+   */
+
+  /**
+   * How far before `endsAt` the frame is queued, and the tick that carries it.
+   *
+   * `LEAD` has to be more than zero and less than `SPAN`, and is otherwise
+   * arbitrary: it is the gap between the frame's `runAt` and the Floor timer's,
+   * which is what puts the frame first inside the tick. `SPAN` has to be one
+   * tick that spans the deadline, and 1 000 is what {@link Room.advance} spends
+   * per tick anyway. Their difference — 463 ms — is how late the mock's `#now()`
+   * is when the frame is finally read, and the engine side below is asked the
+   * same question at the same offset past its own `endsAt`.
+   */
+  const LEAD = 537;
+  const SPAN = 1_000;
+
+  /**
+   * The mock's clock, in the test's own units.
+   *
+   * `SERVER_SKEW_MS` puts the mock 1.2 seconds ahead of the browser on purpose —
+   * deliberate difference 5 — so `endsAt` on the frame is not a number
+   * `Date.now()` here can be subtracted from. The offset is measured rather than
+   * imported: `#beginPlay` stamps `startedAt` at the instant the `arcade.begin`
+   * frame was delivered, and {@link Room.cmd} ticks nothing after that delivery,
+   * so the difference between the stamp and `Date.now()` at this point *is* the
+   * offset. Called immediately after `arcade.begin` and never again.
+   */
+  function mockClock(r: Room): () => number {
+    const startedAt = r.host.state().arcade?.startedAt;
+    assert.ok(typeof startedAt === "number", "the round carries no startedAt");
+    const skew = startedAt - Date.now();
+    return () => Date.now() + skew;
+  }
+
+  /**
+   * Hold the room to `LEAD` ms short of the Floor's clock, queue whatever
+   * `press` queues without letting it arrive, and then spend one tick across the
+   * deadline.
+   *
+   * Returns how far past `endsAt` the queued frames were read, so the engine can
+   * be asked about the same instant. The assertions in here are the scenario's
+   * premise rather than its claim: if the room is not still `running` at
+   * `endsAt − LEAD`, or the tick did not end the round, then the window was
+   * never open and everything after this is measuring something else.
+   */
+  function acrossTheDeadline(r: Room, now: () => number, press: () => void): number {
+    const endsAt = r.host.state().arcade?.endsAt;
+    assert.ok(typeof endsAt === "number", "the round carries no endsAt");
+    const wait = endsAt - now() - LEAD;
+    assert.ok(
+      wait > 0,
+      `the Floor's clock is ${endsAt - now()} ms away, which is inside the lead`,
+    );
+    r.advance(wait);
+    assert.equal(endsAt - now(), LEAD, "the room did not stop where it was asked to");
+    assert.equal(
+      r.host.state().arcade?.phase,
+      "running",
+      "the round ended before the frame was even queued",
+    );
+    press();
+    // The tick that does all the work: `Date.now()` goes to `endsAt + 463`
+    // first, then the queued frames run, then the Floor timer runs and ends the
+    // round underneath them.
+    r.advance(SPAN);
+    assert.equal(
+      r.host.state().arcade?.phase,
+      "idle",
+      "the Floor timer did not end the round, so the frames arrived at a live " +
+        "round and the clock was never the thing refusing them",
+    );
+    // The refusals themselves are `#send`, which is one more `#later`, so they
+    // are on the wire and not yet delivered.
+    r.settle();
+    return SPAN - LEAD;
+  }
+
+  /**
+   * The tap guard, which is the one (b) is named for.
+   *
+   * Target four and three seconds: the target because the crossing has to be
+   * four taps rather than a hundred and twenty, the three seconds because the
+   * Floor's own clock is the clock being run out and ninety of them is a long
+   * time to tick through at one second a tick. Plan / Apply is one of the three
+   * rounds `#armFloorTimer` does arm for, which is what makes the tick that ends
+   * the round a tick this scenario can aim a frame at.
+   *
+   * Paired with a tap that is plainly in time, because a mock that refused every
+   * tap would pass the late half on its own, and with a tap at the round that
+   * has now ended, because that is the answer a scenario which missed the window
+   * would have collected.
+   */
+  it("refuses a tap that arrived on the tick that ended the round, as the reducer does", async (t) => {
+    const cmd = {
+      name: "arcade.round",
+      kind: "plan_apply",
+      target: 4,
+      seconds: 3,
+    } as const;
+    const config: ArcadeRoundConfig = { kind: "plan_apply", target: 4, seconds: 3 };
+
+    const r = await room(t, 3);
+    r.cmd({ name: "open" });
+    r.cmd({ name: "start" });
+    r.cmd({ name: "arcade.enter" });
+    r.cmd(cmd);
+    r.cmd({ name: "arcade.begin" });
+    const round = r.host.state().arcade?.roundIndex ?? -1;
+    const now = mockClock(r);
+    const runner = r.phones[0];
+    assert.ok(runner !== undefined, "the room has no phones");
+
+    let engine = engineRoom(3, [
+      { type: "startRound", round: "plan_apply", config },
+      { type: "beginPlay" },
+    ]);
+    const engineEndsAt = engineView(engine).arcade?.endsAt;
+    assert.ok(typeof engineEndsAt === "number", "the engine's Floor has no clock");
+    // The two clocks are on different epochs and are never compared. Their
+    // *lengths* are the same number and have to be, because the instants below
+    // are offsets from each side's own `endsAt` and mean the same thing only if
+    // the two Floors are open for the same three seconds.
+    assert.equal(
+      (r.host.state().arcade?.endsAt ?? 0) - (r.host.state().arcade?.startedAt ?? 0),
+      engineEndsAt - T0,
+      "the two Floors are open for different lengths of time",
+    );
+
+    // A tap in time. The light is green — `#beginPlay` draws `2_000 +
+    // random(4_000)` for the first PLAN, so the first instant of the round is
+    // inside it whatever it drew — which matters because a tap into the APPLY
+    // light drains, and a drained player is refused `not_on_the_floor` a line
+    // *above* the guard this scenario is about.
+    assert.equal(
+      r.host.state().arcade?.planApply?.light,
+      "plan",
+      "the round opened on the APPLY light, so a tap now would drain the runner",
+    );
+    const early = engineAnswer(engine, { type: "tap", pid: "p1", at: T0 + 10 }, T0 + 10);
+    assert.deepEqual(
+      early.answer,
+      { kind: "ack", applied: true },
+      "the engine refuses a tap inside its own clock, so this is not a pairing",
+    );
+    runner.send({ t: "arcade.tap", cid: "early-tap", round });
+    assert.deepEqual(
+      answerTo(runner, "early-tap"),
+      early.answer,
+      "a tap well inside the Floor's clock",
+    );
+    engine = early.next;
+    const struck = (state: RenderState): readonly string[] =>
+      (state.arcade?.grid ?? []).filter((c) => c.struck).map((c) => c.pid);
+    assert.deepEqual(struck(engineView(engine)), [], "the engine drained the runner");
+    assert.deepEqual(
+      struck(r.host.state()),
+      [],
+      "the mock drained the runner, so the late tap below is refused for standing",
+    );
+
+    // And the same tap, queued before the deadline and read after it.
+    const late = (at: number): Answer =>
+      engineAnswer(engine, { type: "tap", pid: "p1", at }, at).answer;
+    const skew = acrossTheDeadline(r, now, () => {
+      runner.transport.send({ t: "arcade.tap", cid: "late-tap", round });
+    });
+    const refused = late(engineEndsAt + skew);
+    assert.deepEqual(
+      refused,
+      {
+        kind: "refused",
+        code: "floor_locked",
+        message: "The Floor is closed.",
+      },
+      "the engine's own answer to a tap past its Floor's clock",
+    );
+    assert.deepEqual(
+      answerTo(runner, "late-tap"),
+      refused,
+      "a tap that arrived on the tick that ended the round",
+    );
+
+    // The other refusal, one line up, and the reason the one above is evidence:
+    // the round is `idle` now, and an `idle` round answers a tap differently. A
+    // scenario that had ticked past `endsAt` before sending — which is what the
+    // probe that declared this unreachable did — would have got this answer
+    // where it expected the one above.
+    engine = replay(engine, [{ event: { type: "endRound" }, at: engineEndsAt }]);
+    const ended = late(engineEndsAt + 5_000);
+    assert.deepEqual(
+      ended,
+      {
+        kind: "refused",
+        code: "wrong_round_phase",
+        message: "Nothing to tap.",
+      },
+      "the engine answers an ended round the same way it answers a locked Floor",
+    );
+    runner.send({ t: "arcade.tap", cid: "ended-tap", round });
+    assert.deepEqual(
+      answerTo(runner, "ended-tap"),
+      ended,
+      "a tap at a round that has finished",
+    );
+  });
+
+  /**
+   * The other two, in one round and on one tick.
+   *
+   * Unseal arms a Floor timer for the same reason Plan / Apply does, and it is
+   * the one round that holds both of the remaining guards within reach at once:
+   * a tin being tapped open is a `#arcadeUnseal` letter, and a shattered tin is a
+   * Lounge seat without a clock — two wrong letters and no waiting. So both
+   * frames are queued on the same tick and both are read past the same `endsAt`.
+   *
+   * Three roles: p1 has a tin and is tapping it open, p3 shatters theirs and
+   * bets from the Lounge, and p2 is on the Floor and never touched — they are
+   * who the late bet names, because `#arcadeBack` acks a bet on the runner you
+   * are already backing as `applied: false` and a late bet naming p1 again would
+   * have been answered by that check instead of by the clock.
+   *
+   * Both halves are paired with the same press made in time, for the reason the
+   * tap is: a letter and a bet that were both refused *whatever* the clock said
+   * would pass the late half on their own.
+   */
+  it("refuses a letter and a bet that arrived on that same tick, as the reducer does", async (t) => {
+    const cmd = { name: "arcade.round", kind: "unseal", seconds: 3 } as const;
+    const config: ArcadeRoundConfig = {
+      kind: "unseal",
+      items: UNSEAL_ITEMS,
+      seconds: 3,
+    };
+
+    const r = await room(t, 6);
+    r.cmd({ name: "open" });
+    r.cmd({ name: "start" });
+    r.cmd({ name: "arcade.enter" });
+    r.cmd(cmd);
+    r.cmd({ name: "arcade.begin" });
+    const round = r.host.state().arcade?.roundIndex ?? -1;
+    const now = mockClock(r);
+
+    let engine = engineRoom(6, [
+      { type: "startRound", round: "unseal", config },
+      { type: "beginPlay" },
+    ]);
+    const engineEndsAt = engineView(engine).arcade?.endsAt;
+    assert.ok(typeof engineEndsAt === "number", "the engine's Floor has no clock");
+    assert.equal(
+      (r.host.state().arcade?.endsAt ?? 0) - (r.host.state().arcade?.startedAt ?? 0),
+      engineEndsAt - T0,
+      "the two Floors are open for different lengths of time",
+    );
+
+    const runner = r.phones[0];
+    const bystander = r.phones[1];
+    const better = r.phones[2];
+    assert.ok(runner !== undefined && bystander !== undefined && better !== undefined);
+
+    const shape = (r.host.state().arcade?.unseal?.shapes ?? []).find((s) => s.available)
+      ?.shape;
+    assert.ok(shape !== undefined, "the round dealt no tins at all");
+
+    /** The word behind a cue, which the cue is an anagram of. */
+    const wordFor = (cue: string): string[] => {
+      const item = UNSEAL_ITEMS.find((i) => i.cue === cue);
+      assert.ok(item !== undefined, `no unseal item has the cue ${cue}`);
+      return [...item.answer.toUpperCase()].filter((c) => /\p{L}/u.test(c));
+    };
+    const cueOn = (wire: Wire): string => {
+      const cue = wire.state().arcadeMine?.unseal?.cue;
+      assert.ok(typeof cue === "string" && cue !== "", "that phone holds no tin");
+      return cue;
+    };
+    const engineCue = (pid: string, at: number): string | null | undefined =>
+      renderStateFor(engine, {
+        role: "participant",
+        pid,
+        lastSeen: new Map([[pid, at]]),
+        now: at,
+      }).arcadeMine?.unseal?.cue;
+
+    const pick = (wire: Wire, pid: string, at: number): void => {
+      wire.send({ t: "arcade.shape", cid: `pick-${pid}`, round, shape });
+      engine = replay(engine, [{ event: { type: "pickShape", pid, shape }, at }]);
+    };
+    pick(runner, "p1", T0 + 10);
+    pick(better, "p3", T0 + 10);
+    // The two sides deal tins by player number out of the same item list, so the
+    // same person is holding the same word. Asserted rather than assumed: if the
+    // dealing diverges, every letter below stops meaning the same thing on the
+    // two sides and this should say so here.
+    assert.equal(engineCue("p1", T0 + 10), cueOn(runner), "p1's tin");
+    assert.equal(engineCue("p3", T0 + 10), cueOn(better), "p3's tin");
+
+    // p3 shatters: two wrong letters, drawn from their own tiles because a
+    // letter that is not on the tin is a malformed frame rather than a guess.
+    const cue3 = cueOn(better);
+    const wrong = [...cue3].find((c) => /\p{L}/u.test(c) && c !== wordFor(cue3)[0]);
+    assert.ok(wrong !== undefined, "p3's word is one letter repeated");
+    for (const n of [0, 1]) {
+      better.send({ t: "arcade.letter", cid: `x-${n}`, round, letter: wrong });
+      engine = replay(engine, [
+        { event: { type: "tapLetter", pid: "p3", letter: wrong }, at: T0 + 20 + n },
+      ]);
+    }
+    const struck = (state: RenderState): readonly string[] =>
+      (state.arcade?.grid ?? []).filter((c) => c.struck).map((c) => c.pid);
+    assert.deepEqual(
+      struck(engineView(engine)),
+      ["p3"],
+      "the engine did not put p3 in the Lounge, so there is no bet to place",
+    );
+    assert.deepEqual(struck(r.host.state()), struck(engineView(engine)), "the drains");
+
+    // A letter in time, and a bet in time.
+    const word = wordFor(cueOn(runner));
+    assert.ok(
+      word.length >= 2,
+      "p1's word is one letter, so the late letter below would not be the next one",
+    );
+    const firstLetter = word[0];
+    const nextLetter = word[1];
+    assert.ok(firstLetter !== undefined && nextLetter !== undefined);
+
+    const earlyLetter = engineAnswer(
+      engine,
+      { type: "tapLetter", pid: "p1", letter: firstLetter },
+      T0 + 40,
+    );
+    assert.deepEqual(
+      earlyLetter.answer,
+      { kind: "ack", applied: true },
+      "the engine refuses a letter inside its own clock, so this is not a pairing",
+    );
+    runner.send({ t: "arcade.letter", cid: "early-letter", round, letter: firstLetter });
+    assert.deepEqual(
+      answerTo(runner, "early-letter"),
+      earlyLetter.answer,
+      "a letter well inside the Floor's clock",
+    );
+    engine = earlyLetter.next;
+
+    const earlyBet = engineAnswer(
+      engine,
+      { type: "backPlayer", pid: "p3", backing: "p1" },
+      T0 + 50,
+    );
+    assert.deepEqual(
+      earlyBet.answer,
+      { kind: "ack", applied: true },
+      "the engine refuses a bet inside its own clock, so this is not a pairing",
+    );
+    better.send({ t: "arcade.back", cid: "early-bet", pid: "p1" });
+    assert.deepEqual(
+      answerTo(better, "early-bet"),
+      earlyBet.answer,
+      "a bet well inside the Floor's clock",
+    );
+    engine = earlyBet.next;
+
+    // And the same two presses, queued before the deadline and read after it.
+    // p1's next letter is a letter they would be *credited* for — progress is
+    // one and this is word[1] — and p3's bet names somebody they are not already
+    // backing, so with the clock out of the way both of these succeed.
+    const skew = acrossTheDeadline(r, now, () => {
+      runner.transport.send({
+        t: "arcade.letter",
+        cid: "late-letter",
+        round,
+        letter: nextLetter,
+      });
+      better.transport.send({ t: "arcade.back", cid: "late-bet", pid: "p2" });
+    });
+    const at = engineEndsAt + skew;
+
+    const lateLetter = engineAnswer(
+      engine,
+      { type: "tapLetter", pid: "p1", letter: nextLetter },
+      at,
+    );
+    assert.deepEqual(
+      lateLetter.answer,
+      {
+        kind: "refused",
+        code: "floor_locked",
+        message: "The Floor is closed.",
+      },
+      "the engine's own answer to a letter past its Floor's clock",
+    );
+    assert.deepEqual(
+      answerTo(runner, "late-letter"),
+      lateLetter.answer,
+      "a letter that arrived on the tick that ended the round",
+    );
+
+    const lateBet = engineAnswer(
+      engine,
+      { type: "backPlayer", pid: "p3", backing: "p2" },
+      at,
+    );
+    assert.deepEqual(
+      lateBet.answer,
+      {
+        kind: "refused",
+        code: "floor_locked",
+        message: "The Floor has locked.",
+      },
+      "the engine's own answer to a bet past its Floor's clock",
+    );
+    assert.deepEqual(
+      answerTo(better, "late-bet"),
+      lateBet.answer,
+      "a bet that arrived on the tick that ended the round",
+    );
+    // Two different sentences for the same locked Floor, and both go on glass:
+    // the reducer says "closed" to somebody holding a tin and "locked" to
+    // somebody in the Lounge. A mock that shared one string between the two
+    // guards would pass one of these and fail the other.
+    assert.notDeepEqual(
+      lateLetter.answer,
+      lateBet.answer,
+      "the two guards answer with the same sentence, so one of them is unwatched",
+    );
+
+    // And the refusal that is waiting one line up, for the reason the tap
+    // scenario spells out: an `idle` round refuses a bet in different words, so
+    // the answers above are evidence that the window was entered.
+    engine = replay(engine, [{ event: { type: "endRound" }, at: engineEndsAt }]);
+    const ended = engineAnswer(
+      engine,
+      { type: "backPlayer", pid: "p3", backing: "p2" },
+      engineEndsAt + 5_000,
+    );
+    assert.deepEqual(
+      ended.answer,
+      {
+        kind: "refused",
+        code: "wrong_round_phase",
+        message: "The Lounge is not open.",
+      },
+      "the engine answers an ended round the same way it answers a locked Floor",
+    );
+    better.send({ t: "arcade.back", cid: "ended-bet", pid: "p2" });
+    assert.deepEqual(
+      answerTo(better, "ended-bet"),
+      ended.answer,
+      "a bet at a round that has finished",
     );
   });
 });
