@@ -124,6 +124,7 @@ import { RECRUITMENT_ITEMS } from "../../arcade/recruitment.ts";
 import { GLASS_BRIDGE_STEPS } from "../../arcade/glass-bridge.ts";
 import { UNSEAL_ITEMS } from "../../arcade/unseal.ts";
 import { GGANBU_PROMPTS } from "../../arcade/gganbu.ts";
+import { finalRevealMs } from "./view.ts";
 import type { Transport, TransportFactory, TransportHandlers } from "./transport.ts";
 
 export interface MockConfig {
@@ -1000,6 +1001,51 @@ const TELEGRAPH_MS = 400;
 const LOCK_GRACE_MS = 250;
 /** As many runners as the corner of the light has room for. See views.ts. */
 const MOCK_TICKER_ROWS = 5;
+
+/**
+ * The hard five that may go to a phone or the big screen. See `#publicRows`.
+ *
+ * Named rather than written twice because the director now has to reason
+ * about it: how long the Desktop's final reveal takes is a function of how
+ * many rows it was sent, and the loop has to wait out exactly that.
+ */
+const PUBLIC_ROWS = 5;
+
+/**
+ * How long the scripted loop holds `final` before handing over to the
+ * send-off, in seconds. Derived, never a literal.
+ *
+ * The Desktop plays a client-side climb at the final reveal — 5th, 4th, 3rd,
+ * 2nd on a four-second dwell, then seven seconds of empty first place — and
+ * `finalRevealMs` in view.ts is the one place that arithmetic lives. This asks
+ * that same function about the widest board the Desktop can be handed, which
+ * is `#publicRows`' hard five with a unique winner, and reserves the answer.
+ *
+ * Derived and not typed in, because a literal here is a literal that goes
+ * stale the next time anything upstream moves. That is not hypothetical: the
+ * loop used to give `final` **two seconds** against a twenty-three second
+ * climb, so nobody watching `?mock=1` had ever seen the climb play or the
+ * winner land — on the one segment DESIGN.md spends the most words on, in the
+ * loop that exists so that every screen change can be watched. The budget had
+ * in fact been calculated correctly; it was just attached to the loop restart
+ * twelve seconds after the last send-off step instead of to `final` itself.
+ *
+ * A tie for first shortens the real climb, and the loop simply waits the spare
+ * few seconds rather than cutting a reveal short. Rounded up: `#at` takes
+ * seconds, and rounding down would shave the last frame off the landing.
+ */
+const DEMO_FINAL_HOLD_S = Math.ceil(
+  finalRevealMs(
+    Array.from({ length: PUBLIC_ROWS }, (_, i) => ({
+      rank: i + 1,
+      nickname: "",
+      total: 0,
+      perActivity: {},
+      bench: [],
+      spot: 0,
+    })),
+  ) / 1000,
+);
 
 /** Quarter marks of the target: 30 / 60 / 90 at the tuned 120. */
 function mockCheckpoints(target: number): number[] {
@@ -2117,7 +2163,7 @@ class MockSession {
    */
   #publicRows(board: readonly MockRow[]): MockRow[] {
     if (!board.some((r) => r.total > 0)) return [];
-    return this.#topFive(board).slice(0, 5);
+    return this.#topFive(board).slice(0, PUBLIC_ROWS);
   }
 
   #scoreRows(board: readonly MockRow[]): ScoreRow[] {
@@ -2203,8 +2249,11 @@ class MockSession {
    */
   sendoffView(role: Role): SendoffView | undefined {
     const so = this.sendoff;
-    // On the wire whenever one is loaded, not only inside the segment — which
-    // is what views.ts does. The surfaces decide what to draw from `segment`.
+    // On the wire whenever one is loaded and not only inside the segment,
+    // which is what `sendoffViewFor` in views.ts does too — it reads
+    // `state.sendoff` and nothing else. The surfaces decide what to draw from
+    // `segment`. (Rewritten because the old wording could be read as a claim
+    // that views.ts gates on the segment, and a sweep did read it that way.)
     if (so === null) return undefined;
     const phase = this.sendoffPhase;
     const plan = this.sendoffPlan;
@@ -2326,18 +2375,39 @@ class MockSession {
           ...(this.arcadeOn
             ? {
                 arcade: {
-                  // Who has committed at whatever is open. For Gganbu that is
-                  // the **keys** of `wagers` and never its values: a value is a
-                  // pick and a stake, and the console is three feet from the
-                  // host's mouth. The host's question is only whether both
-                  // halves of every pair have locked in, which decides whether
-                  // they settle now or wait, and the keys answer it alone.
+                  // Who has committed at whatever is open — the number behind
+                  // the console's "N of M have picked", which is how a
+                  // facilitator decides whether to move on or wait ten more
+                  // seconds. Every round that has something to commit to
+                  // answers it, and the **keys** answer it: in all four cases
+                  // the value is the commitment itself, and the console is
+                  // three feet from the host's mouth.
+                  //
+                  // - Recruitment: who has answered the open item.
+                  // - The Glass Bridge: who is standing on a pane. Never the
+                  //   value, which is whether their pane held — "X survived
+                  //   this step" read out next to a published break is the one
+                  //   join this round exists to prevent.
+                  // - Unseal: who is holding a tin. Never which tin: the value
+                  //   is an index into the words, and a shape is a word length.
+                  // - Gganbu: who has wagered on the open prompt. Never the
+                  //   value, which is a pick and a stake.
+                  //
+                  // The Bridge and Unseal arms were missing for the whole of
+                  // those two rounds, so the demo console read a flat zero
+                  // while its own bots were visibly picking and stepping. A
+                  // zero looks like a round that has not started, which is why
+                  // nobody noticed until the two files were read side by side.
                   answeredBy:
                     this.arcadePlay?.kind === "recruitment"
                       ? Object.keys(this.arcadePlay.answered)
-                      : this.arcadePlay?.kind === "gganbu"
-                        ? Object.keys(this.arcadePlay.wagers)
-                        : [],
+                      : this.arcadePlay?.kind === "glass_bridge"
+                        ? Object.keys(this.arcadePlay.stepped)
+                        : this.arcadePlay?.kind === "unseal"
+                          ? Object.keys(this.arcadePlay.pick)
+                          : this.arcadePlay?.kind === "gganbu"
+                            ? Object.keys(this.arcadePlay.wagers)
+                            : [],
                   drained: Object.entries(this.arcadeStanding)
                     .filter(([, st]) => st === "drained")
                     .map(([pid]) => pid),
@@ -3172,6 +3242,27 @@ class MockHub {
     // Every round starts with everyone back on the Floor. Cumulative
     // elimination is the show; it is the wrong shape for a work afternoon.
     s.resetFloor();
+    // Counted here, at the start, and not at the round's end where this used
+    // to live.
+    //
+    // Both orders walk the same sequence of values — 0, 1, 2 — so anything
+    // reading the number as "which round of the run is this" could never tell
+    // them apart, and nothing ever did. The Desktop's win beat reads
+    // it as a **reset key** instead: a new index means a new rope and the beat
+    // must forget the last round's tallies. And the pull that *wins* a round
+    // arrives on the frame that ends it. Bumping at the end put a new index on
+    // exactly that frame, the beat reset instead of narrating, and the last
+    // pull of every Tug of Raft round went unnarrated in the demo loop — the
+    // one place anybody watches that feature. The reducer's `startRound` case
+    // counts here, first round at zero because there is no previous round to
+    // count; so does this now, and the two agree frame for frame.
+    //
+    // The inbound guards downstream read `arcadeRoundIndex` to refuse a tap
+    // that crossed a round boundary. They are unaffected: a frame arriving
+    // after `#endRound` now matches the index and is refused a line later by
+    // the `phase !== "running"` check instead, which is precisely what the
+    // real server does with the same late frame.
+    s.arcadeRoundIndex = s.arcadeRound === null ? 0 : s.arcadeRoundIndex + 1;
     s.arcadeRound = cmd.kind;
     s.arcadePhase = "card";
     s.arcadeStartedAt = null;
@@ -3886,7 +3977,9 @@ class MockHub {
     }
     s.arcadePhase = "idle";
     s.arcadeEndsAt = null;
-    s.arcadeRoundIndex += 1;
+    // `arcadeRoundIndex` is deliberately not touched here. It moves in
+    // `#startRound`, where the reducer moves it, and the comment there says
+    // what went wrong while it moved here instead.
   }
 
   #clearArcadeTimers(): void {
@@ -5250,7 +5343,25 @@ class MockHub {
       this.#broadcastState();
     });
 
-    this.#at(364, () => {
+    /**
+     * The reveal, and the only beat in this loop whose length is computed.
+     *
+     * Everything from here on is placed relative to it, because the Desktop's
+     * climb is a *derived* length: {@link DEMO_FINAL_HOLD_S} asks view.ts how
+     * long five rows take to climb, and the send-off cannot start until that
+     * has finished playing. Writing the follow-on beats as absolute literals
+     * is what put `final` on a two-second hold against a twenty-three second
+     * climb; a reader adding a row, a bot, or a dwell would have had to notice
+     * three separate numbers and move all of them.
+     */
+    const FINAL_AT_S = 364;
+    const SENDOFF_AT_S = FINAL_AT_S + DEMO_FINAL_HOLD_S;
+    /** The montage, cut to twenty seconds. See the send-off's own note. */
+    const SENDOFF_STEPS_AT_S = SENDOFF_AT_S + 20;
+    const SENDOFF_STEPS = 7;
+    const SENDOFF_STEP_S = 5;
+
+    this.#at(FINAL_AT_S, () => {
       this.session.seal = "revealed";
       this.session.segment = "final";
       this.#broadcastState();
@@ -5267,28 +5378,37 @@ class MockHub {
      * forty the file asks for — long enough for one cross-fade at the dwell
      * that forty seconds over three photos works out to — and a message holds
      * five seconds instead of however long it takes to read one out.
+     *
+     * It waits out the whole of the final reveal first. The segment change is
+     * what takes the Desktop off `sceneFinal`, so starting it early does not
+     * overlap the climb, it *deletes* it.
      */
-    this.#at(366, () => {
+    this.#at(SENDOFF_AT_S, () => {
       this.session.segment = "sendoff";
       this.#broadcastState();
     });
-    for (let i = 0; i < 7; i += 1) {
-      this.#at(386 + i * 5, () => {
+    for (let i = 0; i < SENDOFF_STEPS; i += 1) {
+      this.#at(SENDOFF_STEPS_AT_S + i * SENDOFF_STEP_S, () => {
         if (this.session.segment !== "sendoff") return;
         this.session.stepSendoff(1);
         this.#broadcastState();
       });
     }
 
-    // Long enough for the big screen's final reveal to actually finish: four
-    // four-second dwells, then the hold on the empty first slot.
-    this.#at(428, () => {
-      this.#clearArcadeTimers();
-      this.session.reset();
-      this.#directorStarted = false;
-      this.#broadcastState();
-      this.#startDirector();
-    });
+    // Twelve seconds on `done` before the room is torn down and rebuilt: the
+    // last card is a thing to sit with, and a loop that restarts on top of it
+    // reads as a crash. The final reveal's own budget is no longer spent here
+    // — it is reserved at `final`, where it is actually played.
+    this.#at(
+      SENDOFF_STEPS_AT_S + (SENDOFF_STEPS - 1) * SENDOFF_STEP_S + 12,
+      () => {
+        this.#clearArcadeTimers();
+        this.session.reset();
+        this.#directorStarted = false;
+        this.#broadcastState();
+        this.#startDirector();
+      },
+    );
   }
 
   #botJoins(): void {
