@@ -42,7 +42,6 @@ import {
   answerTiles,
   bridgeEntries,
   formatCountdown,
-  gganbuQuestion,
   gridEntries,
   itemEndsAt,
   playerTag,
@@ -4017,11 +4016,18 @@ function renderArcade(s: RenderState): void {
         `PROMPT ${gg.at + 1} OF ${gg.of}`,
         `${gg.secondsPerPrompt}s`,
         promptLeft === null ? null : formatCountdown(promptLeft),
-        gg.prompt ? gganbuQuestion(gg.prompt) : null,
+        // No question. The sentence is on the Desktop the room is looking at
+        // and on every phone in it; a third copy here is the longest thing on
+        // the panel and the one thing the host never has to read off it.
+        //
         // The answer, on the one surface in the building that is not in the
         // room. Both halves of a pair are sitting next to each other, so this
-        // line is also the reason the console is not for sharing.
-        open ? `\u2192 ${GGANBU_SIDE[open.answer].word}` : null,
+        // line is also the reason the console is not for sharing. With the
+        // threshold, because "over" is not something a host can say out loud:
+        // the number is what makes it a sentence.
+        open
+          ? `\u2192 ${GGANBU_SIDE[open.answer].word} ${open.threshold}`
+          : null,
         open?.verify === true ? "\u26a0 VERIFY" : null,
       ]
         .filter((x) => x !== null)
@@ -4072,13 +4078,18 @@ function renderArcade(s: RenderState): void {
             h("span", { class: "a-gganbu-cue" }, [
               h("span", {
                 class: "a-gganbu-q",
-                // The room's wording, not a second copy of it: the host is
-                // reading out the sentence the big screen is showing.
-                text: gganbuQuestion({ cue: row.cue, threshold: row.threshold }),
+                // The cue alone, not the question. Six full sentences is the
+                // bulk of this panel, and the host is not reading any of them
+                // out — the Desktop and every phone already carry the wording.
+                // What a row is for is finding the prompt by name and seeing
+                // what it settles to, so the cue is an index entry here.
+                text: row.cue,
               }),
               h("span", {
                 class: "mono a-gganbu-answer",
-                text: GGANBU_SIDE[row.answer].word,
+                // The threshold travels with the answer, for the same reason
+                // it does on the live line: "OVER" on its own settles nothing.
+                text: `${GGANBU_SIDE[row.answer].word} ${row.threshold}`,
               }),
               row.verify
                 ? h("span", { class: "mono a-gganbu-verify", text: "VERIFY" })

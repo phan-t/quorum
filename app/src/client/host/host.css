@@ -2028,12 +2028,24 @@ body {
   font-size: 11px;
   color: var(--muted);
 }
-.a-gganbu-cue {
+/* Scoped to the console's own recap, because the class name is not this
+   stylesheet's alone. `participant.css` defines `.a-gganbu-cue` as the phone's
+   question — `clamp(19px, 5.4vw, 26px)`, `line-height: 1.25`, `max-width: 34ch`
+   — and the console loads that stylesheet whole, for the participant preview in
+   the right-hand column. Unscoped, those land on these rows too, and since
+   nothing here set a size they won: six index entries drawn at the size of the
+   sentence on a player's phone, which is what made this panel the longest thing
+   in the console. The three properties are answered by name rather than reset
+   in bulk, so a change to the phone's question cannot quietly move these. */
+.a-gganbu-host .a-gganbu-cue {
   display: flex;
   flex-wrap: wrap;
   align-items: baseline;
   gap: 0 0.4rem;
   min-width: 0;
+  font-size: inherit;
+  line-height: inherit;
+  max-width: none;
 }
 .a-gganbu-row.is-open .a-gganbu-q {
   font-weight: 600;
