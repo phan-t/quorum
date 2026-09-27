@@ -49,6 +49,73 @@ export const RECOVERABLE_PHASES = [
 ] as const satisfies readonly SessionPhase[];
 
 /**
+ * How long after its last change a `closed` session is still worth holding.
+ *
+ * The other half of the `closed` argument above. Recovering closed sessions is
+ * right and the reason is real, but "for ever" was not the intent and was what
+ * the code did, and it cost more than a long session list:
+ *
+ * - Every boot recovered every closed session and wrote its rows straight back
+ *   at the current version — see the note on that write in `recovery.ts` — so
+ *   the `ttl`, which is derived from `updatedAt`, was pushed out 90 days on
+ *   every deploy. A finished session's rows could not expire while the service
+ *   kept shipping.
+ * - Every SIGTERM wrote a snapshot and a META row for everything the registry
+ *   held, closed sessions from weeks ago included. Rows an operator had just
+ *   deleted by hand were re-created by the process that was shutting down, and
+ *   recovered by the one that replaced it. Measured across three deploys in one
+ *   afternoon: eleven deleted sessions, all twelve rows back at the next boot,
+ *   written at the SIGTERM timestamp to the second.
+ * - Every one of them was rehydrated and run through the migration shims on
+ *   every restart, which is the surface those shims are dangerous on.
+ *
+ * Bounded by `updatedAt` rather than by phase, which is what the DynamoDB scan
+ * had already suggested in a comment: a close from six weeks ago does not need
+ * reopening, one from six minutes ago very much does. Dropping `closed` from
+ * `RECOVERABLE_PHASES` instead would have taken the six-minute case with it,
+ * and that case is the one that happened for real.
+ *
+ * Seven days. Long enough to cover the event and the week of tidying after it,
+ * which is the whole span in which anybody has ever wanted a finished session
+ * back; short enough that the 90-day `ttl` gets to run to the end. Nothing is
+ * deleted at the boundary — a retired session is left in the table exactly as
+ * it was, and its scores and event log stay downloadable by sid, because the
+ * export path reads the store and not the registry.
+ *
+ * Only `closed`. A `draft` that has sat for a month is a session somebody
+ * staged and has not opened yet, and its join code is live; dropping one is
+ * the bug the `draft` entry above exists to record. `lobby` and `running` are
+ * a room that is in progress by definition, however stale the row looks.
+ */
+export const REOPEN_WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
+
+/**
+ * Whether this session has aged out of being worth holding in the registry.
+ *
+ * One function, called from both ends of the process's life — `recoverSessions`
+ * at boot and `shutdown` at SIGTERM — because a rule applied at one end only is
+ * the bug this is fixing. Recovery stopping is what keeps the registry small;
+ * shutdown stopping is what keeps a deploy from writing back the rows somebody
+ * deleted, and a task that has been up for a fortnight can close a session and
+ * then age it out without ever rebooting.
+ *
+ * An `updatedAt` of zero or nonsense is treated as *not* retired. A row with no
+ * usable timestamp is a row this cannot date, and dropping a session because
+ * its clock is missing is a guess in the direction that loses things.
+ */
+export function retiredByAge(
+  phase: SessionPhase | undefined,
+  updatedAt: number,
+  now: number,
+): boolean {
+  if (phase !== "closed") return false;
+  if (typeof updatedAt !== "number" || !Number.isFinite(updatedAt) || updatedAt <= 0) {
+    return false;
+  }
+  return now - updatedAt > REOPEN_WINDOW_MS;
+}
+
+/**
  * The shape version stamped on every `SNAPSHOT` row this code writes.
  *
  * Version 1 was written and never read back, which made it decoration: a row
@@ -348,10 +415,6 @@ export interface SessionStore {
   appendEvent(sid: string, record: StoredEvent): Promise<void>;
   putParticipant(sid: string, participant: StoredParticipant): Promise<void>;
 
-  /** `CODE#<joinCode>` / `ACTIVE` — exists only while the session is joinable. */
-  putJoinCode(joinCode: string, sid: string): Promise<void>;
-  deleteJoinCode(joinCode: string): Promise<void>;
-
   /** Sessions in `lobby` or `running`: what a restart has to bring back. */
   loadRecoverable(): Promise<LoadedSession[]>;
   /** One session by id, whatever its phase — the export path after a restart. */
@@ -403,9 +466,35 @@ export function sessionPk(sid: string): string {
   return `SESSION#${sid}`;
 }
 
-export function codePk(joinCode: string): string {
-  return `CODE#${joinCode}`;
-}
+/**
+ * THE JOIN-CODE PARTITION, AND WHY THERE IS NO LONGER ONE.
+ *
+ * `CODE#<joinCode>` / `ACTIVE` used to be written when a session was created,
+ * deleted when it closed and written again when it reopened. It was there from
+ * the first persistence commit, and ARCHITECTURE.md described it as how join
+ * codes are looked up — which is the design that was intended and never built.
+ * Nothing outside the tests ever read it back, across the whole life of the
+ * project: a phone's join goes through `SessionRegistry.byJoinCode`, which is
+ * an in-memory map rebuilt at boot from the snapshots recovery already loads.
+ *
+ * It was removed in #22, which is the issue about two records of a session's
+ * join code disagreeing. This was the third, and the argument for deleting it
+ * rather than wiring it up is that it could only ever have made that worse: a
+ * copy with no reader cannot be caught drifting, and making it the lookup
+ * would have meant an asynchronous store read on the one path a phone takes to
+ * get into a room, answering from a row that close and reopen have to keep in
+ * step by hand. Two records checked against each other beats three with one of
+ * them unread.
+ *
+ * Rows written before this are harmless and are left alone: nothing reads
+ * them, and each carries a `ttl`, so the table clears them within the
+ * retention window without anybody deleting anything.
+ *
+ * If a lookup by join code is ever genuinely needed — a second task, say, in
+ * which case a great deal else changes first — it wants to be built against a
+ * reader, with the drift that `putMeta` and `putSnapshot` already have to be
+ * checked for, rather than restored because a key shape used to exist.
+ */
 
 /** Expiry stamp, in whole seconds, as DynamoDB's TTL wants it. */
 export function ttlAt(now: number): number {

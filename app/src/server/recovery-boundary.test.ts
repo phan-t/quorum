@@ -14,9 +14,20 @@
  * - **#14.** The registry keys a session by the snapshot's sid and the boot log
  *   names it by META's, with nothing asserting they agree — so a row whose two
  *   halves disagree comes up live under a key the log never mentions.
+ * - **#22.** The same pair one field over. `joinCode` is recorded twice as
+ *   well, the registry keys `byCode` off the snapshot's and a log-only rebuild
+ *   seeds from META's, and a divergence is invisible from every surface: the
+ *   session is live under a code nobody has while the link in the host's hand
+ *   opens nothing.
+ * - **#23.** The other direction — not a row that must not come back, but a
+ *   row that must stop coming back. Every closed session was recovered for
+ *   ever, re-stamped on every boot so its `ttl` never arrived, and written
+ *   again on every SIGTERM, which re-created the rows an operator had just
+ *   deleted.
  *
- * Both are tested here rather than in `persistence.test.ts` because neither is
- * about persistence working. They are about what happens when it has not.
+ * All of them are tested here rather than in `persistence.test.ts` because
+ * none is about persistence working. They are about what happens when it has
+ * not, and about what a boot has to refuse.
  */
 
 import { strict as assert } from "node:assert";
@@ -28,11 +39,36 @@ import type { Activity, Event, Question, SessionState } from "../engine/types.ts
 import { Persister } from "./persist.ts";
 import { recoverSessions } from "./recovery.ts";
 import { DEFAULT_ACTIVITIES, SessionRegistry } from "./runtime.ts";
+import { assembleSession } from "./store/dynamo.ts";
 import { MemoryStore } from "./store/memory.ts";
-import { RECOVERABLE_PHASES, type SessionMeta } from "./store/types.ts";
+import {
+  RECOVERABLE_PHASES,
+  REOPEN_WINDOW_MS,
+  retiredByAge,
+  type SessionMeta,
+} from "./store/types.ts";
 
 /** Long enough for a `setTimeout(…, 0)` to have run. */
 const tick = (): Promise<void> => new Promise((r) => setTimeout(r, 5));
+
+/**
+ * `main.ts` with its comments taken out, for the structural tests.
+ *
+ * Module scope rather than inside one `describe` because two of them read it
+ * now: the socket listeners and the SIGTERM write. `main.ts` cannot be
+ * imported and poked at — it listens on a port and runs recovery at the top
+ * level — so reading the source is what is available, and the property these
+ * assert is only ever whether a guard is present.
+ */
+const mainSrc = (): string =>
+  readFileSync(new URL("./main.ts", import.meta.url), "utf8")
+    .replace(/\/\*[\s\S]*?\*\//g, "")
+    // Comment-only lines as well, so a wrapper is not judged absent merely
+    // because the line above it explains why it is there. Whole lines only:
+    // a blanket `//` strip would eat the rest of any line holding a URL.
+    .split("\n")
+    .filter((l) => !l.trimStart().startsWith("//"))
+    .join("\n");
 
 function metaFor(state: SessionState, at: number): SessionMeta {
   return {
@@ -73,8 +109,9 @@ const QUESTIONS: readonly Question[] = [
  * never produces, which is the easier and less interesting claim.
  *
  * `overrides` then does the damage, after the engine is done and before the
- * store sees it. `metaSid` exists only for #14, where META and SNAPSHOT have
- * to be made to disagree.
+ * store sees it. `metaSid` exists only for #14 and `metaJoinCode` only for
+ * #22, where META and SNAPSHOT have to be made to disagree about one field
+ * while agreeing about everything else.
  */
 async function storeSession(
   store: MemoryStore,
@@ -83,6 +120,7 @@ async function storeSession(
   events: readonly Event[] = [],
   overrides: (s: Record<string, unknown>) => void = () => {},
   metaSid?: string,
+  metaJoinCode?: string,
 ): Promise<SessionState> {
   const base = newSession({
     sid,
@@ -97,7 +135,11 @@ async function storeSession(
   const mutable = structuredClone(played) as SessionState;
   overrides(mutable as unknown as Record<string, unknown>);
   const meta = metaFor(mutable, at);
-  await store.putMeta(metaSid === undefined ? meta : { ...meta, sid: metaSid });
+  await store.putMeta({
+    ...meta,
+    ...(metaSid === undefined ? {} : { sid: metaSid }),
+    ...(metaJoinCode === undefined ? {} : { joinCode: metaJoinCode }),
+  });
   await store.putSnapshot(metaSid ?? mutable.sid, mutable, at);
   return mutable;
 }
@@ -321,6 +363,89 @@ describe("META and SNAPSHOT must agree which session this is (#14)", () => {
 
     assert.equal(recovered[0]?.sid, state.sid);
     assert.ok(registry.bySessionId(recovered[0]?.sid ?? ""), "the reported sid resolves");
+  });
+});
+
+describe("META and SNAPSHOT must agree which code opens the room (#22)", () => {
+  it("skips the row whose two halves give different join codes, and names both", async () => {
+    const now = Date.now();
+    const store = new MemoryStore();
+    // Everything agrees except the one field. The sid matches, so the #14
+    // guard above waves this through and the join code is the only thing left
+    // to catch it — which is the whole point of the issue: #14's fix does not
+    // cover this pair, it just looks as though it should.
+    await storeSession(
+      store,
+      "ses_two_codes",
+      now,
+      openQuestionEvents(),
+      () => {},
+      undefined,
+      "hvs.metasaysadifferentcodeentirely",
+    );
+
+    const registry = new SessionRegistry(new Persister(store, () => {}));
+    const lines: string[] = [];
+    const recovered = await recoverSessions(store, registry, (l) => lines.push(l), now);
+
+    assert.equal(recovered.length, 0, "the row is not recovered");
+    const failure = lines.find((l) => l.includes("COULD NOT BE REBUILT"));
+    assert.ok(failure, "the skip is logged loudly");
+    assert.match(failure, /hvs\.metasaysadifferentcodeentirely/, "names META's code");
+    assert.match(
+      failure,
+      /hvs\.ses_two_codespadpadpadpadpadpadpad/,
+      "and the snapshot's, which is the one the registry would have keyed",
+    );
+  });
+
+  it("leaves neither code resolving, and brings the rest of the boot up", async () => {
+    // The failure mode is not that the session is missing. It is that the
+    // session is *there* under a code nobody was given, so a phone with the
+    // right link gets nothing while the room is live. Both codes have to miss.
+    const now = Date.now();
+    const store = new MemoryStore();
+    await storeSession(
+      store,
+      "ses_wrong_code",
+      now,
+      openQuestionEvents(),
+      () => {},
+      undefined,
+      "hvs.thecodeonthecardinthehostshand",
+    );
+    await storeSession(store, "ses_code_ok", now, openQuestionEvents());
+
+    const registry = new SessionRegistry(new Persister(store, () => {}));
+    const lines: string[] = [];
+    const recovered = await recoverSessions(store, registry, (l) => lines.push(l), now);
+
+    assert.equal(
+      registry.byJoinCode("hvs.thecodeonthecardinthehostshand"),
+      undefined,
+      "META's code must not resolve",
+    );
+    assert.equal(
+      registry.byJoinCode("hvs.ses_wrong_codepadpadpadpadpadpadpad"),
+      undefined,
+      "and neither must the snapshot's — that is the room nobody can reach",
+    );
+    assert.equal(registry.bySessionId("ses_wrong_code"), undefined);
+
+    assert.equal(recovered.length, 1, "the healthy session still comes up");
+    assert.equal(recovered[0]?.sid, "ses_code_ok");
+    assert.ok(lines.some((l) => l.includes("1 session(s) failed to rebuild")));
+  });
+
+  it("keys the registry by the agreed code when the two halves agree", async () => {
+    const now = Date.now();
+    const store = new MemoryStore();
+    const state = await storeSession(store, "ses_one_code", now, openQuestionEvents());
+
+    const registry = new SessionRegistry(new Persister(store, () => {}));
+    await recoverSessions(store, registry, () => {}, now);
+
+    assert.equal(registry.byJoinCode(state.joinCode)?.state.sid, "ses_one_code");
   });
 });
 
@@ -592,16 +717,6 @@ describe("the socket entry points are guarded too", () => {
    * live socket and a poisoned room to exercise behaviourally, and the
    * property that was missing is simply whether the wrapper is there.
    */
-  const mainSrc = (): string =>
-    readFileSync(new URL("./main.ts", import.meta.url), "utf8")
-      .replace(/\/\*[\s\S]*?\*\//g, "")
-      // Comment-only lines as well, so a wrapper is not judged absent merely
-      // because the line above it explains why it is there. Whole lines only:
-      // a blanket `//` strip would eat the rest of any line holding a URL.
-      .split("\n")
-      .filter((l) => !l.trimStart().startsWith("//"))
-      .join("\n");
-
   it("routes the message and close listeners through the guard", () => {
     const src = mainSrc();
     for (const event of ["message", "close"]) {
@@ -643,5 +758,262 @@ describe("the socket entry points are guarded too", () => {
     const applyAt = src.indexOf('{ type: "join", pid, nickname: msg.nickname }');
     const guardAt = src.indexOf("if (runtime.faulted) return quarantined();", joinAt);
     assert.ok(guardAt > joinAt && guardAt < applyAt, "guard sits between lookup and join");
+  });
+});
+
+describe("the two stores hand back the same shape (#22, secondary)", () => {
+  /**
+   * `assembleSession` is the DynamoDB store's reader, pure and exported so it
+   * can be run at all: the suite has no DynamoDB and never will, so anything
+   * in that file which is only a method is a behaviour nothing exercises until
+   * production does. That is not a hypothetical — a `FilterExpression` naming
+   * a key attribute shipped once and broke every read, and the suite was green
+   * throughout because the suite runs on the memory store.
+   */
+  const metaItem = (over: Record<string, unknown> = {}): Record<string, unknown> => ({
+    PK: "SESSION#ses_pk",
+    SK: "META",
+    sid: "ses_pk",
+    title: "A session",
+    joinCode: "hvs.assemblepadpadpadpadpadpad",
+    phase: "running",
+    seal: "live",
+    hostTokenHash: "h",
+    screenTokenHash: "s",
+    createdAt: 1,
+    updatedAt: 2,
+    ...over,
+  });
+
+  it("names the session by the partition it was queried, not by the attribute", () => {
+    // A META row with no `sid` attribute used to assemble as `sid: ""`, which
+    // recovery could only log as "(a row with no sid)". The PK is the one fact
+    // about these items that cannot be wrong: they came back from a Query on
+    // it.
+    const row = metaItem();
+    delete row["sid"];
+    const loaded = assembleSession("ses_pk", [row]);
+    assert.equal(loaded?.meta.sid, "ses_pk");
+  });
+
+  it("refuses a META row filed under one sid that calls itself another", () => {
+    // Recovered, this session would be keyed by the attribute while its rows
+    // sit in the other partition — so every write this process made for it
+    // would land somewhere the next boot's scan finds a second time. One
+    // divergence, two live partitions. Refused for #14's reason: choosing
+    // between two records that disagree about which session this is has no
+    // basis.
+    const loaded = assembleSession("ses_pk", [metaItem({ sid: "ses_somewhere_else" })]);
+    assert.equal(loaded, null);
+  });
+
+  it("drops an event with no event object and a participant with no pid", () => {
+    const loaded = assembleSession("ses_pk", [
+      metaItem(),
+      { PK: "SESSION#ses_pk", SK: "EVENT#0000000001", seq: 1, event: null, at: 1 },
+      {
+        PK: "SESSION#ses_pk",
+        SK: "EVENT#0000000002",
+        seq: 2,
+        event: { type: "open" },
+        at: 2,
+      },
+      { PK: "SESSION#ses_pk", SK: "PARTICIPANT#", pid: "", nickname: "nobody" },
+      { PK: "SESSION#ses_pk", SK: "PARTICIPANT#p1", pid: "p1", nickname: "Priya" },
+    ]);
+    assert.deepEqual(loaded?.events.map((e) => e.seq), [2]);
+    assert.deepEqual(loaded?.participants.map((x) => x.pid), ["p1"]);
+  });
+
+  it("drops the same two in the memory store, which is what the suite runs", async () => {
+    // The point of this one is parity, not the filter. Recovery is hardened
+    // against both shapes, but the two stores had different output contracts
+    // for the same interface and every test in this repo ran against the
+    // laxer of them — so recovery could have come to depend on being handed
+    // something only the memory store produces.
+    const store = new MemoryStore();
+    const now = Date.now();
+    await storeSession(store, "ses_parity", now, openQuestionEvents());
+    await store.putParticipant("ses_parity", {
+      pid: "",
+      nickname: "nobody",
+      nicknameKey: "nobody",
+      playerNumber: 0,
+      joinedAt: now,
+      kicked: false,
+      rejoinTokenHashes: [],
+    });
+
+    const loaded = await store.loadSession("ses_parity");
+    assert.ok(loaded);
+    assert.equal(
+      loaded.participants.some((x) => x.pid === ""),
+      false,
+      "a participant with no pid must not reach recovery from either store",
+    );
+  });
+});
+
+describe("a finished session is retired by age, not held for ever (#23)", () => {
+  /** Open, start, close. A session that is over, with nothing left armed. */
+  const finished = (): readonly Event[] => [
+    { type: "open" },
+    { type: "start" },
+    { type: "close" },
+  ];
+
+  it("leaves a long-closed session in the table and out of the registry", async () => {
+    const now = Date.now();
+    const store = new MemoryStore();
+    const closedLongAgo = now - REOPEN_WINDOW_MS - 60_000;
+    await storeSession(store, "ses_last_month", closedLongAgo, finished());
+
+    const registry = new SessionRegistry(new Persister(store, () => {}));
+    const lines: string[] = [];
+    const recovered = await recoverSessions(store, registry, (l) => lines.push(l), now);
+
+    assert.equal(recovered.length, 0, "not recovered");
+    assert.equal(registry.bySessionId("ses_last_month"), undefined, "not held");
+    assert.ok(
+      lines.some((l) => l.includes("left in the table") && l.includes("ses_last_month")),
+      "the boot log names it, because the first question is whether it was dropped",
+    );
+    // Left where it was. Nothing here deletes a row: the scores stay
+    // exportable by sid because the export path reads the store, and the row's
+    // own `ttl` is what finally clears it.
+    const still = await store.loadSession("ses_last_month");
+    assert.ok(still, "the row is untouched");
+    assert.equal(still.meta.updatedAt, closedLongAgo);
+  });
+
+  it("still restores one closed minutes ago, so reopen keeps working", async () => {
+    // This capability exists because an accidental close happened and the
+    // deploy that followed put the session out of reach. Retiring by age must
+    // not be that bug again with a calendar attached.
+    const now = Date.now();
+    const store = new MemoryStore();
+    await storeSession(store, "ses_oops", now - 5 * 60_000, finished());
+
+    const registry = new SessionRegistry(new Persister(store, () => {}));
+    const recovered = await recoverSessions(store, registry, () => {}, now);
+
+    assert.equal(recovered.length, 1);
+    const back = registry.bySessionId("ses_oops");
+    assert.ok(back, "a close from five minutes ago very much needs reopening");
+    assert.equal(back.state.phase, "closed");
+    assert.equal(back.apply({ type: "reopen" }, now).applied, true);
+    assert.equal(back.state.phase, "running");
+  });
+
+  it("does not re-stamp updatedAt on a row it recovers, so the ttl can run out", async () => {
+    // The half of #23 that is not about the registry at all. `ttl` is derived
+    // from `updatedAt`, recovery writes every recovered row straight back, and
+    // `meta()` used to stamp whatever clock the caller was holding — so every
+    // deploy pushed every row's expiry out another ninety days and nothing in
+    // the table could ever become old enough to be deleted by anything.
+    const now = Date.now();
+    const store = new MemoryStore();
+    const closedYesterday = now - 24 * 60 * 60 * 1000;
+    await storeSession(store, "ses_yesterday", closedYesterday, finished());
+
+    const persister = new Persister(store, () => {});
+    const registry = new SessionRegistry(persister);
+    await recoverSessions(store, registry, () => {}, now);
+    await persister.drain();
+
+    const after = await store.loadSession("ses_yesterday");
+    assert.equal(
+      after?.meta.updatedAt,
+      closedYesterday,
+      "a boot that changed nothing must not claim the session changed",
+    );
+    assert.equal(registry.bySessionId("ses_yesterday")?.updatedAt, closedYesterday);
+  });
+
+  it("moves updatedAt when the session actually changes, and only then", async () => {
+    const now = Date.now();
+    const store = new MemoryStore();
+    await storeSession(store, "ses_moves", now - 60 * 60 * 1000, finished());
+
+    const persister = new Persister(store, () => {});
+    const registry = new SessionRegistry(persister);
+    await recoverSessions(store, registry, () => {}, now);
+    const back = registry.bySessionId("ses_moves");
+    assert.ok(back);
+
+    back.apply({ type: "reopen" }, now);
+    await persister.drain();
+    assert.equal(back.updatedAt, now);
+    assert.equal((await store.loadSession("ses_moves"))?.meta.updatedAt, now);
+  });
+
+  it("does not carry a zero updatedAt back out, which would write a ttl in the past", async () => {
+    // The trap in reporting the stored clock instead of the write clock. The
+    // DynamoDB store derives `ttl` from `updatedAt`, so a row with no usable
+    // timestamp — written before the field existed, or by hand — would be
+    // written back with an expiry ninety days after the epoch, and DynamoDB
+    // would delete the session recovery had just rescued.
+    const now = Date.now();
+    const store = new MemoryStore();
+    await storeSession(store, "ses_no_clock", 0, finished());
+
+    const persister = new Persister(store, () => {});
+    const registry = new SessionRegistry(persister);
+    await recoverSessions(store, registry, () => {}, now);
+    await persister.drain();
+
+    const back = registry.bySessionId("ses_no_clock");
+    assert.ok(back, "a row with no clock is still recovered, not retired");
+    assert.ok(back.updatedAt > 0, "and is not left claiming the epoch");
+    assert.ok(((await store.loadSession("ses_no_clock"))?.meta.updatedAt ?? 0) > 0);
+  });
+
+  it("never retires a draft, a lobby or a running session, however old", () => {
+    // A draft that has sat for a month is a session somebody staged and has
+    // not opened yet, and its join code is live — dropping one is the bug the
+    // `draft` entry in RECOVERABLE_PHASES exists to record.
+    const now = Date.now();
+    const ancient = now - REOPEN_WINDOW_MS * 10;
+    for (const phase of RECOVERABLE_PHASES) {
+      assert.equal(
+        retiredByAge(phase, ancient, now),
+        phase === "closed",
+        `${phase} should ${phase === "closed" ? "" : "never "}retire by age`,
+      );
+    }
+  });
+
+  it("treats a row with no usable updatedAt as not retired", () => {
+    // Dropping a session because its clock is missing is a guess in the
+    // direction that loses things.
+    const now = Date.now();
+    assert.equal(retiredByAge("closed", 0, now), false);
+    assert.equal(retiredByAge("closed", Number.NaN, now), false);
+    assert.equal(retiredByAge("closed", now - REOPEN_WINDOW_MS + 1000, now), false);
+    assert.equal(retiredByAge("closed", now - REOPEN_WINDOW_MS - 1000, now), true);
+  });
+
+  it("guards the SIGTERM write with the same predicate the boot uses", () => {
+    /**
+     * Structural, for the reason the timer count is: `main.ts` listens on a
+     * port and runs recovery at the top level, so `shutdown` cannot be
+     * imported and called. The property that was missing is only whether the
+     * guard is there — and it has to be there, because a rule applied at the
+     * boot end alone leaves the dying task writing back every closed session
+     * it is holding, which is the measured behaviour the issue opens with.
+     */
+    const src = mainSrc();
+    const at = src.indexOf("async function shutdown(");
+    assert.notEqual(at, -1, "no shutdown() found in main.ts");
+    const body = src.slice(at, at + 2000);
+    const guard = body.indexOf("retiredByAge(");
+    const write = body.indexOf("r.persistence.snapshot(");
+    assert.notEqual(write, -1, "shutdown no longer writes a snapshot at all");
+    assert.ok(
+      guard !== -1 && guard < write,
+      "shutdown() must test retiredByAge before writing a session back: " +
+        "without it every deploy re-creates the rows the last purge deleted, " +
+        "at the SIGTERM timestamp, and the next boot recovers them again",
+    );
   });
 });

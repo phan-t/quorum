@@ -37,8 +37,6 @@ export interface SessionPersistence {
   snapshot(state: SessionState, at: number): void;
   event(record: StoredEvent): void;
   participant(p: StoredParticipant): void;
-  joinCode(code: string, sid: string): void;
-  deleteJoinCode(code: string): void;
 }
 
 export interface PersistHealth {
@@ -152,10 +150,6 @@ export class Persister {
         this.enqueue(sid, `participant#${p.pid}`, () =>
           this.store.putParticipant(sid, p),
         ),
-      joinCode: (code, forSid) =>
-        this.enqueue(sid, "joinCode", () => this.store.putJoinCode(code, forSid)),
-      deleteJoinCode: (code) =>
-        this.enqueue(sid, "deleteJoinCode", () => this.store.deleteJoinCode(code)),
     };
   }
 }
@@ -166,6 +160,4 @@ export const NO_PERSISTENCE: SessionPersistence = {
   snapshot: () => {},
   event: () => {},
   participant: () => {},
-  joinCode: () => {},
-  deleteJoinCode: () => {},
 };

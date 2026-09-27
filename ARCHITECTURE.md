@@ -115,7 +115,6 @@ thousand items and under a megabyte.
 | `SESSION#<sid>` | `PARTICIPANT#<pid>` | nickname, nicknameKey, playerNumber, rejoinTokenHashes[], joinedAt, kicked |
 | `SESSION#<sid>#PROMO` | `PROMO` | the event's promo card, one HTML page, chars, at |
 | `SESSION#<sid>#ASSET` | `ASSET#<key>` | one send-off photo or the music file: bytes (Binary), contentType, size, at |
-| `CODE#<joinCode>` | `ACTIVE` | sid — exists only while the session is joinable |
 
 **The promo card and the send-off assets are in partitions of their own**, and
 that is load-bearing rather than tidy. Both are content served *beside* a
@@ -128,10 +127,19 @@ broke every `loadSession` and every `loadRecoverable`; see the commit that
 moved the card. A separate partition needs no filter, and the read is a
 `GetCommand` by exact key either way.
 
-GSI: none. Join codes are looked up by their own PK; everything else is a
-query on `SESSION#<sid>`. The `SNAPSHOT` item is the fast path for restart;
-`EVENT#` items are the audit trail and the slow path when a snapshot is
-suspected.
+GSI: none, and every read is a query on `SESSION#<sid>` or a get by exact key
+inside it. The `SNAPSHOT` item is the fast path for restart; `EVENT#` items
+are the audit trail and the slow path when a snapshot is suspected.
+
+**Join codes have no item.** A `CODE#<joinCode>` / `ACTIVE` row was written on
+create and deleted on close, and this section described it as how join codes
+are looked up — a design that was never built. A phone's join resolves against
+`SessionRegistry.byCode`, an in-memory map the process rebuilds at boot from
+the snapshots it is loading anyway. The row was a third record of a fact two
+other records already carry, with nothing reading it, so nothing could catch
+it drifting from them; it came out with #22, which is about exactly that kind
+of drift between the other two. Rows written before then are left alone and
+expire on their own `ttl`.
 
 **Scores and spot awards have no items of their own.** They are fields of the
 session state, so they ride in the `SNAPSHOT` and are derivable from the
@@ -150,6 +158,18 @@ if that ever stops being true.
 **Retention.** `ttl` on every item is 90 days from session close. Nicknames
 are the only personal data and there is no reason to keep them longer than
 the next event's planning.
+
+That clock only runs if nothing keeps resetting it, and for a while nothing
+did: every boot recovered every `closed` session and wrote its rows straight
+back, and every SIGTERM wrote every session the registry held, so a deploy
+re-stamped the whole table and a finished session's rows never reached 90 days
+while the service kept shipping. A session is now **retired by age**: past
+`REOPEN_WINDOW_MS` from its `updatedAt`, a `closed` session is left in the
+table rather than recovered into the registry, and `updatedAt` reports when
+the session last actually changed rather than when it was last written back.
+Its scores stay exportable by sid the whole time, because the export path
+reads the store directly. See `RECOVERABLE_PHASES` and `retiredByAge` in
+`app/src/server/store/types.ts`.
 
 **Where content comes from.** The arcade's items ship in the container, as
 modules under `src/arcade/`, and are attached to the round when the host starts

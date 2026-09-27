@@ -30,7 +30,12 @@ import { hashToken, newId, newJoinCode, tokenMatches } from "./tokens.ts";
 import { AWAY_AFTER_MS } from "./views.ts";
 import { Persister } from "./persist.ts";
 import { describe as describeError, openStore } from "./store/index.ts";
-import { assetKeyProblem, MAX_ASSET_BYTES, MAX_PROMO_CHARS } from "./store/types.ts";
+import {
+  assetKeyProblem,
+  MAX_ASSET_BYTES,
+  MAX_PROMO_CHARS,
+  retiredByAge,
+} from "./store/types.ts";
 import type { StoredEvent } from "./store/types.ts";
 import { recoverSessions, rehydrate } from "./recovery.ts";
 import {
@@ -2029,9 +2034,27 @@ async function shutdown(signal: string): Promise<void> {
   const now = Date.now();
   for (const r of registry.all()) {
     // The last word on the state, so a restart mid-question loses nothing
-    // that this process had accepted.
-    r.persistence.snapshot(r.state, now);
-    r.persistence.meta(r.meta(now));
+    // that this process had accepted — but only for the sessions that still
+    // have a next word. #23.
+    //
+    // This used to write a snapshot and a META row for everything the registry
+    // held, which is everything `loadRecoverable` ever returned, which includes
+    // every `closed` session the process has recovered since it booted. So a
+    // deploy re-created rows an operator had deleted by hand, at the SIGTERM
+    // timestamp, and the task that replaced this one recovered them again. It
+    // was measured across three deploys in one afternoon; see `retiredByAge`.
+    //
+    // A session past the window has no in-flight state to lose — that is what
+    // closing it meant, a week ago — and writing it back is not durability, it
+    // is undoing somebody's cleanup and pushing the row's `ttl` out another
+    // ninety days. The same predicate recovery uses, because a rule enforced
+    // at one end of the process's life only is the bug it is fixing: recovery
+    // keeps these out of a fresh registry, and this keeps out the ones that
+    // aged past the window while this task was up.
+    if (!retiredByAge(r.state.phase, r.updatedAt, now)) {
+      r.persistence.snapshot(r.state, now);
+      r.persistence.meta(r.meta());
+    }
     // A question that is open stays open in the snapshot, with the same
     // `closesAt` it always had. The next process re-arms from it; this one
     // must not fire a `closeQuestion` it will never get to persist.

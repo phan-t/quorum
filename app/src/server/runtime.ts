@@ -303,6 +303,23 @@ export class SessionRuntime {
   /** Where a `persist` effect goes. Writes never block {@link apply}. */
   readonly persistence: SessionPersistence;
   readonly createdAt: number;
+  /**
+   * When this session last actually changed — not when it was last written.
+   *
+   * The distinction is the whole of #23. `meta()` used to stamp `updatedAt`
+   * with whatever clock the caller happened to be holding, and two of its
+   * three callers are not transitions at all: recovery writes every row back
+   * at boot, and `shutdown` writes every row back on SIGTERM. So a session
+   * that finished in August was marked as having changed on every deploy
+   * since, its `ttl` — derived from `updatedAt` — was pushed out 90 days each
+   * time, and nothing in the table could ever be described as old.
+   *
+   * Advanced by {@link apply}, on the transitions the engine asks to be
+   * persisted, which is the same condition that decides whether a row is
+   * written at all. Seeded from META's stored value on `restore`, so a
+   * restart does not reset the clock it is there to preserve.
+   */
+  updatedAt: number;
   /** The armed `closeQuestion`, and exactly which question it is armed for. */
   #closeTimer: ReturnType<typeof setTimeout> | null = null;
   /** The send-off's auto-advance, and which slide it is armed for. */
@@ -382,6 +399,9 @@ export class SessionRuntime {
     this.secrets = secrets;
     this.persistence = persistence;
     this.createdAt = createdAt;
+    // A session that has never transitioned last changed when it was made.
+    // `restore` overwrites this with META's value straight afterwards.
+    this.updatedAt = createdAt;
   }
 
   /* ---------------- participants ---------------- */
@@ -446,7 +466,17 @@ export class SessionRuntime {
    */
   setup: string | null = null;
 
-  meta(now = Date.now()): SessionMeta {
+  /**
+   * The META row for this session as it stands.
+   *
+   * Takes no clock on purpose. It used to take `now`, and three callers passed
+   * three different things: `apply` passed the transition's time, which was
+   * right, while recovery and `shutdown` passed the moment of a write that
+   * changed nothing about the session. `updatedAt` is a claim about the
+   * session, not about the write, and the field that holds it is the one thing
+   * here that a caller is in no position to know. See {@link updatedAt}.
+   */
+  meta(): SessionMeta {
     return {
       sid: this.state.sid,
       title: this.state.title,
@@ -456,7 +486,7 @@ export class SessionRuntime {
       hostTokenHash: this.secrets.hostTokenHash,
       screenTokenHash: this.secrets.screenTokenHash,
       createdAt: this.createdAt,
-      updatedAt: now,
+      updatedAt: this.updatedAt,
       setup: this.setup,
     };
   }
@@ -538,25 +568,17 @@ export class SessionRuntime {
     // not durable, and persisting it would bring everyone back "present".
     if (persist && result.applied) {
       const seq = this.state.seq;
+      // The one place the session's own clock moves. Everything else that
+      // writes these rows — recovery at boot, `shutdown` at SIGTERM — is
+      // storing a state it did not change, and must not claim otherwise: that
+      // claim is what kept every finished session's `ttl` a fortnight in the
+      // future for ever. See {@link updatedAt} and `retiredByAge`.
+      this.updatedAt = now;
       this.persistence.snapshot(this.state, now);
       this.persistence.event({ seq, event, at: now });
       if (before.phase !== this.state.phase || before.seal !== this.state.seal) {
         // `phase` is what a restart scans on, so META has to keep up with it.
-        this.persistence.meta(this.meta(now));
-      }
-      if (before.phase !== "closed" && this.state.phase === "closed") {
-        // "Exists only while the session is joinable" — a finished session's
-        // code stops resolving rather than sending someone to a dead lobby.
-        this.persistence.deleteJoinCode(this.state.joinCode);
-      }
-      if (before.phase === "closed" && this.state.phase !== "closed") {
-        // And back again, for `reopen` and `restartSession`. The in-memory
-        // registry never forgot the code — `byCode` is not pruned on close —
-        // so this process would have kept resolving it either way; the stored
-        // row is what a *later* process reads, and without this line a
-        // reopened session would come back from a restart with a join code
-        // that resolves to nothing and a room that cannot get back in.
-        this.persistence.joinCode(this.state.joinCode, this.state.sid);
+        this.persistence.meta(this.meta());
       }
       if ("pid" in event) this.persistParticipant(event.pid);
     }
@@ -2213,9 +2235,8 @@ export class SessionRegistry {
     // with its scores and no way for the host to sign in would be worse than
     // one that did not come back at all. Then a snapshot, so a crash between
     // creation and the first event still recovers something coherent.
-    runtime.persistence.meta(runtime.meta(now));
+    runtime.persistence.meta(runtime.meta());
     runtime.persistence.snapshot(state, now);
-    runtime.persistence.joinCode(state.joinCode, state.sid);
     return { runtime, hostToken, screenToken };
   }
 
@@ -2239,6 +2260,25 @@ export class SessionRegistry {
       loaded.meta.createdAt,
     );
     runtime.setup = loaded.meta.setup ?? null;
+    // The clock the row came in with, not this boot's. Recovery is about to
+    // write this row straight back, and if that write moved `updatedAt` the
+    // session would look freshly changed on every deploy — which is how a
+    // session that finished in August stayed permanently young. See
+    // `retiredByAge`.
+    //
+    // The fallbacks are not tidiness. `updatedAt` is what the DynamoDB store
+    // derives `ttl` from, so carrying a zero back out of a row that has no
+    // usable timestamp would write an expiry ninety days after the epoch —
+    // which is to say in the past, which is to say DynamoDB deletes the
+    // session. Recovery must not be the thing that destroys the row it is
+    // recovering. A row that cannot say when it last changed is stamped with
+    // this boot instead: that is the old behaviour, it is wrong in the
+    // direction of keeping things, and it applies only to a row written before
+    // `updatedAt` existed or by hand.
+    const stamped = [loaded.meta.updatedAt, loaded.meta.createdAt].find(
+      (t) => typeof t === "number" && Number.isFinite(t) && t > 0,
+    );
+    runtime.updatedAt = stamped ?? Date.now();
     for (const p of loaded.participants) {
       runtime.restoreRejoinTokens(p.pid, p.rejoinTokenHashes);
     }

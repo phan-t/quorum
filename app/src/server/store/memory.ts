@@ -46,7 +46,6 @@ export class MemoryStore implements SessionStore {
   readonly kind = "memory" as const;
 
   private readonly rows = new Map<string, Row>();
-  private readonly codes = new Map<string, string>();
 
   /**
    * Set to fail the next writes. The persist path is supposed to degrade to
@@ -165,23 +164,31 @@ export class MemoryStore implements SessionStore {
     this.row(sid).participants.set(participant.pid, copy(participant));
   }
 
-  async putJoinCode(joinCode: string, sid: string): Promise<void> {
-    this.guard();
-    this.codes.set(joinCode, sid);
-  }
-
-  async deleteJoinCode(joinCode: string): Promise<void> {
-    this.guard();
-    this.codes.delete(joinCode);
-  }
-
+  /**
+   * One row, as a `LoadedSession` — filtered exactly as the DynamoDB store's
+   * `assembleSession` filters.
+   *
+   * The two filters look pointless here and are not. This store is typed, so
+   * an event without an `event` object and a participant without a `pid`
+   * cannot be *written* through the interface; the DynamoDB store drops them
+   * because a table is older than the type that describes it and a row can be
+   * any shape at all. Without them the two stores have different output
+   * contracts for the same interface, and the suite runs entirely against the
+   * laxer one — so recovery could come to depend on being handed something
+   * this store cannot produce and production can. #22's third unchecked
+   * mirror. The cost is two predicates that never fire; the alternative is a
+   * difference nothing can see.
+   */
   private assemble(sid: string, row: Row): LoadedSession | null {
     if (!row.meta) return null;
     return {
       meta: copy(row.meta),
       snapshot: row.snapshot ? copy(row.snapshot) : null,
-      events: [...row.events.values()].sort((a, b) => a.seq - b.seq).map(copy),
-      participants: [...row.participants.values()].map(copy),
+      events: [...row.events.values()]
+        .filter((e) => e.event != null && typeof e.event === "object")
+        .sort((a, b) => a.seq - b.seq)
+        .map(copy),
+      participants: [...row.participants.values()].filter((p) => p.pid !== "").map(copy),
     };
   }
 
@@ -214,9 +221,5 @@ export class MemoryStore implements SessionStore {
   /** Test affordances: what is on disk, for asserting on the write path. */
   sids(): string[] {
     return [...this.rows.keys()];
-  }
-
-  codeCount(): number {
-    return this.codes.size;
   }
 }
