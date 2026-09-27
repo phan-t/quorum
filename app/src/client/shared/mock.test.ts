@@ -86,6 +86,19 @@
  *   two are **(b)**, the Floor's own clock on a tap, a letter and a bet, which a
  *   wrong reading of the fake clock kept out of this file for a release; the note
  *   on (b) below is what that reading was and why it was wrong.
+ * - **#29**, a survey run against `reducer.ts`, `views.ts` and `runtime.ts` after
+ *   all of the above had closed, and from the source rather than from the issue
+ *   tracker — which is the reason it found nine more. The last section of this
+ *   file. Its first three are things a person watching the demo would see: the
+ *   send-off's Auto never advancing a slide, which is the one row in any of these
+ *   issues that needed *machinery* rather than a guard; the Spot Award toast
+ *   naming somebody the server does not name; and "Clear the card" putting the
+ *   session title on the big screen where a real room goes blank. Then a closed
+ *   session that was not frozen, a door with no phase gate and one nickname rule
+ *   where the reducer has five, three commands that would still name a kicked
+ *   person, a kicked phone still being counted, and the points arithmetic —
+ *   `mock.ts` was the naive transcription that `questionPoints` carries a comment
+ *   warning about, and was a point low on three taps in a thousand.
  *
  * Two of #24's eight are not here, and both for the same reason — the mock
  * cannot be driven into the state they are about. Its question set is a
@@ -108,6 +121,14 @@
  *   Recruitment, so no answer can come from the Lounge. Both were left alone
  *   rather than guarded, because an unreachable guard is another piece of code
  *   nothing watches.
+ *
+ * Two of #29's sixteen are in the same position, and are written up at the head
+ * of its own section: the `no_more_questions` sentence, and the streak bonus on a
+ * warm-up. Both were differences rather than absent guards, so both were fixed
+ * and neither can be watched — `at` cannot pass the end of the set, and the set
+ * has no warm-up in it and no command that loads one. Mutating each of them back
+ * leaves the whole suite green, which is the evidence that they are unreachable
+ * and not the evidence that a scenario is missing.
  *
  * **(b)**, the Floor's clock on a tap, a letter and a bet, was the third of them
  * for a release, and the paragraph that excused it is kept here in corrected
@@ -201,6 +222,15 @@ import { RECRUITMENT_ITEMS } from "../../arcade/recruitment.ts";
 import { GLASS_BRIDGE_STEPS } from "../../arcade/glass-bridge.ts";
 import { UNSEAL_ITEMS } from "../../arcade/unseal.ts";
 import { GGANBU_PROMPTS } from "../../arcade/gganbu.ts";
+// The engine's own arithmetic for a question's points, used as the oracle it is:
+// #29's row about it is that `mock.ts` was the naive transcription this function
+// carries a comment warning against, and a scenario that wrote the correct
+// formula out here instead would be comparing the mock against this file.
+import { questionPoints } from "../../engine/trivia.ts";
+// The floor of the send-off's beat, so the Auto scenario can walk a montage in a
+// hundred fake seconds instead of four hundred. A bound and not a rule: both
+// implementations clamp against it, and the clamp is what is being compared.
+import { MIN_AUTO_SECONDS } from "../../engine/sendoff.ts";
 import { finalRevealMs } from "./view.ts";
 import type { MockConfig } from "./mock.ts";
 import type { Transport } from "./transport.ts";
@@ -433,7 +463,32 @@ function noStrangers(
   }
 }
 
-async function room(t: TestContext, phoneCount: number): Promise<Room> {
+/**
+ * How a room starts, for the one scenario that is about the phase before it.
+ *
+ * {@link room} presses Open before the phones arrive, because a phone cannot join
+ * a session in `draft` — the reducer refuses it `not_joinable`, and as of #29 so
+ * does the mock. Every scenario below therefore gets a room in `lobby` and
+ * presses `start` itself; the `r.cmd({ name: "open" })` that used to be the first
+ * line of each of them is now one press inside the constructor, made before there
+ * is anybody to admit.
+ *
+ * `"draft"` is for the guard scenario that is *about* `draft` — a Close pressed
+ * in it — and it asserts nobody was asked for, because a phone in a draft room is
+ * the thing that is no longer possible.
+ */
+type RoomStart = "lobby" | "draft";
+
+async function room(
+  t: TestContext,
+  phoneCount: number,
+  start: RoomStart = "lobby",
+): Promise<Room> {
+  assert.ok(
+    start === "lobby" || phoneCount === 0,
+    "a draft room cannot hold phones — the mock now refuses a join in draft, " +
+      "as the reducer does",
+  );
   t.mock.timers.enable({ apis: ["setTimeout", "setInterval", "Date"] });
   const mod = await freshMock();
   // `bots: 0` — see {@link noStrangers}. Not in MANUAL itself, because the
@@ -476,6 +531,13 @@ async function room(t: TestContext, phoneCount: number): Promise<Room> {
   // console's frame, so a phone has to be told what the console was told.
   const joinCode = host.state().joinCode;
   assert.ok(joinCode, "the console frame carries no join code");
+  let cid = 0;
+  const press = (command: HostCommand): void => {
+    cid += 1;
+    host.send({ t: "host.cmd", cid: `cid-${cid}`, cmd: command });
+  };
+  // The door, opened before anybody knocks. See {@link RoomStart}.
+  if (start === "lobby") press({ name: "open" });
   const invited = new Set<string>();
   const phones: Wire[] = [];
   for (let i = 0; i < phoneCount; i += 1) {
@@ -484,15 +546,13 @@ async function room(t: TestContext, phoneCount: number): Promise<Room> {
     phones.push(open({ t: "hello", role: "participant", joinCode, nickname }));
   }
 
-  let cid = 0;
   const guard = (): void => noStrangers(host.state().roster, invited);
   return {
     host,
     screen,
     phones,
     cmd(command) {
-      cid += 1;
-      host.send({ t: "host.cmd", cid: `cid-${cid}`, cmd: command });
+      press(command);
       const refused = host.frames.filter((f) => f.t === "refusedCmd");
       const last = refused.at(-1);
       assert.ok(
@@ -502,10 +562,8 @@ async function room(t: TestContext, phoneCount: number): Promise<Room> {
       guard();
     },
     attempt(command) {
-      cid += 1;
-      const id = `cid-${cid}`;
-      host.send({ t: "host.cmd", cid: id, cmd: command });
-      const answer = answerTo(host, id);
+      press(command);
+      const answer = answerTo(host, `cid-${cid}`);
       guard();
       return answer;
     },
@@ -766,7 +824,6 @@ describe("the round counter moves on the transition the reducer moves it on", ()
     const r = await room(t, 6);
     const pair = roundPair("tug_of_raft");
     const second = roundPair("unseal");
-    r.cmd({ name: "open" });
     r.cmd({ name: "start" });
     r.cmd({ name: "arcade.enter" });
 
@@ -822,7 +879,6 @@ describe("the round counter moves on the transition the reducer moves it on", ()
     // goes unsaid.
     const r = await room(t, 6);
     const pair = roundPair("tug_of_raft");
-    r.cmd({ name: "open" });
     r.cmd({ name: "start" });
     r.cmd({ name: "arcade.enter" });
     r.cmd(pair.cmd);
@@ -848,7 +904,6 @@ describe("the round counter moves on the transition the reducer moves it on", ()
     // same late frame, and the reason this is a safe place to move it.
     const r = await room(t, 6);
     const pair = roundPair("tug_of_raft");
-    r.cmd({ name: "open" });
     r.cmd({ name: "start" });
     r.cmd({ name: "arcade.enter" });
     r.cmd(pair.cmd);
@@ -991,7 +1046,6 @@ describe("the console is told who has committed, in every round that has a commi
     it(`names both committers in ${commit.kind}, exactly as the engine does`, async (t) => {
       const pair = roundPair(commit.kind);
       const r = await room(t, 6);
-      r.cmd({ name: "open" });
       r.cmd({ name: "start" });
       r.cmd({ name: "arcade.enter" });
       r.cmd(pair.cmd);
@@ -1061,7 +1115,6 @@ describe("the console is told who has committed, in every round that has a commi
     it(`names nobody in ${quiet.kind}, which has nothing to commit to`, async (t) => {
       const pair = roundPair(quiet.kind);
       const r = await room(t, 6);
-      r.cmd({ name: "open" });
       r.cmd({ name: "start" });
       r.cmd({ name: "arcade.enter" });
       r.cmd(pair.cmd);
@@ -1233,7 +1286,6 @@ describe("a pink strike is the standing and nothing else", () => {
   it("keeps a drained cell struck through idle and reveal, as the engine does", async (t) => {
     const pair = roundPair("glass_bridge");
     const r = await room(t, 6);
-    r.cmd({ name: "open" });
     r.cmd({ name: "start" });
     r.cmd({ name: "arcade.enter" });
     r.cmd(pair.cmd);
@@ -1307,7 +1359,6 @@ describe("a released participant stops being counted", () => {
   it("drops them from the roster, the grid and every count, exactly as the engine does", async (t) => {
     const pair = roundPair("recruitment");
     const r = await room(t, 6);
-    r.cmd({ name: "open" });
     r.cmd({ name: "start" });
     r.cmd({ name: "arcade.enter" });
     r.cmd(pair.cmd);
@@ -1388,7 +1439,6 @@ describe("a released participant stops being counted", () => {
   it("takes them off the Plan / Apply ticker, exactly as the engine does", async (t) => {
     const pair = roundPair("plan_apply");
     const r = await room(t, 6);
-    r.cmd({ name: "open" });
     r.cmd({ name: "start" });
     r.cmd({ name: "arcade.enter" });
     r.cmd(pair.cmd);
@@ -1514,7 +1564,6 @@ describe("the trivia podium is the people who have played", () => {
    */
   it("sends a row per person who played and no more, exactly as the engine does", async (t) => {
     const r = await room(t, 6);
-    r.cmd({ name: "open" });
     r.cmd({ name: "start" });
     // The mock times an answer on its own clock — `#now() - opensAt` — and the
     // engine is handed the same figure as `ms`, because a pure reducer cannot
@@ -1579,7 +1628,6 @@ describe("the trivia podium is the people who have played", () => {
    */
   it("counts a released person out of the eligible, exactly as the engine does", async (t) => {
     const r = await room(t, 6);
-    r.cmd({ name: "open" });
     r.cmd({ name: "start" });
     r.cmd({ name: "trivia.open", suddenDeath: false });
     const question = questionFromFrame(r.host.state());
@@ -1627,7 +1675,6 @@ describe("a tiebreaker is not question four of twenty", () => {
    */
   it("carries no index and no round card under a sudden death, on either side", async (t) => {
     const r = await room(t, 6);
-    r.cmd({ name: "open" });
     r.cmd({ name: "start" });
 
     // The whole set, walked and captured: the round card is a property of a
@@ -1747,7 +1794,6 @@ describe("the send-off's advanceAt is anchored to the slide, not to the frame", 
 
   it("holds its deadline across an unrelated frame, on both implementations", async (t) => {
     const r = await room(t, 2);
-    r.cmd({ name: "open" });
     r.cmd({ name: "start" });
     r.cmd({ name: "segment", kind: "sendoff" });
 
@@ -1899,7 +1945,6 @@ describe("somebody who joined after the round started still has a number", () =>
     const first = roundPair("glass_bridge");
     const second = roundPair("recruitment");
     const r = await room(t, 6);
-    r.cmd({ name: "open" });
     r.cmd({ name: "start" });
     r.cmd({ name: "participant.release", pid: "p3" });
     r.cmd({ name: "arcade.enter" });
@@ -2068,7 +2113,6 @@ describe("the trivia points reach the score grid at the reveal", () => {
    */
   it("holds the grid still at the close and moves it at the reveal, as the engine does", async (t) => {
     const r = await room(t, 6);
-    r.cmd({ name: "open" });
     r.cmd({ name: "start" });
     const openedAt = Date.now();
     r.cmd({ name: "trivia.open", suddenDeath: false });
@@ -2173,7 +2217,6 @@ describe("the trivia points reach the score grid at the reveal", () => {
    */
   it("scores a practice question into the podium and not onto the board, as the engine does", async (t) => {
     const r = await room(t, 6);
-    r.cmd({ name: "open" });
     r.cmd({ name: "start" });
     r.cmd({ name: "practice", on: true });
     const openedAt = Date.now();
@@ -2259,7 +2302,6 @@ describe("a sudden death is closed by the host, like every other question", () =
 
   it("stays open until the host closes it, on both implementations", async (t) => {
     const r = await room(t, 6);
-    r.cmd({ name: "open" });
     r.cmd({ name: "start" });
     const openedAt = Date.now();
     // Out of `idle`, because the mock's `trivia.open` admits only `idle` where
@@ -2337,7 +2379,6 @@ describe("a sudden death is closed by the host, like every other question", () =
    */
   it("breaks nobody's streak, as the engine does", async (t) => {
     const r = await room(t, 6);
-    r.cmd({ name: "open" });
     r.cmd({ name: "start" });
     const openedAt = Date.now();
     r.cmd({ name: "trivia.open", suddenDeath: false });
@@ -2429,7 +2470,6 @@ describe("Recruitment banks what the engine banks", () => {
   it("pays 5 and 5, and the bonus to the first three only, as the engine does", async (t) => {
     const pair = roundPair("recruitment");
     const r = await room(t, 6);
-    r.cmd({ name: "open" });
     r.cmd({ name: "start" });
     r.cmd({ name: "arcade.enter" });
     r.cmd(pair.cmd);
@@ -2548,7 +2588,6 @@ describe("a round's totals are folded over the people who were in it", () => {
     assert.ok(item !== undefined, "there are no recruitment items");
 
     const r = await room(t, 6);
-    r.cmd({ name: "open" });
     r.cmd({ name: "start" });
     r.cmd({ name: "arcade.enter" });
     // Out of the room before the card goes up, and therefore out of the round.
@@ -2635,7 +2674,6 @@ describe("Recruitment's round ends when its last item does", () => {
   it("re-derives the Floor's clock at every item, as the engine does", async (t) => {
     const pair = roundPair("recruitment");
     const r = await room(t, 6);
-    r.cmd({ name: "open" });
     r.cmd({ name: "start" });
     r.cmd({ name: "arcade.enter" });
     r.cmd(pair.cmd);
@@ -2724,7 +2762,6 @@ describe("a bet placed after the result it names pays nothing", () => {
   it("pays the backer who bet early and not the one who waited, as the engine does", async (t) => {
     const pair = roundPair("unseal");
     const r = await room(t, 6);
-    r.cmd({ name: "open" });
     r.cmd({ name: "start" });
     r.cmd({ name: "arcade.enter" });
     r.cmd(pair.cmd);
@@ -2888,7 +2925,6 @@ describe("a bet placed after the result it names pays nothing", () => {
     const config: ArcadeRoundConfig = { kind: "plan_apply", target: 4, seconds: 90 };
 
     const r = await room(t, 6);
-    r.cmd({ name: "open" });
     r.cmd({ name: "start" });
     r.cmd({ name: "arcade.enter" });
     r.cmd(cmd);
@@ -3042,7 +3078,6 @@ describe("a Gganbu pair dissolves when half of it leaves", () => {
   it("houses both halves the moment one of them is released, on both implementations", async (t) => {
     const pair = roundPair("gganbu");
     const r = await room(t, 6);
-    r.cmd({ name: "open" });
     r.cmd({ name: "start" });
     r.cmd({ name: "arcade.enter" });
     r.cmd(pair.cmd);
@@ -3134,7 +3169,6 @@ describe("a practice arcade round moves no board either", () => {
   it("banks the round and leaves the score grid alone, as the engine does", async (t) => {
     const pair = roundPair("recruitment");
     const r = await room(t, 6);
-    r.cmd({ name: "open" });
     r.cmd({ name: "start" });
     r.cmd({ name: "practice", on: true });
     r.cmd({ name: "arcade.enter" });
@@ -3244,7 +3278,6 @@ describe("a kicked person keeps their row and loses their place", () => {
    */
   it("refuses their own rejoin token under the name they were kicked for, as the engine does", async (t) => {
     const r = await room(t, 6);
-    r.cmd({ name: "open" });
     r.cmd({ name: "start" });
     let engine = engineRoom(6);
 
@@ -3331,7 +3364,6 @@ describe("a kicked person keeps their row and loses their place", () => {
    */
   it("keeps them out of the board, the grid, the podium and the ceiling, as the engine does", async (t) => {
     const r = await room(t, 6);
-    r.cmd({ name: "open" });
     r.cmd({ name: "start" });
     const openedAt = Date.now();
     r.cmd({ name: "trivia.open", suddenDeath: false });
@@ -3460,7 +3492,6 @@ describe("the console's standings are not the public five", () => {
    */
   it("shows the host an unscored room the engine would not show the screen", async (t) => {
     const r = await room(t, 7);
-    r.cmd({ name: "open" });
     r.cmd({ name: "start" });
     const engine = engineRoom(7);
 
@@ -3523,7 +3554,11 @@ describe("the console's refusals are the reducer's refusals", () => {
    * had already done what it says.
    */
   it("answers a Close in draft and a second Close the way the reducer answers them", async (t) => {
-    const r = await room(t, 2);
+    // The one room in this file that stays in `draft`, and it holds no phones:
+    // #29 gave the mock the reducer's `not_joinable`, so a draft session has
+    // nobody in it by construction. Nothing below reads the roster — the two
+    // claims are an answer and a phase.
+    const r = await room(t, 0, "draft");
     assert.equal(r.host.state().phase, "draft", "the room did not start in draft");
 
     // The engine's own two answers, which are the point of the pairing: they are
@@ -3545,9 +3580,10 @@ describe("the console's refusals are the reducer's refusals", () => {
       "the refused Close closed the session anyway",
     );
 
+    // The one press {@link room} normally makes for itself.
     r.cmd({ name: "open" });
     r.cmd({ name: "start" });
-    let engine = engineRoom(2);
+    let engine = engineRoom(0);
     const first = engineAnswer(engine, { type: "close" });
     assert.deepEqual(
       first.answer,
@@ -3586,7 +3622,6 @@ describe("the console's refusals are the reducer's refusals", () => {
    */
   it("takes a segment before the session is started, and acks a repeat as nothing", async (t) => {
     const r = await room(t, 2);
-    r.cmd({ name: "open" });
     assert.equal(
       r.host.state().phase,
       "lobby",
@@ -3651,7 +3686,6 @@ describe("the console's refusals are the reducer's refusals", () => {
    */
   it("acks a setter that moved nothing as nothing, and tells only the console about the lock", async (t) => {
     const r = await room(t, 2);
-    r.cmd({ name: "open" });
     r.cmd({ name: "start" });
     let engine = engineRoom(2);
     const phone = r.phones[0];
@@ -3771,7 +3805,6 @@ describe("the console's refusals are the reducer's refusals", () => {
   it("names the button to press when Reveal comes before End", async (t) => {
     const r = await room(t, 2);
     const pair = roundPair("unseal");
-    r.cmd({ name: "open" });
     r.cmd({ name: "start" });
     r.cmd({ name: "arcade.enter" });
     let engine = engineRoom(2);
@@ -3840,7 +3873,6 @@ describe("the console's refusals are the reducer's refusals", () => {
    */
   it("turns practice off across a restart, as the reducer does", async (t) => {
     const r = await room(t, 2);
-    r.cmd({ name: "open" });
     r.cmd({ name: "start" });
     r.cmd({ name: "practice", on: true });
     let engine = replay(engineRoom(2), [
@@ -3910,7 +3942,6 @@ describe("a tiebreak leaves the scored set exactly where it found it", () => {
    */
   it("skips out of idle, settles a tie after the last reveal, and comes back unmoved", async (t) => {
     const r = await room(t, 3);
-    r.cmd({ name: "open" });
     r.cmd({ name: "start" });
 
     const total = r.host.state().trivia?.of ?? 0;
@@ -4075,7 +4106,6 @@ describe("a tiebreak leaves the scored set exactly where it found it", () => {
    */
   it("refuses to advance past an open question, in the reducer's words", async (t) => {
     const r = await room(t, 3);
-    r.cmd({ name: "open" });
     r.cmd({ name: "start" });
     const asked = [questionFromFrame(r.host.state())];
     r.cmd({ name: "trivia.open", suddenDeath: false });
@@ -4139,7 +4169,6 @@ describe("a latecomer to a running round can play it", () => {
     const config: ArcadeRoundConfig = { kind: "plan_apply", target: 4, seconds: 90 };
 
     const r = await room(t, 6);
-    r.cmd({ name: "open" });
     r.cmd({ name: "start" });
     r.cmd({ name: "arcade.enter" });
     r.cmd(cmd);
@@ -4235,7 +4264,6 @@ describe("a latecomer to a running round can play it", () => {
   it("acks the press that numbers a latecomer, and leaves them out of the round", async (t) => {
     const pair = roundPair("recruitment");
     const r = await room(t, 6);
-    r.cmd({ name: "open" });
     r.cmd({ name: "start" });
     r.cmd({ name: "arcade.enter" });
     r.cmd(pair.cmd);
@@ -4352,7 +4380,6 @@ describe("a bet is refused in the reducer's order and in the reducer's words", (
     const config: ArcadeRoundConfig = { kind: "plan_apply", target: 4, seconds: 90 };
 
     const r = await room(t, 6);
-    r.cmd({ name: "open" });
     r.cmd({ name: "start" });
     // Before the arcade, because the first thing the reducer checks for a bet is
     // that there is one. See {@link engineBeforeTheArcade}.
@@ -4578,7 +4605,6 @@ describe("a round that has ended carries neither of its clocks", () => {
   it("nulls startedAt at the end and keeps it null through the reveal, as the engine does", async (t) => {
     const pair = roundPair("unseal");
     const r = await room(t, 6);
-    r.cmd({ name: "open" });
     r.cmd({ name: "start" });
     r.cmd({ name: "arcade.enter" });
     r.cmd(pair.cmd);
@@ -4695,7 +4721,6 @@ describe("a tap at the rope that achieved nothing tells nobody it did", () => {
   it("acks what moved, sends a frame only for what was credited, as the reducer does", async (t) => {
     const pair = roundPair("tug_of_raft");
     const r = await room(t, 6);
-    r.cmd({ name: "open" });
     r.cmd({ name: "start" });
     r.cmd({ name: "arcade.enter" });
     r.cmd(pair.cmd);
@@ -4867,7 +4892,6 @@ describe("picking the tin you are already holding changes nothing", () => {
   it("acks a repeated pick as nothing and sends the room no frame for it", async (t) => {
     const pair = roundPair("unseal");
     const r = await room(t, 6);
-    r.cmd({ name: "open" });
     r.cmd({ name: "start" });
     r.cmd({ name: "arcade.enter" });
     r.cmd(pair.cmd);
@@ -4974,7 +4998,6 @@ describe("a waiting wave stops being able to bet the moment it walks on", () => 
   it("refuses a second bet from a wave that is now crossing, as the reducer does", async (t) => {
     const pair = roundPair("glass_bridge");
     const r = await room(t, 6);
-    r.cmd({ name: "open" });
     r.cmd({ name: "start" });
     r.cmd({ name: "arcade.enter" });
     r.cmd(pair.cmd);
@@ -5223,7 +5246,6 @@ describe("a press that arrives after the Floor's clock is refused by the clock",
     const config: ArcadeRoundConfig = { kind: "plan_apply", target: 4, seconds: 3 };
 
     const r = await room(t, 3);
-    r.cmd({ name: "open" });
     r.cmd({ name: "start" });
     r.cmd({ name: "arcade.enter" });
     r.cmd(cmd);
@@ -5355,7 +5377,6 @@ describe("a press that arrives after the Floor's clock is refused by the clock",
     };
 
     const r = await room(t, 6);
-    r.cmd({ name: "open" });
     r.cmd({ name: "start" });
     r.cmd({ name: "arcade.enter" });
     r.cmd(cmd);
@@ -5569,6 +5590,1844 @@ describe("a press that arrives after the Floor's clock is refused by the clock",
       answerTo(better, "ended-bet"),
       ended.answer,
       "a bet at a round that has finished",
+    );
+  });
+});
+
+/* ------------------------------------------------------------------ */
+/* #29 — the nine the four sweeps missed, and the five confirmed       */
+/* ------------------------------------------------------------------ */
+
+/**
+ * #29's survey, scenario by scenario.
+ *
+ * It was written from the source rather than from the issue tracker — three
+ * claims in the earlier issues turned out to be false once somebody read the
+ * engine — and it found nine divergences the sweeps behind #17, #19, #12, #24,
+ * #25 and #27 had all walked past, plus five the previous agent had recorded and
+ * left. The first three are things a person watching `?mock=1` would see.
+ *
+ * Two of its rows are recorded rather than tested, and both are unreachable
+ * through this socket rather than merely awkward. They are written down here for
+ * the same reason (c) and (o) are above: a difference nobody wrote down is what
+ * the issue is about.
+ *
+ * - **`no_more_questions`'s wording.** `trivia.open` said "That was the last
+ *   one." where the reducer says "That was the last question." The two strings
+ *   are now the same string, and nothing can reach the branch to prove it:
+ *   `question()` indexes the scored set at `at`, `trivia.next` refuses to move
+ *   `at` past the end, and a tiebreak restores where it found it. Fixed rather
+ *   than listed because the fix is a string and the alternative is a sentence
+ *   that would reach a host's glass differently the day the mock grows a loader.
+ * - **The streak bonus on a warm-up.** `settleQuestion` in engine/trivia.ts pays
+ *   nothing at all for a `basePoints: 0` question, streak bonus included, and
+ *   this file paid the bonus regardless. Also now in step, and also unreachable:
+ *   the question set is a private constant with no warm-up in it and no command
+ *   that loads another, which is deliberate difference 2. The same argument as
+ *   the "no trivia loaded" frame, one field along.
+ *
+ * Everything else the survey found is a scenario below, in the issue's own
+ * order of what a person would notice.
+ */
+
+/**
+ * The mock's own clock, measured through `ping`.
+ *
+ * `SERVER_SKEW_MS` puts the mock 1.2 seconds ahead of the browser on purpose —
+ * deliberate difference 5 — so an instant on a frame is not a number `Date.now()`
+ * here can be subtracted from. {@link mockClock} in the last suite measures the
+ * offset off a round's `startedAt`, which only exists inside the arcade; this
+ * measures it off `pong`, which any surface can ask for at any time.
+ *
+ * Exact rather than approximate, and the two ticks are why. `Wire.send` is
+ * `transport.send(msg)` followed by `tick(2)`, and the mock's delivery is one
+ * more zero-millisecond `setTimeout` — so the `pong` is *built* during that
+ * tick, at the clock this line then reads, and *delivered* on the next one.
+ */
+function mockNow(r: Room): () => number {
+  r.host.send({ t: "ping", t0: 0 });
+  const builtAt = Date.now();
+  r.settle();
+  const pong = r.host.frames.filter((f) => f.t === "pong").at(-1);
+  assert.ok(pong !== undefined && pong.t === "pong", "the mock did not answer a ping");
+  const skew = pong.t1 - builtAt;
+  return () => Date.now() + skew;
+}
+
+/**
+ * A send-off the engine can be handed, shaped like one a room would watch.
+ *
+ * Two photographs and two messages of different lengths, so that stepping moves
+ * between slides whose `slideMs` are different numbers, and a closing card so the
+ * walk has somewhere to stop. It is not the mock's content and does not try to
+ * be — the mock's is a private constant of four long messages — which is why
+ * every claim below is about *behaviour* rather than about an instant.
+ */
+const SENDOFF_CONTENT: SendoffContent = {
+  name: "A Leaving Colleague",
+  subtitle: null,
+  opening: { photos: ["one.jpg", "two.jpg"], seconds: 40, music: null },
+  kudos: [
+    { from: "A Colleague", message: "Thank you for all of it." },
+    {
+      from: "Another Colleague",
+      message:
+        "The desk will not be the same, and neither will the Tuesday review, " +
+        "which you ran for three years without once letting it run long.",
+    },
+  ],
+  closing: { photos: [], line: "Don't be a stranger." },
+};
+
+/* ------------------------------------------------------------------ */
+/* #29.1 — Auto, on the send-off, advancing something                  */
+/* ------------------------------------------------------------------ */
+
+describe("the send-off walks itself under Auto, as the runtime's slide timer does", () => {
+  /**
+   * The headline of #29, and the only row in it that needed machinery rather
+   * than a guard.
+   *
+   * `stepSendoff` had exactly three callers in `mock.ts` — the two host commands
+   * and the scripted director — and **there was no timer keyed on `sendoffAuto`
+   * anywhere in the file**. The server has one: `#armSlideTimer` in runtime.ts
+   * fires `{ type: "sendoffNext" }` at `slideAt + slideMs(...)` and re-arms after
+   * every `apply`. So in `?mock=manual` the host pressed Auto, `auto: true` and a
+   * live `advanceAt` went on the wire, the console and the Desktop both counted
+   * down to zero — and the photograph stayed up for ever. A probe left the mock
+   * on `run / index 0 / same photo` with `advanceAt` eighty-four seconds in the
+   * past while the runtime under the same presses had reached `closing`.
+   *
+   * Two near misses are worth naming, because between them they are the reason
+   * this survived four sweeps. The #12 scenario above checks that `advanceAt` is
+   * *anchored* — that it does not move when nothing about the send-off moved —
+   * which is a claim about the projection and is perfectly true of a deadline
+   * nothing ever acts on. And deliberate difference 1 in `mock.ts`'s header is
+   * about **trivia** Auto, and says "trivia" in as many words.
+   *
+   * **Why this compares behaviour and not instants.** The same reason #12 does:
+   * the two sides are holding different send-offs, `slideMs` scales a slide by
+   * its own text, and the clocks are on different epochs. What is the same is
+   * what Auto *does* — hold at the title card, hold short of the deadline, step
+   * on it, keep stepping, hold when it is switched off, and stop at the closing
+   * card. Seven observations, taken the same way on each side, compared as one
+   * record.
+   *
+   * **How the engine is made to spend a clock.** The reducer is pure and holds no
+   * timers; the timer lives in runtime.ts. So {@link spendOnTheEngine} runs it:
+   * step the clock forward, and whenever the instant `views.ts` publishes as
+   * `advanceAt` has arrived, apply `sendoffNext` at exactly that instant. That is
+   * `#armSlideTimer`'s rule, read off the projection rather than guessed at —
+   * which is the part that matters, because a helper that picked its own
+   * deadlines would be comparing the mock against this file's arithmetic.
+   */
+  interface AutoWalk {
+    readonly heldAtTheTitleCard: boolean;
+    readonly heldShortOfTheFirstDeadline: boolean;
+    readonly steppedOnTheFirstDeadline: boolean;
+    readonly heldShortOfTheSecondDeadline: boolean;
+    readonly steppedOnTheSecondDeadline: boolean;
+    readonly heldOnceAutoWasOff: boolean;
+    readonly reachedTheClosingCardUnpressed: boolean;
+    readonly heldAtTheClosingCard: boolean;
+  }
+
+  /**
+   * Which slide is up, as a string two sides can be compared on.
+   *
+   * `index` alone is not enough: it is the *message* ordinal, so every photograph
+   * in the opening montage reports zero. The photo key is what tells two
+   * consecutive photographs apart, and `part` is what tells the halves of one
+   * long message apart — both of which are single steps of Auto and both of which
+   * a scenario that only watched `index` would call "nothing happened".
+   */
+  function slide(view: RenderState["sendoff"]): string {
+    assert.ok(view !== undefined, "no send-off on the frame");
+    return `${view.phase}|${view.index}|${view.part}|${view.photo ?? ""}`;
+  }
+
+  /** How far short of a deadline the room is held before it is crossed. */
+  const SHORT_OF_IT = 500;
+
+  /**
+   * The runtime's slide timer, run over the engine.
+   *
+   * Applies `sendoffNext` at each `advanceAt` that falls at or before `to`, and
+   * stops without applying anything past it — so "hold the engine to 500 ms short
+   * of its own deadline" and "let the engine cross it" are the same call with two
+   * different targets, which is what makes the two halves of the record mean the
+   * same thing on both sides.
+   */
+  function spendOnTheEngine(
+    state: SessionState,
+    from: number,
+    to: number,
+  ): SessionState {
+    let s = state;
+    let t = from;
+    for (let steps = 0; steps < 500; steps += 1) {
+      const due = engineView(s, t).sendoff?.advanceAt ?? null;
+      if (due === null || due > to) return s;
+      t = due;
+      s = replay(s, [{ event: { type: "sendoffNext" }, at: t }]);
+    }
+    assert.fail("the engine's send-off never stopped advancing");
+  }
+
+  /** Where the engine's slide deadline is, or nothing if it has none. */
+  function engineDeadline(state: SessionState, now: number): number | null {
+    return engineView(state, now).sendoff?.advanceAt ?? null;
+  }
+
+  it("holds, steps, keeps stepping and stops, on both implementations", async (t) => {
+    const r = await room(t, 2);
+    r.cmd({ name: "start" });
+    r.cmd({ name: "segment", kind: "sendoff" });
+    // The shortest beat the reducer will accept, so the montage is walked in a
+    // hundred fake seconds rather than in four hundred. It is the host's own
+    // control and it is clamped identically on both sides.
+    r.cmd({ name: "sendoff.speed", seconds: MIN_AUTO_SECONDS });
+    // Auto on at the title card, which is where a host turns it on, and — as the
+    // #12 scenario records — the only starting point at which a `setSendoffAuto`
+    // restamp cannot cover for a step that never stamped an anchor at all.
+    r.cmd({ name: "sendoff.auto", auto: true });
+    const now = mockNow(r);
+    const view = (): RenderState["sendoff"] => r.host.state().sendoff;
+
+    const atTitle = slide(view());
+    r.advance(30_000);
+    const heldAtTheTitleCard = slide(view()) === atTitle;
+
+    r.cmd({ name: "sendoff.next" });
+    const first = view()?.advanceAt ?? null;
+    assert.ok(first !== null, "the run started with no deadline on the frame");
+    const onSlideOne = slide(view());
+    r.advance(first - now() - SHORT_OF_IT);
+    const heldShortOfTheFirstDeadline = slide(view()) === onSlideOne;
+    r.advance(1_000);
+    const steppedOnTheFirstDeadline = slide(view()) !== onSlideOne;
+
+    const second = view()?.advanceAt ?? null;
+    assert.ok(second !== null, "the second slide carries no deadline");
+    const onSlideTwo = slide(view());
+    r.advance(second - now() - SHORT_OF_IT);
+    const heldShortOfTheSecondDeadline = slide(view()) === onSlideTwo;
+    r.advance(1_000);
+    const steppedOnTheSecondDeadline = slide(view()) !== onSlideTwo;
+
+    r.cmd({ name: "sendoff.auto", auto: false });
+    const parked = slide(view());
+    r.advance(60_000);
+    const heldOnceAutoWasOff = slide(view()) === parked;
+
+    // And the whole of the rest of it, unpressed. One second a tick, because a
+    // re-arming chain advances one link per tick however long the tick is — see
+    // {@link Room.advance} — so the cap is a slide count and not a duration.
+    r.cmd({ name: "sendoff.auto", auto: true });
+    let ticks = 0;
+    while (view()?.phase !== "closing" && ticks < 400) {
+      r.advance(1_000);
+      ticks += 1;
+    }
+    const reachedTheClosingCardUnpressed = view()?.phase === "closing";
+    const onTheLastCard = slide(view());
+    r.advance(60_000);
+    const heldAtTheClosingCard = slide(view()) === onTheLastCard;
+
+    const mocked: AutoWalk = {
+      heldAtTheTitleCard,
+      heldShortOfTheFirstDeadline,
+      steppedOnTheFirstDeadline,
+      heldShortOfTheSecondDeadline,
+      steppedOnTheSecondDeadline,
+      heldOnceAutoWasOff,
+      reachedTheClosingCardUnpressed,
+      heldAtTheClosingCard,
+    };
+
+    /* The same eight moments, on the engine and its own runtime's rule. */
+    let engine = engineRoom(2, [
+      { type: "loadSendoff", content: SENDOFF_CONTENT, seed: 1 },
+      { type: "setSegment", segment: "sendoff" },
+      { type: "setSendoffSpeed", seconds: MIN_AUTO_SECONDS },
+      { type: "setSendoffAuto", auto: true },
+    ]);
+    let at = T0;
+    const realView = (): RenderState["sendoff"] => engineView(engine, at).sendoff;
+
+    const realAtTitle = slide(realView());
+    engine = spendOnTheEngine(engine, at, at + 30_000);
+    at += 30_000;
+    const realHeldAtTheTitleCard = slide(realView()) === realAtTitle;
+
+    engine = replay(engine, [{ event: { type: "sendoffNext" }, at }]);
+    const realFirst = engineDeadline(engine, at);
+    assert.ok(realFirst !== null, "the engine's run started with no deadline");
+    const realOnSlideOne = slide(realView());
+    engine = spendOnTheEngine(engine, at, realFirst - SHORT_OF_IT);
+    at = realFirst - SHORT_OF_IT;
+    const realHeldShortOfTheFirst = slide(realView()) === realOnSlideOne;
+    engine = spendOnTheEngine(engine, at, realFirst);
+    at = realFirst;
+    const realSteppedOnTheFirst = slide(realView()) !== realOnSlideOne;
+
+    const realSecond = engineDeadline(engine, at);
+    assert.ok(realSecond !== null, "the engine's second slide carries no deadline");
+    const realOnSlideTwo = slide(realView());
+    engine = spendOnTheEngine(engine, at, realSecond - SHORT_OF_IT);
+    at = realSecond - SHORT_OF_IT;
+    const realHeldShortOfTheSecond = slide(realView()) === realOnSlideTwo;
+    engine = spendOnTheEngine(engine, at, realSecond);
+    at = realSecond;
+    const realSteppedOnTheSecond = slide(realView()) !== realOnSlideTwo;
+
+    engine = replay(engine, [{ event: { type: "setSendoffAuto", auto: false }, at }]);
+    const realParked = slide(realView());
+    engine = spendOnTheEngine(engine, at, at + 60_000);
+    at += 60_000;
+    const realHeldOnceAutoWasOff = slide(realView()) === realParked;
+
+    engine = replay(engine, [{ event: { type: "setSendoffAuto", auto: true }, at }]);
+    engine = spendOnTheEngine(engine, at, at + 3_600_000);
+    at += 3_600_000;
+    const realReachedTheClosingCard = realView()?.phase === "closing";
+    const realOnTheLastCard = slide(realView());
+    engine = spendOnTheEngine(engine, at, at + 60_000);
+    at += 60_000;
+    const realHeldAtTheClosingCard = slide(realView()) === realOnTheLastCard;
+
+    const real: AutoWalk = {
+      heldAtTheTitleCard: realHeldAtTheTitleCard,
+      heldShortOfTheFirstDeadline: realHeldShortOfTheFirst,
+      steppedOnTheFirstDeadline: realSteppedOnTheFirst,
+      heldShortOfTheSecondDeadline: realHeldShortOfTheSecond,
+      steppedOnTheSecondDeadline: realSteppedOnTheSecond,
+      heldOnceAutoWasOff: realHeldOnceAutoWasOff,
+      reachedTheClosingCardUnpressed: realReachedTheClosingCard,
+      heldAtTheClosingCard: realHeldAtTheClosingCard,
+    };
+
+    // The engine's own record, spelled out, because it is the claim and not the
+    // baseline: a walk that never moved would satisfy four of these eight for
+    // free, and those four are exactly the ones the old mock passed.
+    assert.deepEqual(
+      real,
+      {
+        heldAtTheTitleCard: true,
+        heldShortOfTheFirstDeadline: true,
+        steppedOnTheFirstDeadline: true,
+        heldShortOfTheSecondDeadline: true,
+        steppedOnTheSecondDeadline: true,
+        heldOnceAutoWasOff: true,
+        reachedTheClosingCardUnpressed: true,
+        heldAtTheClosingCard: true,
+      },
+      "the engine's own behaviour under its runtime's slide timer",
+    );
+    assert.deepEqual(mocked, real);
+  });
+});
+
+/* ------------------------------------------------------------------ */
+/* #29.2 — what the Spot Award toast says                              */
+/* ------------------------------------------------------------------ */
+
+describe("the Spot Award toast carries what the server puts on the wire", () => {
+  /**
+   * `grantSpot` in reducer.ts emits `{ what: "toast", detail:
+   * event.reason.trim() }`; runtime.ts sends `text: effect.detail ?? ""`; the
+   * Desktop draws its own "Spot Award" label beside it. So a real room reads
+   * "Spot Award  <the reason>", with nobody named.
+   *
+   * This file sent `Spot Award — ${p.nickname} — ${spot.reason}`, which on the
+   * same surface reads "Spot Award  Spot Award — Player 1 — <reason>": the label
+   * twice, and a name the server does not send. No scenario in this file
+   * mentioned toasts at all.
+   *
+   * **Matched to the server, and the server is asked about separately.** The
+   * mock is an oracle *for* the server; a demo that shows a better toast than the
+   * room will get is precisely the lie `?mock=1` exists not to tell, so the fix
+   * goes here whichever toast is the better one. Whether the server's toast
+   * should name its recipient is a question about `engine/` and `server/`, which
+   * this file does not get to answer — it is filed as its own issue, #31.
+   *
+   * The audience is checked too, because it is the other half of a toast: the
+   * reducer's effect is `to: "all"` and runtime.ts fans it with `sendAll`, so the
+   * big screen and every phone get it and not just the console.
+   */
+  function toastsOn(wire: Wire): readonly string[] {
+    return wire.frames.flatMap((f) => (f.t === "toast" ? [f.text] : []));
+  }
+
+  /**
+   * The text the runtime would put on the wire for one event's toast effect.
+   *
+   * Two lines of runtime.ts — find the `toast` broadcast among the effects, and
+   * `effect.detail ?? ""` — reproduced here for the same reason trivia's index
+   * check is reproduced below: the boundary is where the server does it, and a
+   * comparison against the reducer alone would stop one layer short of the wire.
+   */
+  function engineToast(state: SessionState, event: Event, at: number): string | null {
+    const result = reduce(state, event, at);
+    const toast = result.effects.find(
+      (e) => e.kind === "broadcast" && e.what === "toast",
+    );
+    if (toast === undefined || toast.kind !== "broadcast") return null;
+    assert.equal(toast.to, "all", "the engine's toast is not addressed to the room");
+    return toast.detail ?? "";
+  }
+
+  it("says the reason and names nobody, exactly as the reducer's effect does", async (t) => {
+    const REASON = "  asked the question nobody else would  ";
+    const r = await room(t, 3);
+    r.cmd({ name: "start" });
+    const engine = engineRoom(3);
+    const grant: Event = {
+      type: "grantSpot",
+      activityId: "trivia",
+      pid: "p1",
+      reason: REASON,
+    };
+    const real = engineToast(engine, grant, T0);
+    // The engine's own answer, spelled out. Both halves matter: the reason is
+    // trimmed and it is *all* there is, so a mock that added a name would fail on
+    // the second line even if it happened to trim the same way.
+    assert.equal(real, REASON.trim(), "the engine's toast is not the bare reason");
+    const nickname = engineView(engine).roster[0]?.nickname;
+    assert.ok(nickname !== undefined, "the engine's room has no first row");
+    assert.ok(
+      real !== null && !real.includes(nickname),
+      "the engine's toast names the recipient after all, so this claim has moved",
+    );
+
+    r.cmd({ name: "spot.grant", activityId: "trivia", pid: "p1", reason: REASON });
+    assert.deepEqual(toastsOn(r.host), [real], "the console's toast");
+    assert.deepEqual(toastsOn(r.screen), [real], "the big screen's toast");
+    // Every phone, not only the one being praised: `to: "all"`.
+    for (const [i, phone] of r.phones.entries()) {
+      assert.deepEqual(toastsOn(phone), [real], `phone ${i + 1}'s toast`);
+    }
+  });
+});
+
+/* ------------------------------------------------------------------ */
+/* #29.3 — what "Clear the card" leaves behind                         */
+/* ------------------------------------------------------------------ */
+
+describe("clearing the holding card leaves the card the server leaves", () => {
+  /**
+   * The console's Clear sends `{ name: "holding", title: "", line: "" }`.
+   * `main.ts` turns that into `setHolding` with `{ title: "", line: "" }`,
+   * protocol.ts's parser accepts empty strings on purpose, and the reducer stores
+   * the card **non-null**. This file mapped both fields empty to `holding: null`.
+   *
+   * Which is a different big screen, not a different representation. The Desktop
+   * draws `state.holding?.title ?? state.title`, so `null` puts the **session
+   * title** up — "Divergence", or whatever the afternoon is called — where a real
+   * session goes blank. The one field on the holding panel whose whole job is to
+   * be empty was the one that showed something in the demo.
+   *
+   * `null` is still reachable and still means "no card": it is where a session
+   * starts and where `restart` puts it back. There is simply no console command
+   * that returns to it, which is the reducer's position too — so the scenario
+   * checks the start, the write, the clear, and that the clear is *not* the start.
+   */
+  it("stores an empty card rather than no card, as the reducer does", async (t) => {
+    const r = await room(t, 2);
+    r.cmd({ name: "start" });
+    let engine = engineRoom(2);
+
+    // Where a session begins: no card at all, on both sides.
+    assert.equal(engineView(engine).holding, null, "the engine started with a card");
+    assert.equal(r.screen.state().holding, engineView(engine).holding, "at the start");
+
+    const filled = { title: "Back at 14:20", line: "Prize: the good coffee." };
+    r.cmd({ name: "holding", ...filled });
+    engine = replay(engine, [
+      { event: { type: "setHolding", holding: filled }, at: T0 + 1_000 },
+    ]);
+    assert.deepEqual(
+      r.screen.state().holding,
+      engineView(engine).holding,
+      "the card the host typed",
+    );
+
+    r.cmd({ name: "holding", title: "", line: "" });
+    engine = replay(engine, [
+      {
+        event: { type: "setHolding", holding: { title: "", line: "" } },
+        at: T0 + 2_000,
+      },
+    ]);
+    const cleared = engineView(engine).holding;
+    // The engine's own answer, and the whole of the divergence: a card, with
+    // nothing in it. Without this line the comparison below would be just as
+    // happy with two implementations that both cleared to `null`.
+    assert.deepEqual(
+      cleared,
+      { title: "", line: "" },
+      "the engine cleared to no card at all, so this claim has moved",
+    );
+    assert.deepEqual(
+      r.screen.state().holding,
+      cleared,
+      "the card the big screen is left drawing after a Clear",
+    );
+    // And what the Desktop actually paints, which is the thing a room sees.
+    const painted = (state: RenderState): string => state.holding?.title ?? state.title;
+    assert.equal(painted(r.screen.state()), "", "the demo put a title on the big screen");
+    assert.equal(painted(r.screen.state()), painted(engineScreen(engine)));
+
+    // A second Clear is a no-op on both sides, which is `setHolding`'s own
+    // field-by-field comparison: the console sends the whole card on every
+    // keystroke of the editor and an unchanged one must not fan out.
+    const again = engineAnswer(engine, {
+      type: "setHolding",
+      holding: { title: "", line: "" },
+    });
+    assert.deepEqual(again.answer, { kind: "ack", applied: false }, "the engine's repeat");
+    assert.deepEqual(r.attempt({ name: "holding", title: "", line: "" }), again.answer);
+  });
+});
+
+/* ------------------------------------------------------------------ */
+/* #29.4 — a closed session is frozen                                  */
+/* ------------------------------------------------------------------ */
+
+describe("a closed session refuses every press the reducer refuses", () => {
+  /**
+   * The reducer's first act, before its switch: once `phase === "closed"`,
+   * everything but `disconnect` / `reconnect` / `close` / `reopen` /
+   * `restartSession` is refused `session_closed`. `#hostCmd` had no such gate at
+   * all, and a probe pressed six buttons after a Close and was acked
+   * `applied: true` on every one — it sealed the scoreboard, granted a Spot
+   * Award, shrank the roster and opened a question in a session the engine had
+   * frozen.
+   *
+   * **Reachable from the console, not only from the socket**, which is what makes
+   * this the one a host walks into. After Close the segment rail and the primary
+   * button are disabled in `host/main.ts` and nothing else is: not the scoring
+   * grid, not Spot Award, not kick or release, not seal, not practice, not the
+   * lobby lock. "Close the session, then tidy the scores" is a reasonable thing
+   * to rehearse, and the demo taught that it works.
+   *
+   * Each press is paired with the engine's answer to the same event *before* the
+   * close, which is the non-vacuity line: every one of these six is an
+   * `applied: true` in a running session, so a mock that refused them for some
+   * other reason would fail that half.
+   */
+  it("answers six presses after a Close the way the reducer answers them", async (t) => {
+    const r = await room(t, 3);
+    r.cmd({ name: "start" });
+    // A trivia room rather than {@link engineRoom}, because one of the six presses
+    // is `trivia.open` and the reducer asks "is a set loaded" before it asks about
+    // the phase — so an engine with no questions would refuse it
+    // `no_questions_loaded` and the pairing below would be comparing the wrong
+    // refusal. The mock's set is a private constant, so the honest way to put the
+    // same questions in front of the engine is to read one off the frame.
+    const running = engineTriviaRoom(3, [questionFromFrame(r.host.state())]);
+
+    const presses: readonly { cmd: HostCommand; event: Event }[] = [
+      {
+        cmd: { name: "seal", state: "sealed" },
+        event: { type: "setSeal", seal: "sealed" },
+      },
+      {
+        cmd: { name: "score.set", activityId: "trivia", pid: "p1", raw: 11 },
+        event: { type: "setScore", activityId: "trivia", pid: "p1", raw: 11 },
+      },
+      {
+        cmd: {
+          name: "spot.grant",
+          activityId: "trivia",
+          pid: "p1",
+          reason: "held the room together",
+        },
+        event: {
+          type: "grantSpot",
+          activityId: "trivia",
+          pid: "p1",
+          reason: "held the room together",
+        },
+      },
+      { cmd: { name: "participant.kick", pid: "p2" }, event: { type: "kick", pid: "p2" } },
+      { cmd: { name: "practice", on: true }, event: { type: "setPractice", on: true } },
+      {
+        cmd: { name: "trivia.open", suddenDeath: false },
+        event: { type: "openQuestion", suddenDeath: false },
+      },
+    ];
+
+    // Every one of the six is a press a running session accepts. Taken off the
+    // engine rather than asserted here, so the day one of them stops being
+    // allowed this line says so instead of quietly passing.
+    for (const press of presses) {
+      assert.deepEqual(
+        engineAnswer(running, press.event).answer,
+        { kind: "ack", applied: true },
+        `the engine refuses ${press.cmd.name} in a running session, so its row has moved`,
+      );
+    }
+
+    r.cmd({ name: "close" });
+    const closed = engineAnswer(running, { type: "close" }).next;
+    assert.equal(engineView(closed).phase, "closed", "the engine did not close");
+
+    for (const press of presses) {
+      const real = engineAnswer(closed, press.event);
+      assert.deepEqual(
+        real.answer,
+        {
+          kind: "refused",
+          code: "session_closed",
+          message: "The session is closed.",
+        },
+        `the engine's answer to ${press.cmd.name} in a closed session`,
+      );
+      assert.deepEqual(r.attempt(press.cmd), real.answer, `${press.cmd.name}, after a Close`);
+    }
+
+    // And nothing moved, which is the half the `applied` flag cannot show. Four
+    // projections the six presses would each have changed.
+    assert.equal(r.host.state().seal, engineView(closed).seal, "the seal");
+    assert.equal(r.host.state().practice, engineView(closed).practice, "practice");
+    assert.deepEqual(triviaGrid(r.host.state()), triviaGrid(engineView(closed)), "the grid");
+    assert.deepEqual(
+      r.host.state().roster.map((p) => p.pid),
+      engineView(closed).roster.map((p) => p.pid),
+      "the roster",
+    );
+    assert.equal(
+      r.host.state().trivia?.phase,
+      engineView(closed).trivia?.phase,
+      "the question phase",
+    );
+  });
+
+  /**
+   * The other half, which the guard above cannot reach: the clocks.
+   *
+   * Every timer in `mock.ts` mutates the session directly rather than going back
+   * through `#hostCmd`, so a gate on presses does not see them. On the server the
+   * same timeouts survive a Close and then call `apply` — which is the layer the
+   * freeze is in — so the event is refused and nothing moves. Here the close
+   * timer went on to settle the question a few seconds after the session had
+   * ended, which is a scoreboard changing in a room that has gone home.
+   *
+   * The engine's answer to the event the timer fires is the oracle: a refusal,
+   * therefore an unmoved state, therefore a question still open.
+   */
+  it("leaves a question open across a Close, because the reducer refuses the close", async (t) => {
+    const r = await room(t, 3);
+    r.cmd({ name: "start" });
+    r.cmd({ name: "trivia.open", suddenDeath: false });
+    const question = questionFromFrame(r.host.state());
+    assert.equal(r.host.state().trivia?.phase, "open", "no question was opened");
+
+    let engine = engineTriviaRoom(3, [question]);
+    engine = replay(engine, [
+      { event: { type: "openQuestion", suddenDeath: false }, at: T0 },
+      { event: { type: "close" }, at: T0 + 1_000 },
+    ]);
+    const timerFires = engineAnswer(engine, { type: "closeQuestion" }, T0 + 60_000);
+    assert.deepEqual(
+      timerFires.answer,
+      { kind: "refused", code: "session_closed", message: "The session is closed." },
+      "the engine lets a closed session's question timer settle after all",
+    );
+    assert.equal(
+      engineView(timerFires.next, T0 + 60_000).trivia?.phase,
+      "open",
+      "the engine's question is not still open, so there is nothing to compare",
+    );
+
+    r.cmd({ name: "close" });
+    // Well past the question's own time limit, which is what the close timer is
+    // armed for. Nothing may fire.
+    r.advance(question.timeLimitSec * 1000 + 10_000);
+    assert.equal(
+      r.host.state().trivia?.phase,
+      engineView(timerFires.next, T0 + 60_000).trivia?.phase,
+      "the mock's own clock settled a question in a closed session",
+    );
+  });
+});
+
+/* ------------------------------------------------------------------ */
+/* #29.5 — the door, before the session is open and after it is shut   */
+/* ------------------------------------------------------------------ */
+
+/**
+ * What a phone is told at the door, in the shape it comes off the wire.
+ *
+ * A `refused` frame carries a {@link RefusedReason} and a sentence, and both are
+ * read: the reason picks the screen the join form shows and the sentence is what
+ * the person holding the phone actually reads.
+ */
+interface DoorAnswer {
+  readonly reason: string;
+  readonly message: string;
+}
+
+function doorAnswerTo(wire: Wire): DoorAnswer | null {
+  const refusal = wire.frames.filter((f) => f.t === "refused").at(-1);
+  if (refusal === undefined || refusal.t !== "refused") return null;
+  return { reason: refusal.reason, message: refusal.message };
+}
+
+/**
+ * The same answer, off the reducer and through the boundary's own mapping.
+ *
+ * `main.ts` has the table: the engine's reject codes are deliberately not the
+ * wire's reasons, so `joins_locked` becomes `lobby_locked`, and both
+ * `not_joinable` and the global `session_closed` become `not_joinable` — with a
+ * note about why it is not `no_such_code` ("the code is real and the session
+ * exists"). The sentence is the reducer's, unchanged. Reproduced rather than
+ * imported because it is the boundary, which is exactly where the mock's own
+ * `#hello` sits.
+ */
+function engineDoorAnswer(
+  state: SessionState,
+  pid: string,
+  nickname: string,
+): DoorAnswer | null {
+  const result = reduce(state, { type: "join", pid, nickname }, T0);
+  const rejection = result.effects.find((e) => e.kind === "reject");
+  if (rejection === undefined || rejection.kind !== "reject") return null;
+  const map: Record<string, string> = {
+    nickname_taken: "nickname_taken",
+    invalid_nickname: "invalid_nickname",
+    joins_locked: "lobby_locked",
+    kicked: "kicked",
+    not_joinable: "not_joinable",
+    session_closed: "not_joinable",
+  };
+  return {
+    reason: map[rejection.code] ?? "malformed",
+    message: rejection.message,
+  };
+}
+
+describe("a phone cannot join a session that is not open", () => {
+  /**
+   * `#hello` checked the token, the code's shape, the lock, the nickname's length
+   * and a clash — and never the phase. `join` in reducer.ts refuses `draft` and
+   * `closed`, and the two sentences are different sentences.
+   *
+   * It matters more here than it would anywhere else, because `?mock=manual`
+   * deliberately *starts* in `draft` so the host can drive `open` themselves. So
+   * a phone opened against the demo before the host has pressed anything joined,
+   * and the same phone against the same session in the room is turned away — and
+   * the console's roster is the one surface a host checks before starting.
+   *
+   * Fixable rather than listable because the scripted bots do not come through
+   * this door: `#botJoins` adds to the roster directly, which is deliberate
+   * difference 6, so `?mock=manual` still has a room to show. What it did cost is
+   * one line of the harness — {@link room} now presses Open before the phones
+   * arrive, because a draft room cannot hold any.
+   */
+  it("turns a phone away from a draft session, in the reducer's words", async (t) => {
+    const r = await room(t, 0, "draft");
+    const real = engineDoorAnswer(engineDraft(), "p1", "Player 1");
+    assert.deepEqual(
+      real,
+      { reason: "not_joinable", message: "The session is not open." },
+      "the engine admits a phone to a draft session, so this row has moved",
+    );
+    const phone = r.join("Player 1");
+    r.settle();
+    assert.deepEqual(doorAnswerTo(phone), real, "the door of a draft session");
+    assert.deepEqual(r.host.state().roster, [], "somebody got in anyway");
+  });
+
+  it("turns a phone away from a closed session, in the reducer's other words", async (t) => {
+    const r = await room(t, 1);
+    r.cmd({ name: "start" });
+    r.cmd({ name: "close" });
+    const closed = engineAnswer(engineRoom(1), { type: "close" }).next;
+    const real = engineDoorAnswer(closed, "p9", "Latecomer");
+    // The engine's closed-session freeze answers before `join` does, which is why
+    // this sentence is not the draft one. Two different sentences through one
+    // wire reason, and a mock with one of them cannot pass both scenarios.
+    assert.deepEqual(
+      real,
+      { reason: "not_joinable", message: "The session is closed." },
+      "the engine's answer at the door of a closed session",
+    );
+    const phone = r.join("Latecomer");
+    r.settle();
+    assert.deepEqual(doorAnswerTo(phone), real, "the door of a closed session");
+    assert.equal(
+      r.host.state().roster.length,
+      engineView(closed).roster.length,
+      "the roster grew",
+    );
+  });
+
+  /**
+   * The locked lobby, which is not one of #29's rows and was found beside them.
+   *
+   * The reason was right — `main.ts` maps the engine's `joins_locked` onto the
+   * wire's `lobby_locked`, and this file has said `lobby_locked` all along — and
+   * the sentence was this file's own: "The host has locked the lobby." where the
+   * reducer says "The host has locked joining." A `refused` frame's message is
+   * what the person holding the phone reads, so it is the same kind of difference
+   * as every other sentence in this section, and it is here because the fix to the
+   * phase gate is one line above it.
+   *
+   * The same sentence is now on the special `…lock` code beside it, which is a
+   * demo affordance — deliberate difference 6 — kept so the locked-lobby screen
+   * can be reached without a host. Not reachable from here: the mock draws its own
+   * join code at construction and {@link Room.join} can only offer that one, so
+   * the two strings are kept in step by being written together and not by this
+   * scenario.
+   */
+  it("turns a phone away from a locked lobby, in the reducer's words", async (t) => {
+    const r = await room(t, 1);
+    r.cmd({ name: "start" });
+    r.cmd({ name: "lobby.lock", locked: true });
+    const locked = engineAnswer(engineRoom(1), {
+      type: "setJoinsLocked",
+      locked: true,
+    }).next;
+    const real = engineDoorAnswer(locked, "p9", "Latecomer");
+    assert.deepEqual(
+      real,
+      { reason: "lobby_locked", message: "The host has locked joining." },
+      "the engine admits a phone to a locked lobby, so this row has moved",
+    );
+
+    const phone = r.join("Latecomer");
+    r.settle();
+    assert.deepEqual(doorAnswerTo(phone), real, "the door of a locked lobby");
+
+    // Unlocked again, and the same name gets in — so the refusal above is the
+    // lock's and not something the name or the phase would have produced anyway.
+    r.cmd({ name: "lobby.lock", locked: false });
+    const unlocked = engineDoorAnswer(
+      engineAnswer(locked, { type: "setJoinsLocked", locked: false }).next,
+      "p9",
+      "Someone Else",
+    );
+    assert.equal(unlocked, null, "the engine refuses a join into an unlocked lobby");
+    const admitted = r.join("Someone Else");
+    r.settle();
+    assert.equal(doorAnswerTo(admitted), null, "the unlocked lobby refused a join");
+  });
+});
+
+/* ------------------------------------------------------------------ */
+/* #29.6 — commands that name somebody who is no longer there          */
+/* ------------------------------------------------------------------ */
+
+describe("a command naming a kicked or unknown participant is answered as the reducer answers it", () => {
+  /**
+   * `find_pid` includes kicked people, deliberately — it is how a kicked row is
+   * still found for `houseThePairOf` and for the projections that mark it — so
+   * `setScore`, `setStatus` and `grantSpot` have to say `!p || p.kicked`
+   * themselves, which is what the reducer does. Here they asked only `!p`, so the
+   * probe granted a Spot Award to somebody the host had just removed and toasted
+   * it to the whole room.
+   *
+   * The same scenario carries the three idempotence rows beside it, because they
+   * are the same lookup from the other end: kicking an unknown pid was a refusal
+   * here and is a no-op there, and a second kick and a second release both
+   * *applied* here and broadcast a frame identical to the one the room was
+   * holding. The console reads that difference — `applied: false` is a button
+   * that was already where it is, and a refusal is a sentence on the glass.
+   *
+   * Six answers, and they are not all the same answer: three refusals with a pid
+   * in them, one ack that did something, and three acks that did not.
+   */
+  it("walks the six, and compares each one", async (t) => {
+    const r = await room(t, 3);
+    r.cmd({ name: "start" });
+    let engine = engineRoom(3);
+
+    r.cmd({ name: "participant.kick", pid: "p2" });
+    engine = engineAnswer(engine, { type: "kick", pid: "p2" }).next;
+    assert.equal(
+      engineView(engine).roster.find((p) => p.pid === "p2"),
+      undefined,
+      "the engine still has p2 on the roster, so nothing was kicked",
+    );
+
+    const rows: readonly { what: string; cmd: HostCommand; event: Event }[] = [
+      {
+        what: "scoring somebody who has been kicked",
+        cmd: { name: "score.set", activityId: "trivia", pid: "p2", raw: 7 },
+        event: { type: "setScore", activityId: "trivia", pid: "p2", raw: 7 },
+      },
+      {
+        what: "benching somebody who has been kicked",
+        cmd: { name: "score.status", activityId: "trivia", pid: "p2", status: "bench" },
+        event: { type: "setStatus", activityId: "trivia", pid: "p2", status: "bench" },
+      },
+      {
+        what: "a Spot Award for somebody who has been kicked",
+        cmd: {
+          name: "spot.grant",
+          activityId: "trivia",
+          pid: "p2",
+          reason: "was here a moment ago",
+        },
+        event: {
+          type: "grantSpot",
+          activityId: "trivia",
+          pid: "p2",
+          reason: "was here a moment ago",
+        },
+      },
+      {
+        what: "kicking somebody twice",
+        cmd: { name: "participant.kick", pid: "p2" },
+        event: { type: "kick", pid: "p2" },
+      },
+      {
+        what: "kicking a pid nobody holds",
+        cmd: { name: "participant.kick", pid: "p99" },
+        event: { type: "kick", pid: "p99" },
+      },
+      {
+        what: "releasing a pid nobody holds",
+        cmd: { name: "participant.release", pid: "p99" },
+        event: { type: "releaseNickname", pid: "p99" },
+      },
+    ];
+
+    const answers = rows.map((row) => engineAnswer(engine, row.event).answer);
+    // The engine's own six, written out. Three refusals naming the pid and three
+    // acks that changed nothing: a mock that gave one answer to all six — which
+    // is close to what this file did — cannot pass this line.
+    assert.deepEqual(
+      answers,
+      [
+        { kind: "refused", code: "unknown_participant", message: "No participant p2." },
+        { kind: "refused", code: "unknown_participant", message: "No participant p2." },
+        { kind: "refused", code: "unknown_participant", message: "No participant p2." },
+        { kind: "ack", applied: false },
+        { kind: "ack", applied: false },
+        { kind: "ack", applied: false },
+      ],
+      "the engine's own answers to the six",
+    );
+    rows.forEach((row, i) => {
+      assert.deepEqual(r.attempt(row.cmd), answers[i], row.what);
+    });
+
+    // A release is the other door out of the room, and it has the same two
+    // answers: the first one does something and the second one does not.
+    const first = engineAnswer(engine, { type: "releaseNickname", pid: "p1" });
+    assert.deepEqual(first.answer, { kind: "ack", applied: true }, "the engine's release");
+    assert.deepEqual(r.attempt({ name: "participant.release", pid: "p1" }), first.answer);
+    const second = engineAnswer(first.next, { type: "releaseNickname", pid: "p1" });
+    assert.deepEqual(
+      second.answer,
+      { kind: "ack", applied: false },
+      "the engine's second release is not an ack that changed nothing",
+    );
+    assert.deepEqual(
+      r.attempt({ name: "participant.release", pid: "p1" }),
+      second.answer,
+      "releasing the same nickname twice",
+    );
+
+    // And the grid, which is where a stored raw against a kicked row would show.
+    assert.deepEqual(
+      triviaGrid(r.host.state()),
+      triviaGrid(engineView(second.next)),
+      "the score grid after six presses that should have changed nothing",
+    );
+    assert.deepEqual(
+      r.host.state().hostExtras?.spots ?? [],
+      engineView(second.next).hostExtras?.spots ?? [],
+      "a Spot Award was granted to somebody who is not in the room",
+    );
+  });
+});
+
+/* ------------------------------------------------------------------ */
+/* #29.7 — the arithmetic of a question's points                       */
+/* ------------------------------------------------------------------ */
+
+describe("a question's points are the engine's arithmetic, on the millisecond it matters", () => {
+  /**
+   * `questionPoints` in engine/trivia.ts is one division on purpose, and carries
+   * the argument: the obvious transcription of SCORING.md's formula — `base * (1
+   * - t / limit / 2)` — divides twice and subtracts, each step carries its own
+   * binary rounding error, and a response time that lands on an exact half
+   * arrives as .4999… and `Math.round` takes it **down**. The comment names 123
+   * response times in the real launch set where it happens.
+   *
+   * This file was that transcription. For its own 1000-point, fifteen-second
+   * questions, 41 of the 15 001 possible millisecond values came out a point low
+   * — on `triviaMine.points`, on the totals, on the podium and on the score grid,
+   * for roughly three taps in a thousand. Nobody was going to find it by eye,
+   * which is the whole reason it is worth a scenario.
+   *
+   * **The millisecond is searched for, not written down.** The scenario asks the
+   * two formulas where they disagree for whatever question the mock is holding,
+   * and fails if they now agree everywhere — so it follows a change to the
+   * question set instead of quietly testing a value that no longer matters. The
+   * naive form is written out once, here, for that search and nowhere else.
+   *
+   * **A scenario about a clock has to spend some**, and this one is the sharpest
+   * case of that rule in the file: the whole claim lives at one millisecond of
+   * response time, so the room is held for exactly the offset that reaches it.
+   */
+  const naivePoints = (base: number, ms: number, limitSec: number): number =>
+    Math.round(base * (1 - Math.min(ms, limitSec * 1000) / (limitSec * 1000) / 2));
+
+  it("scores a response time the naive formula rounds down, as the engine scores it", async (t) => {
+    const r = await room(t, 3);
+    r.cmd({ name: "start" });
+    r.cmd({ name: "trivia.open", suddenDeath: false });
+    // `opensAt` is stamped inside the tick this press spends, so `Date.now()`
+    // here *is* that instant less the skew — and the skew cancels, because the
+    // mock's `ms` is one skewed clock minus another.
+    const openedAt = Date.now();
+    const question = questionFromFrame(r.host.state());
+
+    let target = -1;
+    for (let ms = 0; ms <= question.timeLimitSec * 1000; ms += 1) {
+      if (
+        naivePoints(question.basePoints, ms, question.timeLimitSec) !==
+        questionPoints(question.basePoints, ms, question.timeLimitSec)
+      ) {
+        target = ms;
+        break;
+      }
+    }
+    assert.ok(
+      target > 0,
+      "the two formulas agree on every response time this question can have, so " +
+        "there is nothing here to tell apart",
+    );
+    // What the difference is, so the failure reads as arithmetic rather than as a
+    // number that moved: the naive form is one point low, never high.
+    assert.equal(
+      questionPoints(question.basePoints, target, question.timeLimitSec) -
+        naivePoints(question.basePoints, target, question.timeLimitSec),
+      1,
+      "the naive transcription is not one point low here after all",
+    );
+
+    const right = question.correct[0] ?? 0;
+    // Two milliseconds of the offset belong to the tick that carries the frame:
+    // `Wire.send` is `transport.send` followed by `tick(2)`, and the answer is
+    // read at the end of that tick.
+    r.advance(target - 2);
+    r.phones[0]?.send({ t: "trivia.answer", cid: "late", index: 0, choice: right });
+    assert.equal(
+      Date.now() - openedAt,
+      target,
+      "the room was not held to the millisecond the claim is about",
+    );
+
+    r.cmd({ name: "trivia.close" });
+    r.cmd({ name: "trivia.reveal" });
+
+    let engine = engineTriviaRoom(3, [question]);
+    engine = replay(engine, [
+      { event: { type: "openQuestion", suddenDeath: false }, at: T0 },
+      {
+        event: { type: "answerQuestion", pid: "p1", choice: right, ms: target },
+        at: T0 + target,
+      },
+      { event: { type: "closeQuestion" }, at: T0 + target + 100 },
+      { event: { type: "revealQuestion" }, at: T0 + target + 200 },
+    ]);
+
+    // The phone's own strip, which is the surface the number is largest on.
+    const mine = renderStateFor(engine, {
+      role: "participant",
+      pid: "p1",
+      lastSeen: new Map([["p1", T0 + target + 200]]),
+      now: T0 + target + 200,
+    }).triviaMine;
+    assert.ok(mine?.state === "revealed", "the engine's phone is not at the reveal");
+    assert.equal(
+      mine.points,
+      questionPoints(question.basePoints, target, question.timeLimitSec),
+      "the engine did not score its own question with its own formula",
+    );
+    const theirs = r.phones[0]?.state().triviaMine;
+    assert.ok(theirs?.state === "revealed", "the mock's phone is not at the reveal");
+    assert.equal(theirs.points, mine.points, "the points on the phone");
+    // And the two surfaces the same number is copied onto.
+    assert.deepEqual(
+      triviaGrid(r.host.state()),
+      triviaGrid(engineView(engine, T0 + target + 200)),
+      "the score grid",
+    );
+    assert.deepEqual(
+      publicBoard(r.screen.state()),
+      publicBoard(engineScreen(engine, T0 + target + 200)),
+      "the public leaderboard",
+    );
+  });
+});
+
+/* ------------------------------------------------------------------ */
+/* #29.8 — the nickname rules at the door                              */
+/* ------------------------------------------------------------------ */
+
+describe("the door applies the reducer's nickname rules", () => {
+  /**
+   * `#hello` had one rule — `nickname.length < 2`, worded "Two characters or
+   * more." — against the reducer's three, and none of the three sentences
+   * matched. So a nickname that gets in here is turned away there, which is the
+   * worst direction for this file to be wrong in: the join form is rehearsed
+   * against `?mock=1` and nowhere else.
+   *
+   * - `sanitiseNickname` first, which strips control and format characters and
+   *   collapses whitespace. Absent entirely: a name padded with zero-width
+   *   joiners was long here and short there.
+   * - the fold to a key, which is `nicknameKey` — NFKD, marks stripped, lowered,
+   *   non-alphanumerics dropped. This file folded case and nothing else, so `Ana`
+   *   and `Aña` were one person there and two here.
+   * - and the two bounds, two and twenty-four **glyphs**. There was no ceiling at
+   *   all, and `String.length` would have counted a name of twenty emoji as
+   *   forty.
+   *
+   * Four names, four different answers, all four taken off the reducer through
+   * the boundary's mapping — see {@link engineDoorAnswer}.
+   */
+  it("gives a phone the reducer's four answers, in the reducer's words", async (t) => {
+    const r = await room(t, 1);
+    r.cmd({ name: "start" });
+    const engine = engineRoom(1);
+
+    const names: readonly { what: string; nickname: string }[] = [
+      { what: "one character", nickname: "A" },
+      // Punctuation folds to an empty key on both sides once the engine's fold is
+      // the fold. It is two characters, so the length rules have nothing to say.
+      { what: "nothing that can be a key", nickname: "!!" },
+      { what: "twenty-five glyphs", nickname: "A".repeat(25) },
+      // Twenty-five letters from outside the BMP, which is what proves the count
+      // is code points and not UTF-16 units: `String.length` calls these fifty and
+      // `[...name].length` calls them twenty-five. Letters rather than emoji on
+      // purpose — an emoji is neither `\p{L}` nor `\p{N}`, so a name of emoji folds
+      // to an empty key and collects "Pick a nickname." before the ceiling is ever
+      // reached, which would have made this row a second copy of the one above it.
+      { what: "twenty-five astral letters", nickname: "\u{1D400}".repeat(25) },
+    ];
+
+    const real = names.map((n) => engineDoorAnswer(engine, "p9", n.nickname));
+    assert.deepEqual(
+      real,
+      [
+        { reason: "invalid_nickname", message: "Nicknames need at least 2 characters." },
+        { reason: "invalid_nickname", message: "Pick a nickname." },
+        { reason: "invalid_nickname", message: "Nicknames are at most 24 characters." },
+        { reason: "invalid_nickname", message: "Nicknames are at most 24 characters." },
+      ],
+      "the engine's own four answers, which are three different sentences",
+    );
+
+    names.forEach((n, i) => {
+      const phone = r.join(n.nickname);
+      r.settle();
+      assert.deepEqual(doorAnswerTo(phone), real[i], n.what);
+    });
+    assert.equal(
+      r.host.state().roster.length,
+      1,
+      "one of the four names was admitted to the room",
+    );
+
+    /**
+     * And `sanitiseNickname` itself, which none of the four above can reach.
+     *
+     * The old door did `trim().replace(/\s+/g, " ")`, and the engine's fold does
+     * that *and* strips control and format characters. Those two differ on exactly
+     * one kind of name — one carrying something invisible — and on nothing else, so
+     * a mutation that deletes the sanitise call survives all four rows above. It
+     * did, the first time these ran.
+     *
+     * So: twenty-four letters and a zero-width joiner. Sanitised it is twenty-four
+     * glyphs and gets through the ceiling; unsanitised it is twenty-five and
+     * collects "Nicknames are at most 24 characters." from the row above, which is
+     * a different sentence and a different rule. Paired with a holder of the
+     * sanitised name already in the room so the answer is a *refusal* rather than
+     * an admission — a phone that got in under a name the harness never invited
+     * would trip {@link noStrangers} before any comparison could be made, and it
+     * would be tripping it for the right reason.
+     *
+     * It carries the third claim beside it for free: the sentence names the
+     * *sanitised* nickname, which is what the reducer puts in it.
+     */
+    const PLAIN = "A".repeat(24);
+    const INVISIBLE = `${PLAIN}‍`;
+    assert.equal([...INVISIBLE].length, 25, "the invisible character is not there");
+    r.join(PLAIN);
+    r.settle();
+    assert.equal(r.host.state().roster.length, 2, "the plain name was not admitted");
+
+    const held = replay(
+      engineDraft(),
+      (
+        [
+          { type: "open" },
+          { type: "join", pid: "p1", nickname: PLAIN },
+          { type: "start" },
+        ] as Event[]
+      ).map((event) => ({ event, at: T0 })),
+    );
+    const invisible = engineDoorAnswer(held, "p9", INVISIBLE);
+    assert.deepEqual(
+      invisible,
+      {
+        reason: "nickname_taken",
+        message: `${PLAIN} is already here. Pick another, or ask the host to release it.`,
+      },
+      "the engine reads the invisible character as a twenty-fifth glyph, so this " +
+        "name no longer tells the two folds apart",
+    );
+    const sneaky = r.join(INVISIBLE);
+    r.settle();
+    assert.deepEqual(doorAnswerTo(sneaky), invisible, "a name padded with a joiner");
+    assert.equal(r.host.state().roster.length, 2, "the padded name was admitted");
+  });
+
+  /**
+   * The clash, and the reason `participant.release` exists.
+   *
+   * The reducer refuses any non-kicked holder of the key, connected or not. This
+   * file asked `clash.conn === "on"` and, when the holder was away, **handed the
+   * newcomer their row** — their pid, their player number, their raw scores and
+   * their Spot Awards. A door that gives the next arrival the row is a door that
+   * makes `participant.release` pointless.
+   *
+   * **Driven off the scripted director, and it has to be.** Nothing in
+   * {@link room} can produce an away participant who is neither kicked nor
+   * released: a kick marks them `kicked` and a release blanks their key, and both
+   * free the name on purpose — the reducer agrees with the mock about both. The
+   * one route to `conn: "away"` with the key intact is the director's own
+   * hand-dropped bot at thirteen seconds, which is deliberate difference 7's
+   * single scripted disconnection, so this scenario builds a director room the way
+   * {@link walkTheLoop} does and types that bot's name into a phone. Which is also
+   * exactly how a person would meet it: it is reachable in `?mock=1` with no
+   * socket at all.
+   */
+  it("refuses a name held by somebody who is away, as the reducer does", async (t) => {
+    t.mock.timers.enable({ apis: ["setTimeout", "setInterval", "Date"] });
+    const mod = await freshMock();
+    const factory = mod.mockTransport({ ...MANUAL, director: true });
+    const tick = (ms: number): void => t.mock.timers.tick(ms);
+
+    const frames: ServerMessage[] = [];
+    const host = factory({
+      onOpen() {},
+      onMessage(msg) {
+        frames.push(msg);
+      },
+      onClose() {},
+    });
+    tick(11);
+    host.send({ t: "hello", role: "host", hostToken: "mock-host" });
+    // Fifteen seconds: the script opens at half a second, starts the session at
+    // nine, and drops one bot's connection at thirteen. One second a tick, for the
+    // reason {@link Room.advance} gives.
+    for (let i = 0; i < 15; i += 1) tick(1_000);
+
+    const state = frames.filter((f) => f.t === "state").at(-1);
+    assert.ok(state !== undefined && state.t === "state", "the console has no frame");
+    assert.equal(state.state.phase, "running", "the script has not started the session");
+    const away = state.state.roster.find((p) => p.conn === "away");
+    assert.ok(
+      away !== undefined,
+      "the script dropped nobody, so there is no away holder to clash with",
+    );
+    const joinCode = state.state.joinCode;
+    assert.ok(joinCode, "the console frame carries no join code");
+
+    const phoneFrames: ServerMessage[] = [];
+    const phone = factory({
+      onOpen() {},
+      onMessage(msg) {
+        phoneFrames.push(msg);
+      },
+      onClose() {},
+    });
+    tick(11);
+    phone.send({
+      t: "hello",
+      role: "participant",
+      joinCode,
+      nickname: away.nickname,
+    });
+    tick(4);
+
+    // The engine, holding the same situation: somebody joined, then dropped, and
+    // is still on the roster under their own key.
+    const engine = replay(
+      engineDraft(),
+      (
+        [
+          { type: "open" },
+          { type: "join", pid: "p1", nickname: away.nickname },
+          { type: "start" },
+          { type: "disconnect", pid: "p1" },
+        ] as Event[]
+      ).map((event) => ({ event, at: T0 })),
+    );
+    assert.equal(
+      engine.participants["p1"]?.connected,
+      false,
+      "the engine's holder is not away, so the clash is the connected one",
+    );
+    const real = engineDoorAnswer(engine, "p9", away.nickname);
+    assert.deepEqual(
+      real,
+      {
+        reason: "nickname_taken",
+        message: `${away.nickname} is already here. Pick another, or ask the host to release it.`,
+      },
+      "the engine lets a newcomer take an away holder's name, so this row has moved",
+    );
+
+    const refusal = phoneFrames.filter((f) => f.t === "refused").at(-1);
+    assert.ok(refusal !== undefined && refusal.t === "refused", "the phone was admitted");
+    assert.deepEqual(
+      { reason: refusal.reason, message: refusal.message },
+      real,
+      "the door, for a name whose holder is away",
+    );
+    // And the row is still theirs: the newcomer was given no welcome, so there is
+    // no pid to inherit a score with.
+    assert.equal(
+      phoneFrames.filter((f) => f.t === "welcome").length,
+      0,
+      "the newcomer was welcomed into the away holder's row",
+    );
+    // Releasing the name is what frees it, which is the other half of the rule —
+    // and the reducer agrees, because a released holder's key is blank.
+    const released = engineAnswer(engine, { type: "releaseNickname", pid: "p1" }).next;
+    assert.equal(
+      engineDoorAnswer(released, "p9", away.nickname),
+      null,
+      "the engine still refuses a released name, so release does nothing",
+    );
+  });
+});
+
+/* ------------------------------------------------------------------ */
+/* #29.9 — a kicked phone's tap                                        */
+/* ------------------------------------------------------------------ */
+
+describe("a kicked phone's answer is refused and counted by nobody", () => {
+  /**
+   * `answerQuestion` in reducer.ts refuses `!p || p.kicked` with
+   * `unknown_participant`, and `main.ts` drops the kicked socket on the way past.
+   * This file had neither — and the socket half is deliberate difference 7, which
+   * says nobody ever disconnects, so the phone is still connected on purpose. The
+   * *guard* was simply missing, so the tap was acked and counted: a probe left the
+   * console reading `answered 1 / eligible 1` with a distribution and an
+   * `answeredBy` row, in a room whose one remaining participant had not answered.
+   *
+   * The socket staying open stays. Being counted does not.
+   */
+  it("refuses the tap in the reducer's words and leaves the count alone", async (t) => {
+    const r = await room(t, 2);
+    r.cmd({ name: "start" });
+    r.cmd({ name: "trivia.open", suddenDeath: false });
+    const question = questionFromFrame(r.host.state());
+    const right = question.correct[0] ?? 0;
+
+    let engine = engineTriviaRoom(2, [question]);
+    engine = replay(engine, [
+      { event: { type: "openQuestion", suddenDeath: false }, at: T0 },
+      { event: { type: "kick", pid: "p2" }, at: T0 + 10 },
+    ]);
+    r.cmd({ name: "participant.kick", pid: "p2" });
+
+    const real = engineAnswer(
+      engine,
+      { type: "answerQuestion", pid: "p2", choice: right, ms: 20 },
+      T0 + 20,
+    );
+    assert.deepEqual(
+      real.answer,
+      {
+        kind: "refused",
+        code: "unknown_participant",
+        message: "No participant p2.",
+      },
+      "the engine counts a kicked phone's answer, so this row has moved",
+    );
+    const kicked = r.phones[1];
+    assert.ok(kicked !== undefined, "the room has no second phone");
+    kicked.send({ t: "trivia.answer", cid: "ghost", index: 0, choice: right });
+    assert.deepEqual(answerTo(kicked, "ghost"), real.answer, "a kicked phone's tap");
+
+    // The one person still in the room taps, so the count below is one and not
+    // zero: two empty counts would match however either side is written.
+    engine = replay(engine, [
+      {
+        event: { type: "answerQuestion", pid: "p1", choice: right, ms: 30 },
+        at: T0 + 30,
+      },
+    ]);
+    r.phones[0]?.send({ t: "trivia.answer", cid: "real", index: 0, choice: right });
+    r.settle();
+
+    // `answered` and `eligible` are optional on the wire — protocol.ts leaves
+    // them off a phone that has not locked in — so a missing one is a real answer
+    // and is reported as such rather than defaulted to zero, which would let two
+    // absent counts match.
+    const count = (
+      state: RenderState,
+    ): { answered: number | undefined; eligible: number | undefined } => {
+      const view = state.trivia;
+      assert.ok(view !== undefined, "no question on the frame");
+      return { answered: view.answered, eligible: view.eligible };
+    };
+    assert.deepEqual(
+      count(engineView(engine, T0 + 30)),
+      { answered: 1, eligible: 1 },
+      "the engine's own count",
+    );
+    assert.deepEqual(count(r.host.state()), count(engineView(engine, T0 + 30)));
+    assert.deepEqual(
+      r.host.state().hostExtras?.trivia?.answeredBy ?? [],
+      engineView(engine, T0 + 30).hostExtras?.trivia?.answeredBy ?? [],
+      "the console's list of who has answered",
+    );
+  });
+});
+
+/* ------------------------------------------------------------------ */
+/* #29 — the five that were recorded and not fixed                     */
+/* ------------------------------------------------------------------ */
+
+describe("the four recorded divergences that a sequence can reach", () => {
+  /**
+   * `openQuestion` in reducer.ts asks three things in order: is a set loaded, is
+   * the session `running`, and is the question phase one that can be opened.
+   * There was no phase check here at all, so the probe opened a question in the
+   * lobby and the phone received the text — a room being asked question one
+   * before the host has pressed Start.
+   *
+   * Socket-only from the console's point of view, because the trivia panel is
+   * behind the segment rail. The rail is not a rule, and this file is where the
+   * rule lives.
+   */
+  it("refuses a question opened before the session is started, in the reducer's words", async (t) => {
+    const r = await room(t, 2);
+    assert.equal(r.host.state().phase, "lobby", "the room is not in the lobby");
+
+    // A set loaded, and no `start`: `engineTriviaRoom` presses one, so this walks
+    // the events itself.
+    const joins: Event[] = [
+      { type: "join", pid: "p1", nickname: "Player 1" },
+      { type: "join", pid: "p2", nickname: "Player 2" },
+    ];
+    const lobby = replay(
+      engineDraft(),
+      (
+        [
+          { type: "open" },
+          ...joins,
+          { type: "setSegment", segment: "trivia" },
+          {
+            type: "loadTrivia",
+            activityId: "trivia",
+            questions: [questionFromFrame(r.host.state())],
+            tiebreakers: [],
+          },
+        ] as Event[]
+      ).map((event) => ({ event, at: T0 })),
+    );
+    const inTheLobby = engineAnswer(lobby, { type: "openQuestion", suddenDeath: false });
+    assert.deepEqual(
+      inTheLobby.answer,
+      { kind: "refused", code: "wrong_phase", message: "Start the session first." },
+      "the engine opens a question in the lobby, so this row has moved",
+    );
+    assert.deepEqual(
+      r.attempt({ name: "trivia.open", suddenDeath: false }),
+      inTheLobby.answer,
+      "a question opened in the lobby",
+    );
+    assert.equal(
+      r.host.state().trivia?.phase,
+      engineView(lobby).trivia?.phase,
+      "the mock opened it anyway",
+    );
+
+    // And the pairing that keeps the fix honest: once the session is running the
+    // same press is accepted on both sides, so a mock that refused every
+    // `trivia.open` would fail here.
+    r.cmd({ name: "start" });
+    const running = engineAnswer(
+      replay(lobby, [{ event: { type: "start" }, at: T0 + 100 }]),
+      { type: "openQuestion", suddenDeath: false },
+    );
+    assert.deepEqual(running.answer, { kind: "ack", applied: true }, "the engine's Open");
+    assert.deepEqual(
+      r.attempt({ name: "trivia.open", suddenDeath: false }),
+      running.answer,
+      "a question opened in a running session",
+    );
+  });
+
+  /**
+   * The two halves of a trivia tap's refusal order.
+   *
+   * On the server the index is not the engine's to refuse: `answer` in runtime.ts
+   * checks it at the boundary — "the driver is the only layer that can tell a tap
+   * meant for question 7 from one that arrived after the host advanced to question
+   * 8" — and only then hands the event to `reduce`. This file asked the *phase*
+   * first, which is a divergence a phone reads: after Reveal and Next, `at` is 1
+   * and the phase is `idle`, so a phone still holding question one was told "That
+   * question is closed." where the room would be told "That question has moved
+   * on." Same code, and the wrong one of the two sentences — the one that does not
+   * say why.
+   *
+   * Pressed twice, with the stale index and with the current one, because the two
+   * answers are different sentences and a scenario that collected the wrong one
+   * would be passing on the bug it was written for.
+   *
+   * And `Number.isInteger`, which the reducer asks for and this did not. In
+   * principle only from a socket, since protocol.ts's parser refuses a fractional
+   * `choice` before a real server sees it — but the in-page path hands a typed
+   * `ClientMessage` straight to the hub with no parse in between, which is the
+   * door this harness comes through too.
+   */
+  it("refuses a tap in the boundary's order, with the boundary's sentences", async (t) => {
+    const r = await room(t, 2);
+    r.cmd({ name: "start" });
+    r.cmd({ name: "trivia.open", suddenDeath: false });
+    const first = questionFromFrame(r.host.state());
+    const right = first.correct[0] ?? 0;
+
+    /**
+     * The answer the server would give one tap, boundary included.
+     *
+     * `answer` in runtime.ts checks the index and defers everything else; so does
+     * this, and the deferral is {@link engineAnswer} over `answerQuestion`.
+     */
+    const engineTap = (
+      state: SessionState,
+      index: number,
+      pid: string,
+      choice: number,
+    ): Answer => {
+      const trivia = state.trivia;
+      assert.ok(trivia !== null, "the engine has no question set loaded");
+      if (index !== trivia.at) {
+        return {
+          kind: "refused",
+          code: "question_not_open",
+          message: "That question has moved on.",
+        };
+      }
+      return engineAnswer(state, { type: "answerQuestion", pid, choice, ms: 5 }).answer;
+    };
+
+    let engine = engineTriviaRoom(2, [first, first]);
+    engine = replay(engine, [
+      { event: { type: "openQuestion", suddenDeath: false }, at: T0 },
+    ]);
+
+    // A fractional choice, while the question is plainly open.
+    const fractional = engineTap(engine, 0, "p1", 1.5);
+    assert.deepEqual(
+      fractional,
+      { kind: "refused", code: "invalid_choice", message: "No such answer." },
+      "the engine accepts a fractional choice, so this row has moved",
+    );
+    r.phones[0]?.send({ t: "trivia.answer", cid: "half", index: 0, choice: 1.5 });
+    assert.deepEqual(answerTo(r.phones[0]!, "half"), fractional, "a choice of 1.5");
+    // And a whole one, so the refusal above is about the fraction and not about
+    // the tap: the same phone, the same moment.
+    const whole = engineTap(engine, 0, "p1", right);
+    assert.deepEqual(whole, { kind: "ack", applied: true }, "the engine's own tap");
+    r.phones[0]?.send({ t: "trivia.answer", cid: "whole", index: 0, choice: right });
+    assert.deepEqual(answerTo(r.phones[0]!, "whole"), whole, "a choice of an integer");
+    engine = replay(engine, [
+      {
+        event: { type: "answerQuestion", pid: "p1", choice: right, ms: 5 },
+        at: T0 + 5,
+      },
+    ]);
+
+    // Now past the question: closed, revealed, and on to the next one. `at` is 1
+    // and the phase is `idle`, which is the state the two checks disagree about.
+    r.cmd({ name: "trivia.close" });
+    r.cmd({ name: "trivia.reveal" });
+    r.cmd({ name: "trivia.next" });
+    engine = replay(engine, [
+      { event: { type: "closeQuestion" }, at: T0 + 100 },
+      { event: { type: "revealQuestion" }, at: T0 + 200 },
+      { event: { type: "nextQuestion" }, at: T0 + 300 },
+    ]);
+    assert.equal(engine.trivia?.at, 1, "the engine did not advance");
+    assert.equal(engine.trivia?.phase, "idle", "the engine's next question is already open");
+
+    const stale = engineTap(engine, 0, "p2", right);
+    const current = engineTap(engine, 1, "p2", right);
+    // The two sentences, which is the whole content of the ordering: a mock that
+    // asks the phase first gives the second answer to the first press.
+    assert.deepEqual(
+      [stale, current],
+      [
+        {
+          kind: "refused",
+          code: "question_not_open",
+          message: "That question has moved on.",
+        },
+        {
+          kind: "refused",
+          code: "question_not_open",
+          message: "That question is closed.",
+        },
+      ],
+      "the engine's two answers, which have to be two answers",
+    );
+    const phone = r.phones[1];
+    assert.ok(phone !== undefined, "the room has no second phone");
+    phone.send({ t: "trivia.answer", cid: "stale", index: 0, choice: right });
+    assert.deepEqual(answerTo(phone, "stale"), stale, "a tap on the question before");
+    phone.send({ t: "trivia.answer", cid: "current", index: 1, choice: right });
+    assert.deepEqual(answerTo(phone, "current"), current, "a tap on an unopened question");
+  });
+
+  /**
+   * Recruitment's typed answer, and the sentence the server actually uses.
+   *
+   * The audit read this as `not_in_arcade` / "The arcade is not open." on the
+   * server, and that is `tap`'s chain in runtime.ts rather than `submitAnswer`'s —
+   * worth recording, because #29's own opening says three claims in the earlier
+   * issues were false once somebody read the engine, and this is a fourth.
+   * `submitAnswer` has no such branch, and the reducer's `not_in_arcade` is
+   * unreachable behind the runtime's Recruitment check.
+   *
+   * What *is* wrong is a wording, and it is reachable. The server asks the
+   * question in two layers with two sentences: runtime.ts asks whether the round
+   * in play is Recruitment and says "Nothing to answer."; the reducer then asks
+   * whether the Floor is `running` and says "There is nothing to answer." This
+   * file had one condition and one sentence, so a submission to a Recruitment
+   * round that has *ended* — the play survives `#endRound`, the phase does not —
+   * collected the wrong one of the two.
+   *
+   * The kicked check the reducer makes is the other half, and it is the same
+   * omission as trivia's: deliberate difference 7 keeps the socket open, and never
+   * said the answer counts.
+   */
+  it("uses each of the two sentences where the server uses it", async (t) => {
+    const pair = roundPair("recruitment");
+    const r = await room(t, 3);
+    r.cmd({ name: "start" });
+    r.cmd({ name: "arcade.enter" });
+    r.cmd(pair.cmd);
+    r.cmd({ name: "arcade.begin" });
+
+    let engine = engineRoom(3, [
+      { type: "startRound", round: "recruitment", config: pair.config },
+      { type: "beginPlay" },
+    ]);
+
+    /**
+     * The server's answer to one typed submission, boundary included: the
+     * Recruitment check and the item index are runtime.ts's, and everything after
+     * them is the reducer's.
+     */
+    const engineSubmit = (
+      state: SessionState,
+      pid: string,
+      item: number,
+      answer: string,
+      at: number,
+    ): Answer => {
+      const play = state.arcade?.play;
+      if (play?.kind !== "recruitment") {
+        return {
+          kind: "refused",
+          code: "wrong_round_phase",
+          message: "Nothing to answer.",
+        };
+      }
+      if (item !== play.at) {
+        return {
+          kind: "refused",
+          code: "wrong_round_phase",
+          message: "That one has moved on.",
+        };
+      }
+      return engineAnswer(state, { type: "submitAnswer", pid, answer }, at).answer;
+    };
+
+    // First, a kicked player answering a round that is plainly running.
+    r.cmd({ name: "participant.kick", pid: "p3" });
+    engine = engineAnswer(engine, { type: "kick", pid: "p3" }).next;
+    const ghost = engineSubmit(engine, "p3", 0, "anything", T0 + 100);
+    assert.deepEqual(
+      ghost,
+      {
+        kind: "refused",
+        code: "unknown_participant",
+        message: "No participant p3.",
+      },
+      "the engine counts a kicked player's typed answer, so this row has moved",
+    );
+    const kicked = r.phones[2];
+    assert.ok(kicked !== undefined, "the room has no third phone");
+    kicked.send({ t: "arcade.answer", cid: "ghost", item: 0, answer: "anything" });
+    assert.deepEqual(answerTo(kicked, "ghost"), ghost, "a kicked player's typed answer");
+
+    // And a real one, so the refusal above is about the kick: the same item, the
+    // same instant.
+    const alive = engineSubmit(engine, "p1", 0, "anything", T0 + 110);
+    assert.deepEqual(alive, { kind: "ack", applied: true }, "the engine's own submission");
+    r.phones[0]?.send({ t: "arcade.answer", cid: "alive", item: 0, answer: "anything" });
+    assert.deepEqual(answerTo(r.phones[0]!, "alive"), alive, "a submission that counts");
+    engine = replay(engine, [
+      {
+        event: { type: "submitAnswer", pid: "p1", answer: "anything" },
+        at: T0 + 110,
+      },
+    ]);
+
+    // Now end the round. The play is still Recruitment and the Floor is not
+    // running, which is the state the two sentences disagree about.
+    r.cmd({ name: "arcade.end" });
+    engine = replay(engine, [{ event: { type: "endRound" }, at: T0 + 200 }]);
+    assert.equal(
+      engine.arcade?.play?.kind,
+      "recruitment",
+      "the engine dropped the play at the end of the round, so the second " +
+        "sentence is unreachable and there is nothing here to compare",
+    );
+    const ended = engineSubmit(engine, "p2", 0, "anything", T0 + 300);
+    assert.deepEqual(
+      ended,
+      {
+        kind: "refused",
+        code: "wrong_round_phase",
+        message: "There is nothing to answer.",
+      },
+      "the engine's answer at a Recruitment round that has ended",
+    );
+    // Not the same sentence as the one the boundary uses, which is the point.
+    assert.notDeepEqual(
+      ended,
+      {
+        kind: "refused",
+        code: "wrong_round_phase",
+        message: "Nothing to answer.",
+      },
+      "the two sentences are the same sentence, so this row is not a difference",
+    );
+    const late = r.phones[1];
+    assert.ok(late !== undefined, "the room has no second phone");
+    late.send({ t: "arcade.answer", cid: "late", item: 0, answer: "anything" });
+    assert.deepEqual(
+      answerTo(late, "late"),
+      ended,
+      "a typed answer at a Recruitment round that has ended",
+    );
+
+    // And the boundary's own sentence, where the boundary uses it: a round that
+    // is not Recruitment at all.
+    r.cmd({ name: "arcade.reveal" });
+    const second = roundPair("plan_apply");
+    r.cmd(second.cmd);
+    r.cmd({ name: "arcade.begin" });
+    engine = replay(engine, [
+      { event: { type: "revealRound" }, at: T0 + 400 },
+      {
+        event: { type: "startRound", round: "plan_apply", config: second.config },
+        at: T0 + 500,
+      },
+      { event: { type: "beginPlay" }, at: T0 + 600 },
+    ]);
+    const elsewhere = engineSubmit(engine, "p2", 0, "anything", T0 + 700);
+    assert.deepEqual(
+      elsewhere,
+      {
+        kind: "refused",
+        code: "wrong_round_phase",
+        message: "Nothing to answer.",
+      },
+      "the boundary's own sentence, for a round with nothing to type into",
+    );
+    late.send({ t: "arcade.answer", cid: "wrong-round", item: 0, answer: "anything" });
+    assert.deepEqual(
+      answerTo(late, "wrong-round"),
+      elsewhere,
+      "a typed answer at a round that is not Recruitment",
+    );
+  });
+
+  /**
+   * `sendoff.speed`, handed something that is not a number.
+   *
+   * `setSendoffSpeed` in reducer.ts refuses a non-finite `seconds` before it
+   * clamps, and the clamp is the reason: `Math.round(NaN)` is `NaN`, `Math.max`
+   * and `Math.min` pass it straight through, and `autoSeconds: NaN` then poisons
+   * every deadline derived from it — a countdown that draws nothing, and now that
+   * the mock has a slide timer, one armed for `NaN` milliseconds.
+   *
+   * In principle only from a socket: protocol.ts's parser drops it. It reaches
+   * *this* file because the in-page path hands a typed `HostCommand` straight to
+   * the hub with no parse in between, which is also how this harness presses
+   * buttons — so unlike the two rows recorded at the top of this section, this one
+   * can be watched, and is.
+   */
+  it("refuses a speed that is not a number, in the reducer's words", async (t) => {
+    const r = await room(t, 2);
+    r.cmd({ name: "start" });
+    r.cmd({ name: "segment", kind: "sendoff" });
+    const engine = engineRoom(2, [
+      { type: "loadSendoff", content: SENDOFF_CONTENT, seed: 1 },
+      { type: "setSegment", segment: "sendoff" },
+    ]);
+
+    const real = engineAnswer(engine, {
+      type: "setSendoffSpeed",
+      seconds: Number.NaN,
+    });
+    assert.deepEqual(
+      real.answer,
+      {
+        kind: "refused",
+        code: "invalid_round_config",
+        message: "That speed is not a number.",
+      },
+      "the engine stores a non-finite speed, so this row has moved",
+    );
+    assert.deepEqual(
+      r.attempt({ name: "sendoff.speed", seconds: Number.NaN }),
+      real.answer,
+      "a speed of NaN",
+    );
+    // The consequence, which is what the refusal is protecting: the beat on the
+    // wire is still a number, and still the same number on both sides.
+    const held = r.host.state().sendoff?.autoSeconds;
+    assert.ok(
+      typeof held === "number" && Number.isFinite(held),
+      `the mock stored a beat of ${String(held)}`,
+    );
+    assert.equal(held, engineView(engine).sendoff?.autoSeconds, "the beat on the wire");
+
+    // A finite speed the engine does take, so the refusal above is about the
+    // number and not about the button.
+    const good = engineAnswer(engine, {
+      type: "setSendoffSpeed",
+      seconds: MIN_AUTO_SECONDS,
+    });
+    assert.deepEqual(good.answer, { kind: "ack", applied: true }, "the engine's own speed");
+    assert.deepEqual(
+      r.attempt({ name: "sendoff.speed", seconds: MIN_AUTO_SECONDS }),
+      good.answer,
+      "a speed the reducer accepts",
+    );
+    assert.equal(
+      r.host.state().sendoff?.autoSeconds,
+      engineView(good.next).sendoff?.autoSeconds,
+      "the beat the host chose",
     );
   });
 });
