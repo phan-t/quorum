@@ -1258,7 +1258,29 @@ export type Event =
 export type Audience = "all" | "host" | "screen" | { pid: ParticipantId };
 
 export type Effect =
-  | { kind: "broadcast"; to: Audience; what: "state" | "standings" | "toast"; detail?: string }
+  | {
+      kind: "broadcast";
+      to: Audience;
+      what: "state" | "standings" | "toast";
+      detail?: string;
+      /**
+       * Who the toast is *about* — not who it goes to, which is `to`. A Spot
+       * Award names its recipient, and SPEC.md settles that it must: "the
+       * Desktop shows as a toast: *Spot Award — Kenji — best recovery of the
+       * afternoon*". The name is not in `detail` because a rendered string is
+       * a snapshot, and both ends of it move: a kicked participant rejoining
+       * takes a *new* nickname on the *same* pid (`join` in reducer.ts), and
+       * `kick` and `releaseNickname` free the old name for a different pid to
+       * join under. Carrying the pid instead lets the projection layer — which
+       * has the state that the engine, being pure, must not reach for — look
+       * the name up as the frame goes out. See `spotToastText` in
+       * server/runtime.ts.
+       *
+       * Only `what: "toast"` uses it; a `state` or `standings` broadcast is
+       * about the room and has no subject.
+       */
+      subject?: ParticipantId;
+    }
   | { kind: "persist"; what: "snapshot" | "event" }
   /** `to` is an Audience, not a pid: host commands are rejected to the host. */
   | { kind: "reject"; to: Audience; code: RejectCode; message: string };

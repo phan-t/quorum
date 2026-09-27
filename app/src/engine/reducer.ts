@@ -1129,6 +1129,21 @@ export function reduce(
             to: "all",
             what: "toast",
             detail: event.reason.trim(),
+            // The reason is rendered here; the *name* is not. SPEC.md's toast
+            // is "Spot Award — Kenji — best recovery of the afternoon", so the
+            // recipient has to reach a surface — but as a pid, resolved at
+            // projection time by server/runtime.ts, not as text frozen into an
+            // effect that outlives the nickname it copied. Both ends of that
+            // copy move: `join` above rewrites the nickname on a kicked pid
+            // that comes back, and `kick`/`releaseNickname` hand the old name
+            // to somebody else. The pid is the thing this reducer is sure of.
+            //
+            // #31, split out of #29. #29 found client/shared/mock.ts naming the
+            // recipient and the server not, and matched the mock down to the
+            // server because the mock is an oracle *for* the server. This is
+            // the other half: the spec says the mock had it right, so the fix
+            // runs back up — the server names them, and the demo follows.
+            subject: event.pid,
           },
           PERSIST,
         ],

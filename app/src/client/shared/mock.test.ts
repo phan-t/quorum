@@ -212,6 +212,7 @@ import type {
   UnsealShape,
 } from "../../engine/types.ts";
 import { renderStateFor } from "../../server/views.ts";
+import { spotToastText } from "../../server/runtime.ts";
 import type {
   ClientMessage,
   HostCommand,
@@ -5929,31 +5930,37 @@ describe("the send-off walks itself under Auto, as the runtime's slide timer doe
 });
 
 /* ------------------------------------------------------------------ */
-/* #29.2 — what the Spot Award toast says                              */
+/* #29.2 / #31 — what the Spot Award toast says                        */
 /* ------------------------------------------------------------------ */
 
 describe("the Spot Award toast carries what the server puts on the wire", () => {
   /**
-   * `grantSpot` in reducer.ts emits `{ what: "toast", detail:
-   * event.reason.trim() }`; runtime.ts sends `text: effect.detail ?? ""`; the
-   * Desktop draws its own "Spot Award" label beside it. So a real room reads
-   * "Spot Award  <the reason>", with nobody named.
+   * SPEC.md, "Spot Awards": the reason is "shown as a toast: *Spot Award —
+   * Kenji — best recovery of the afternoon*". Three parts from three places.
+   * The **Spot Award** label is the Desktop's, drawn in its own `.label` span
+   * by `showToast` in screen/main.ts. The reason is the host's, carried as the
+   * toast effect's `detail`. The name is the boundary's: `grantSpot` emits
+   * `subject: event.pid` and `spotToastText` in server/runtime.ts resolves it
+   * against the state it is about to send. So the wire carries `Kenji — <the
+   * reason>` and the room reads the spec's sentence.
    *
-   * This file sent `Spot Award — ${p.nickname} — ${spot.reason}`, which on the
-   * same surface reads "Spot Award  Spot Award — Player 1 — <reason>": the label
-   * twice, and a name the server does not send. No scenario in this file
-   * mentioned toasts at all.
-   *
-   * **Matched to the server, and the server is asked about separately.** The
-   * mock is an oracle *for* the server; a demo that shows a better toast than the
-   * room will get is precisely the lie `?mock=1` exists not to tell, so the fix
-   * goes here whichever toast is the better one. Whether the server's toast
-   * should name its recipient is a question about `engine/` and `server/`, which
-   * this file does not get to answer — it is filed as its own issue, #31.
+   * **This scenario has been right, then wrong, then right again, and the
+   * middle step was not a mistake.** This file sent `Spot Award — ${nickname}
+   * — ${reason}`, which on a surface that draws its own label reads "Spot
+   * Award  Spot Award — Player 1 — …": the name was right and the label was
+   * doubled. #29 found the mock and the server disagreeing and matched the
+   * mock *down* to the server's bare reason, which was the correct call for
+   * its scope — the mock is an oracle *for* the server, and a demo that shows
+   * a better toast than the room will get is precisely the lie `?mock=1`
+   * exists not to tell. It filed the server's half as #31 rather than deciding
+   * it in passing. #31 found SPEC.md deciding it: the example names Kenji, so
+   * the nameless toast was a gap, the mock had the name right all along, and
+   * the fix ran back up into `engine/` and `server/`. The doubled label did
+   * **not** come back.
    *
    * The audience is checked too, because it is the other half of a toast: the
-   * reducer's effect is `to: "all"` and runtime.ts fans it with `sendAll`, so the
-   * big screen and every phone get it and not just the console.
+   * reducer's effect is `to: "all"` and runtime.ts fans it with `sendAll`, so
+   * the big screen and every phone get it and not just the console.
    */
   function toastsOn(wire: Wire): readonly string[] {
     return wire.frames.flatMap((f) => (f.t === "toast" ? [f.text] : []));
@@ -5962,22 +5969,31 @@ describe("the Spot Award toast carries what the server puts on the wire", () => 
   /**
    * The text the runtime would put on the wire for one event's toast effect.
    *
-   * Two lines of runtime.ts — find the `toast` broadcast among the effects, and
-   * `effect.detail ?? ""` — reproduced here for the same reason trivia's index
-   * check is reproduced below: the boundary is where the server does it, and a
-   * comparison against the reducer alone would stop one layer short of the wire.
+   * The boundary's own `spotToastText`, imported rather than reproduced. #29's
+   * version copied runtime.ts's two lines into this file, on the grounds that
+   * the comparison has to reach the wire and not stop at the reducer. It still
+   * does — but a copy is an oracle that agrees with itself, and this one now
+   * composes a name, which is more than an `?? ""` worth of behaviour to keep
+   * in step by hand. Importing it means the mock is compared against the line
+   * the server actually sends. The *reducer* half stays a real `reduce` call:
+   * `subject` and `detail` have to come out of the engine and not out of a
+   * fixture.
    */
-  function engineToast(state: SessionState, event: Event, at: number): string | null {
+  function engineToast(state: SessionState, event: Event, at: number): string {
     const result = reduce(state, event, at);
     const toast = result.effects.find(
       (e) => e.kind === "broadcast" && e.what === "toast",
     );
-    if (toast === undefined || toast.kind !== "broadcast") return null;
+    assert.ok(
+      toast !== undefined && toast.kind === "broadcast",
+      "the engine emitted no toast for this event",
+    );
     assert.equal(toast.to, "all", "the engine's toast is not addressed to the room");
-    return toast.detail ?? "";
+    // The state *after* the event, which is the one runtime.ts resolves against.
+    return spotToastText(result.state, toast);
   }
 
-  it("says the reason and names nobody, exactly as the reducer's effect does", async (t) => {
+  it("names the recipient and says the reason, exactly as the server does", async (t) => {
     const REASON = "  asked the question nobody else would  ";
     const r = await room(t, 3);
     r.cmd({ name: "start" });
@@ -5989,24 +6005,56 @@ describe("the Spot Award toast carries what the server puts on the wire", () => 
       reason: REASON,
     };
     const real = engineToast(engine, grant, T0);
-    // The engine's own answer, spelled out. Both halves matter: the reason is
-    // trimmed and it is *all* there is, so a mock that added a name would fail on
-    // the second line even if it happened to trim the same way.
-    assert.equal(real, REASON.trim(), "the engine's toast is not the bare reason");
+    // The server's own answer, spelled out, so this scenario says what it is
+    // claiming rather than only that the two sides agree. Every part matters:
+    // the name is there, the reason is trimmed, and the separator is the em
+    // dash SPEC.md's example uses.
     const nickname = engineView(engine).roster[0]?.nickname;
     assert.ok(nickname !== undefined, "the engine's room has no first row");
+    assert.equal(real, `${nickname} — ${REASON.trim()}`, "the server's toast");
+    // And the Desktop's label is *not* in it. This is the half of the old bug
+    // that stays fixed: screen/main.ts draws "Spot Award" itself, so a toast
+    // carrying it would print it twice.
     assert.ok(
-      real !== null && !real.includes(nickname),
-      "the engine's toast names the recipient after all, so this claim has moved",
+      !real.includes("Spot Award"),
+      "the toast carries the Desktop's own label, which would print it twice",
     );
 
     r.cmd({ name: "spot.grant", activityId: "trivia", pid: "p1", reason: REASON });
     assert.deepEqual(toastsOn(r.host), [real], "the console's toast");
     assert.deepEqual(toastsOn(r.screen), [real], "the big screen's toast");
-    // Every phone, not only the one being praised: `to: "all"`.
+    // Every phone, not only the one being praised: `to: "all"`. Nothing on a
+    // phone renders it — participant/main.ts passes no `onToast` and net.ts's
+    // call is optional — but the frame is on the wire, and the mock has to put
+    // it on the same wires the server does.
     for (const [i, phone] of r.phones.entries()) {
       assert.deepEqual(toastsOn(phone), [real], `phone ${i + 1}'s toast`);
     }
+  });
+
+  it("names the person it was granted to, not whoever is first on the roster", async (t) => {
+    // The mock looks the pid up, the same as the boundary does. A demo that
+    // hard-wired the star of the scripted loop, or `participants[0]`, would
+    // pass the scenario above and be wrong on every award but one.
+    const REASON = "steadied the whole table";
+    const r = await room(t, 3);
+    r.cmd({ name: "start" });
+    const engine = engineRoom(3);
+    const grant: Event = {
+      type: "grantSpot",
+      activityId: "trivia",
+      pid: "p3",
+      reason: REASON,
+    };
+    const real = engineToast(engine, grant, T0);
+    const third = engineView(engine).roster[2]?.nickname;
+    const first = engineView(engine).roster[0]?.nickname;
+    assert.ok(third !== undefined && first !== undefined, "the engine's room is short");
+    assert.notEqual(third, first, "the fixture's nicknames are not distinct");
+    assert.equal(real, `${third} — ${REASON}`, "the server named the wrong person");
+
+    r.cmd({ name: "spot.grant", activityId: "trivia", pid: "p3", reason: REASON });
+    assert.deepEqual(toastsOn(r.screen), [real], "the big screen's toast");
   });
 });
 

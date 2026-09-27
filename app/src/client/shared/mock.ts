@@ -4040,23 +4040,18 @@ class MockHub {
         const spot = s.grantSpot(cmd.pid, cmd.activityId, cmd.reason);
         this.#send(conn, { t: "ack", cid, applied: true });
         this.#broadcastState();
-        // The reason and nothing else, because that is all the room is sent.
+        // The recipient and the reason, which is what the room is sent.
         //
         // `grantSpot` in reducer.ts emits `{ what: "toast", detail:
-        // event.reason.trim() }` and runtime.ts puts `effect.detail ?? ""` on
-        // the wire as `text`. The Desktop draws its own "Spot Award" label
-        // beside it (screen/main.ts), so a real room reads "Spot Award  <the
-        // reason>" — with nobody named.
-        //
-        // This file used to name the recipient, which read "Spot Award  Spot
-        // Award — Player 1 — <reason>" on the same surface: the label twice and
-        // a name the server does not send. Matched to the server rather than
-        // the other way round, because this file is the oracle *for* the
-        // server and a demo that shows a better toast than the room will get is
-        // the lie `?mock=1` exists not to tell. Whether the server's toast
-        // should name the recipient is a question about the server, and it is
-        // filed as one: #31.
-        this.#toast("spot", spot.reason);
+        // event.reason.trim(), subject: event.pid }` and runtime.ts resolves
+        // the pid and puts `<nickname> — <reason>` on the wire as `text`. The
+        // Desktop draws its own "Spot Award" label beside it (screen/main.ts),
+        // so a real room reads SPEC.md's "Spot Award — Kenji — best recovery of
+        // the afternoon". See {@link MockHub.#spotToast} for the
+        // history: this file named the recipient, #29 matched it down to the
+        // server's nameless toast, and #31 found the spec on this file's side
+        // and moved the server instead.
+        this.#spotToast(spot);
         return;
       }
 
@@ -6744,6 +6739,38 @@ class MockHub {
     }
   }
 
+  /**
+   * A Spot Award's toast, composed the way the server composes it.
+   *
+   * `spotToastText` in server/runtime.ts, reproduced: the reducer's toast
+   * effect carries `detail` (the trimmed reason) and `subject` (the pid), and
+   * the boundary resolves the pid against the state it is about to send and
+   * joins them with an em dash. The Desktop supplies the **Spot Award** label
+   * out of `showToast`, so the text is `Kenji — <reason>` and the room reads
+   * SPEC.md's "Spot Award — Kenji — best recovery of the afternoon".
+   *
+   * This file *did* name the recipient, as `Spot Award — ${nickname} —
+   * ${reason}` — the label included, which on a surface that draws its own
+   * label read "Spot Award  Spot Award — Player 1 — …". #29 matched it down to
+   * the server's bare reason, correctly: the mock is an oracle *for* the
+   * server, and it does not get to show a better toast than the room will get.
+   * #31 then asked the server the question that left open, SPEC.md answered it
+   * by naming Kenji, and the server came up to meet this file. So the name is
+   * back and the doubled label is not: the mock was right about the name and
+   * wrong about the label, and only one of those has been restored.
+   *
+   * The lookup is by pid rather than off the caller's own `MockParticipant`
+   * for the same reason runtime.ts does it at the boundary: it is a name as of
+   * the frame, not as of the grant.
+   */
+  #spotToast(spot: MockSpot): void {
+    const nickname = this.session.find_pid(spot.pid)?.nickname;
+    this.#toast(
+      "spot",
+      nickname === undefined ? spot.reason : `${nickname} — ${spot.reason}`,
+    );
+  }
+
   /* ---- the director ---- */
 
   #later(fn: () => void, ms: number): void {
@@ -6848,8 +6875,9 @@ class MockHub {
       if (!star) return;
       const spot = this.session.grantSpot(star.pid, "ttx", "best question of the day");
       this.#broadcastState();
-      // The reason alone, as the server sends it. See the `spot.grant` case.
-      this.#toast("spot", spot.reason);
+      // The recipient and the reason, as the server sends it. See the
+      // `spot.grant` case and {@link MockHub.#spotToast}.
+      this.#spotToast(spot);
     });
 
     // Trivia, played rather than typed in: one facilitator on bench, then four
@@ -7139,8 +7167,9 @@ class MockHub {
         "drew out someone who had not spoken",
       );
       this.#broadcastState();
-      // The reason alone, as the server sends it. See the `spot.grant` case.
-      this.#toast("spot", spot.reason);
+      // The recipient and the reason, as the server sends it. See the
+      // `spot.grant` case and {@link MockHub.#spotToast}.
+      this.#spotToast(spot);
     });
 
     this.#at(352, () => {
