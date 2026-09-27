@@ -67,7 +67,7 @@ const PROMPT = {
   cue: "Terraform's default parallelism",
   threshold: "15",
   answer: "under",
-  note: "10 — concurrent resource operations while Terraform walks the graph.",
+  note: "10. Concurrent resource operations while Terraform walks the graph.",
   verify: false,
 };
 

@@ -623,8 +623,16 @@ body {
    never had fields at all, so the indent survived only there, pushing the five
    buttons the host presses during a round a hundred pixels off the frame with
    nothing in the gap to explain why. */
+/* A row of secondary controls: trivia has three and a slider, the arcade can
+   have four.
+   Wrapping between buttons rather than inside them is what keeps every button
+   in the console one height, so the arcade's strip and trivia's look like the
+   same control repeated. `align-items: start` stops a wrapped row stretching
+   a short button to match a tall neighbour. */
 .field-actions {
   display: flex;
+  flex-wrap: wrap;
+  align-items: start;
   gap: 8px;
 }
 
@@ -1211,6 +1219,13 @@ body {
      whatever the two words happen to be. */
   min-height: 31px;
   color: var(--ink);
+  /* One line, always. Without this a label wraps inside its own button when
+     the row runs out of width, and since the labels are different lengths
+     they wrap at different points: the arcade's row was measured at 31, 44
+     and 59 pixels tall in one strip, which reads as three sizes of button
+     rather than one control that happens to have a long name. The row wraps
+     between buttons instead — see `.field-actions`. */
+  white-space: nowrap;
 }
 .ctl-button:hover:not(:disabled) {
   border-color: var(--muted);
@@ -1614,6 +1629,48 @@ body {
   display: none;
 }
 
+/* Auto's slider, in the same row as Close early and Sudden death.
+
+   It sits *in* `.field-actions` rather than in a strip of its own, so it
+   inherits that row's wrap and so the pace controls do not become a second
+   place to look. `min-height` is `.ctl-button`'s 31px: a row that mixes a
+   button with a bare range input otherwise lines their tops up and leaves the
+   slider floating a few pixels high against `align-items: start`. */
+.t-speed-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  min-height: 31px;
+}
+.t-speed-row[hidden] {
+  display: none;
+}
+.t-speed {
+  /* The send-off's 10rem. Big enough to hit without looking down, which is
+     the whole constraint on a console being driven while somebody talks. */
+  width: 10rem;
+  /* The segment's own token: DESIGN's "once a participant learns that pink is
+     trivia, pink is trivia everywhere". The send-off's slider takes --nomad-ink
+     for the same reason. */
+  accent-color: var(--trivia);
+}
+.t-speed-value {
+  min-width: 2.5ch;
+  color: var(--muted);
+}
+
+/* The one line that says what Auto is about to do and how many seconds there
+   are to stop it. --muted rather than --dim: under Auto this is the sentence
+   the host is reading to decide whether to intervene, so it is a sentence and
+   not chrome. */
+.t-pace-note {
+  margin: 0;
+  color: var(--muted);
+}
+.t-pace-note[hidden] {
+  display: none;
+}
+
 .t-load[hidden] {
   display: none;
 }
@@ -1996,10 +2053,6 @@ body {
   border: 1px solid var(--line);
   border-radius: 3px;
   color: var(--ink);
-}
-.a-gganbu-note {
-  flex-basis: 100%;
-  color: var(--muted);
 }
 /* The one sentence that says which notes to check, above the counts. Not
    muted: it is an instruction, and the only one on this panel. */

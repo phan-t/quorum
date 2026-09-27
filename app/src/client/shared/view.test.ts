@@ -1667,7 +1667,7 @@ describe("the prompt, as a question", () => {
   it("puts the threshold in the sentence, because the cue is only half of it", () => {
     assert.equal(
       gganbuQuestion({ cue: "Vault's default max lease TTL, in hours", threshold: "720" }),
-      "Vault's default max lease TTL, in hours — over or under 720?",
+      "Vault's default max lease TTL, in hours: over or under 720?",
     );
   });
 

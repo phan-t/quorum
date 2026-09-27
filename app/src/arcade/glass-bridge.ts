@@ -140,7 +140,7 @@ export const GLASS_BRIDGE_STEPS: readonly GlassStep[] = [
       },
       {
         label: "Packer Builders",
-        note: "A builder is the plugin that produces the image for one platform — amazon-ebs, qemu, docker.",
+        note: "A builder is the plugin that produces the image for one platform: amazon-ebs, qemu, docker.",
       },
     ],
     real: 1,
@@ -210,7 +210,7 @@ export const GLASS_BRIDGE_STEPS: readonly GlassStep[] = [
       },
       {
         label: "Nomad Sysperiodic Jobs",
-        note: "A sysbatch job can be periodic — that is what the periodic block is for. There is no sysperiodic.",
+        note: "A sysbatch job can be periodic, which is what the periodic block is for. There is no sysperiodic.",
       },
     ],
     real: 0,

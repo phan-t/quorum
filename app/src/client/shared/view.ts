@@ -1036,7 +1036,7 @@ export const HOW_TO_PLAY: Readonly<
   ],
   gganbu: [
     "You are paired with one other player. Ten tokens each.",
-    "Six over-or-under questions — bet tokens on your answer.",
+    "Six over-or-under questions. Bet tokens on your answer.",
     "Run out of tokens and you are drained to the Lounge.",
   ],
   glass_bridge: [
@@ -2141,10 +2141,16 @@ export function gganbuStake(want: number, held: number): number {
   return Math.min(top, Math.max(1, Math.floor(want)));
 }
 
-/** The prompt, as the question it is: cue, then the threshold it turns on. */
+/**
+ * The prompt, as the question it is: cue, then the threshold it turns on.
+ *
+ * A colon and not an em dash. Every surface builds its question here, so the
+ * dash appeared on the phone, the Desktop and the console at once, on the
+ * only sentence in the round a player reads under a clock.
+ */
 export function gganbuQuestion(prompt: GganbuPrompt | undefined): string {
   if (prompt === undefined) return "";
-  return `${prompt.cue} — over or under ${prompt.threshold}?`;
+  return `${prompt.cue}: over or under ${prompt.threshold}?`;
 }
 
 /** The word on a side, and the glyph that says it without the word. */

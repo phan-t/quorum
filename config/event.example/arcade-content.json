@@ -117,7 +117,7 @@
       "shape": "umbrella",
       "cue": "C A I T U N E H T A N O T I",
       "answer": "AUTHENTICATION",
-      "note": "Vault checks you against something it does not own — GitHub, LDAP, AppRole — and hands back a token."
+      "note": "Vault checks you against something it does not own, such as GitHub, LDAP or AppRole, and hands back a token."
     },
     {
       "shape": "umbrella",
@@ -217,56 +217,56 @@
       "cue": "Versions Vault's KV v2 keeps per key by default",
       "threshold": "5",
       "answer": "over",
-      "note": "10 — and the write past the tenth permanently deletes the oldest. The mount sets it, and a key's own metadata can overrule the mount.",
+      "note": "10, and the write past the tenth permanently deletes the oldest. The mount sets it, and a key's own metadata can overrule the mount.",
       "verify": true
     },
     {
       "cue": "Terraform's default parallelism",
       "threshold": "12",
       "answer": "under",
-      "note": "10 — concurrent operations as Terraform walks the graph, not concurrent modules or providers. The same ceiling applies to plan, apply and destroy, and raising it moves the bottleneck to the provider's rate limit.",
+      "note": "10. Concurrent operations as Terraform walks the graph, not concurrent modules or providers. The same ceiling applies to plan, apply and destroy.",
       "verify": true
     },
     {
       "cue": "Consul's default raft_multiplier",
       "threshold": "3",
       "answer": "over",
-      "note": "5 — a slack default that suits a small server, and the production guidance is to set it to 1. It scales every Raft timer, so it is also how long a lost leader goes unnoticed.",
+      "note": "5. A slack default that suits a small server, where the production guidance is 1. It scales every Raft timer, so it is also how long a lost leader goes unnoticed.",
       "verify": true
     },
     {
       "cue": "Unseal key shares Vault asks for by default",
       "threshold": "4",
       "answer": "over",
-      "note": "5 — and the number people reach for instead is 3, which is how many of those five it takes to unseal. `vault operator init` prints five shares and needs any three: a threshold scheme, not five keys that all have to turn.",
+      "note": "5, and the number people reach for instead is 3, which is how many of those five it takes to unseal. `vault operator init` prints five shares and needs any three: a threshold scheme, not five keys that all have to turn.",
       "verify": true
     },
     {
       "cue": "Nomad's default task memory limit, in megabytes",
       "threshold": "512",
       "answer": "under",
-      "note": "300 — beside a default of 100 MHz of CPU. Deliberately small: Nomad bin-packs, so a task that never says what it needs is sized like a sidecar rather than a service, and finds out under load.",
+      "note": "300, beside a default of 100 MHz of CPU. Deliberately small, because Nomad bin-packs: a task that never says what it needs is sized like a sidecar, and finds out under load.",
       "verify": true
     },
     {
       "cue": "Vault's default max_request_duration, in seconds",
       "threshold": "60",
       "answer": "over",
-      "note": "90 — per listener, and it is a deadline rather than a timeout: Vault cancels the request's context, so the work stops rather than finishing unwatched. A minute is the number most people reach for.",
+      "note": "90, set per listener. It is a deadline and not a timeout: Vault cancels the request's context, so the work stops rather than finishing unwatched. A minute is the number most people reach for.",
       "verify": true
     },
     {
       "cue": "Boundary's default session length, in hours",
       "threshold": "12",
       "answer": "under",
-      "note": "8 — 28,800 seconds, set per target. A working day rather than a calendar one: a session that outlives the shift is a credential nobody remembered to revoke, which is the thing Boundary is for.",
+      "note": "8, or 28,800 seconds, set per target. A working day rather than a calendar one: a session that outlives the shift is a credential nobody remembered to revoke.",
       "verify": true
     },
     {
       "cue": "Consul's default dns_config.max_stale, in years",
       "threshold": "5",
       "answer": "over",
-      "note": "10 — 87,600 hours. Any server may answer a DNS query however far behind it has fallen, because a stale answer beats no answer; tightening it trades availability for freshness.",
+      "note": "10, or 87,600 hours. Any server may answer a DNS query however far behind it has fallen, because a stale answer beats no answer. Tightening it trades availability for freshness.",
       "verify": true
     }
   ]

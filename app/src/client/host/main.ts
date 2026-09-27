@@ -22,6 +22,12 @@ import type {
 import { initTheme, themeToggle } from "../shared/theme.ts";
 import type { ArcadePhase, ArcadeRoundKind, Seal, Segment } from "../../engine/types.ts";
 import { MAX_AUTO_SECONDS, MIN_AUTO_SECONDS } from "../../engine/sendoff.ts";
+import {
+  autoBeat,
+  DEFAULT_BEAT_SECONDS,
+  MAX_BEAT_SECONDS,
+  MIN_BEAT_SECONDS,
+} from "../../engine/trivia.ts";
 import { h, keyedList, qs, replace, setAttr, setText } from "../shared/dom.ts";
 import { QuorumClient } from "../shared/net.ts";
 import { mockBadge, mockTransport, readMockConfig } from "../shared/mock.ts";
@@ -2698,6 +2704,76 @@ const suddenDeath = control({
   },
 });
 
+/**
+ * Auto / Manual for the question set, and how long its beats are.
+ *
+ * The send-off's control, on the other segment with a fixed run of beats.
+ * Twenty-four questions is seventy-two presses and the question already closes
+ * itself, so what is handed to a clock here is the reveal and the move to the
+ * next question — and nothing else. It cannot open the first question, it
+ * cannot touch a sudden death, and it stops on the last reveal rather than
+ * reaching for a question that is not there. `autoBeat` is the rule and both
+ * this and the server read it, so the label and the countdown below cannot
+ * promise something the server will not do.
+ *
+ * **Why a live console may carry it.** Pressing it does nothing the room can
+ * see. There is no beat out of an idle or an open question, so the earliest
+ * consequence of a press is one whole beat after the *next* close — five
+ * seconds by default, with the console counting them down in words — and
+ * every beat it then performs is one the host was about to press anyway.
+ * A mis-press is a button press away from being undone, and the button says
+ * "Manual" while it is on so there is no reading of the console under which
+ * the host thinks they have the wheel and does not.
+ *
+ * The label flips rather than the state being shown beside it, exactly as the
+ * send-off's does: the word on the button is what pressing it will do.
+ */
+const triviaAutoControl = control({
+  label: "Auto",
+  className: "ctl-secondary",
+  title:
+    "Reveal each question and open the next one on a clock. It never opens the first question, never runs a sudden death, and stops at the end of the set. Manual takes it back at any point.",
+  onFire: (c) =>
+    issue(
+      { name: "trivia.auto", auto: !(lastState?.hostExtras?.trivia?.auto?.on ?? false) },
+      c,
+    ),
+});
+
+const triviaSpeedValue = h("span", { class: "mono t-speed-value" });
+const triviaSpeed = h("input", {
+  class: "t-speed",
+  attrs: {
+    type: "range",
+    min: String(MIN_BEAT_SECONDS),
+    max: String(MAX_BEAT_SECONDS),
+    step: "1",
+    "aria-label": "Seconds a beat",
+  },
+}) as HTMLInputElement;
+const triviaSpeedRow = h("label", { class: "t-speed-row" }, [
+  h("span", { class: "label", text: "Beat" }),
+  triviaSpeed,
+  triviaSpeedValue,
+]);
+
+// Dragging updates the number under the thumb; releasing sends it. A command
+// per pixel of travel would be a broadcast per pixel of travel.
+triviaSpeed.addEventListener("input", () => {
+  setText(triviaSpeedValue, `${triviaSpeed.value}s`);
+});
+triviaSpeed.addEventListener("change", () => {
+  issue({ name: "trivia.speed", seconds: Number(triviaSpeed.value) }, null);
+  // Handed back deliberately: `spaceVerdict` ignores any key that lands in an
+  // input, so a slider still holding focus is a space bar that has stopped
+  // advancing the question — which the host would discover in front of the
+  // room. The send-off's slider does the same.
+  triviaSpeed.blur();
+});
+
+/** What the pace row says, under the buttons. */
+const triviaPace = h("p", { class: "pb-note t-pace-note" });
+
 const triviaActions = h("div", { class: "field-actions" }, [triviaPractice.el]);
 
 const triviaLoad = h("div", { class: "t-load" }, [
@@ -2714,7 +2790,16 @@ const bodyTrivia = h("section", { class: "pb pb-trivia" }, [
   triviaCounts,
   triviaNote,
   triviaWaiting,
-  h("div", { class: "field-actions" }, [closeEarly.el, suddenDeath.el]),
+  // Auto sits in the same row as Close early and Sudden death, so it inherits
+  // `.field-actions` wrapping and `.ctl-button`'s `white-space: nowrap` —
+  // which between them are what keep every button in this console one height.
+  h("div", { class: "field-actions" }, [
+    closeEarly.el,
+    suddenDeath.el,
+    triviaAutoControl.el,
+    triviaSpeedRow,
+  ]),
+  triviaPace,
   triviaLoad,
 ]);
 
@@ -3543,7 +3628,7 @@ const arcadeNextPrompt = control({
   label: "Settle the prompt",
   className: "ctl-secondary",
   title:
-    "Gganbu only. Settles the open prompt — this is where the tokens move, and where anyone down to zero is drained — and opens the next one. The clock does this anyway.",
+    "Gganbu only. Settles the open prompt: the tokens move, anyone down to zero is drained, the next prompt opens. The clock does this anyway.",
   onFire: (c) => issue({ name: "arcade.nextPrompt" }, c),
 });
 
@@ -3712,8 +3797,8 @@ function renderArcade(s: RenderState): void {
     pick === null
       ? "Every round you chose has been played. The button moves on to the standings."
       : arcadeOverride !== null
-        ? `Next: ${ARCADE_ROUND_LABEL[pick]} — you picked this one by hand.`
-        : `Next: ${ARCADE_ROUND_LABEL[pick]} — round ${at + 1} of ${order.length} in your running order.`,
+        ? `Next: ${ARCADE_ROUND_LABEL[pick]}. You picked this one by hand.`
+        : `Next: ${ARCADE_ROUND_LABEL[pick]}. Round ${at + 1} of ${order.length} in your running order.`,
   );
 
   if (a === undefined) {
@@ -3998,7 +4083,12 @@ function renderArcade(s: RenderState): void {
               row.verify
                 ? h("span", { class: "mono a-gganbu-verify", text: "VERIFY" })
                 : null,
-              h("span", { class: "a-gganbu-note", text: row.note }),
+              // No note. Six notes is six paragraphs of prose on a panel a
+              // host glances at between sentences, and the console is not
+              // where they are read from: the Desktop puts the note up beside
+              // its prompt at the reveal, which is the moment they are said
+              // out loud. What the console is for is the answer and the flag
+              // — which of these six to re-check before saying anything.
             ]),
           ],
         ),
@@ -4038,7 +4128,7 @@ function renderArcade(s: RenderState): void {
         `STEP ${step + 1} OF ${gl.of}`,
         `${gl.waveSeconds[gl.wave - 1] ?? 0}s`,
         stepLeft === null ? null : formatCountdown(stepLeft),
-        pane ? `— ${pane.product}` : null,
+        pane ? pane.product : null,
       ]
         .filter((x) => x !== null)
         .join(" · "),
@@ -4265,10 +4355,37 @@ function primaryPlan(): Plan {
         return cmdPlan("Close the question", { name: "trivia.close" });
       case "closed":
         return cmdPlan("Reveal the answer", { name: "trivia.reveal" });
-      case "revealed":
-        return t.index + 1 < t.of
-          ? cmdPlan("Next question", { name: "trivia.next" })
-          : advanceFromHere(s);
+      case "revealed": {
+        if (t.index + 1 >= t.of) return advanceFromHere(s);
+        // Under Auto the press does exactly what the clock was about to do,
+        // which is the send-off's answer to a host pressing mid-interval: the
+        // step happens now and the run carries on from there.
+        //
+        // It has to be the *same* step, not a similar one. Auto's advance is
+        // next-and-open; a press that only did `trivia.next` would leave the
+        // set idle with Auto still on and nothing to fire, so a host stepping
+        // on early would silently stop the thing they turned on. Two frames in
+        // one press, as the send-off's Skip sends two `sendoff.next` — the
+        // composite step is two steps that already exist.
+        if (
+          autoBeat({
+            auto: s.hostExtras?.trivia?.auto?.on ?? false,
+            suddenDeath: t.suddenDeath,
+            phase: t.phase,
+            at: t.index,
+            of: t.of,
+          }) === "advance"
+        ) {
+          return {
+            label: `Open ${questionLabel({ ...t, index: t.index + 1 })}`,
+            fire: (c) => {
+              issue({ name: "trivia.next" }, c);
+              issue({ name: "trivia.open", suddenDeath: false }, null);
+            },
+          };
+        }
+        return cmdPlan("Next question", { name: "trivia.next" });
+      }
     }
   }
   // Inside the send-off the primary button walks the send-off: the Farewell
@@ -4294,7 +4411,7 @@ function primaryPlan(): Plan {
           so.parts > 1 && so.part < so.parts
             ? `Continue message ${so.index}`
             : so.index < so.total
-              ? `Next — message ${so.index + 1} of ${so.total}`
+              ? `Next: message ${so.index + 1} of ${so.total}`
               : "End the run",
           { name: "sendoff.next" },
         );
@@ -4321,7 +4438,7 @@ function primaryPlan(): Plan {
         // A round that has been played and not revealed. Revealing it is what
         // puts the points on the board, so it is never skipped by accident.
         if (a.round !== null) {
-          return cmdPlan(`Show the results — ${ARCADE_ROUND_LABEL[a.round]}`, {
+          return cmdPlan(`Show the results: ${ARCADE_ROUND_LABEL[a.round]}`, {
             name: "arcade.reveal",
           });
         }
@@ -4840,6 +4957,9 @@ function renderTrivia(s: RenderState): void {
     triviaWaiting.hidden = true;
     closeEarly.setDisabled(true);
     suddenDeath.setDisabled(true);
+    triviaAutoControl.setDisabled(true);
+    triviaSpeedRow.hidden = true;
+    triviaPace.hidden = true;
     triviaLoad.hidden = false;
     return;
   }
@@ -4855,6 +4975,10 @@ function renderTrivia(s: RenderState): void {
       questionLabel(t).toUpperCase(),
       t.phase.toUpperCase(),
       t.suddenDeath ? "SUDDEN DEATH" : null,
+      // On the head line and not only on the button, because driving mode
+      // reads this line and nothing else: a host who has folded the console
+      // down to four numbers still has to know the set is walking itself.
+      (s.hostExtras?.trivia?.auto?.on ?? false) ? "AUTO" : null,
       t.phase === "open" && left !== null ? formatCountdown(left) : null,
       t.basePoints === 0 ? "WARM-UP · 0 POINTS" : `${t.basePoints} POINTS`,
     ]
@@ -4870,7 +4994,7 @@ function renderTrivia(s: RenderState): void {
     setText(
       triviaRound,
       t.round.startsHere
-        ? `Round card — ${t.round.name} · ${t.round.size} questions`
+        ? `Round card: ${t.round.name} · ${t.round.size} questions`
         : `${t.round.name} · ${t.round.position} of ${t.round.size}`,
     );
     triviaRound.classList.toggle("is-card", t.round.startsHere);
@@ -4929,6 +5053,72 @@ function renderTrivia(s: RenderState): void {
   closeEarly.setDisabled(t.phase !== "open");
   // Arming it mid-question would be a promise the engine cannot keep.
   suddenDeath.setDisabled(t.phase === "open");
+
+  renderTriviaPace(s, t);
+}
+
+/**
+ * Auto's half of the trivia panel: the button, the slider, and one line
+ * saying what is about to happen and when.
+ *
+ * The line matters more than it looks. A mode that moves the room on its own
+ * is only safe if the console says so in words a host can read at a glance
+ * while looking at a video call — so this never says "Auto is on", it says
+ * the next thing it is going to do and how long there is to stop it.
+ */
+function renderTriviaPace(s: RenderState, t: TriviaView): void {
+  const auto = s.hostExtras?.trivia?.auto;
+  // A frame that carries no Auto block reads as Manual, which is the safe way
+  // to be wrong about a frame that cannot say. See the note in protocol.ts.
+  const on = auto?.on ?? false;
+  const seconds = auto?.seconds ?? DEFAULT_BEAT_SECONDS;
+
+  triviaAutoControl.setLabel(on ? "Manual" : "Auto");
+  // Refused on during a sudden death by the engine, so the console does not
+  // offer it: a tie is settled and announced by a person. Off stays available
+  // — off is always the safe direction — but the engine has already switched
+  // it off on the way into one, so there is nothing there to turn off.
+  triviaAutoControl.setDisabled(t.suddenDeath && !on);
+  triviaSpeedRow.hidden = !on;
+  if (document.activeElement !== triviaSpeed) {
+    triviaSpeed.value = String(seconds);
+    setText(triviaSpeedValue, `${seconds}s`);
+  }
+
+  // Asked of the same function the server arms its timer off, rather than
+  // re-derived here, so the console cannot promise a beat the server is not
+  // going to take.
+  const beat = autoBeat({
+    auto: on,
+    suddenDeath: t.suddenDeath,
+    phase: t.phase,
+    at: t.index,
+    of: t.of,
+  });
+  const left =
+    auto?.advanceAt == null
+      ? null
+      : Math.max(0, Math.round((auto.advanceAt - (client?.now() ?? Date.now())) / 1000));
+
+  triviaPace.hidden = false;
+  setText(
+    triviaPace,
+    !on
+      ? t.suddenDeath
+        ? "Manual. Auto is off for the tie and stays off until you settle it."
+        : "Manual: you press for the reveal and for the next question. Auto hands those two to a clock and leaves everything else with you."
+      : beat === "reveal"
+        ? `Revealing the answer${left === null ? "" : ` in ${left}s`}. Space reveals now; Manual stops it.`
+        : beat === "advance"
+          ? `Opening ${questionLabel({ ...t, index: t.index + 1 })}${left === null ? "" : ` in ${left}s`}. Space opens it now; Manual stops it.`
+          : t.suddenDeath
+            ? "Auto is holding: nothing advances itself during a sudden death."
+            : t.phase === "open"
+              ? "Auto is waiting for this question to close. It takes over at the reveal."
+              : t.phase === "revealed"
+                ? "That was the last question. Auto stops here; space moves the room on."
+                : "Auto is waiting for you to open a question. It never opens one itself.",
+  );
 }
 
 /**
@@ -5099,7 +5289,16 @@ client = new QuorumClient({
  */
 setInterval(() => {
   if (lastState === null) return;
-  if (lastState.segment === "trivia" && lastState.trivia?.phase === "open") {
+  // The question's own countdown while it is open, and — under Auto — the
+  // count to the reveal and to the next question. Those two are the whole
+  // reason the mode is safe to have on a live console: a host has to be able
+  // to see the seconds running out and press Manual before they do, and a
+  // number that only moved when a frame arrived would not give them that.
+  if (
+    lastState.segment === "trivia" &&
+    (lastState.trivia?.phase === "open" ||
+      lastState.hostExtras?.trivia?.auto?.advanceAt != null)
+  ) {
     renderTrivia(lastState);
   }
   // The arcade's clocks move without anything arriving: the item timer, the

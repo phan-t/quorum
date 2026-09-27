@@ -184,7 +184,7 @@ export function createScoringPanel(opts: Opts): ScoringPanel {
       const activityId = spotActivity.value;
       const reason = spotReason.value.trim();
       if (reason === "") {
-        c.flash("A spot award needs a reason — it gets read out.");
+        c.flash("A spot award needs a reason. It gets read out.");
         spotReason.focus();
         return;
       }
@@ -337,14 +337,14 @@ export function createScoringPanel(opts: Opts): ScoringPanel {
       type: "button",
       text: "B",
       title:
-        "Bench — they sat this one out. They are credited their own average instead of a zero, so missing an activity does not sink them. (Alt+B)",
+        "Bench: they sat this one out. They are credited their own average instead of a zero, so missing an activity does not sink them. (Alt+B)",
       attrs: { tabindex: "-1" },
     });
     const clearButton = h("button", {
       class: "sc-mini",
       type: "button",
       text: "×",
-      title: "Clear this cell back to empty — no score entered (Alt+U)",
+      title: "Clear this cell back to empty, with no score entered (Alt+U)",
       attrs: { tabindex: "-1" },
     });
     const td = h("td", { class: "sc-cell" }, [
@@ -620,7 +620,7 @@ export function createScoringPanel(opts: Opts): ScoringPanel {
         }
       }
     }
-    setText(benchLine, parts.length === 0 ? "Bench — nobody" : `Bench — ${parts.join(" · ")}`);
+    setText(benchLine, parts.length === 0 ? "Bench: nobody" : `Bench: ${parts.join(" · ")}`);
   }
 
   /* ---------------------------------------------------------------- */

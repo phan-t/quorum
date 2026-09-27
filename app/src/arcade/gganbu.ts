@@ -128,7 +128,7 @@ export const GGANBU_PROMPTS: readonly OverUnderItem[] = [
     cue: "Terraform's default parallelism",
     threshold: "15",
     answer: "under",
-    note: "10 — concurrent resource operations while Terraform walks the graph, not concurrent modules or providers. The same ceiling applies to plan, apply and destroy, and raising it moves the bottleneck to the provider's rate limit.",
+    note: "10. Concurrent resource operations while Terraform walks the graph, not concurrent modules or providers. Raising it moves the bottleneck to the provider's rate limit.",
     verify: true,
   },
   {
@@ -136,7 +136,7 @@ export const GGANBU_PROMPTS: readonly OverUnderItem[] = [
     cue: "Vault's default max lease TTL, in hours",
     threshold: "720",
     answer: "over",
-    note: "768 — thirty-two days, not the thirty that 720 hours would be. The default lease TTL is the same 768 hours, so out of the box the default and the ceiling are one number.",
+    note: "768. Thirty-two days, not the thirty that 720 hours would be. The default lease TTL is the same number, so out of the box the default and the ceiling match.",
     verify: true,
   },
   {
@@ -144,7 +144,7 @@ export const GGANBU_PROMPTS: readonly OverUnderItem[] = [
     cue: "Consul's default check_update_interval, in minutes",
     threshold: "1",
     answer: "over",
-    note: "5 — how long Consul sits on the *output* of a check that has not changed state, so a thousand checks writing a new timestamp every run do not become a thousand writes. A check that actually changes state syncs at once, which is the part people assume this delays.",
+    note: "5. How long Consul holds the output of a check that has not changed state, so a thousand checks writing a fresh timestamp do not become a thousand writes. A check that does change state syncs at once.",
     verify: true,
   },
   {
@@ -152,7 +152,7 @@ export const GGANBU_PROMPTS: readonly OverUnderItem[] = [
     cue: "Nomad's default task CPU, in MHz",
     threshold: "250",
     answer: "under",
-    note: "100 — beside a default of 300 MB of memory. Deliberately small: Nomad bin-packs, so a task that never says what it needs is sized like a sidecar rather than a service, and finds out under load.",
+    note: "100, beside a default of 300 MB of memory. Deliberately small, because Nomad bin-packs: a task that never says what it needs is sized like a sidecar, and finds out under load.",
     verify: true,
   },
   {
@@ -161,7 +161,7 @@ export const GGANBU_PROMPTS: readonly OverUnderItem[] = [
     cue: "Consul's maximum KV value size, in kilobytes",
     threshold: "1024",
     answer: "under",
-    note: "512 — the size Raft itself suggests as a maximum, which is where Consul's default comes from. Every KV write goes through the Raft log, so a large value is a cost the whole cluster pays, not just the node that took the write.",
+    note: "512, which is the maximum Raft itself suggests and where Consul's default comes from. Every KV write goes through the Raft log, so a large value costs the whole cluster and not just the node that took it.",
     verify: true,
   },
   {
@@ -169,7 +169,7 @@ export const GGANBU_PROMPTS: readonly OverUnderItem[] = [
     cue: "Vault's default max_request_duration, in seconds",
     threshold: "60",
     answer: "over",
-    note: "90 — per listener, and a deadline rather than a timeout: Vault cancels the request's context, so the work stops rather than finishing unwatched. A minute is the number most people reach for.",
+    note: "90, set per listener. It is a deadline and not a timeout: Vault cancels the request's context, so the work stops rather than finishing unwatched. A minute is the number most people reach for.",
     verify: true,
   },
 ];
