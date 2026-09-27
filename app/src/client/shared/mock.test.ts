@@ -38,6 +38,14 @@
  *   the arcade grid, a released participant leaving five projections, the
  *   trivia podium, the send-off's countdown, a tiebreaker's index and round
  *   card, and a latecomer's arcade number.
+ * - **#25** the state-timing sweep, the other half of the same read: *when*
+ *   the mock moves a thing the reducer also moves. The trivia points reaching
+ *   the score grid at the reveal and not at the close, and reaching it only
+ *   for the people who played; `practice` gating the board in both trivia and
+ *   the arcade; a sudden death staying open for the host to close and
+ *   breaking nobody's streak; a Lounge bet placed after the result it names
+ *   paying nothing; Recruitment's 5 + 5; and a Gganbu pair dissolving the
+ *   moment half of it leaves.
  *
  * Two of #24's eight are not here, and both for the same reason — the mock
  * cannot be driven into the state they are about. Its question set is a
@@ -47,6 +55,15 @@
  * difference in `mock.ts`; the second is a one-line guard added there to
  * match `roundAt`, and it is unverified by anything until the mock grows a
  * loader.
+ *
+ * #25's late-bet scenario is driven through Unseal and not through Plan /
+ * Apply, and that is a gap rather than a choice. `betStands` covers exactly
+ * those two rounds; a Plan / Apply drain needs the APPLY light, the light is
+ * on a two-to-six second timer, and the whole budget here is the one second
+ * below. `mockBetStands`' `plan_apply` arm and the `finishedAt` stamp that
+ * feeds it are therefore written and unwatched, which is the state every bug
+ * this file exists for was found in. Whoever grows the harness a way to run a
+ * timer out should start there.
  *
  * ## Writing another one
  *
@@ -73,7 +90,7 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import type { TestContext } from "node:test";
 
-import { newSession, replay } from "../../engine/reducer.ts";
+import { newSession, reduce, replay } from "../../engine/reducer.ts";
 import type {
   Activity,
   ArcadeRoundConfig,
@@ -344,6 +361,23 @@ function engineRoom(
 function engineView(state: SessionState, now: number = T0): RenderState {
   const lastSeen = new Map(Object.keys(state.participants).map((pid) => [pid, now]));
   return renderStateFor(state, { role: "host", lastSeen, now });
+}
+
+/**
+ * The big screen's frame, at `now`.
+ *
+ * Separate from {@link engineView} because `standings` is one of the few
+ * fields where the two roles genuinely differ: views.ts gives the console
+ * `topFive(all)` — "they cannot run the session blind" — and gives the screen
+ * `publicStandings(all)`, which is the hard five *and* the rule that an
+ * unscored room shows nothing rather than an alphabetical slice of itself. A
+ * claim about the public leaderboard has to be made against the public frame,
+ * and comparing a screen frame to a host frame was the first version of the
+ * test below.
+ */
+function engineScreen(state: SessionState, now: number = T0): RenderState {
+  const lastSeen = new Map(Object.keys(state.participants).map((pid) => [pid, now]));
+  return renderStateFor(state, { role: "screen", lastSeen, now });
 }
 
 /**
@@ -1665,6 +1699,872 @@ describe("somebody who joined after the round started still has a number", () =>
     assert.equal(
       r.host.state().arcade?.recruitment?.eligible,
       engineView(engine).arcade?.recruitment?.eligible,
+    );
+  });
+});
+
+/* ------------------------------------------------------------------ */
+/* #25.1 and #25.6 — when the points reach the score grid              */
+/* ------------------------------------------------------------------ */
+
+/**
+ * The trivia slice of the console's score grid, which is what item 1 is about.
+ *
+ * A `ScoreRow` carries every activity at once plus a rank and a nickname, and
+ * comparing the whole row would drag in six fields that have nothing to do
+ * with *when* trivia lands. This is the three that do, per person, in roster
+ * order — and taken the same way on both sides, so it is still the engine's
+ * answer being compared and not a literal.
+ */
+function triviaGrid(state: RenderState): readonly {
+  pid: string;
+  raw: number | null;
+  status: string | undefined;
+  points: number | null;
+}[] {
+  return (state.hostExtras?.scores ?? []).map((row) => ({
+    pid: row.pid,
+    raw: row.raw["trivia"] ?? null,
+    status: row.status["trivia"],
+    points: row.points["trivia"] ?? null,
+  }));
+}
+
+/**
+ * The big screen's leaderboard, as far as trivia is concerned.
+ *
+ * `perActivity` is keyed by activity id and the two rooms are not holding the
+ * same *list* of activities — the mock's session is a fixed three (a judged
+ * TTX, trivia, the arcade) and `engineRoom` loads two — so a whole-row compare
+ * fails on a `ttx: null` key that says nothing about anything. Rank, name,
+ * total and the trivia column are the board, and they are taken the same way
+ * on both sides.
+ */
+function publicBoard(
+  state: RenderState,
+): readonly { rank: number; nickname: string; total: number; trivia: number | null }[] {
+  return state.standings.map((row) => ({
+    rank: row.rank,
+    nickname: row.nickname,
+    total: row.total,
+    trivia: row.perActivity["trivia"] ?? null,
+  }));
+}
+
+describe("the trivia points reach the score grid at the reveal", () => {
+  /**
+   * `closeQuestion` in reducer.ts settles into `trivia.totals` and `streaks`
+   * and stops there, and the note on it says why in as many words: writing
+   * `scores` at the close leaked the answer, because the participant's own
+   * points strip is projected from `scores` and a right answer made it jump
+   * while the question was still unrevealed. No field said "correct" and the
+   * phone turned green anyway. `revealQuestion` is where `scores` is written.
+   *
+   * `MockSession.settleQuestion` ended by writing `p.raw["trivia"]` and
+   * `p.status["trivia"]`, and `#closeQuestion` calls it — so on the demo, in
+   * the window between the host pressing Close and pressing Reveal, the
+   * participant's strip moved and the public leaderboard re-sorted with the
+   * answer off the screen. The exact leak the reducer's note records fixing,
+   * reproduced on the only surface anybody looks at without a backend.
+   *
+   * The same scenario carries the sibling claim about *who* is written, since
+   * it is the same two lines: the grid is filled for the people who have a
+   * **total**, which is the people who answered, and not for the whole roster
+   * at zero. Three of the six here never touch their phone and must stay
+   * `unset` — the empty cell a host benches somebody off. `board()` averages
+   * Bench Credit over the `played` entries, so "played, 0" moves a number as
+   * well as a colour.
+   */
+  it("holds the grid still at the close and moves it at the reveal, as the engine does", async (t) => {
+    const r = await room(t, 6);
+    r.cmd({ name: "open" });
+    r.cmd({ name: "start" });
+    const openedAt = Date.now();
+    r.cmd({ name: "trivia.open", suddenDeath: false });
+    const question = questionFromFrame(r.host.state());
+    const right = question.correct[0] ?? 0;
+    const wrong = right === 0 ? 1 : 0;
+    // Two right, one wrong, three silent — the same shape the podium test
+    // uses, because it is the shape where padding, the truth and an empty
+    // room are three different answers.
+    const taps: readonly { pid: string; choice: number }[] = [
+      { pid: "p1", choice: right },
+      { pid: "p2", choice: right },
+      { pid: "p3", choice: wrong },
+    ];
+    const answers: Event[] = [];
+    taps.forEach((tap, i) => {
+      const ms = Date.now() - openedAt;
+      answers.push({ type: "answerQuestion", pid: tap.pid, choice: tap.choice, ms });
+      r.phones[i]?.send({
+        t: "trivia.answer",
+        cid: `q${i}`,
+        index: 0,
+        choice: tap.choice,
+      });
+    });
+
+    let engine = engineTriviaRoom(6, [question]);
+    engine = replay(engine, [
+      { event: { type: "openQuestion", suddenDeath: false }, at: T0 },
+      ...answers.map((event) => ({ event, at: T0 })),
+    ]);
+
+    // Nothing yet, on either side: the question is open.
+    assert.deepEqual(triviaGrid(r.host.state()), triviaGrid(engineView(engine)));
+
+    r.cmd({ name: "trivia.close" });
+    engine = replay(engine, [{ event: { type: "closeQuestion" }, at: T0 + 1_000 }]);
+    const closedReal = triviaGrid(engineView(engine));
+    // The engine's own claim, spelled out: the close leaves every cell empty.
+    // Without this the comparison below would pass on two implementations
+    // that both wrote at the close.
+    assert.deepEqual(
+      closedReal.map((row) => row.status),
+      ["unset", "unset", "unset", "unset", "unset", "unset"],
+      "the engine wrote the grid at the close, so this test is about nothing",
+    );
+    assert.deepEqual(
+      triviaGrid(r.host.state()),
+      closedReal,
+      "the grid moved between Close and Reveal",
+    );
+    // And the public board, which is the other half of the leak: thirty
+    // phones and the big screen draw it.
+    assert.deepEqual(
+      publicBoard(r.screen.state()),
+      publicBoard(engineScreen(engine)),
+      "the standings moved between Close and Reveal",
+    );
+
+    r.cmd({ name: "trivia.reveal" });
+    engine = replay(engine, [{ event: { type: "revealQuestion" }, at: T0 + 1_100 }]);
+    const revealedReal = triviaGrid(engineView(engine));
+    // Three cells filled and three still absent: the people who answered, the
+    // wrong tap included at zero, and nobody else. A grid that stayed empty at
+    // the reveal would match an unwritten one just as happily.
+    assert.deepEqual(
+      revealedReal.map((row) => row.status),
+      ["played", "played", "played", "unset", "unset", "unset"],
+      "the engine's own grid at the reveal",
+    );
+    assert.ok(
+      revealedReal.some((row) => (row.raw ?? 0) > 0),
+      "nobody scored, so an unwritten grid would pass",
+    );
+    assert.deepEqual(triviaGrid(r.host.state()), revealedReal, "the grid at the reveal");
+    assert.deepEqual(
+      publicBoard(r.screen.state()),
+      publicBoard(engineScreen(engine)),
+      "the standings at the reveal",
+    );
+  });
+
+  /**
+   * `withActivityTotals` in reducer.ts opens with
+   * `if (state.practice) return state.scores;` — one choke point, covering
+   * trivia and the arcade, gated there rather than at its two call sites so
+   * that a third activity gets the behaviour without anybody remembering to
+   * ask for it.
+   *
+   * This file stored `practice`, had a `#hostCmd` case for it and projected
+   * it, and nothing read it. So a practice round moved the board on the demo
+   * and does not on the server, which is the entire content of the toggle —
+   * and `mock.ts`'s own comment above `MOCK_SENDOFF` records the previous
+   * round of exactly this: "the practice toggle shipped unverifiable because
+   * this file had no case for its command". The case was added. The gate was
+   * not.
+   *
+   * The round still *happens* on both sides, which is the other half of the
+   * rule and the reason this is not simply "score nothing": the podium fills
+   * and the phone's own strip fills. Only the score grid and the standings
+   * stay where they were.
+   */
+  it("scores a practice question into the podium and not onto the board, as the engine does", async (t) => {
+    const r = await room(t, 6);
+    r.cmd({ name: "open" });
+    r.cmd({ name: "start" });
+    r.cmd({ name: "practice", on: true });
+    const openedAt = Date.now();
+    r.cmd({ name: "trivia.open", suddenDeath: false });
+    const question = questionFromFrame(r.host.state());
+    const right = question.correct[0] ?? 0;
+    const answers: Event[] = [];
+    ["p1", "p2"].forEach((pid, i) => {
+      const ms = Date.now() - openedAt;
+      answers.push({ type: "answerQuestion", pid, choice: right, ms });
+      r.phones[i]?.send({ t: "trivia.answer", cid: `q${i}`, index: 0, choice: right });
+    });
+    r.cmd({ name: "trivia.close" });
+    r.cmd({ name: "trivia.reveal" });
+
+    let engine = engineTriviaRoom(6, [question], [], [{ type: "setPractice", on: true }]);
+    engine = replay(engine, [
+      { event: { type: "openQuestion", suddenDeath: false }, at: T0 },
+      ...answers.map((event) => ({ event, at: T0 })),
+      { event: { type: "closeQuestion" }, at: T0 + 1_000 },
+      { event: { type: "revealQuestion" }, at: T0 + 1_100 },
+    ]);
+
+    const real = engineView(engine);
+    assert.equal(real.practice, true, "the engine is not in practice");
+    assert.equal(r.host.state().practice, true, "the mock is not in practice");
+    // The round happened: two people are on the engine's own podium with
+    // points. Without this the comparison below is two empty boards, and two
+    // empty boards match however the gate is written.
+    const podium = real.trivia?.podium ?? [];
+    assert.equal(podium.length, 2, "the engine's own podium");
+    assert.ok(
+      podium.some((row) => row.points > 0),
+      "nobody scored even into the practice totals",
+    );
+    assert.deepEqual(r.screen.state().trivia?.podium, podium, "the podium");
+
+    // And the board did not move.
+    assert.deepEqual(
+      triviaGrid(real).map((row) => row.status),
+      ["unset", "unset", "unset", "unset", "unset", "unset"],
+      "the engine wrote a practice round onto its own grid",
+    );
+    assert.deepEqual(triviaGrid(r.host.state()), triviaGrid(real), "the score grid");
+    assert.deepEqual(
+      publicBoard(r.screen.state()),
+      publicBoard(engineScreen(engine)),
+      "the standings",
+    );
+  });
+});
+
+/* ------------------------------------------------------------------ */
+/* #25.3 and #25.9 — what a sudden death does and does not do          */
+/* ------------------------------------------------------------------ */
+
+describe("a sudden death is closed by the host, like every other question", () => {
+  /**
+   * `answerQuestion` in reducer.ts sets `suddenDeathWinner` and leaves the
+   * phase `open`. Nothing in runtime.ts or views.ts closes it either, and
+   * that is the design: the big screen shows the winner **while the question
+   * is still open**, the room gets to look at it, the rest of the room can
+   * still tap, and the host presses Close when they are ready.
+   *
+   * `#recordAnswer` called `#closeQuestion()` inline. So on the demo the first
+   * correct tap flipped the phase to `closed`, nulled both clocks, locked
+   * everybody else out mid-thought, and turned the host's own Close into a
+   * refusal — "No question is open" — on the one question a host most wants to
+   * control the pacing of.
+   *
+   * Four observations taken the same way on both sides and compared as one
+   * record. The two cannot be compared question-for-question here, because
+   * the mock has no tiebreaker pool and shows the next unasked question
+   * instead — a listed deliberate difference — but none of these four is
+   * about which question is on screen.
+   */
+  interface SuddenDeathBeat {
+    readonly phaseAfterTheWinningTap: string | undefined;
+    readonly winnerIsNamed: boolean;
+    readonly aSecondPersonCanStillAnswer: boolean;
+    readonly phaseAfterTheHostCloses: string | undefined;
+  }
+
+  it("stays open until the host closes it, on both implementations", async (t) => {
+    const r = await room(t, 6);
+    r.cmd({ name: "open" });
+    r.cmd({ name: "start" });
+    const openedAt = Date.now();
+    // Out of `idle`, because the mock's `trivia.open` admits only `idle` where
+    // the reducer also admits `suddenDeath` out of `revealed`. That guard is
+    // its own item and not this one's; a tiebreak opened from idle is
+    // reachable on both today.
+    r.cmd({ name: "trivia.open", suddenDeath: true });
+    const question = questionFromFrame(r.host.state());
+    const right = question.correct[0] ?? 0;
+    const ms = Date.now() - openedAt;
+    r.phones[0]?.send({ t: "trivia.answer", cid: "sd1", index: 0, choice: right });
+    const afterTheTap = r.screen.state().trivia;
+    r.phones[1]?.send({ t: "trivia.answer", cid: "sd2", index: 0, choice: right });
+    const secondRefused = r.phones[1]?.frames
+      .filter((f) => f.t === "refusedCmd")
+      .at(-1);
+    r.cmd({ name: "trivia.close" });
+    const mocked: SuddenDeathBeat = {
+      phaseAfterTheWinningTap: afterTheTap?.phase,
+      winnerIsNamed: afterTheTap?.suddenDeathWinner != null,
+      aSecondPersonCanStillAnswer:
+        secondRefused === undefined || secondRefused.cid !== "sd2",
+      phaseAfterTheHostCloses: r.screen.state().trivia?.phase,
+    };
+
+    let engine = engineTriviaRoom(6, [question], [question]);
+    engine = replay(engine, [
+      { event: { type: "openQuestion", suddenDeath: true }, at: T0 },
+      { event: { type: "answerQuestion", pid: "p1", choice: right, ms }, at: T0 + 10 },
+    ]);
+    const realAfterTheTap = engineView(engine).trivia;
+    // `reduce` rather than `replay`, because the claim is about whether the
+    // second tap was *accepted* and `replay` throws the answer away.
+    const secondTap = reduce(
+      engine,
+      { type: "answerQuestion", pid: "p2", choice: right, ms },
+      T0 + 20,
+    );
+    engine = replay(secondTap.state, [
+      { event: { type: "closeQuestion" }, at: T0 + 30 },
+    ]);
+    const real: SuddenDeathBeat = {
+      phaseAfterTheWinningTap: realAfterTheTap?.phase,
+      winnerIsNamed: realAfterTheTap?.suddenDeathWinner != null,
+      aSecondPersonCanStillAnswer: secondTap.applied,
+      phaseAfterTheHostCloses: engineView(engine).trivia?.phase,
+    };
+
+    // The engine's own answer, written out, so that two implementations which
+    // both slammed the question shut could not pass by agreeing.
+    assert.deepEqual(
+      real,
+      {
+        phaseAfterTheWinningTap: "open",
+        winnerIsNamed: true,
+        aSecondPersonCanStillAnswer: true,
+        phaseAfterTheHostCloses: "closed",
+      },
+      "the engine's own behaviour, which is the claim being compared against",
+    );
+    assert.deepEqual(mocked, real);
+  });
+
+  /**
+   * `settleQuestion` in engine/trivia.ts early-returns on `trivia.suddenDeath`
+   * with `answers`, `totals` **and `streaks`** handed straight back. SPEC.md's
+   * "no points change", read strictly: a tiebreak is a decision, not a
+   * question, so it neither pays nor breaks a run.
+   *
+   * The mock skipped the *scoring* for a sudden death and then went on running
+   * the fold, so a non-answerer and a wrong tap both had `triviaStreaks[pid]`
+   * set to 0 on the way past. Visible immediately as `triviaMine.streak` on
+   * the phone, and again on the next scored question as a streak bonus that
+   * should have been paid and was not.
+   */
+  it("breaks nobody's streak, as the engine does", async (t) => {
+    const r = await room(t, 6);
+    r.cmd({ name: "open" });
+    r.cmd({ name: "start" });
+    const openedAt = Date.now();
+    r.cmd({ name: "trivia.open", suddenDeath: false });
+    const question = questionFromFrame(r.host.state());
+    const right = question.correct[0] ?? 0;
+    const ms = Date.now() - openedAt;
+    // p1 builds a streak of one on a scored question and then sits out the
+    // tiebreak, which is the ordinary case: a tiebreak is between two other
+    // people and the rest of the room watches.
+    r.phones[0]?.send({ t: "trivia.answer", cid: "a1", index: 0, choice: right });
+    r.cmd({ name: "trivia.close" });
+    r.cmd({ name: "trivia.reveal" });
+    r.cmd({ name: "trivia.next" });
+    const sdOpenedAt = Date.now();
+    r.cmd({ name: "trivia.open", suddenDeath: true });
+    const tie = questionFromFrame(r.host.state());
+    const tieRight = tie.correct[0] ?? 0;
+    const tieMs = Date.now() - sdOpenedAt;
+    r.phones[1]?.send({ t: "trivia.answer", cid: "sd", index: 1, choice: tieRight });
+    r.cmd({ name: "trivia.close" });
+    // Revealed, because `TriviaMine` only carries a streak in that state:
+    // before the reveal a phone is told `locked` and nothing else, which is
+    // the whole of the secrecy rule. Revealing a tiebreak is what a host does
+    // with one anyway.
+    r.cmd({ name: "trivia.reveal" });
+    const streakOf = (wire: Wire | undefined): number | undefined => {
+      const mine = wire?.state().triviaMine;
+      return mine?.state === "revealed" ? mine.streak : undefined;
+    };
+    const mocked = { p1: streakOf(r.phones[0]), p2: streakOf(r.phones[1]) };
+
+    let engine = engineTriviaRoom(6, [question, question], [tie]);
+    engine = replay(engine, [
+      { event: { type: "openQuestion", suddenDeath: false }, at: T0 },
+      { event: { type: "answerQuestion", pid: "p1", choice: right, ms }, at: T0 + 10 },
+      { event: { type: "closeQuestion" }, at: T0 + 20 },
+      { event: { type: "revealQuestion" }, at: T0 + 30 },
+      { event: { type: "nextQuestion" }, at: T0 + 40 },
+      { event: { type: "openQuestion", suddenDeath: true }, at: T0 + 50 },
+      {
+        event: { type: "answerQuestion", pid: "p2", choice: tieRight, ms: tieMs },
+        at: T0 + 60,
+      },
+      { event: { type: "closeQuestion" }, at: T0 + 70 },
+      { event: { type: "revealQuestion" }, at: T0 + 80 },
+    ]);
+    const engineStreak = (pid: string): number | undefined => {
+      const mine = renderStateFor(engine, {
+        role: "participant",
+        pid,
+        lastSeen: new Map([[pid, T0 + 80]]),
+        now: T0 + 80,
+      }).triviaMine;
+      return mine?.state === "revealed" ? mine.streak : undefined;
+    };
+    const real = { p1: engineStreak("p1"), p2: engineStreak("p2") };
+
+    // The engine's own answer: p1 keeps the run they earned on the scored
+    // question, and p2's correct tiebreak tap does not start one either —
+    // both of which are "a sudden death settles nothing". A room where nobody
+    // had a streak to lose would read `{p1: 0, p2: 0}` on any implementation
+    // at all, which is why the scored question comes first.
+    assert.deepEqual(real, { p1: 1, p2: 0 }, "the engine's own streaks");
+    assert.deepEqual(mocked, real);
+  });
+});
+
+/* ------------------------------------------------------------------ */
+/* #25.7 — what Recruitment banks                                      */
+/* ------------------------------------------------------------------ */
+
+describe("Recruitment banks what the engine banks", () => {
+  /**
+   * `RECRUITMENT_CORRECT` in engine/arcade.ts was **retuned from 10 to 5**,
+   * and carries the arithmetic: at 10 the round banks 7 × 15 = 105 against
+   * Plan / Apply's 40 and the Bridge's 63, which is more than the other two
+   * together and settles the leaderboard before the arcade is half over. At 5
+   * it is 7 × (5 + 5) = 70. The first-three bonus deliberately did not move.
+   *
+   * `#recordItemAnswer` here still banked `10 + 5`. The engine is the one that
+   * moved and this file is the one that did not, so the demo's Floor max was
+   * 105 against the server's 70 — on the console's `banked` and `totals`, on
+   * the phone's own strip, and on the board once the round was revealed.
+   *
+   * Four correct answers on one item, because three is where the bonus stops:
+   * the fourth person is what separates "5 and 5" from a flat 10, and this
+   * file has now had both numbers wrong in different directions.
+   */
+  it("pays 5 and 5, and the bonus to the first three only, as the engine does", async (t) => {
+    const pair = roundPair("recruitment");
+    const r = await room(t, 6);
+    r.cmd({ name: "open" });
+    r.cmd({ name: "start" });
+    r.cmd({ name: "arcade.enter" });
+    r.cmd(pair.cmd);
+    r.cmd({ name: "arcade.begin" });
+    const item = RECRUITMENT_ITEMS[0];
+    assert.ok(item !== undefined, "there are no recruitment items");
+    for (let i = 0; i < 4; i += 1) {
+      r.phones[i]?.send({
+        t: "arcade.answer",
+        cid: `a${i}`,
+        item: 0,
+        answer: item.answer,
+      });
+    }
+    r.settle();
+
+    let engine = engineRoom(6, [
+      { type: "startRound", round: "recruitment", config: pair.config },
+      { type: "beginPlay" },
+    ]);
+    engine = replay(
+      engine,
+      (["p1", "p2", "p3", "p4"] as const).map((pid, i) => ({
+        event: { type: "submitAnswer", pid, answer: item.answer } as Event,
+        at: T0 + 100 + i,
+      })),
+    );
+
+    const banked = (state: RenderState): Readonly<Record<string, number>> =>
+      state.hostExtras?.arcade?.banked ?? {};
+    // The engine's own arithmetic, printed rather than implied: three at ten
+    // and a fourth at five. A round where everybody scored the same would
+    // pass against a mock that kept the bonus and dropped the retune, or the
+    // other way round.
+    assert.deepEqual(
+      banked(engineView(engine)),
+      { p1: 10, p2: 10, p3: 10, p4: 5 },
+      "the engine's own banked",
+    );
+    assert.deepEqual(banked(r.host.state()), banked(engineView(engine)), "banked");
+    // The fourth person's own phone, which is where a wrong number is read by
+    // somebody who can argue about it.
+    const mine = r.phones[3]?.state().arcadeMine?.banked;
+    const realMine = renderStateFor(engine, {
+      role: "participant",
+      pid: "p4",
+      lastSeen: new Map([["p4", T0 + 200]]),
+      now: T0 + 200,
+    }).arcadeMine?.banked;
+    assert.equal(realMine, 5, "the engine's own answer on the fourth phone");
+    assert.equal(mine, realMine, "the fourth phone's own strip");
+
+    // And the round's totals once it has settled, which is what reaches the
+    // score grid at the reveal.
+    r.cmd({ name: "arcade.end" });
+    engine = replay(engine, [{ event: { type: "endRound" }, at: T0 + 300 }]);
+    assert.deepEqual(
+      r.host.state().hostExtras?.arcade?.totals,
+      engineView(engine).hostExtras?.arcade?.totals,
+      "totals",
+    );
+  });
+});
+
+/* ------------------------------------------------------------------ */
+/* #25.4 — a bet placed after the result it names                      */
+/* ------------------------------------------------------------------ */
+
+describe("a bet placed after the result it names pays nothing", () => {
+  /**
+   * `betStands` in engine/arcade.ts, written a second time here as
+   * `mockBetStands` — and it was not written here at all before.
+   *
+   * A round's Floor is a public surface: the big screen draws who has crossed
+   * and whose tin is open, because that is the round's theatre. A bet may be
+   * changed until the Floor locks. Put the two together and the Lounge stops
+   * being a bet — watch the screen until somebody is through, then name them,
+   * and collect the top award for a certainty. The engine stamps
+   * `LoungeSeat.placedAt` at `backPlayer` and refuses such a bet at
+   * settlement; `MockLounge` had no `placedAt`, `MockPlanPlay` had no
+   * `finishedAt`, and `#endRound` paid purely on membership of `finishOrder`
+   * and `unsealOrder`. In the demo a drained bot could back a guaranteed
+   * winner, and it showed in the console, the standings and the export.
+   *
+   * Unseal rather than Plan / Apply, for one reason: a Plan / Apply drain
+   * needs the APPLY light, and the light is on a two-to-six second timer that
+   * does not fit inside the window this file has before the mock starts
+   * joining its own bots. An Unseal drain is two wrong letters and no clock at
+   * all. It is the same guard — `betStands` covers exactly these two rounds,
+   * and the reasoning is identical — and Plan / Apply's half is left to
+   * whoever grows the harness a way to run a timer out.
+   *
+   * The scenario is the whole claim: **two** drained backers on the same
+   * runner, one who bets before the tin comes open and one who bets after.
+   * One backer alone would pass against an implementation with no guard at
+   * all, and two who both bet early would pass against one that refused
+   * everything.
+   */
+  it("pays the backer who bet early and not the one who waited, as the engine does", async (t) => {
+    const pair = roundPair("unseal");
+    const r = await room(t, 6);
+    r.cmd({ name: "open" });
+    r.cmd({ name: "start" });
+    r.cmd({ name: "arcade.enter" });
+    r.cmd(pair.cmd);
+    r.cmd({ name: "arcade.begin" });
+    const round = r.host.state().arcade?.roundIndex ?? -1;
+
+    let engine = engineRoom(6, [
+      { type: "startRound", round: "unseal", config: pair.config },
+      { type: "beginPlay" },
+    ]);
+    // `beginPlay` above is stamped at T0, so the engine's `startedAt` is T0
+    // and every `unsealedMs` below is an offset from it. The instants are
+    // chosen rather than borrowed from the mock's clock for that reason: the
+    // rule is an ordering, and an ordering written out is one that can be read.
+    const shapes = r.host.state().arcade?.unseal?.shapes ?? [];
+    const shape = shapes.find((s) => s.available)?.shape;
+    assert.ok(shape !== undefined, "the round dealt no tins at all");
+
+    const pick = (i: number, pid: string, at: number): void => {
+      r.phones[i]?.send({ t: "arcade.shape", cid: `pick-${pid}`, round, shape });
+      engine = replay(engine, [{ event: { type: "pickShape", pid, shape }, at }]);
+    };
+    /** The word behind a cue, which the cue is an anagram of. */
+    const wordFor = (cue: string): string[] => {
+      const item = UNSEAL_ITEMS.find((i) => i.cue === cue);
+      assert.ok(item !== undefined, `no unseal item has the cue ${cue}`);
+      return [...item.answer.toUpperCase()].filter((c) => /\p{L}/u.test(c));
+    };
+    const cueOn = (wire: Wire | undefined): string => {
+      const cue = wire?.state().arcadeMine?.unseal?.cue;
+      assert.ok(typeof cue === "string" && cue !== "", "that phone holds no tin");
+      return cue;
+    };
+    const engineCue = (pid: string, now: number): string | null | undefined =>
+      renderStateFor(engine, {
+        role: "participant",
+        pid,
+        lastSeen: new Map([[pid, now]]),
+        now,
+      }).arcadeMine?.unseal?.cue;
+
+    // The runner, and the two who are about to fall.
+    pick(0, "p1", T0 + 10);
+    pick(2, "p3", T0 + 10);
+    pick(3, "p4", T0 + 10);
+    // The two sides deal tins by player number out of the same item list, so
+    // the same person is holding the same word. Asserted rather than assumed:
+    // if the dealing ever diverges, the numbers below stop meaning anything
+    // and this should say so rather than fail somewhere downstream.
+    for (const [i, pid] of [[0, "p1"], [2, "p3"], [3, "p4"]] as const) {
+      assert.equal(engineCue(pid, T0 + 10), cueOn(r.phones[i]), `${pid}'s tin`);
+    }
+
+    // p3 and p4 shatter their own tins: two wrong letters each. The letter has
+    // to be one of their own tiles — a letter that is not is a malformed frame
+    // and is refused rather than counted — so it is drawn from their own cue.
+    const shatter = (i: number, pid: string, at: number): void => {
+      const cue = cueOn(r.phones[i]);
+      const word = wordFor(cue);
+      const wrong = [...cue].find((c) => /\p{L}/u.test(c) && c !== word[0]);
+      assert.ok(wrong !== undefined, `${pid}'s word is one letter repeated`);
+      for (const n of [0, 1]) {
+        r.phones[i]?.send({
+          t: "arcade.letter",
+          cid: `x-${pid}-${n}`,
+          round,
+          letter: wrong,
+        });
+        engine = replay(engine, [
+          { event: { type: "tapLetter", pid, letter: wrong }, at: at + n },
+        ]);
+      }
+    };
+    shatter(2, "p3", T0 + 20);
+    shatter(3, "p4", T0 + 20);
+    const drained = (state: RenderState): readonly string[] =>
+      (state.arcade?.grid ?? []).filter((c) => c.struck).map((c) => c.pid);
+    assert.deepEqual(
+      drained(engineView(engine)),
+      ["p3", "p4"],
+      "the engine drained somebody else, so the Lounge below is not what it looks like",
+    );
+    assert.deepEqual(drained(r.host.state()), drained(engineView(engine)), "the drains");
+
+    // The honest bet: placed while p1's tin is still shut.
+    r.phones[2]?.send({ t: "arcade.back", cid: "back-p3", pid: "p1" });
+    engine = replay(engine, [
+      { event: { type: "backPlayer", pid: "p3", backing: "p1" }, at: T0 + 30 },
+    ]);
+
+    // p1 unseals, which is on the big screen the instant it happens.
+    const word = wordFor(cueOn(r.phones[0]));
+    word.forEach((letter, n) => {
+      r.phones[0]?.send({ t: "arcade.letter", cid: `p1-${n}`, round, letter });
+      engine = replay(engine, [
+        { event: { type: "tapLetter", pid: "p1", letter }, at: T0 + 40 },
+      ]);
+    });
+    assert.equal(
+      r.phones[0]?.state().arcadeMine?.unseal?.unsealed,
+      true,
+      "p1 did not get their tin open, so there is no result to bet after",
+    );
+
+    // And the bet that is not a bet: named after the result it names.
+    r.phones[3]?.send({ t: "arcade.back", cid: "back-p4", pid: "p1" });
+    engine = replay(engine, [
+      { event: { type: "backPlayer", pid: "p4", backing: "p1" }, at: T0 + 50 },
+    ]);
+
+    r.cmd({ name: "arcade.end" });
+    engine = replay(engine, [{ event: { type: "endRound" }, at: T0 + 60 }]);
+
+    const totals = (state: RenderState): Readonly<Record<string, number>> =>
+      state.hostExtras?.arcade?.totals ?? {};
+    const real = totals(engineView(engine));
+    // The engine's own arithmetic, printed. p3 is paid the 8 for backing the
+    // fastest in a shape; p4 backed the same person for the same 8 and is
+    // paid nothing, which is the entire difference the guard makes. Both
+    // banked nothing on the Floor — their first letter was wrong, so a
+    // shattered tin is worth zero — so these two numbers are the Lounge and
+    // nothing else.
+    assert.equal(real["p3"], 8, "the engine did not pay the honest bet");
+    assert.equal(real["p4"], 0, "the engine paid the late bet");
+    assert.deepEqual(totals(r.host.state()), real, "the round's totals");
+  });
+});
+
+/* ------------------------------------------------------------------ */
+/* #25.5 — a Gganbu rival who leaves mid-round                         */
+/* ------------------------------------------------------------------ */
+
+describe("a Gganbu pair dissolves when half of it leaves", () => {
+  /**
+   * `houseThePairOf` in reducer.ts runs at `disconnect`, at `kick` and at
+   * `releaseNickname` — at the instant the rival goes — and houses **both**
+   * halves, because the +10 is awarded per player against whoever is in front
+   * of them and a one-sided substitution makes the pair's two comparisons
+   * disagree. SPEC.md: "a rival who disconnects is replaced by the house."
+   *
+   * The mock wrote `housed` only inside `#startRound`, which is the one moment
+   * at which nobody has left yet. `participant.release` set `conn = "away"`
+   * and the director dropped a bot, and neither touched it. `housed` is
+   * projected and `gganbuMine` draws the survivor's rival card off it, so on
+   * the demo the card went on naming somebody who had gone home, all the way
+   * to a settlement that compared against them.
+   *
+   * **Why this compares behaviour rather than two lists.** The pairs are drawn
+   * from a seed, and the mock draws its own at `#startRound` where the engine
+   * is handed one in the round config — so p1's rival is a different person on
+   * the two sides and always will be. What is the same is the rule: before,
+   * nobody is housed and p1 has a rival; after, that pair and only that pair
+   * is housed, and the survivor's own phone says they are playing the house.
+   * Four observations, taken the same way on each side.
+   */
+  interface HousingBehaviour {
+    readonly housedBeforeAnybodyLeft: number;
+    readonly theSurvivorHadARival: boolean;
+    readonly housedAfterTheRelease: number;
+    readonly theSurvivorNowPlaysTheHouse: boolean;
+  }
+
+  it("houses both halves the moment one of them is released, on both implementations", async (t) => {
+    const pair = roundPair("gganbu");
+    const r = await room(t, 6);
+    r.cmd({ name: "open" });
+    r.cmd({ name: "start" });
+    r.cmd({ name: "arcade.enter" });
+    r.cmd(pair.cmd);
+    r.cmd({ name: "arcade.begin" });
+
+    const mockRivalOf = (i: number): string | null | undefined =>
+      r.phones[i]?.state().arcadeMine?.gganbu?.rival;
+    const mockHoused = (): number => (r.host.state().arcade?.gganbu?.housed ?? []).length;
+    const rival = mockRivalOf(0);
+    assert.ok(
+      typeof rival === "string",
+      "p1 has no rival in a room of six, so there is no pair to dissolve",
+    );
+    // The phones are opened in pid order, so `p4` is `phones[3]`. Stated here
+    // rather than searched for, because `room()` documents the mapping and
+    // every other scenario in this file already relies on it.
+    const survivor = Number(rival.slice(1)) - 1;
+    const housedBefore = mockHoused();
+    r.cmd({ name: "participant.release", pid: "p1" });
+    const mocked: HousingBehaviour = {
+      housedBeforeAnybodyLeft: housedBefore,
+      theSurvivorHadARival: true,
+      housedAfterTheRelease: mockHoused(),
+      theSurvivorNowPlaysTheHouse: mockRivalOf(survivor) === null,
+    };
+
+    let engine = engineRoom(6, [
+      { type: "startRound", round: "gganbu", config: pair.config },
+      { type: "beginPlay" },
+    ]);
+    const engineMine = (pid: string, now: number): string | null | undefined =>
+      renderStateFor(engine, {
+        role: "participant",
+        pid,
+        lastSeen: new Map([[pid, now]]),
+        now,
+      }).arcadeMine?.gganbu?.rival;
+    const engineHoused = (): number =>
+      (engineView(engine).arcade?.gganbu?.housed ?? []).length;
+    const realRival = engineMine("p1", T0);
+    assert.ok(typeof realRival === "string", "the engine left p1 unpaired");
+    const realHousedBefore = engineHoused();
+    engine = replay(engine, [
+      { event: { type: "releaseNickname", pid: "p1" }, at: T0 + 1_000 },
+    ]);
+    const real: HousingBehaviour = {
+      housedBeforeAnybodyLeft: realHousedBefore,
+      theSurvivorHadARival: true,
+      housedAfterTheRelease: engineHoused(),
+      theSurvivorNowPlaysTheHouse: engineMine(realRival, T0 + 1_000) === null,
+    };
+
+    // The engine's own behaviour, written out. Two is the claim: **both**
+    // halves, not only the one left behind. A round where nobody was paired
+    // would read zero and zero on any implementation at all, which is what
+    // the two assertions above are for.
+    assert.deepEqual(
+      real,
+      {
+        housedBeforeAnybodyLeft: 0,
+        theSurvivorHadARival: true,
+        housedAfterTheRelease: 2,
+        theSurvivorNowPlaysTheHouse: true,
+      },
+      "the engine's own behaviour, which is the claim being compared against",
+    );
+    assert.deepEqual(mocked, real);
+  });
+});
+
+/* ------------------------------------------------------------------ */
+/* #25.2, the other half — practice and the arcade                     */
+/* ------------------------------------------------------------------ */
+
+describe("a practice arcade round moves no board either", () => {
+  /**
+   * `withActivityTotals` is one choke point for a reason its own comment
+   * gives: "a third activity added later gets the behaviour without anyone
+   * remembering to ask for it". The mock has no such choke point — the trivia
+   * write and the arcade write are two loops in two files' worth of distance
+   * from each other — so the gate has to be stated twice, and a test that
+   * only covered trivia would be a test that let the arcade half rot.
+   *
+   * Recruitment, because it is the round that needs no clock: four correct
+   * answers, end, reveal. The round still produces its totals on both sides —
+   * `hostExtras.arcade.totals` is what the console draws and what a host uses
+   * to decide the round worked — and the score grid does not move.
+   */
+  it("banks the round and leaves the score grid alone, as the engine does", async (t) => {
+    const pair = roundPair("recruitment");
+    const r = await room(t, 6);
+    r.cmd({ name: "open" });
+    r.cmd({ name: "start" });
+    r.cmd({ name: "practice", on: true });
+    r.cmd({ name: "arcade.enter" });
+    r.cmd(pair.cmd);
+    r.cmd({ name: "arcade.begin" });
+    const item = RECRUITMENT_ITEMS[0];
+    assert.ok(item !== undefined, "there are no recruitment items");
+    for (let i = 0; i < 4; i += 1) {
+      r.phones[i]?.send({
+        t: "arcade.answer",
+        cid: `a${i}`,
+        item: 0,
+        answer: item.answer,
+      });
+    }
+    r.cmd({ name: "arcade.end" });
+    r.cmd({ name: "arcade.reveal" });
+
+    let engine = engineRoom(
+      6,
+      [
+        { type: "startRound", round: "recruitment", config: pair.config },
+        { type: "beginPlay" },
+        ...(["p1", "p2", "p3", "p4"] as const).map(
+          (pid): Event => ({ type: "submitAnswer", pid, answer: item.answer }),
+        ),
+        { type: "endRound" },
+        { type: "revealRound" },
+      ],
+      [{ type: "setPractice", on: true }],
+    );
+
+    const real = engineView(engine);
+    assert.equal(real.practice, true, "the engine is not in practice");
+    // The round happened on both sides, which is what makes the empty grid
+    // below a gate rather than a round that never ran.
+    // Two zeroes on the end: `settleRound` in engine/arcade.ts folds over
+    // `standing ∪ banked`, so everybody who was on the Floor gets a total
+    // whether or not they answered.
+    assert.deepEqual(
+      real.hostExtras?.arcade?.totals,
+      { p1: 10, p2: 10, p3: 10, p4: 5, p5: 0, p6: 0 },
+      "the engine's own totals",
+    );
+    assert.deepEqual(
+      r.host.state().hostExtras?.arcade?.totals,
+      real.hostExtras?.arcade?.totals,
+      "the round's totals",
+    );
+    const arcadeGridSlice = (
+      state: RenderState,
+    ): readonly { pid: string; status: string | undefined }[] =>
+      (state.hostExtras?.scores ?? []).map((row) => ({
+        pid: row.pid,
+        status: row.status["arcade"],
+      }));
+    assert.deepEqual(
+      arcadeGridSlice(real).map((row) => row.status),
+      ["unset", "unset", "unset", "unset", "unset", "unset"],
+      "the engine wrote a practice round onto its own grid",
+    );
+    assert.deepEqual(arcadeGridSlice(r.host.state()), arcadeGridSlice(real), "the grid");
+    assert.deepEqual(
+      publicBoard(r.screen.state()),
+      publicBoard(engineScreen(engine)),
+      "the standings",
     );
   });
 });
