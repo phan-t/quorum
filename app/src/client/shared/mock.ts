@@ -119,6 +119,14 @@
  *    Cost: the console's Auto controls and its reveal countdown cannot be
  *    watched in the demo, and a host cannot rehearse a set that runs itself.
  *
+ *    **This entry is about trivia and about nothing else**, and the sentence is
+ *    here because the entry was read the other way. The send-off's Auto is a
+ *    different beat, on a different segment, and it does advance: see
+ *    `#armSlideTimer` below, which is the timer, the countdown and the stamped
+ *    instant this entry asks for, built for the segment DESIGN.md spends the
+ *    most words on. #29 found it missing because four sweeps had taken this
+ *    entry to cover both, and it never did.
+ *
  * 2. **`hostExtras.trivia` and `RenderState.trivia` are never absent.**
  *    views.ts omits both until `loadTrivia`. Here the question set is a
  *    constant loaded at construction and there is no command that loads or
@@ -164,6 +172,15 @@
  *    six strangers a second in. Its cost is only that a demo affordance is now
  *    a configuration point, and it buys every scenario about a clock.
  *
+ *    All of them arrive without knocking, and that is now load-bearing rather
+ *    than incidental. `#botJoins` adds to the roster directly instead of going
+ *    through `#hello`, so the door's rules — the phase gate, the nickname
+ *    bounds, the fold, the clash — do not apply to the cast. Which is what let
+ *    the door be given the reducer's rules in #29 at all: `?mock=manual` starts
+ *    in `draft` on purpose, and a phase gate that the bots had to pass would
+ *    have emptied it. The HTML-named bot depends on the same thing, being thirty
+ *    glyphs long against a ceiling of twenty-four.
+ *
  * 7. **Nobody ever disconnects.** The engine has a `disconnect` event: it
  *    sets `connected: false`, and — the part that moves a round — it houses
  *    the dropped player's Gganbu pair. Here a socket closing removes the
@@ -177,6 +194,15 @@
  *    a real room — a phone that dies mid-Gganbu — cannot be watched here, and
  *    `RosterEntry.conn` only ever reads `away` for the one bot the director
  *    hand-drops and for somebody the host released.
+ *
+ *    **The socket staying open is the whole of this entry.** It never said the
+ *    frames arriving on it count, and #29 found two places that read it that
+ *    way: `#answer` and `#arcadeAnswer` had no kicked check, so a phone the host
+ *    had just removed went on being counted — the console reading `answered 1 /
+ *    eligible 1` in a room whose one remaining participant had not answered.
+ *    Both now refuse `unknown_participant` as the reducer does. The socket is
+ *    still there, which is the difference, and it is now a socket that is
+ *    answered rather than obeyed.
  *
  * 8. **No instant is latency-corrected.** Every moment this file judges — a
  *    trivia response time, a Glass Bridge decision time, a Gganbu stake
@@ -1417,6 +1443,20 @@ const BOT_NAMES = [
  */
 const MANUAL_BOTS = 6;
 
+/**
+ * The nickname bounds, a second time.
+ *
+ * `MIN_NICKNAME_LENGTH` and `MAX_NICKNAME_LENGTH` in reducer.ts hold the same
+ * two numbers, and they are copied rather than imported for the reason the rest
+ * of this file is copied: they are a *rule* — SPEC.md "Identity" for the floor,
+ * ARCHITECTURE.md for the ceiling — and a shared constant is a rule this file
+ * could not catch the engine getting wrong. See the test for sharing in the
+ * header. The numbers being the same is what `mock.test.ts` checks, by comparing
+ * the sentence a phone is turned away with on both sides.
+ */
+const MOCK_MIN_NICKNAME_LENGTH = 2;
+const MOCK_MAX_NICKNAME_LENGTH = 24;
+
 /** The mock's clock runs ~1.2s ahead of the browser's, on purpose. */
 const SERVER_SKEW_MS = 1_237;
 
@@ -2405,10 +2445,37 @@ class MockSession {
         this.triviaTotals[p.pid] = this.triviaTotals[p.pid] ?? 0;
         continue;
       }
-      const t = Math.min(a.ms, q.timeLimitSec * 1000);
-      const points = Math.round(q.basePoints * (1 - t / (q.timeLimitSec * 1000) / 2));
+      const limitMs = q.timeLimitSec * 1000;
+      const t = Math.min(a.ms, limitMs);
+      // One division, not three — and not because it is tidier.
+      //
+      // `questionPoints` in engine/trivia.ts carries the whole argument: the
+      // obvious transcription of SCORING.md's formula, `base * (1 - t / limit /
+      // 2)`, divides twice and subtracts, and each step carries its own binary
+      // rounding error. A response time that lands on an exact half arrives as
+      // .4999… and `Math.round` takes it *down*, one point short. For the real
+      // launch set there are 123 response times where that happens.
+      //
+      // This file was the naive transcription that comment warns about, which
+      // made it wrong on 41 of the 15 001 millisecond values a 1000-point,
+      // fifteen-second question here can be answered at — always one point low,
+      // and visible on `triviaMine.points`, on the totals, on the podium and on
+      // the score grid. A third of a percent of taps is not something anybody
+      // was ever going to find by eye, which is the reason it is worth a line.
+      const points = Math.round((q.basePoints * (2 * limitMs - t)) / (2 * limitMs));
       const streak = (this.triviaStreaks[p.pid] ?? 0) + 1;
-      const streakBonus = 100 * Math.min(streak - 1, 5);
+      // A warm-up (`basePoints: 0`) pays nothing *including* the streak bonus —
+      // `settleQuestion` in engine/trivia.ts, whose header says why: the whole
+      // point of a warm-up is that it does not move the scoreboard. The streak
+      // itself still advances, because a warm-up is a question you got right.
+      //
+      // Unreachable through this socket today: the question set here is a
+      // private constant with no warm-up in it and no command that loads
+      // another, so nothing can put `basePoints: 0` in front of this line. Kept
+      // in step with the engine anyway rather than left as a difference waiting
+      // for the day the set grows one, because the cost of being wrong is a
+      // demo that pays 500 points the room will not.
+      const streakBonus = q.basePoints > 0 ? 100 * Math.min(streak - 1, 5) : 0;
       this.triviaStreaks[p.pid] = streak;
       a.points = points;
       a.streakBonus = streakBonus;
@@ -2650,8 +2717,42 @@ class MockSession {
     };
   }
 
+  /**
+   * The nickname, folded to the key two people collide on — `nicknameKey` in
+   * reducer.ts, implemented a second time here like every other rule.
+   *
+   * This used to be `trim().replace(/\s+/g, " ").toLowerCase()`, which folds
+   * case and nothing else, so the reducer and this file disagreed about who was
+   * already in the room: `Ana` and `Aña` are the same person to the engine
+   * (marks are stripped after NFKD) and two people here, and `A B` and `AB` are
+   * one key there and two here. The engine's fold is the one that decides,
+   * because it is the one a real door uses.
+   *
+   * The empty string is a real answer and is checked at the door: a nickname of
+   * nothing but punctuation folds to it.
+   */
   key(nickname: string): string {
-    return nickname.trim().replace(/\s+/g, " ").toLowerCase();
+    return nickname
+      .normalize("NFKD")
+      .replace(/\p{M}/gu, "")
+      .toLowerCase()
+      .replace(/[^\p{L}\p{N}]/gu, "");
+  }
+
+  /**
+   * What the nickname becomes once it is stored — `sanitiseNickname` in
+   * reducer.ts, a second time.
+   *
+   * Control and format characters out, runs of whitespace down to one, then
+   * trim. Absent here entirely before: `add` collapsed whitespace but kept
+   * every zero-width joiner and right-to-left override a phone could type,
+   * which is a roster row the server would never have stored.
+   */
+  sanitise(nickname: string): string {
+    return nickname
+      .replace(/[\p{Cc}\p{Cf}]/gu, "")
+      .replace(/\s+/gu, " ")
+      .trim();
   }
 
   /**
@@ -2674,7 +2775,7 @@ class MockSession {
   add(nickname: string, bot: boolean): MockParticipant {
     const p: MockParticipant = {
       pid: `p${this.#nextNumber}`,
-      nickname: nickname.trim().replace(/\s+/g, " "),
+      nickname: this.sanitise(nickname),
       nicknameKey: this.key(nickname),
       playerNumber: this.#nextNumber++,
       conn: "on",
@@ -3298,7 +3399,48 @@ class MockHub {
     }
 
     const code = msg.joinCode.trim();
-    const nickname = msg.nickname.trim().replace(/\s+/g, " ");
+    // `sanitiseNickname`'s job, and it has to happen before anything is measured
+    // or folded: the reducer counts glyphs and derives the key from the
+    // *sanitised* name, so a nickname padded with zero-width joiners is long
+    // here and short there if this line is skipped.
+    const nickname = this.session.sanitise(msg.nickname);
+
+    /**
+     * A phone cannot join a session that has not been opened, or one that has
+     * finished.
+     *
+     * `join` in reducer.ts refuses `draft` and `closed` with `not_joinable`, and
+     * `main.ts` maps both that and the global `session_closed` freeze onto the
+     * same wire reason with a note about why it is not `no_such_code`: "the code
+     * is real and the session exists — it has not been opened, or it has
+     * finished. Saying 'no session with that code' sends someone to check a code
+     * that is perfectly correct."
+     *
+     * There was no phase check here at all, which matters more in this file than
+     * it would in most: `?mock=manual` deliberately *starts* in `draft` so the
+     * host can drive `open` themselves, so opening a phone against the demo
+     * before the host has pressed anything worked, and the same phone against
+     * the same session in the room is turned away. The console's roster is the
+     * one surface a host checks before starting, and the demo filled it early.
+     *
+     * Before the rejoin token rather than after it, because the reducer's phase
+     * check is before everything a rejoin cares about: a phone that slept
+     * through the end of the session does not get back into it either.
+     *
+     * The two sentences are different sentences and both are the engine's. The
+     * scripted bots do not come through this door — `#botJoins` adds to the
+     * roster directly — so the demo's room is unaffected, which is the only
+     * reason this could be fixed rather than listed.
+     */
+    if (this.session.phase === "draft" || this.session.phase === "closed") {
+      return this.#refuse(
+        conn,
+        "not_joinable",
+        this.session.phase === "closed"
+          ? "The session is closed."
+          : "The session is not open.",
+      );
+    }
 
     // A rejoin token beats every other check: this is the phone that slept.
     if (msg.rejoinToken) {
@@ -3338,24 +3480,85 @@ class MockHub {
       return this.#refuse(conn, "no_such_code", `No session with the code ${code}.`);
     }
     // …except one, kept so the locked-lobby refusal is still demonstrable.
+    // The sentence is the reducer's, and `main.ts` maps `joins_locked` onto the
+    // `lobby_locked` wire reason — so this is the same refusal a phone gets from
+    // a real locked lobby, words included.
     if (/lock$/i.test(code)) {
-      return this.#refuse(conn, "lobby_locked", "The host has locked the lobby.");
+      return this.#refuse(conn, "lobby_locked", "The host has locked joining.");
     }
     if (this.session.joinsLocked) {
-      return this.#refuse(conn, "lobby_locked", "The host has locked the lobby.");
+      return this.#refuse(conn, "lobby_locked", "The host has locked joining.");
     }
-    if (nickname.length < 2) {
-      return this.#refuse(conn, "invalid_nickname", "Two characters or more.");
+    /**
+     * The three nickname rules, in the reducer's order and with its sentences.
+     *
+     * This was one check — `nickname.length < 2`, worded "Two characters or
+     * more." — against the reducer's three, which is a phone that gets in here
+     * and is turned away there:
+     *
+     * - a nickname that folds to nothing (all punctuation, or nothing but the
+     *   format characters `sanitise` has just removed) has no key to collide on;
+     * - two glyphs is the floor, SPEC.md "Identity";
+     * - twenty-four is the ceiling, ARCHITECTURE.md, enforced on the server
+     *   rather than in the client "because the client can be bypassed" — which
+     *   is exactly what a mock with no ceiling was demonstrating.
+     *
+     * Glyphs and not UTF-16 units, which is the reducer's `[...nickname].length`:
+     * a name of twenty emoji is twenty characters and `String.length` calls it
+     * forty.
+     *
+     * Not applied to the bots, which is deliberate difference 6 and shows here:
+     * `#botJoins` adds to the roster without knocking, so the one named with a
+     * fragment of HTML — thirty glyphs of it — is still in the demo's room. That
+     * bot is a regression test for "nicknames render as text" and a door it
+     * cannot get through would delete it.
+     */
+    if (this.session.key(nickname) === "") {
+      return this.#refuse(conn, "invalid_nickname", "Pick a nickname.");
     }
+    const glyphs = [...nickname].length;
+    if (glyphs < MOCK_MIN_NICKNAME_LENGTH) {
+      return this.#refuse(
+        conn,
+        "invalid_nickname",
+        `Nicknames need at least ${MOCK_MIN_NICKNAME_LENGTH} characters.`,
+      );
+    }
+    if (glyphs > MOCK_MAX_NICKNAME_LENGTH) {
+      return this.#refuse(
+        conn,
+        "invalid_nickname",
+        `Nicknames are at most ${MOCK_MAX_NICKNAME_LENGTH} characters.`,
+      );
+    }
+    /**
+     * A name is taken by whoever holds it, in the room or not.
+     *
+     * This asked `clash.conn === "on"` and, when the holder was away, **handed
+     * the newcomer their row** — their pid, their player number, their raw
+     * scores and their Spot Awards. The reducer's clash is every non-kicked
+     * holder of the key whatever their connection, and `participant.release`
+     * exists precisely because that is strict: it is the host's tool for freeing
+     * a name somebody has walked off with, and a door that let the next arrival
+     * take the row instead made it pointless.
+     *
+     * Reachable in `?mock=1` without a socket: type the name of the bot the
+     * director hand-drops at thirteen seconds into a phone, and the demo used to
+     * give you their score.
+     *
+     * The sentence names the *incoming* nickname rather than the holder's, which
+     * is the reducer's choice and reads better on the phone that is being turned
+     * away — it is the name they just typed.
+     */
     const clash = this.session.find(nickname);
-    if (clash && clash.conn === "on") {
+    if (clash) {
       return this.#refuse(
         conn,
         "nickname_taken",
-        `${clash.nickname} is already in this session.`,
+        `${nickname} is already here. Pick another, or ask the host to release it.`,
       );
     }
-    const me = clash ?? this.session.add(nickname, false);
+    const me = this.session.add(nickname, false);
     me.conn = "on";
     this.#admit(conn, me);
     this.#startDirector();
@@ -3407,6 +3610,41 @@ class MockHub {
       this.#send(conn, { t: "ack", cid, applied: false });
     };
 
+    /**
+     * A closed session is frozen.
+     *
+     * The reducer's own first act, before its switch: everything but
+     * `disconnect` / `reconnect` / `close` / `reopen` / `restartSession` is
+     * refused `session_closed` once `phase === "closed"`. The two exits are
+     * exempt because they are the only routes back, and a second Close is
+     * exempt because closing twice is idempotent rather than an error. The
+     * connection events have no host command, so the three names below are the
+     * whole exemption list on this side.
+     *
+     * There was no gate here at all, and this is not socket-only. After Close
+     * the console's rail and its primary button go dark (`host/main.ts`), and
+     * nothing else does: the scoring grid, Spot Award, kick and release, seal,
+     * practice and the lobby lock are all still live. A probe pressed six of
+     * them after a Close and the mock acked every one `applied: true` — it
+     * sealed the scoreboard, granted a Spot Award, shrank the roster and opened
+     * a question, in a session the engine had frozen. That is a host rehearsing
+     * something entirely reasonable — "close the session, then tidy the scores"
+     * — and learning that it works.
+     *
+     * Before the switch rather than inside it, exactly as the reducer has it, so
+     * the refusal is `session_closed` and not each case's own phase complaint: a
+     * closed session refuses `open` because it is closed, not because it is
+     * already open.
+     */
+    if (
+      s.phase === "closed" &&
+      cmd.name !== "close" &&
+      cmd.name !== "session.reopen" &&
+      cmd.name !== "session.restart"
+    ) {
+      return reject("session_closed", "The session is closed.");
+    }
+
     switch (cmd.name) {
       case "open":
         if (s.phase !== "draft") {
@@ -3446,6 +3684,21 @@ class MockHub {
         s.segment = "final";
         s.seal = "revealed";
         s.joinsLocked = true;
+        // And the clocks, which the freeze above only covers for a *press*.
+        //
+        // Every timer in this file mutates the session directly rather than
+        // going back through `#hostCmd`, so the guard cannot see them: a Close
+        // over a live question left the close timer running and it settled the
+        // question a few seconds later, a Close mid-round left the Floor timer
+        // to end the round, and a Close under Auto left the montage walking. On
+        // the server the same timeouts survive the Close and then call `apply`,
+        // which is the layer the freeze is in — so the events are refused and
+        // *nothing moves*. Clearing them here is how this file reaches the same
+        // place: a closed session is a session where the last frame stays up.
+        if (this.#closeTimer !== null) clearTimeout(this.#closeTimer);
+        this.#closeTimer = null;
+        this.#clearArcadeTimers();
+        this.#clearSlideTimer();
         break;
       case "session.reopen":
         if (s.phase !== "closed") {
@@ -3476,6 +3729,7 @@ class MockHub {
         if (this.#closeTimer !== null) clearTimeout(this.#closeTimer);
         this.#closeTimer = null;
         this.#clearArcadeTimers();
+        this.#clearSlideTimer();
         s.restart();
         break;
       }
@@ -3501,20 +3755,28 @@ class MockHub {
         s.segment = cmd.kind;
         break;
       case "holding": {
-        const next =
-          cmd.title === "" && cmd.line === ""
-            ? null
-            : { title: cmd.title, line: cmd.line };
+        // An empty card is a card, not the absence of one.
+        //
+        // This used to map `title === "" && line === ""` to `null`, which is a
+        // different big screen. `main.ts` turns the console's Clear into
+        // `setHolding` with `{ title: "", line: "" }`, protocol.ts's parser
+        // accepts empty strings on purpose, and the reducer stores the card
+        // non-null — and the Desktop draws `state.holding?.title ?? state.title`.
+        // So "Clear the card" put the *session title* on the big screen here
+        // and a blank one in the room: the one field on the holding panel whose
+        // whole job is to be empty, showing something in the demo.
+        //
+        // `null` is reachable and still means "no card": that is where a
+        // session starts and where `restart()` puts it back. There is simply no
+        // console command that returns to it, which is the reducer's position
+        // too.
+        const next = { title: cmd.title, line: cmd.line };
         const held = s.holding;
         // `setHolding` compares the two cards field by field rather than by
         // identity, because the console sends the whole card on every keystroke
         // of the editor and an unchanged one must not fan out.
         const same =
-          held === next ||
-          (held !== null &&
-            next !== null &&
-            held.title === next.title &&
-            held.line === next.line);
+          held !== null && held.title === next.title && held.line === next.line;
         if (same) return noop();
         s.holding = next;
         break;
@@ -3615,6 +3877,22 @@ class MockHub {
         if (s.sendoff === null) {
           return reject("wrong_phase", "No send-off is loaded.");
         }
+        // `setSendoffSpeed` in reducer.ts refuses a speed that is not a number
+        // before it clamps, and the clamp is why: `Math.round(NaN)` is `NaN`,
+        // `Math.max`/`Math.min` pass it straight through, and `autoSeconds: NaN`
+        // then poisons every `advanceAt` computed from it — a countdown that
+        // draws nothing and a slide timer armed for `NaN` milliseconds, which
+        // fires immediately.
+        //
+        // In principle only, from one direction: protocol.ts's parser drops a
+        // non-finite `seconds` before it could reach a real server. It reaches
+        // *this* file, though, because the in-page path hands a typed
+        // `HostCommand` straight to the hub with no parse in between — which is
+        // the same door the harness comes through, so unlike the two entries
+        // above it this one can be, and is, watched.
+        if (!Number.isFinite(cmd.seconds)) {
+          return reject("invalid_round_config", "That speed is not a number.");
+        }
         const seconds = Math.min(
           MAX_AUTO_SECONDS,
           Math.max(MIN_AUTO_SECONDS, Math.round(cmd.seconds)),
@@ -3623,9 +3901,20 @@ class MockHub {
         s.sendoffSeconds = seconds;
         break;
       }
+      /**
+       * A kick, and the two presses that are no-ops rather than refusals.
+       *
+       * `kick` in reducer.ts opens `if (!p || p.kicked) return unchanged()`: a
+       * pid nobody holds and a second kick of the same person are both "understood,
+       * changed nothing". This file refused the first with a red toast and *applied*
+       * the second — which broadcast the whole room a frame identical to the one it
+       * was holding and housed a Gganbu pair that had already been housed. The
+       * console reads the difference: `applied: false` is a button that was already
+       * where it is, and a `refusedCmd` is a sentence on the glass.
+       */
       case "participant.kick": {
         const p = s.find_pid(cmd.pid);
-        if (!p) return reject("unknown_participant", "No such participant.");
+        if (!p || p.kicked) return noop();
         // Marked, not spliced. `kick` in reducer.ts sets `kicked: true,
         // connected: false` and leaves the rest of the row where it was, and
         // the difference is not bookkeeping: every projection that decides who
@@ -3645,9 +3934,14 @@ class MockHub {
         s.houseThePairOf(cmd.pid);
         break;
       }
+      // `releaseNickname` in reducer.ts is the same shape: `if (!p ||
+      // p.nicknameKey === "") return unchanged()`. So an unknown pid and a
+      // second release of somebody whose nickname is already free are both acks
+      // that changed nothing, where this file refused the first and re-applied
+      // the second.
       case "participant.release": {
-        const p = s.participants.find((x) => x.pid === cmd.pid);
-        if (!p) return reject("unknown_participant", "No such participant.");
+        const p = s.find_pid(cmd.pid);
+        if (!p || p.nicknameKey === "") return noop();
         p.conn = "away";
         p.nicknameKey = "";
         // Releasing a nickname takes somebody out of the roster, which is
@@ -3659,11 +3953,29 @@ class MockHub {
 
       /* ---- scoring ---- */
 
+      /**
+       * Somebody the host has removed from the room is not somebody to score.
+       *
+       * `setScore`, `setStatus` and `grantSpot` in reducer.ts all open the same
+       * way — `if (!p || p.kicked)` — and they have to, because every projection
+       * that decides who is in the room filters the kicked out: a raw stored
+       * against a kicked row is a number no grid will ever draw, and a Spot
+       * Award granted to one is read out to the room for somebody who is not in
+       * it. The probe did exactly that and the toast went to every phone.
+       *
+       * `find_pid` is the lookup that includes them, deliberately — it is how a
+       * kicked row is still found for `houseThePairOf` and for the projections
+       * that mark them — so the `kicked` half has to be written out here. And
+       * the sentence is the reducer's sentence, naming the pid, because a
+       * `refusedCmd`'s message is what the console puts on the glass.
+       */
       case "score.set": {
         const activity = s.activity(cmd.activityId);
         if (!activity) return reject("unknown_activity", `No activity ${cmd.activityId}.`);
         const p = s.find_pid(cmd.pid);
-        if (!p) return reject("unknown_participant", "No such participant.");
+        if (!p || p.kicked) {
+          return reject("unknown_participant", `No participant ${cmd.pid}.`);
+        }
         if (!Number.isFinite(cmd.raw) || cmd.raw < 0) {
           return reject(
             "invalid_score",
@@ -3690,7 +4002,9 @@ class MockHub {
         const activity = s.activity(cmd.activityId);
         if (!activity) return reject("unknown_activity", `No activity ${cmd.activityId}.`);
         const p = s.find_pid(cmd.pid);
-        if (!p) return reject("unknown_participant", "No such participant.");
+        if (!p || p.kicked) {
+          return reject("unknown_participant", `No participant ${cmd.pid}.`);
+        }
         if ((p.status[cmd.activityId] ?? "unset") === cmd.status) return noop();
         // Benching discards the raw, exactly as the reducer does.
         if (cmd.status === "played") p.raw[cmd.activityId] = p.raw[cmd.activityId] ?? 0;
@@ -3703,7 +4017,9 @@ class MockHub {
         const activity = s.activity(cmd.activityId);
         if (!activity) return reject("unknown_activity", `No activity ${cmd.activityId}.`);
         const p = s.find_pid(cmd.pid);
-        if (!p) return reject("unknown_participant", "No such participant.");
+        if (!p || p.kicked) {
+          return reject("unknown_participant", `No participant ${cmd.pid}.`);
+        }
         // The console must never send this, but the server refuses it anyway:
         // a field that may be blank will be blank.
         if (cmd.reason.trim() === "") {
@@ -3724,7 +4040,23 @@ class MockHub {
         const spot = s.grantSpot(cmd.pid, cmd.activityId, cmd.reason);
         this.#send(conn, { t: "ack", cid, applied: true });
         this.#broadcastState();
-        this.#toast("spot", `Spot Award — ${p.nickname} — ${spot.reason}`);
+        // The reason and nothing else, because that is all the room is sent.
+        //
+        // `grantSpot` in reducer.ts emits `{ what: "toast", detail:
+        // event.reason.trim() }` and runtime.ts puts `effect.detail ?? ""` on
+        // the wire as `text`. The Desktop draws its own "Spot Award" label
+        // beside it (screen/main.ts), so a real room reads "Spot Award  <the
+        // reason>" — with nobody named.
+        //
+        // This file used to name the recipient, which read "Spot Award  Spot
+        // Award — Player 1 — <reason>" on the same surface: the label twice and
+        // a name the server does not send. Matched to the server rather than
+        // the other way round, because this file is the oracle *for* the
+        // server and a demo that shows a better toast than the room will get is
+        // the lie `?mock=1` exists not to tell. Whether the server's toast
+        // should name the recipient is a question about the server, and it is
+        // filed as one: #31.
+        this.#toast("spot", spot.reason);
         return;
       }
 
@@ -3738,6 +4070,19 @@ class MockHub {
       /* ---- trivia ---- */
 
       case "trivia.open": {
+        // A question is only opened in a session that is running.
+        //
+        // `openQuestion` in reducer.ts asks this second, after "is a set
+        // loaded", and before it looks at the question phase — so the order
+        // matters and it is the order used here. There was no such check at all:
+        // the probe opened a question in `lobby` and the phone received the
+        // text, which is a room being asked question one before the host has
+        // pressed Start. Socket-only, because the console's trivia panel is
+        // behind the segment rail, but the segment rail is not a rule and this
+        // file is where the rule is supposed to live.
+        if (s.phase !== "running") {
+          return reject("wrong_phase", "Start the session first.");
+        }
         // `openQuestion` in reducer.ts admits a sudden death out of `revealed`
         // as well as out of `idle`, and its comment calls that the point of the
         // fix: "a tie is settled *after* the last question, when the phase is
@@ -3762,7 +4107,20 @@ class MockHub {
               : "This question is already in play.",
           );
         }
-        if (!s.question()) return reject("no_more_questions", "That was the last one.");
+        // The reducer's sentence, word for word — "That was the last question."
+        // — where this said "That was the last one."
+        //
+        // Unreachable, and fixed anyway. `question()` indexes the scored set at
+        // `at`, and `at` cannot pass the end: `trivia.next` refuses to advance
+        // past the last question and a tiebreak restores where it found it, so
+        // there is no sequence through this socket that reaches the branch. It
+        // costs one string to have the two files agree rather than to leave a
+        // sentence that would reach a host's glass differently the day the set
+        // grows a loader — and this is the one place a wording difference is
+        // free, because nothing has to be tested to keep it.
+        if (!s.question()) {
+          return reject("no_more_questions", "That was the last question.");
+        }
         this.#send(conn, { t: "ack", cid, applied: true });
         this.#openQuestion(cmd.suddenDeath);
         return;
@@ -4009,6 +4367,104 @@ class MockHub {
     }
     this.#send(conn, { t: "ack", cid, applied: true });
     this.#broadcastState();
+    // Re-armed after every press that got this far, which is where runtime.ts
+    // arms it too — after every `apply`. See {@link MockHub.#armSlideTimer}.
+    this.#armSlideTimer();
+  }
+
+  /* ---- the send-off's own clock ---- */
+
+  /**
+   * The slide timer: Auto, on the send-off, actually advancing something.
+   *
+   * There was no such timer here at all, and that is the divergence this
+   * machinery exists to close rather than a guard being tightened. `stepSendoff`
+   * had exactly three callers — the two host commands and the scripted director
+   * — so in `?mock=manual` the host pressed Auto, `auto: true` and a live
+   * `advanceAt` went on the wire, the console and the Desktop both counted down
+   * to zero, and the photograph stayed up for ever. A probe left the mock on
+   * `phase run / index 0 / same photo` with `advanceAt` eighty-four seconds in
+   * the past while the runtime under the same presses had walked to `closing`.
+   *
+   * Worth saying why the #12 scenario did not catch it: that one checks the
+   * countdown is *anchored* — that `advanceAt` does not move when nothing about
+   * the send-off moved — which is a claim about the projection and is true of a
+   * deadline nothing ever acts on. And deliberate difference 1 covers **trivia**
+   * Auto, and says "trivia" in as many words; it was never about this segment.
+   * The send-off is the thing DESIGN.md spends the most words on, and it is the
+   * reason the demo loop exists at all.
+   *
+   * `#armSlideTimer` in runtime.ts is the thing being copied, and the two
+   * properties worth copying exactly are both about a host who presses by hand
+   * while a timeout is in flight:
+   *
+   * - **Keyed on the slide and its deadline.** Arming twice for the same
+   *   `{ at, fireAt }` is a no-op, so calling this after every press is cheap
+   *   and does not restart the slide the room is looking at.
+   * - **Checked again on the way out.** The callback re-reads the state and
+   *   does nothing if the slide has moved underneath it, which is what stops a
+   *   timeout armed for slide 3 from advancing slide 4 the instant the host
+   *   steps forward themselves.
+   *
+   * Only during `run`, and only on Auto: the title card and the closing card
+   * hold until somebody presses, which is the whole of what "do not start it
+   * until I click" and "leave the last frame up" mean.
+   *
+   * The clock is the mock's skewed one, like every other instant here — see
+   * deliberate difference 5 — because `sendoffSlideAt` is stamped from it, and
+   * subtracting a browser instant from a skewed one would arm every slide 1.2
+   * seconds short.
+   */
+  #slideTimer: ReturnType<typeof setTimeout> | null = null;
+  #slideTimerFor: { at: number; fireAt: number } | null = null;
+
+  #armSlideTimer(): void {
+    const s = this.session;
+    const here = s.sendoffPhase === "run" ? s.sendoffPlan[s.sendoffAt] : undefined;
+    if (
+      s.sendoff === null ||
+      !s.sendoffAuto ||
+      here === undefined ||
+      s.sendoffSlideAt === null ||
+      // A closed session moves nothing at all. The reducer's freeze refuses
+      // `sendoffNext` along with everything else, so a slide timer left running
+      // over a Close would be the one clock in this file that walked a session
+      // the engine had stopped. See the closed-session guard in `#hostCmd`.
+      s.phase === "closed"
+    ) {
+      return this.#clearSlideTimer();
+    }
+    const want = {
+      at: s.sendoffAt,
+      fireAt:
+        s.sendoffSlideAt + slideMs(here, s.sendoff as SendoffContent, s.sendoffSeconds),
+    };
+    const armed = this.#slideTimerFor;
+    if (armed !== null && armed.at === want.at && armed.fireAt === want.fireAt) return;
+    this.#clearSlideTimer();
+    this.#slideTimerFor = want;
+    this.#slideTimer = setTimeout(
+      () => {
+        this.#slideTimer = null;
+        this.#slideTimerFor = null;
+        // The same guard runtime.ts's callback makes, and for the same race: a
+        // timeout in flight when the host presses Back finds the state has
+        // moved and does nothing.
+        if (s.sendoffPhase !== "run" || !s.sendoffAuto || s.sendoffAt !== want.at) return;
+        s.stepSendoff(1);
+        this.#broadcastState();
+        // The next slide arms its own timer, which is what makes the montage
+        // walk rather than take one step and stop.
+        this.#armSlideTimer();
+      },
+      Math.max(0, want.fireAt - (Date.now() + SERVER_SKEW_MS)),
+    );
+  }
+
+  #clearSlideTimer(): void {
+    if (this.#slideTimer !== null) clearTimeout(this.#slideTimer);
+    this.#slideTimer = null;
+    this.#slideTimerFor = null;
   }
 
   /* ---- trivia mechanics ---- */
@@ -4107,11 +4563,52 @@ class MockHub {
     const refuse = (code: string, message: string): void => {
       this.#send(conn, { t: "refusedCmd", cid, code, message });
     };
-    if (s.questionPhase !== "open") return refuse("question_not_open", "That question is closed.");
+    /**
+     * The four refusals, in the order the server makes them.
+     *
+     * The index first, because on the server it is not the engine's to refuse at
+     * all: `answer` in runtime.ts checks it at the socket boundary — "the `index`
+     * check is here rather than in the reducer because `answerQuestion` has no
+     * question id on it: the driver is the only layer that can tell a tap meant
+     * for question 7 from one that arrived after the host advanced to question
+     * 8" — and only then hands the event to `reduce`. So everything the reducer
+     * refuses comes *after* the index, and this file had the first two the other
+     * way round.
+     *
+     * Which is a divergence a host reads, not a tidiness point. Open question
+     * one, reveal it, press Next: `at` is now 1 and the phase is `idle`. A phone
+     * still holding question one taps. The server answers "That question has
+     * moved on."; this file answered "That question is closed." Same code, wrong
+     * sentence, and the wrong one is the one that does not tell the phone why.
+     */
     if (index !== s.at) return refuse("question_not_open", "That question has moved on.");
+    if (s.questionPhase !== "open") return refuse("question_not_open", "That question is closed.");
+    /**
+     * A kicked phone does not answer.
+     *
+     * `answerQuestion` in reducer.ts refuses `!p || p.kicked` with
+     * `unknown_participant`, and `main.ts` additionally drops the socket on the
+     * way past. This file has neither: deliberate difference 7 says nobody ever
+     * disconnects, which is why the socket is still here — but the *guard* was
+     * missing too, so the tap was acked and counted. A probe left the console
+     * reading `answered 1 / eligible 1` with a distribution and an `answeredBy`
+     * row, in a room whose one remaining participant had not answered anything.
+     *
+     * The socket staying open is the deliberate part and it stays; being counted
+     * was not, and does not.
+     */
+    const me = s.find_pid(pid);
+    if (!me || me.kicked) {
+      return refuse("unknown_participant", `No participant ${pid}.`);
+    }
     if (s.answers[pid]) return refuse("already_answered", "You are locked in.");
     const q = s.question();
-    if (!q || choice < 0 || choice >= q.answers.length) {
+    // `Number.isInteger`, which the reducer asks for and this did not. In
+    // principle only from a socket — protocol.ts's parser refuses a fractional
+    // `choice` before it reaches a real server — but the in-page path hands a
+    // typed `ClientMessage` straight to the hub, so a choice of 1.5 got as far
+    // as `answers[choice]` and was judged against `correct.includes(1.5)`.
+    if (!q || !Number.isInteger(choice) || choice < 0 || choice >= q.answers.length) {
       return refuse("invalid_choice", "No such answer.");
     }
     this.#recordAnswer(pid, choice);
@@ -5070,11 +5567,49 @@ class MockHub {
     if (conn.role !== "participant" || pid === null) {
       return refuse("forbidden", "Only a participant plays the arcade.");
     }
+    /**
+     * The refusals a typed answer can collect, split the way the server splits
+     * them.
+     *
+     * This was one condition — `arcadePhase !== "running" || play?.kind !==
+     * "recruitment"` — with one sentence, and the server has two, in two layers,
+     * with two different sentences:
+     *
+     * - `submitAnswer` in runtime.ts asks only whether the round in play *is*
+     *   Recruitment, and says "Nothing to answer." when it is not. That covers
+     *   an arcade nobody has entered too, because `arcadeStateOf(...)?.play` is
+     *   `undefined` there and `undefined?.kind !== "recruitment"`.
+     * - then the reducer's own `submitAnswer` asks whether the Floor is
+     *   `running`, and says "There is **nothing** to answer." — three words the
+     *   other sentence does not have.
+     *
+     * So the reachable difference is a Recruitment round that has ended: the
+     * play survives `#endRound`, the phase does not, and this file answered a
+     * late submission with the wrong one of the two sentences. Worth a note that
+     * the audit that found this read it as `not_in_arcade` / "The arcade is not
+     * open." on the server side; that is `tap`'s chain in runtime.ts and not this
+     * one — `submitAnswer` has no such branch, and the reducer's `not_in_arcade`
+     * is unreachable behind the runtime's Recruitment check. The refusal that was
+     * actually wrong is the wording below.
+     *
+     * The item check sits between them because that is where the server has it:
+     * it is the boundary's, like trivia's index, and it is asked before the
+     * engine sees the event at all.
+     */
     const play = s.arcadePlay;
-    if (s.arcadePhase !== "running" || play?.kind !== "recruitment") {
+    if (play?.kind !== "recruitment") {
       return refuse("wrong_round_phase", "Nothing to answer.");
     }
     if (item !== play.at) return refuse("wrong_round_phase", "That one has moved on.");
+    if (s.arcadePhase !== "running") {
+      return refuse("wrong_round_phase", "There is nothing to answer.");
+    }
+    // The kicked check the reducer makes and this file did not. Deliberate
+    // difference 7 keeps the socket open; it never said the tap counts.
+    const me = s.find_pid(pid);
+    if (!me || me.kicked) {
+      return refuse("unknown_participant", `No participant ${pid}.`);
+    }
     if (pid in play.answered) return refuse("already_answered_item", "You are locked in.");
     this.#recordItemAnswer(pid, answer);
     this.#send(conn, { t: "ack", cid, applied: true });
@@ -6313,7 +6848,8 @@ class MockHub {
       if (!star) return;
       const spot = this.session.grantSpot(star.pid, "ttx", "best question of the day");
       this.#broadcastState();
-      this.#toast("spot", `Spot Award — ${star.nickname} — ${spot.reason}`);
+      // The reason alone, as the server sends it. See the `spot.grant` case.
+      this.#toast("spot", spot.reason);
     });
 
     // Trivia, played rather than typed in: one facilitator on bench, then four
@@ -6603,7 +7139,8 @@ class MockHub {
         "drew out someone who had not spoken",
       );
       this.#broadcastState();
-      this.#toast("spot", `Spot Award — ${p.nickname} — ${spot.reason}`);
+      // The reason alone, as the server sends it. See the `spot.grant` case.
+      this.#toast("spot", spot.reason);
     });
 
     this.#at(352, () => {
@@ -6660,6 +7197,12 @@ class MockHub {
         if (this.session.segment !== "sendoff") return;
         this.session.stepSendoff(1);
         this.#broadcastState();
+        // The third caller of `stepSendoff`, and it re-arms for the same reason
+        // the two host commands do. The script never turns Auto on, so this is
+        // a no-op in `?mock=1` today — kept so that the *only* thing deciding
+        // whether the montage walks itself is `sendoffAuto`, wherever the step
+        // came from.
+        this.#armSlideTimer();
       });
     }
 
@@ -6671,6 +7214,9 @@ class MockHub {
       SENDOFF_STEPS_AT_S + (SENDOFF_STEPS - 1) * SENDOFF_STEP_S + 12,
       () => {
         this.#clearArcadeTimers();
+        // The loop rebuilds the room from `title`, so a slide timer armed for
+        // the montage that has just ended would step the next run's.
+        this.#clearSlideTimer();
         this.session.reset();
         this.#directorStarted = false;
         this.#broadcastState();
