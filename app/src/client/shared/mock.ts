@@ -208,9 +208,12 @@
  * 9. **Recruitment's answer has no standing check.** `submitAnswer` in
  *    reducer.ts refuses a drained player; `#recordItemAnswer` does not ask.
  *    No state reaches the difference: nothing drains in Recruitment — SPEC.md
- *    is explicit that two elimination rounds back to back is a downer — and
- *    `resetFloor()` puts the whole room back on the Floor at every round card,
- *    so a drain from an earlier round cannot follow anybody into an item round.
+ *    says "No draining" of the round in as many words; this entry used to cite
+ *    "two elimination rounds back-to-back is a downer" for it, which is SPEC.md
+ *    arguing the same conclusion about *Tug of Raft* and not about this round
+ *    — and `resetFloor()` puts the whole room back on the Floor at every round
+ *    card, so a drain from an earlier round cannot follow anybody into an item
+ *    round.
  *    Left absent rather than added, because a guard no scenario can reach is a
  *    guard nothing watches, and this file has had enough of those. Cost: none
  *    today, and the day a round that drains gains items, this file will credit
@@ -5162,18 +5165,35 @@ class MockHub {
     // The Floor's own clock, which the engine checks on every tap and this file
     // did not check at all.
     //
-    // Nothing in this file can reach it today, and it is here anyway. The
-    // window the engine's guard exists for is between `endsAt` and the frame
-    // that ends the round, and on the real server that is a real gap — the
-    // `endRound` "arrives from the boundary a moment later", as the comment on
-    // the same guard in `backPlayer` puts it. Here the Floor timer is a
-    // `setTimeout` in this process with no boundary in front of it, and
-    // Plan / Apply is one of the three rounds whose Floor timer *is* armed, so
-    // the round is already `idle` and the phase check above has the tap. The
-    // guard is kept for the same reason `#nextItem` keeps its `#armFloorTimer()`
-    // call: the invariant is worth holding, and the day somebody gives this
-    // round a lagged ending is not the day to discover it was missing. Its
-    // sibling in `#arcadeBack` is the one with a window, and that one is tested.
+    // The window is between `endsAt` and the frame that ends the round, and on
+    // the real server it is a real gap — the `endRound` "arrives from the
+    // boundary a moment later", as the comment on the same guard in
+    // `backPlayer` puts it. Here the Floor timer is a `setTimeout` in this
+    // process with no boundary in front of it, and Plan / Apply is one of the
+    // three rounds whose Floor timer *is* armed, so this comment used to say the
+    // window could not be reached from a test and the guard was being kept on
+    // principle. **That was wrong**, and it cost a release: mock.test.ts has the
+    // scenario now, and so does the Lounge's sibling below, which the same
+    // paragraph wrongly claimed was already tested.
+    //
+    // What the argument missed is that `tick(n)` on `node:test`'s fake clock
+    // advances `Date.now()` to the **end** of the tick and only then runs the
+    // timers that came due inside it, in `runAt` order. A callback never sees
+    // its own deadline; it sees the tick's end. So a frame handed to
+    // `transport.send` before `endsAt` and a Floor timer armed for `endsAt` come
+    // due in the same tick, the frame runs first — and it runs with `#now()`
+    // already past `endsAt` while `arcadePhase` is still `running`, because the
+    // timer that clears it has not had its turn. That is this guard's window,
+    // reproduced on the cheapest clock there is. In a browser it is wider still:
+    // `setTimeout` fires late and a backgrounded tab clamps it to whole seconds,
+    // which the note at the top of this file already warns about.
+    //
+    // The refusal code is what tells the two apart. A frame that arrives one
+    // tick *later* meets the phase check above and is answered
+    // `wrong_round_phase` / "Nothing to tap."; only a frame inside the window
+    // gets `floor_locked`. The probe that declared this unreachable ticked past
+    // `endsAt` and then sent, which is the second of those and can never be the
+    // first.
     const received = this.#now();
     if (s.arcadeEndsAt !== null && received >= s.arcadeEndsAt) {
       return refuse("floor_locked", "The Floor is closed.");
@@ -5662,6 +5682,14 @@ class MockHub {
     // round on top of the last one. So between `arcadeEndsAt` and the timer that
     // actually ends the round, this file accepted a bet the server refuses —
     // which on the bridge is a bet placed while wave 3 is mid-crossing.
+    //
+    // The three unarmed rounds are the widest window and not the only one. On a
+    // round whose Floor timer *is* armed the window is still there, because a
+    // frame and the Floor timer that both come due inside one tick are run after
+    // the clock has already moved to the tick's end — see the long note on the
+    // same guard in `#arcadeTap`, which is where that was worked out. The
+    // scenario in mock.test.ts is an Unseal round for exactly that reason: it
+    // reaches this guard and the letter guard on one tick.
     if (s.arcadeEndsAt !== null && this.#now() >= s.arcadeEndsAt) {
       return refuse("floor_locked", "The Floor has locked.");
     }
