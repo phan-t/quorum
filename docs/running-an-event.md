@@ -265,6 +265,17 @@ is the thing that turns up in a security review.
   stateful process means every socket drops at once. `make url` reports
   `sessionsLive`, so there is a way to check before you find out. If the deploy
   *is* the fix, do it anyway; otherwise it waits.
+- **After a deploy that changes a frame's shape, reload any Desktop or console
+  that was already open.** They reconnect on their own and they do not reload,
+  so an open tab keeps running the *old* JavaScript against the new server's
+  frames — and when a frame narrowed, the old code reads a field that is no
+  longer sent and throws while rendering. The surface then stops updating with
+  nothing on it to say so. A phone does this for itself now, and the console and
+  the Desktop will say **this build is older than the server** when they can
+  tell (`PROTOCOL_VERSION` in `app/src/protocol.ts`) — but that check lives in
+  the client that is already running, so it cannot help across the deploy that
+  introduces it, or any deploy where the shape changed without the version
+  moving. Reloading the two long-lived tabs costs seconds and covers all of it.
 - **Write the holding cards before you start.** After that you can only show
   them.
 - **The tokens are printed once.** There is no way to ask for them again.

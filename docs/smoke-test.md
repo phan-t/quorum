@@ -189,6 +189,21 @@ It does not walk a whole session. The run of show plays three questions and
 four arcade rounds, which is enough to exercise every code path without taking
 twenty minutes.
 
+It does not survive a deploy, because it opens its sockets after one. Every bot
+here is a fresh client running the build it just connected with, so it can
+never be the thing that was left open across a release — which is the case that
+hurts. **After a deploy that changes a frame's shape, reload any Desktop or
+console that was already open.** They reconnect without reloading, by design,
+so an open tab keeps running the old JavaScript against the new server's
+frames; when a frame narrowed, the old code reads a field that is no longer
+sent and throws while rendering, and the surface stops updating with nothing on
+it to say so. `PROTOCOL_VERSION` (`app/src/protocol.ts`) plus the check in
+`client/shared/protocol-guard.ts` closes most of this from one deploy to the
+next — a phone reloads itself; the console and the Desktop say they are stale —
+but the check runs in the client that is *already* open, so it cannot cover the
+deploy that introduces it, nor one where the shape changed and the version did
+not. Reloading the two long-lived tabs covers all of it, and costs seconds.
+
 It does not replace a human at a rehearsal. It cannot tell you the Desktop is
 unreadable over a compressed share, or that a round drags. It tells you the
 thing stayed up and stayed consistent while sixty sockets used it.

@@ -19,7 +19,8 @@ import type {
   TriviaView,
 } from "../../protocol.ts";
 import { h, qs, replace, setAttr, setClass, setText } from "../shared/dom.ts";
-import { QuorumClient } from "../shared/net.ts";
+import { QuorumClient, type ConnStatus } from "../shared/net.ts";
+import { checkProtocol } from "../shared/protocol-guard.ts";
 import { mockBadge, mockTransport, readMockConfig } from "../shared/mock.ts";
 import {
   ARCADE_ROUND_CARD,
@@ -108,6 +109,23 @@ const banner = h("div", {
   class: "s-banner",
   attrs: { hidden: true, role: "status" },
 });
+/**
+ * Set when the server turns out to be speaking a protocol this build does not
+ * know. The Desktop never reloads itself, and that is the decision.
+ *
+ * This is the surface projected in front of the room, and a reload mid-reveal
+ * is the one failure every person in it sees at once. So the screen says what
+ * is wrong, in the banner it already has for things that are wrong, and keeps
+ * saying it until somebody reloads the browser — which the host can do between
+ * segments, having read it. There is no control on it: nobody is standing at
+ * this machine's pointer.
+ *
+ * It outranks "reconnecting", which is transient and fixes itself; see
+ * {@link paintBanner}. The whole three-surface split is in
+ * `shared/protocol-guard.ts`.
+ */
+let stale = false;
+
 const stage = h("div", { class: "s-root" });
 /**
  * Practice, said to the whole room at once.
@@ -133,6 +151,27 @@ interface Scene {
 let kind: ViewKind | null = null;
 let scene: Scene | null = null;
 let client: QuorumClient | null = null;
+let connStatus: ConnStatus = "connecting";
+
+/**
+ * One banner, two things that want it, and the stale one wins.
+ *
+ * Never a modal, and never anything about the network unless it is wrong. A
+ * reconnect clears itself; a build older than the server does not, and if the
+ * socket's message were allowed to overwrite it the room would be told the
+ * screen is fine the moment the socket came back — which is precisely when it
+ * is not.
+ */
+function paintBanner(): void {
+  if (stale) {
+    banner.hidden = false;
+    setText(banner, "this screen needs reloading");
+    return;
+  }
+  const bad = connStatus === "reconnecting";
+  banner.hidden = !bad;
+  if (bad) setText(banner, "reconnecting");
+}
 
 /** Corrected server time. Every countdown on this surface is drawn off it. */
 const serverNow = (): number => client?.now() ?? Date.now();
@@ -3232,11 +3271,34 @@ client = new QuorumClient({
   },
 
   onStatus(status) {
-    // Never a modal, and never anything about the network unless it is wrong.
-    const bad = status === "reconnecting";
-    banner.hidden = !bad;
-    if (bad) setText(banner, "reconnecting");
+    connStatus = status;
+    paintBanner();
   },
+
+  // A visible state, never an automatic reload — see {@link stale}.
+  onProtocol: (theirs, ours) =>
+    checkProtocol(
+      {
+        surface: "screen",
+        ours,
+        // Never reached on this surface today: the Desktop's verdict is always
+        // "tell". It is wired anyway so that changing the split in
+        // protocol-guard.ts stays a one-line change there, rather than a hunt
+        // for the surface that quietly has no way to act on it.
+        reload: () => {
+          location.reload();
+        },
+        show: () => {
+          stale = true;
+          paintBanner();
+        },
+        clear: () => {
+          stale = false;
+          paintBanner();
+        },
+      },
+      theirs,
+    ),
 
   onRefused(reason, message) {
     replace(stage, [

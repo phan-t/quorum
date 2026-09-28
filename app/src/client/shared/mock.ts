@@ -307,6 +307,7 @@ import {
   partsOf,
   slideMs,
 } from "../../engine/sendoff.ts";
+import { PROTOCOL_VERSION } from "../../protocol.ts";
 import { RECRUITMENT_ITEMS } from "../../arcade/recruitment.ts";
 import { GLASS_BRIDGE_STEPS } from "../../arcade/glass-bridge.ts";
 import { UNSEAL_ITEMS } from "../../arcade/unseal.ts";
@@ -3319,7 +3320,15 @@ class MockHub {
         role: msg.role,
         sid: this.session.sid,
         serverTime: Date.now() + SERVER_SKEW_MS,
-        protocol: 1,
+        // Not a literal, and this is load-bearing. `?mock=1` is the only way
+        // anybody sees the console or the Desktop without staging a session,
+        // and a hard-coded 1 here would have become a permanent mismatch the
+        // moment `PROTOCOL_VERSION` moved to 2 — the demo reloading itself, on
+        // a loop, for as long as the loop guard allowed and then sitting under
+        // a banner telling the reader to reload a page with no server behind
+        // it. The mock is this build's server; it speaks this build's version
+        // by construction.
+        protocol: PROTOCOL_VERSION,
       });
       this.#sendState(conn);
       this.#startDirector();
@@ -3502,7 +3511,8 @@ class MockHub {
       pid: p.pid,
       rejoinToken: `tok-${p.pid}`,
       serverTime: Date.now() + SERVER_SKEW_MS,
-      protocol: 1,
+      // This build's version — see `#hello` above for why it is not a literal.
+      protocol: PROTOCOL_VERSION,
     });
     this.#sendState(conn);
     this.#broadcastRoster();

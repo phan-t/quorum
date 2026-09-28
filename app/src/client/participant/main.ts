@@ -9,7 +9,8 @@
 
 import type { RenderState } from "../../protocol.ts";
 import { h, qs, replace, setText } from "../shared/dom.ts";
-import { QuorumClient, type Hello } from "../shared/net.ts";
+import { QuorumClient, type ConnStatus, type Hello } from "../shared/net.ts";
+import { checkProtocol } from "../shared/protocol-guard.ts";
 import { mockBadge, mockTransport, readMockConfig } from "../shared/mock.ts";
 import { refusalCopy } from "../shared/view.ts";
 import { initTheme, themeToggle } from "../shared/theme.ts";
@@ -133,6 +134,33 @@ let rejoinToken: string | null = null;
 // functions that use it: the first `connect()` runs at module top level, and
 // a `let` further down the file is still in its dead zone at that point.
 let connectingTimer: ReturnType<typeof setTimeout> | null = null;
+
+/* ---- the banner, which has two callers and one of them outranks the other ---- */
+
+let connStatus: ConnStatus = "connecting";
+/**
+ * Set when the server turns out to be speaking a protocol this build does not
+ * know and the phone has already spent its reloads on it. See
+ * `shared/protocol-guard.ts`: the ordinary answer on a phone is to reload
+ * without asking, so this line is only ever reached by a phone that reloaded
+ * and came back to the same mismatch.
+ */
+let staleNotice: string | null = null;
+
+/**
+ * One banner, two things that want it, and the stale one wins.
+ *
+ * "reconnecting…" is transient and fixes itself; a build older than the server
+ * does not, and a message that came and went with the socket would be gone by
+ * the time anybody looked up. Without this both callers would write straight
+ * to `setBanner` and the *last* one to fire would win, which on a reconnect is
+ * always the socket.
+ */
+function paintBanner(): void {
+  view.setBanner(
+    staleNotice ?? (connStatus === "reconnecting" ? "reconnecting…" : null),
+  );
+}
 
 const stored = readStore();
 if (stored && (joinCode === "" || stored.code === joinCode)) {
@@ -441,6 +469,42 @@ function connect(): void {
     hello,
     ...(mock ? { transport: mockTransport(mock) } : {}),
 
+    /**
+     * A phone reloads itself, immediately, and does not render the frame.
+     *
+     * Of the three surfaces this is the one where a reload is nearly free —
+     * the viewer is holding it and the cost is a blink — and the one where
+     * rendering a frame of an unknown shape is worst: there are thirty of
+     * them, nobody is watching any single one, and a phone that has silently
+     * stopped updating is a person who thinks they are still in the game.
+     *
+     * The console and the Desktop deliberately do *not* do this; see
+     * `shared/protocol-guard.ts` for why each surface gets a different answer.
+     */
+    onProtocol: (theirs, ours) =>
+      checkProtocol(
+        {
+          surface: "participant",
+          ours,
+          reload: () => {
+            location.reload();
+          },
+          show: () => {
+            // Always without a control here: the guard only gets this far
+            // once reloading has been tried and did not help, and a button
+            // that repeats a move that failed is a button that wastes a tap.
+            // The host is the escalation path, so the words say so.
+            staleNotice = "out of date — tell the host";
+            paintBanner();
+          },
+          clear: () => {
+            staleNotice = null;
+            paintBanner();
+          },
+        },
+        theirs,
+      ),
+
     onWelcome(welcome) {
       clearConnectingNotice();
       if (welcome.rejoinToken !== undefined) {
@@ -458,7 +522,8 @@ function connect(): void {
     onStatus(status) {
       // A banner, never a modal. The page underneath keeps its last state, so
       // nobody is ever looking at a blank screen while the socket comes back.
-      view.setBanner(status === "reconnecting" ? "reconnecting…" : null);
+      connStatus = status;
+      paintBanner();
       // Before the welcome there is no view to put that banner in, and this
       // is the status that says the wait is not a fast one: skip the couple
       // of seconds of quiet and say so now.
