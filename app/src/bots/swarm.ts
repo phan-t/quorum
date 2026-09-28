@@ -1007,20 +1007,30 @@ class HostBot {
     return kinds.map(build).filter((r): r is NonNullable<typeof r> => r !== null);
   }
 
-  /** Seal, grant a couple of Spot Awards, then reveal — the real ending. */
+  /**
+   * Seal, type a score in by hand, then reveal — the real ending.
+   *
+   * The hand-typed score is what is left of a pair of Spot Awards that used to
+   * go out here. It is worth keeping something on this beat: `score.set` over a
+   * real socket, against a real pid, is the only scoring command the swarm ever
+   * sends, and a sealed board that moves under the room is exactly the state
+   * SCORING.md's seal exists for.
+   */
   private async standings(bots: readonly Bot[]): Promise<void> {
     await this.press({ name: "segment", kind: "standings" }, "seg-standings", 900);
     await this.press({ name: "seal", state: "sealed" }, "seal", 900);
 
     const withPid = bots.map((b) => b.conn.pid).filter((pid): pid is string => pid !== null);
-    const activity = this.state?.activities[0]?.id;
-    if (activity !== undefined) {
+    const manual = this.state?.activities.find((a) => a.kind === "manual")?.id;
+    if (manual !== undefined) {
+      let raw = 18;
       for (const pid of withPid.slice(0, 2)) {
         await this.press(
-          { name: "spot.grant", pid, activityId: activity, reason: "best recovery of the afternoon" },
-          `spot-${pid.slice(0, 6)}`,
+          { name: "score.set", activityId: manual, pid, raw },
+          `score-${pid.slice(0, 6)}`,
           700,
         );
+        raw -= 4;
       }
     }
     await this.press({ name: "seal", state: "revealed" }, "reveal", 2_000);
@@ -1431,8 +1441,10 @@ async function main(): Promise<void> {
 
   const show = host.run(bots);
 
-  // People who wander in after it has started. They get Bench Credit rather
-  // than a zero, which is a rule nothing has ever exercised over a socket.
+  // People who wander in after it has started. They take a zero in whatever they
+  // missed — Bench Credit used to fill that in and does not exist any more — and
+  // the path worth exercising over a socket is the join itself, mid-round,
+  // against a lobby that is still open.
   if (late.length > 0) {
     void (async () => {
       await sleep(12_000);

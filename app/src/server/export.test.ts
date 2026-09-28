@@ -1,11 +1,12 @@
 /**
  * Export: the scoresheet and the event log.
  *
- * Expected behaviour comes from SCORING.md (normalisation, Bench Credit, Spot
- * Awards) and ARCHITECTURE.md's REST table, which fixes the CSV's shape as
- * `Name, <Activity> Raw, <Activity> Pts, …, Spot Awards, TOTAL` — the
- * spreadsheet this service replaces, so the columns land where the person who
- * has kept the scores for years expects them.
+ * Expected behaviour comes from SCORING.md (normalisation) and
+ * ARCHITECTURE.md's REST table, which fixes the CSV's shape as
+ * `Name, <Activity> Raw, <Activity> Pts, …, TOTAL` — the spreadsheet this
+ * service replaces, so the columns land where the person who has kept the scores
+ * for years expects them. There was a `Spot Awards` column before TOTAL; it came
+ * out with the feature.
  */
 
 import { describe, it } from "node:test";
@@ -24,8 +25,8 @@ import {
 import { reduce } from "../engine/reducer.ts";
 
 const ACTIVITIES = [
-  { id: "ttx", title: "Agentic Security TTX", kind: "manual" as const, spotCap: 2 },
-  { id: "trivia", title: "Trivia", kind: "trivia" as const, spotCap: 2 },
+  { id: "ttx", title: "Agentic Security TTX", kind: "manual" as const },
+  { id: "trivia", title: "Trivia", kind: "trivia" as const },
 ];
 
 function build(events: readonly Event[]): SessionState {
@@ -51,7 +52,6 @@ describe("the scoresheet", () => {
       "Agentic Security TTX Pts",
       "Trivia Raw",
       "Trivia Pts",
-      "Spot Awards",
       "TOTAL",
     ]);
   });
@@ -69,42 +69,28 @@ describe("the scoresheet", () => {
       { type: "setScore", activityId: "trivia", pid: "p3", raw: 9200 },
     ]);
     const out = rows(scoresheetCsv(state));
-    assert.equal(out[0], "Name,Agentic Security TTX Raw,Agentic Security TTX Pts,Trivia Raw,Trivia Pts,Spot Awards,TOTAL");
-    assert.equal(out[1], "Priya,,,18400,100,0,100");
-    assert.equal(out[2], "Kenji,,,14720,80,0,80");
-    assert.equal(out[3], "Sam,,,9200,50,0,50");
+    assert.equal(out[0], "Name,Agentic Security TTX Raw,Agentic Security TTX Pts,Trivia Raw,Trivia Pts,TOTAL");
+    assert.equal(out[1], "Priya,,,18400,100,100");
+    assert.equal(out[2], "Kenji,,,14720,80,80");
+    assert.equal(out[3], "Sam,,,9200,50,50");
   });
 
-  it("carries Spot Awards in their own column and in the total", () => {
-    const state = build([
-      { type: "open" },
-      { type: "start" },
-      { type: "join", pid: "p1", nickname: "Priya" },
-      { type: "setScore", activityId: "trivia", pid: "p1", raw: 100 },
-      {
-        type: "grantSpot",
-        pid: "p1",
-        activityId: "trivia",
-        reason: "best recovery of the afternoon",
-      },
-    ]);
-    assert.equal(rows(scoresheetCsv(state))[1], "Priya,,,100,100,10,110");
-  });
-
-  it("says `bench` in the raw column and still credits the points", () => {
+  it("writes nothing for an activity somebody sat out, and does not credit it", () => {
+    // This is the Bench Credit row, and the line is the change. Ade ran the TTX
+    // and played the trivia. The cell used to read `bench,90` and the total 180 —
+    // the mean of what they scored elsewhere, credited for the activity they ran.
+    // It is two empty cells and 90 now: SCORING.md's "Removed" section is where
+    // the argument for the old behaviour is kept.
     const state = build([
       { type: "open" },
       { type: "start" },
       { type: "join", pid: "p1", nickname: "Ade" },
       { type: "join", pid: "p2", nickname: "Kenji" },
-      // Ade ran the TTX and played the trivia: credited their own average.
       { type: "setScore", activityId: "trivia", pid: "p1", raw: 90 },
       { type: "setScore", activityId: "trivia", pid: "p2", raw: 100 },
-      { type: "setStatus", activityId: "ttx", pid: "p1", status: "bench" },
     ]);
     const line = rows(scoresheetCsv(state)).find((l) => l.startsWith("Ade,"));
-    // 90 raw against a top of 100 is 90 points; the bench cell is credited 90.
-    assert.equal(line, "Ade,bench,90,90,90,0,180");
+    assert.equal(line, "Ade,,,90,90,90");
   });
 
   it("leaves an unscored activity blank rather than writing a misleading zero", () => {
@@ -113,7 +99,7 @@ describe("the scoresheet", () => {
       { type: "start" },
       { type: "join", pid: "p1", nickname: "Priya" },
     ]);
-    assert.equal(rows(scoresheetCsv(state))[1], "Priya,,,,,0,0");
+    assert.equal(rows(scoresheetCsv(state))[1], "Priya,,,,,0");
   });
 
   it("leaves a kicked participant out", () => {
@@ -135,7 +121,7 @@ describe("the scoresheet", () => {
       { type: "setScore", activityId: "trivia", pid: "p1", raw: 500 },
       { type: "releaseNickname", pid: "p1" },
     ]);
-    assert.match(scoresheetCsv(state), /^Priya,,,500,100,0,100$/m);
+    assert.match(scoresheetCsv(state), /^Priya,,,500,100,100$/m);
   });
 
   it("is ordered by standing, highest first", () => {

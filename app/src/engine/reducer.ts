@@ -31,7 +31,6 @@ import type {
   TriviaAnswer,
   TriviaState,
 } from "./types.ts";
-import { spotsRemaining } from "./scoring.ts";
 import {
   assignPlayerNumbers,
   beatMsFor,
@@ -164,7 +163,6 @@ export function newSession(input: NewSessionInput): SessionState {
     tiebreakOrder: input.tiebreakOrder ?? input.activities.map((a) => a.id),
     participants: {},
     scores: Object.fromEntries(input.activities.map((a) => [a.id, {}])),
-    spots: [],
     holding: null,
     trivia: null,
     arcade: null,
@@ -196,9 +194,9 @@ const BROADCAST_STANDINGS: Effect[] = [
  * also why nothing here touches the normalisation: SCORING.md's one rule
  * applies to trivia, and to the arcade, because both hand it an ordinary raw.
  *
- * Shared by trivia and the arcade deliberately. The bench rule below is the
- * same statement about a person in both, and two copies of it would be one
- * copy away from disagreeing.
+ * Shared by trivia and the arcade deliberately: one funnel is one place for the
+ * practice gate below to live, and two copies of it would be one copy away from
+ * disagreeing.
  */
 /**
  * One step through the send-off, forward or back, or `null` at either end.
@@ -275,10 +273,11 @@ function withActivityTotals(
   };
   for (const [pid, raw] of Object.entries(totals)) {
     const prev = bucket[pid];
-    // Bench credit is a statement about a person, not a score. A facilitator
-    // who plays along from the bench must not be scored back onto the board —
-    // `setScore` refuses the same thing for the same reason.
-    if (prev?.status === "bench") continue;
+    // There used to be a `bench` skip here, and in `setScore`, keeping a
+    // facilitator who played along from being scored back onto the board. Bench
+    // Credit is gone and so is the skip: whoever an activity produced a total
+    // for is scored for it, and a facilitator who is not competing is somebody
+    // the activity produced no total for.
     if (prev?.status === "played" && prev.raw === raw) continue;
     bucket[pid] = { raw, status: "played" };
   }
@@ -738,7 +737,6 @@ export function reduce(
           // score, and un-kicking somebody as a side effect of wiping the
           // board would be a surprise the host did not ask for.
           scores: Object.fromEntries([...activityIds].map((id) => [id, {}])),
-          spots: [],
           holding: null,
           trivia:
             state.trivia === null
@@ -1000,18 +998,6 @@ export function reduce(
       }
 
       const prev = state.scores[event.activityId]?.[event.pid];
-      // Scoring someone who is on bench credit is refused rather than stored:
-      // storing it would let the raw reappear if they were ever un-benched.
-      if (prev?.status === "bench") {
-        return unchanged(
-          reject(
-            "host",
-            "bench_cannot_be_scored",
-            `${p.nickname} is on bench credit for ${activity.title}.`,
-          ),
-        );
-      }
-
       const next: RawScore = { raw: event.raw, status: "played" };
       if (prev && prev.raw === next.raw && prev.status === next.status) {
         return unchanged();
@@ -1047,7 +1033,7 @@ export function reduce(
       const prev = state.scores[event.activityId]?.[event.pid];
       if ((prev?.status ?? "unset") === event.status) return unchanged();
 
-      // Benching discards the raw score: it is no longer meaningful, and
+      // Clearing discards the raw score: it is no longer meaningful, and
       // leaving it would let it reappear if the status flipped back.
       const next: RawScore = {
         raw: event.status === "played" ? (prev?.raw ?? 0) : 0,
@@ -1064,96 +1050,6 @@ export function reduce(
             },
           },
         },
-        [...BROADCAST_STANDINGS, PERSIST],
-      );
-    }
-
-    case "grantSpot": {
-      const activity = state.activities.find((a) => a.id === event.activityId);
-      if (!activity) {
-        return unchanged(
-          reject("host", "unknown_activity", `No activity ${event.activityId}.`),
-        );
-      }
-      const p = state.participants[event.pid];
-      if (!p || p.kicked) {
-        return unchanged(
-          reject("host", "unknown_participant", `No participant ${event.pid}.`),
-        );
-      }
-      if (event.reason.trim() === "") {
-        return unchanged(
-          reject(
-            "host",
-            "reason_required",
-            "A Spot Award needs a reason — it gets read out.",
-          ),
-        );
-      }
-      if (state.scores[event.activityId]?.[event.pid]?.status === "bench") {
-        return unchanged(
-          reject(
-            "host",
-            "bench_cannot_receive_spot",
-            "They are on bench credit for this activity.",
-          ),
-        );
-      }
-      if (spotsRemaining(state, activity) <= 0) {
-        return unchanged(
-          reject(
-            "host",
-            "spot_cap_reached",
-            `No Spot Awards left for ${activity.title}.`,
-          ),
-        );
-      }
-      return applied(
-        {
-          ...state,
-          spots: [
-            ...state.spots,
-            {
-              seq: state.seq + 1,
-              pid: event.pid,
-              activityId: event.activityId,
-              reason: event.reason.trim(),
-              at: now,
-            },
-          ],
-        },
-        [
-          ...BROADCAST_STANDINGS,
-          {
-            kind: "broadcast",
-            to: "all",
-            what: "toast",
-            detail: event.reason.trim(),
-            // The reason is rendered here; the *name* is not. SPEC.md's toast
-            // is "Spot Award — Kenji — best recovery of the afternoon", so the
-            // recipient has to reach a surface — but as a pid, resolved at
-            // projection time by server/runtime.ts, not as text frozen into an
-            // effect that outlives the nickname it copied. Both ends of that
-            // copy move: `join` above rewrites the nickname on a kicked pid
-            // that comes back, and `kick`/`releaseNickname` hand the old name
-            // to somebody else. The pid is the thing this reducer is sure of.
-            //
-            // #31, split out of #29. #29 found client/shared/mock.ts naming the
-            // recipient and the server not, and matched the mock down to the
-            // server because the mock is an oracle *for* the server. This is
-            // the other half: the spec says the mock had it right, so the fix
-            // runs back up — the server names them, and the demo follows.
-            subject: event.pid,
-          },
-          PERSIST,
-        ],
-      );
-    }
-
-    case "revokeSpot": {
-      if (!state.spots.some((sp) => sp.seq === event.seq)) return unchanged();
-      return applied(
-        { ...state, spots: state.spots.filter((sp) => sp.seq !== event.seq) },
         [...BROADCAST_STANDINGS, PERSIST],
       );
     }

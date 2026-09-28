@@ -10,7 +10,6 @@
 import {
   computeStandings,
   publicStandings,
-  spotsRemaining,
   topFive,
   type Standing,
 } from "../engine/scoring.ts";
@@ -116,19 +115,14 @@ export interface ViewOptions {
 
 function toRow(state: SessionState, s: Standing): StandingRow {
   const perActivity: Record<string, number | null> = {};
-  const bench: string[] = [];
   for (const a of state.activities) {
-    const cell = s.perActivity[a.id];
-    perActivity[a.id] = cell?.points ?? null;
-    if (cell?.source === "bench") bench.push(a.id);
+    perActivity[a.id] = s.perActivity[a.id]?.points ?? null;
   }
   return {
     rank: s.rank,
     nickname: s.nickname,
     total: s.total,
     perActivity,
-    bench,
-    spot: s.spotPoints,
   };
 }
 
@@ -136,7 +130,7 @@ function toRow(state: SessionState, s: Standing): StandingRow {
 function scoreRows(state: SessionState, all: readonly Standing[]): ScoreRow[] {
   return all.map((s) => {
     const raw: Record<string, number | null> = {};
-    const status: Record<string, "played" | "bench" | "unset"> = {};
+    const status: Record<string, "played" | "unset"> = {};
     const points: Record<string, number | null> = {};
     for (const a of state.activities) {
       const cell = state.scores[a.id]?.[s.pid];
@@ -151,7 +145,6 @@ function scoreRows(state: SessionState, all: readonly Standing[]): ScoreRow[] {
       raw,
       status,
       points,
-      spot: s.spotPoints,
       total: s.total,
       rank: s.rank,
     };
@@ -1387,8 +1380,6 @@ export function prepareViews(
     id: a.id,
     title: a.title,
     kind: a.kind,
-    spotCap: a.spotCap,
-    spotsLeft: spotsRemaining(state, a),
   }));
 
   const trivia = triviaStateOf(state);
@@ -1461,12 +1452,6 @@ export function prepareViews(
           participantCount: roster.length,
           awayCount: roster.filter((r) => r.conn === "away").length,
           scores: scoreRows(state, all),
-          spots: state.spots.map((sp) => ({
-            seq: sp.seq,
-            pid: sp.pid,
-            activityId: sp.activityId,
-            reason: sp.reason,
-          })),
           ...(trivia
             ? {
                 trivia: {

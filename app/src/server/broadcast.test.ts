@@ -31,8 +31,8 @@ import { BEAT_FLUSH_MS, SessionRegistry, type Client } from "./runtime.ts";
 import { prepareViews } from "./views.ts";
 
 const ACTIVITIES: readonly Activity[] = [
-  { id: "trivia", title: "Trivia", kind: "trivia", spotCap: 2 },
-  { id: "arcade", title: "Hashi Arcade", kind: "arcade", spotCap: 2 },
+  { id: "trivia", title: "Trivia", kind: "trivia" },
+  { id: "arcade", title: "Hashi Arcade", kind: "arcade" },
 ];
 
 const T0 = 1_700_000_000_000;

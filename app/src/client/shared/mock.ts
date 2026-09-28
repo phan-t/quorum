@@ -40,15 +40,14 @@
  * The scripted session runs the whole of Phase 2 scoring, the whole of Phase
  * 3 trivia and all six rounds of the Phase 4 arcade, so every surface
  * can be watched without a backend: a judged activity out of 20 with its
- * facilitator on bench, then four real questions with bots tapping at
+ * facilitator left unscored, then four real questions with bots tapping at
  * plausible speeds — including a round card, a multi-answer question, a
  * two-answer question and a sudden death — then Recruitment, Plan / Apply
  * with the light turning, Unseal with tins cracking, Tug of Raft with the
  * heartbeat at the real 100 bpm, Gganbu with rivals staking tokens against
  * each other and the counts moving only when a prompt settles, and the Glass
  * Bridge, with bots being drained into the Lounge and backing the runners
- * still on the Floor, two Spot Awards with reasons, and finally the seal and
- * the reveal.
+ * still on the Floor, and finally the seal and the reveal.
  *
  * ## Two implementations, on purpose
  *
@@ -404,29 +403,20 @@ interface MockParticipant {
    */
   kicked: boolean;
   /**
-   * activityId -> what the host typed. Benching clears it, exactly as the
-   * reducer does: a raw score that is no longer meaningful must not reappear
-   * if the status flips back.
+   * activityId -> what the host typed. Clearing a cell zeroes it, exactly as the
+   * reducer does: a raw score that is no longer meaningful must not reappear if
+   * the status flips back.
    */
   raw: Record<string, number>;
   status: Record<string, ScoreStatus>;
   bot: boolean;
 }
 
-interface MockSpot {
-  seq: number;
-  pid: string;
-  activityId: string;
-  reason: string;
-}
-
 /** One participant's line of the board, before it is projected to a role. */
 interface MockRow {
   p: MockParticipant;
-  /** Normalised points, or the bench credit, per activity. Null for unset. */
+  /** Normalised points per activity. Null for unset. */
   points: Record<string, number | null>;
-  bench: string[];
-  spot: number;
   total: number;
   rank: number;
 }
@@ -439,13 +429,11 @@ interface MockRow {
  * a surface to develop against and a manual column is the one the default set
  * no longer has.
  */
-const ACTIVITIES: readonly Omit<ActivitySummary, "spotsLeft">[] = [
-  { id: "ttx", title: "Agentic Security TTX", kind: "manual", spotCap: 2 },
-  { id: "trivia", title: "Trivia", kind: "trivia", spotCap: 2 },
-  { id: "arcade", title: "Hashi Arcade", kind: "arcade", spotCap: 2 },
+const ACTIVITIES: readonly ActivitySummary[] = [
+  { id: "ttx", title: "Agentic Security TTX", kind: "manual" },
+  { id: "trivia", title: "Trivia", kind: "trivia" },
+  { id: "arcade", title: "Hashi Arcade", kind: "arcade" },
 ];
-
-const SPOT_AWARD_POINTS = 10;
 
 /* ---- trivia ---- */
 
@@ -1395,8 +1383,6 @@ const DEMO_FINAL_HOLD_S = Math.ceil(
       nickname: "",
       total: 0,
       perActivity: {},
-      bench: [],
-      spot: 0,
     })),
   ) / 1000,
 );
@@ -1473,9 +1459,7 @@ class MockSession {
   joinsLocked = false;
   seq = 0;
   participants: MockParticipant[] = [];
-  spots: MockSpot[] = [];
   #nextNumber = 1;
-  #nextSpotSeq = 1;
 
   /* ---- trivia ---- */
   questions: readonly MockQuestion[] = QUESTIONS;
@@ -1535,8 +1519,8 @@ class MockSession {
    * projection time, which is what this file used to do. The field's whole
    * job — protocol.ts is explicit about it — is to be an absolute instant a
    * surface can count down to, and recomputing it on every render meant every
-   * broadcast reset the countdown to full. A join, a bot answering, a Spot
-   * Award: any unrelated frame pushed the send-off's "advances in Ns" back
+   * broadcast reset the countdown to full. A join, a bot answering, a score
+   * typed in: any unrelated frame pushed the send-off's "advances in Ns" back
    * out, so under Auto it never counted down at all on the mock.
    */
   sendoffSlideAt: number | null = null;
@@ -1638,8 +1622,8 @@ class MockSession {
    * avoid.
    *
    * Kept: participants, nicknames, join-order numbers, the join code, the
-   * question set. Cleared: every score, every Spot Award, all trivia progress,
-   * the arcade entirely, the holding card, the seal and the join lock.
+   * question set. Cleared: every score, all trivia progress, the arcade
+   * entirely, the holding card, the seal and the join lock.
    */
   restart(): void {
     this.phase = "lobby";
@@ -1655,7 +1639,6 @@ class MockSession {
     this.practice = false;
     this.holding = null;
     this.joinsLocked = false;
-    this.spots = [];
     for (const p of this.participants) {
       p.raw = {};
       p.status = {};
@@ -2352,7 +2335,6 @@ class MockSession {
     this.sendoffSlideAt = null;
     this.holding = null;
     this.joinsLocked = false;
-    this.spots = [];
     for (const p of this.participants) {
       p.raw = {};
       p.status = {};
@@ -2439,7 +2421,7 @@ class MockSession {
         // `trivia.answers` and writes `totals[pid] = (totals[pid] ?? 0) +
         // points + bonus` for every one of them, a wrong tap included. A zero
         // entry is "played and scored nothing", which is a different
-        // statement from the absent cell that lets a host bench somebody —
+        // statement from the absent cell of a question nobody answered —
         // and the podium is built off the totals, so the entry is also what
         // puts a wrong-but-present tap on the board below the scorers.
         this.triviaTotals[p.pid] = this.triviaTotals[p.pid] ?? 0;
@@ -2509,17 +2491,15 @@ class MockSession {
    *   board does not move. That is the whole of what the toggle is for, and
    *   this file stored the flag, commanded it and projected it without ever
    *   reading it.
-   * - **Somebody on Bench Credit.** A facilitator who plays along from the
-   *   bench must not be scored back onto the board; `withActivityTotals`
-   *   skips a `bench` bucket for the same reason `setScore` refuses one.
+   * There was a third: **somebody on Bench Credit**, whose cell
+   * `withActivityTotals` skipped so that a facilitator playing along was not
+   * scored back onto the board. The status and the skip are both gone.
    *
    * The walk is over `triviaTotals` rather than over the roster, for the
    * reason `triviaPodium` walks it: a total exists for somebody who answered,
    * a wrong tap included at zero, and for nobody else. Writing `played` and a
-   * zero for every silent phone is the absent cell a host needs in order to
-   * bench somebody, filled in with a fiction — and `board()` averages Bench
-   * Credit over the `played` entries, so it moves a number as well as a
-   * colour.
+   * zero for every silent phone would put thirty people on the board for a
+   * question none of them answered.
    */
   publishTriviaScores(): void {
     if (this.suddenDeath) return;
@@ -2527,7 +2507,6 @@ class MockSession {
     for (const [pid, raw] of Object.entries(this.triviaTotals)) {
       const p = this.find_pid(pid);
       if (!p) continue;
-      if (p.status["trivia"] === "bench") continue;
       p.raw["trivia"] = raw;
       p.status["trivia"] = "played";
     }
@@ -2555,7 +2534,6 @@ class MockSession {
     for (const [pid, raw] of Object.entries(this.arcadeTotals)) {
       const p = this.find_pid(pid);
       if (!p) continue;
-      if (p.status["arcade"] === "bench") continue;
       p.raw["arcade"] = raw;
       p.status["arcade"] = "played";
     }
@@ -2796,28 +2774,12 @@ class MockSession {
     return ACTIVITIES.find((a) => a.id === id);
   }
 
-  grantSpot(pid: string, activityId: string, reason: string): MockSpot {
-    const spot: MockSpot = {
-      seq: this.#nextSpotSeq++,
-      pid,
-      activityId,
-      reason: reason.trim(),
-    };
-    this.spots.push(spot);
-    return spot;
-  }
-
-  spotsLeft(activityId: string): number {
-    const cap = this.activity(activityId)?.spotCap ?? 0;
-    return Math.max(0, cap - this.spots.filter((s) => s.activityId === activityId).length);
-  }
-
   /* ---- scoring: SCORING.md, and nothing else ---- */
 
   /**
    * Normalise one activity: the top raw among `played` becomes 100, everyone
-   * else `round(100 × raw ÷ top)`. Bench is excluded from the top — a
-   * facilitator's absence must not set the ceiling for the room.
+   * else `round(100 × raw ÷ top)`. A cell nobody has typed into is `unset`, is
+   * not `played`, and so cannot set the ceiling.
    */
   #normalise(activityId: string): Map<string, number> {
     // `normaliseActivity` in engine/scoring.ts skips a kicked participant at
@@ -2858,40 +2820,15 @@ class MockSession {
 
     const onTheRecord = this.participants.filter((p) => !p.kicked);
     const rows = onTheRecord.map((p) => {
-      const played: number[] = [];
-      for (const a of ACTIVITIES) {
-        const pts = normalised.get(a.id)?.get(p.pid);
-        if (pts !== undefined) played.push(pts);
-      }
-      // Bench Credit: the mean of their own normalised points where they
-      // played in full. Null — not zero — before they have played anything.
-      const credit =
-        played.length === 0
-          ? null
-          : Math.round(played.reduce((x, y) => x + y, 0) / played.length);
-
       const points: Record<string, number | null> = {};
-      const bench: string[] = [];
       for (const a of ACTIVITIES) {
-        const pts = normalised.get(a.id)?.get(p.pid);
-        if (pts !== undefined) {
-          points[a.id] = pts;
-        } else if (p.status[a.id] === "bench") {
-          points[a.id] = credit;
-          bench.push(a.id);
-        } else {
-          points[a.id] = null;
-        }
+        points[a.id] = normalised.get(a.id)?.get(p.pid) ?? null;
       }
-      // An award for an activity they are now benched for does not count:
-      // benching after a grant would otherwise be a back door to keeping it.
-      const spot =
-        this.spots.filter(
-          (s) => s.pid === p.pid && p.status[s.activityId] !== "bench",
-        ).length * SPOT_AWARD_POINTS;
-      const total =
-        ACTIVITIES.reduce((n, a) => n + (points[a.id] ?? 0), 0) + spot;
-      return { p, points, bench, spot, total };
+      // The sum of the normalisation and nothing else. There was a Bench Credit
+      // mean filling in an activity somebody sat out, and Spot Awards adding 10
+      // a piece on top; `computeStandings` in engine/scoring.ts has neither now.
+      const total = ACTIVITIES.reduce((n, a) => n + (points[a.id] ?? 0), 0);
+      return { p, points, total };
     });
 
     rows.sort(
@@ -2928,8 +2865,6 @@ class MockSession {
       nickname: r.p.nickname,
       total: r.total,
       perActivity: { ...r.points },
-      bench: [...r.bench],
-      spot: r.spot,
     };
   }
 
@@ -2967,7 +2902,6 @@ class MockSession {
         raw,
         status,
         points: { ...r.points },
-        spot: r.spot,
         total: r.total,
         rank: r.rank,
       };
@@ -3113,7 +3047,7 @@ class MockSession {
   }
 
   activities(): ActivitySummary[] {
-    return ACTIVITIES.map((a) => ({ ...a, spotsLeft: this.spotsLeft(a.id) }));
+    return ACTIVITIES.map((a) => ({ ...a }));
   }
 
   /**
@@ -3163,12 +3097,6 @@ class MockSession {
           participantCount: this.roster().length,
           awayCount: this.roster().filter((p) => p.conn === "away").length,
           scores: this.#scoreRows(board),
-          spots: this.spots.map((s) => ({
-            seq: s.seq,
-            pid: s.pid,
-            activityId: s.activityId,
-            reason: s.reason,
-          })),
           trivia: {
             answeredBy: Object.keys(this.answers),
             loaded: this.questions.length,
@@ -3535,8 +3463,8 @@ class MockHub {
      * A name is taken by whoever holds it, in the room or not.
      *
      * This asked `clash.conn === "on"` and, when the holder was away, **handed
-     * the newcomer their row** — their pid, their player number, their raw
-     * scores and their Spot Awards. The reducer's clash is every non-kicked
+     * the newcomer their row** — their pid, their player number and their raw
+     * scores. The reducer's clash is every non-kicked
      * holder of the key whatever their connection, and `participant.release`
      * exists precisely because that is strict: it is the host's tool for freeing
      * a name somebody has walked off with, and a door that let the next arrival
@@ -3623,11 +3551,11 @@ class MockHub {
      *
      * There was no gate here at all, and this is not socket-only. After Close
      * the console's rail and its primary button go dark (`host/main.ts`), and
-     * nothing else does: the scoring grid, Spot Award, kick and release, seal,
-     * practice and the lobby lock are all still live. A probe pressed six of
-     * them after a Close and the mock acked every one `applied: true` — it
-     * sealed the scoreboard, granted a Spot Award, shrank the roster and opened
-     * a question, in a session the engine had frozen. That is a host rehearsing
+     * nothing else does: the scoring grid, kick and release, seal, practice and
+     * the lobby lock are all still live. A probe pressed six of them after a
+     * Close and the mock acked every one `applied: true` — it sealed the
+     * scoreboard, typed a score in, shrank the roster and opened a question, in
+     * a session the engine had frozen. That is a host rehearsing
      * something entirely reasonable — "close the session, then tidy the scores"
      * — and learning that it works.
      *
@@ -3956,12 +3884,14 @@ class MockHub {
       /**
        * Somebody the host has removed from the room is not somebody to score.
        *
-       * `setScore`, `setStatus` and `grantSpot` in reducer.ts all open the same
-       * way — `if (!p || p.kicked)` — and they have to, because every projection
-       * that decides who is in the room filters the kicked out: a raw stored
-       * against a kicked row is a number no grid will ever draw, and a Spot
-       * Award granted to one is read out to the room for somebody who is not in
-       * it. The probe did exactly that and the toast went to every phone.
+       * `setScore` and `setStatus` in reducer.ts both open the same way — `if
+       * (!p || p.kicked)` — and they have to, because every projection that
+       * decides who is in the room filters the kicked out: a raw stored against
+       * a kicked row is a number no grid will ever draw. A third command opened
+       * the same way, `grantSpot`, and its failure was louder: an award granted
+       * to a kicked participant was read out to the room for somebody who was
+       * not in it. The probe did exactly that and the toast went to every phone.
+       * Spot Awards are gone; the rule they shared is still the rule.
        *
        * `find_pid` is the lookup that includes them, deliberately — it is how a
        * kicked row is still found for `houseThePairOf` and for the projections
@@ -3982,14 +3912,6 @@ class MockHub {
             "A raw score must be a finite number, zero or above.",
           );
         }
-        // Scoring someone on bench credit is refused rather than stored: the
-        // raw would reappear if they were ever un-benched.
-        if (p.status[cmd.activityId] === "bench") {
-          return reject(
-            "bench_cannot_be_scored",
-            `${p.nickname} is on bench credit for ${activity.title}.`,
-          );
-        }
         if (p.status[cmd.activityId] === "played" && p.raw[cmd.activityId] === cmd.raw) {
           return noop();
         }
@@ -4006,59 +3928,10 @@ class MockHub {
           return reject("unknown_participant", `No participant ${cmd.pid}.`);
         }
         if ((p.status[cmd.activityId] ?? "unset") === cmd.status) return noop();
-        // Benching discards the raw, exactly as the reducer does.
+        // Clearing discards the raw, exactly as the reducer does.
         if (cmd.status === "played") p.raw[cmd.activityId] = p.raw[cmd.activityId] ?? 0;
         else p.raw[cmd.activityId] = 0;
         p.status[cmd.activityId] = cmd.status;
-        break;
-      }
-
-      case "spot.grant": {
-        const activity = s.activity(cmd.activityId);
-        if (!activity) return reject("unknown_activity", `No activity ${cmd.activityId}.`);
-        const p = s.find_pid(cmd.pid);
-        if (!p || p.kicked) {
-          return reject("unknown_participant", `No participant ${cmd.pid}.`);
-        }
-        // The console must never send this, but the server refuses it anyway:
-        // a field that may be blank will be blank.
-        if (cmd.reason.trim() === "") {
-          return reject(
-            "reason_required",
-            "A Spot Award needs a reason — it gets read out.",
-          );
-        }
-        if (p.status[cmd.activityId] === "bench") {
-          return reject(
-            "bench_cannot_receive_spot",
-            "They are on bench credit for this activity.",
-          );
-        }
-        if (s.spotsLeft(cmd.activityId) <= 0) {
-          return reject("spot_cap_reached", `No Spot Awards left for ${activity.title}.`);
-        }
-        const spot = s.grantSpot(cmd.pid, cmd.activityId, cmd.reason);
-        this.#send(conn, { t: "ack", cid, applied: true });
-        this.#broadcastState();
-        // The recipient and the reason, which is what the room is sent.
-        //
-        // `grantSpot` in reducer.ts emits `{ what: "toast", detail:
-        // event.reason.trim(), subject: event.pid }` and runtime.ts resolves
-        // the pid and puts `<nickname> — <reason>` on the wire as `text`. The
-        // Desktop draws its own "Spot Award" label beside it (screen/main.ts),
-        // so a real room reads SPEC.md's "Spot Award — Kenji — best recovery of
-        // the afternoon". See {@link MockHub.#spotToast} for the
-        // history: this file named the recipient, #29 matched it down to the
-        // server's nameless toast, and #31 found the spec on this file's side
-        // and moved the server instead.
-        this.#spotToast(spot);
-        return;
-      }
-
-      case "spot.revoke": {
-        const before = s.spots.length;
-        s.spots = s.spots.filter((sp) => sp.seq !== cmd.seq);
-        if (s.spots.length === before) return noop();
         break;
       }
 
@@ -5501,8 +5374,8 @@ class MockHub {
     // — but wrong at both ends the moment the roster moves inside a round. A
     // latecomer's banked points went nowhere, and somebody who left the roster
     // mid-round picked up a `0` entry the engine does not write, which is the
-    // difference between "played and scored nothing" and the absent cell a
-    // host benches somebody from.
+    // difference between "played and scored nothing" and a cell with nothing in
+    // it at all.
     for (const pid of new Set([
       ...Object.keys(s.arcadeStanding),
       ...Object.keys(s.arcadeBanked),
@@ -6732,45 +6605,6 @@ class MockHub {
     this.#gapNext = false;
   }
 
-  #toast(kind: "spot" | "text", text: string): void {
-    for (const conn of this.#conns) {
-      if (conn.role === null) continue;
-      this.#send(conn, { t: "toast", seq: 0, kind, text });
-    }
-  }
-
-  /**
-   * A Spot Award's toast, composed the way the server composes it.
-   *
-   * `spotToastText` in server/runtime.ts, reproduced: the reducer's toast
-   * effect carries `detail` (the trimmed reason) and `subject` (the pid), and
-   * the boundary resolves the pid against the state it is about to send and
-   * joins them with an em dash. The Desktop supplies the **Spot Award** label
-   * out of `showToast`, so the text is `Kenji — <reason>` and the room reads
-   * SPEC.md's "Spot Award — Kenji — best recovery of the afternoon".
-   *
-   * This file *did* name the recipient, as `Spot Award — ${nickname} —
-   * ${reason}` — the label included, which on a surface that draws its own
-   * label read "Spot Award  Spot Award — Player 1 — …". #29 matched it down to
-   * the server's bare reason, correctly: the mock is an oracle *for* the
-   * server, and it does not get to show a better toast than the room will get.
-   * #31 then asked the server the question that left open, SPEC.md answered it
-   * by naming Kenji, and the server came up to meet this file. So the name is
-   * back and the doubled label is not: the mock was right about the name and
-   * wrong about the label, and only one of those has been restored.
-   *
-   * The lookup is by pid rather than off the caller's own `MockParticipant`
-   * for the same reason runtime.ts does it at the boundary: it is a name as of
-   * the frame, not as of the grant.
-   */
-  #spotToast(spot: MockSpot): void {
-    const nickname = this.session.find_pid(spot.pid)?.nickname;
-    this.#toast(
-      "spot",
-      nickname === undefined ? spot.reason : `${nickname} — ${spot.reason}`,
-    );
-  }
-
   /* ---- the director ---- */
 
   #later(fn: () => void, ms: number): void {
@@ -6851,16 +6685,20 @@ class MockHub {
       this.#broadcastRoster();
     });
 
-    // The TTX: a judged rubric out of 20, and the facilitator who ran it on
-    // bench. Raw units differ wildly from the trivia below on purpose — that
-    // is the whole reason SCORING.md normalises instead of adding.
+    // The TTX: a judged rubric out of 20, and the facilitator who ran it left
+    // with nothing typed into their cell. Raw units differ wildly from the
+    // trivia below on purpose — that is the whole reason SCORING.md normalises
+    // instead of adding.
+    //
+    // The facilitator used to be benched here, and credited the mean of what
+    // they scored elsewhere. Bench Credit is gone, so the demo shows what a real
+    // session now shows: an `unset` cell, an em dash in the grid and nothing
+    // towards their total.
     this.#at(18, () => {
       const people = this.session.participants;
       people.forEach((p, i) => {
         if (i === 3) {
-          // Ade ran this one. Bench Credit, not a zero.
-          p.status["ttx"] = "bench";
-          p.raw["ttx"] = 0;
+          // Ade ran this one, so nothing is typed against them.
           return;
         }
         p.raw["ttx"] = Math.max(4, 20 - i - Math.floor(Math.random() * 3));
@@ -6870,26 +6708,10 @@ class MockHub {
       this.#broadcastState();
     });
 
-    this.#at(22, () => {
-      const star = this.session.participants[1];
-      if (!star) return;
-      const spot = this.session.grantSpot(star.pid, "ttx", "best question of the day");
-      this.#broadcastState();
-      // The recipient and the reason, as the server sends it. See the
-      // `spot.grant` case and {@link MockHub.#spotToast}.
-      this.#spotToast(spot);
-    });
-
-    // Trivia, played rather than typed in: one facilitator on bench, then four
-    // real questions with the bots tapping. Raw units end up in the thousands
+    // Trivia, played rather than typed in. Raw units end up in the thousands
     // against the TTX's twenty, which is the whole reason SCORING.md
     // normalises instead of adding.
     this.#at(24, () => {
-      const facilitator = this.session.participants[1];
-      if (facilitator) {
-        facilitator.status["trivia"] = "bench";
-        facilitator.raw["trivia"] = 0;
-      }
       this.session.segment = "trivia";
       this.#broadcastState();
     });
@@ -7156,20 +6978,6 @@ class MockHub {
     this.#at(348, () => {
       this.session.segment = "standings";
       this.#broadcastState();
-    });
-
-    this.#at(350, () => {
-      const p = this.session.participants[4];
-      if (!p) return;
-      const spot = this.session.grantSpot(
-        p.pid,
-        "trivia",
-        "drew out someone who had not spoken",
-      );
-      this.#broadcastState();
-      // The recipient and the reason, as the server sends it. See the
-      // `spot.grant` case and {@link MockHub.#spotToast}.
-      this.#spotToast(spot);
     });
 
     this.#at(352, () => {

@@ -874,9 +874,9 @@ function expectPlanApply(): ExpectedPlanApply {
 /* ------------------------------------------------------------------ */
 
 const ACTIVITIES: readonly Activity[] = [
-  { id: "ttx", title: "Agentic Security TTX", kind: "manual", spotCap: 2 },
-  { id: "trivia", title: "Trivia", kind: "trivia", spotCap: 2 },
-  { id: "arcade", title: "Hashi Arcade", kind: "arcade", spotCap: 2 },
+  { id: "ttx", title: "Agentic Security TTX", kind: "manual" },
+  { id: "trivia", title: "Trivia", kind: "trivia" },
+  { id: "arcade", title: "Hashi Arcade", kind: "arcade" },
 ];
 
 /** What the driver's clock reads, for the wire checks inside a fake socket's send(). */

@@ -109,7 +109,6 @@ const banner = h("div", {
   attrs: { hidden: true, role: "status" },
 });
 const stage = h("div", { class: "s-root" });
-const toastBar = h("div", { class: "s-toast", attrs: { hidden: true } });
 /**
  * Practice, said to the whole room at once.
  *
@@ -122,7 +121,7 @@ const practiceBar = h("div", {
   attrs: { hidden: true, role: "status" },
   text: "PRACTICE — nothing is being scored",
 });
-replace(app, [banner, practiceBar, stage, toastBar]);
+replace(app, [banner, practiceBar, stage]);
 if (mock) document.body.appendChild(mockBadge());
 
 interface Scene {
@@ -2985,9 +2984,10 @@ function sceneArcade(): Scene {
  * hues — the thing DESIGN.md asks the standings to keep from the live
  * scoreboard. A bar is readable at any resolution; the number is the bonus.
  *
- * Bench Credit is drawn hatched as well as dimmed, because nothing on this
- * surface may be conveyed by colour alone and a credited block is not the
- * same claim as a played one.
+ * Every block is a played activity. There used to be a fourth kind — a Bench
+ * Credit block, drawn hatched as well as dimmed, because nothing on this surface
+ * may be conveyed by colour alone and a credited block was not the same claim as
+ * a played one — and a gold Spot Awards block on the end. Both features are gone.
  */
 function standingRow(
   row: StandingRow,
@@ -3004,7 +3004,7 @@ function standingRow(
         { class: "s-bar" },
         segments.map((seg) =>
           h("div", {
-            class: seg.bench ? "s-seg s-seg-bench" : "s-seg",
+            class: "s-seg",
             attrs: {
               style: `flex-basis:${seg.percent}%;background-color:${seg.hue}`,
               // Not read aloud anywhere, but it keeps the DOM honest about
@@ -3019,9 +3019,16 @@ function standingRow(
   ]);
 }
 
-/** Which hue is which activity, in words. Three chips, ≥ 32px, no legend key. */
+/**
+ * Which hue is which activity, in words. One chip per activity, ≥ 32px, no
+ * legend key.
+ *
+ * There was a fixed gold "Spot Awards" chip on the end, whether or not any had
+ * been granted, because the bar could always grow one. Spot Awards are gone and
+ * so is the chip: the legend is now exactly the activities the session scores.
+ */
 function activityLegend(activities: readonly ActivitySummary[]): HTMLElement[] {
-  const chips = activities.map((a, i) =>
+  return activities.map((a, i) =>
     h("span", { class: "s-legend-item" }, [
       h("span", {
         class: "s-legend-swatch",
@@ -3030,16 +3037,6 @@ function activityLegend(activities: readonly ActivitySummary[]): HTMLElement[] {
       h("span", { class: "s-legend-label", text: a.title }),
     ]),
   );
-  chips.push(
-    h("span", { class: "s-legend-item" }, [
-      h("span", {
-        class: "s-legend-swatch",
-        attrs: { style: "background:var(--spot)", "aria-hidden": "true" },
-      }),
-      h("span", { class: "s-legend-label", text: "Spot Awards" }),
-    ]),
-  );
-  return chips;
 }
 
 function sceneStandings(): Scene {
@@ -3155,7 +3152,7 @@ function sceneFinal(): Scene {
             winnerBar,
             stackedBar(first, activities, top).map((seg) =>
               h("div", {
-                class: seg.bench ? "s-seg s-seg-bench" : "s-seg",
+                class: "s-seg",
                 attrs: {
                   style: `flex-basis:${seg.percent}%;background-color:${seg.hue}`,
                   "data-activity": seg.key,
@@ -3175,7 +3172,7 @@ function sceneFinal(): Scene {
     update(state) {
       // Replay only when the result actually changes, never on every broadcast.
       const sig = state.standings
-        .map((r) => `${r.rank}:${r.nickname}:${r.total}:${JSON.stringify(r.perActivity)}:${r.spot}`)
+        .map((r) => `${r.rank}:${r.nickname}:${r.total}:${JSON.stringify(r.perActivity)}`)
         .join("|");
       if (sig === signature) return;
       signature = sig;
@@ -3187,26 +3184,6 @@ function sceneFinal(): Scene {
     },
   };
 }
-
-/* ------------------------------------------------------------------ */
-/* Toasts                                                              */
-/* ------------------------------------------------------------------ */
-
-let toastTimer: ReturnType<typeof setTimeout> | null = null;
-function showToast(kind: "spot" | "text", text: string): void {
-  if (toastTimer !== null) clearTimeout(toastTimer);
-  replace(toastBar, [
-    kind === "spot" ? h("span", { class: "label s-toast-kind", text: "Spot Award" }) : null,
-    h("span", { class: "s-toast-text", text }),
-  ]);
-  toastBar.hidden = false;
-  toastBar.dataset["kind"] = kind;
-  // Six seconds: comfortably past the four-second dwell floor.
-  toastTimer = setTimeout(() => {
-    toastBar.hidden = true;
-  }, 6_000);
-}
-
 /* ------------------------------------------------------------------ */
 
 /**
@@ -3260,8 +3237,6 @@ client = new QuorumClient({
     banner.hidden = !bad;
     if (bad) setText(banner, "reconnecting");
   },
-
-  onToast: showToast,
 
   onRefused(reason, message) {
     replace(stage, [

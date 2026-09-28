@@ -1644,8 +1644,9 @@ function sceneStandings(final: boolean): Scene {
    *
    * Keyed on the result itself and not on the broadcast: state arrives many
    * times a minute, and a wait that restarted on each one would never end. A
-   * result that genuinely changes — a spot award after the final segment is
-   * reached — restarts it, which is what the Desktop does with its own climb.
+   * result that genuinely changes — a late score typed in after the final
+   * segment is reached — restarts it, which is what the Desktop does with its
+   * own climb.
    */
   const arm = (state: RenderState): void => {
     const sig = state.standings

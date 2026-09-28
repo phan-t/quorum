@@ -14,12 +14,10 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
 import {
-  DEFAULT_SPOT_CAP,
   formatErrors,
   importActivities,
   MAX_ACTIVITIES,
   MAX_ID_CHARS,
-  MAX_SPOT_CAP,
   MAX_TITLE_CHARS,
 } from "./import.ts";
 
@@ -40,30 +38,16 @@ function errs(raw: unknown): string[] {
 
 const TRIVIA = { id: "trivia", title: "Trivia", kind: "trivia" };
 const ARCADE = { id: "arcade", title: "Hashi Arcade", kind: "arcade" };
-const MANUAL = { id: "ttx", title: "Security TTX", kind: "manual", spotCap: 2 };
+const MANUAL = { id: "ttx", title: "Security TTX", kind: "manual" };
 
 describe("what loads", () => {
   it("reads the documented shape", () => {
     const list = ok([TRIVIA, ARCADE, MANUAL]);
     assert.deepEqual(list, [
-      { id: "trivia", title: "Trivia", kind: "trivia", spotCap: DEFAULT_SPOT_CAP },
-      { id: "arcade", title: "Hashi Arcade", kind: "arcade", spotCap: DEFAULT_SPOT_CAP },
-      { id: "ttx", title: "Security TTX", kind: "manual", spotCap: 2 },
+      { id: "trivia", title: "Trivia", kind: "trivia" },
+      { id: "arcade", title: "Hashi Arcade", kind: "arcade" },
+      { id: "ttx", title: "Security TTX", kind: "manual" },
     ]);
-  });
-
-  it("defaults spotCap, and takes the one it is given", () => {
-    const list = ok([{ ...TRIVIA, spotCap: 5 }, ARCADE]);
-    assert.equal(list[0]?.spotCap, 5);
-    assert.equal(list[1]?.spotCap, DEFAULT_SPOT_CAP);
-  });
-
-  it("takes a spotCap of 0 — a facilitator who grants none", () => {
-    assert.equal(ok([{ ...TRIVIA, spotCap: 0 }])[0]?.spotCap, 0);
-  });
-
-  it("takes a null spotCap as absent", () => {
-    assert.equal(ok([{ ...TRIVIA, spotCap: null }])[0]?.spotCap, DEFAULT_SPOT_CAP);
   });
 
   it("trims the id and the title", () => {
@@ -132,12 +116,6 @@ describe("the list itself", () => {
 });
 
 describe("unknown keys", () => {
-  it("refuses a misspelled spotCap rather than defaulting it", () => {
-    assert.deepEqual(errs([{ ...TRIVIA, spotcap: 4 }]), [
-      'Activity 1, spotcap: Nothing reads a "spotcap" key. Check the spelling.',
-    ]);
-  });
-
   it("refuses a key nothing reads", () => {
     assert.deepEqual(errs([{ ...TRIVIA, facilitator: "someone" }]), [
       'Activity 1, facilitator: Nothing reads a "facilitator" key. Check the spelling.',
@@ -250,25 +228,34 @@ describe("title", () => {
   });
 });
 
-describe("spotCap", () => {
-  it("refuses a cap that is not a whole number", () => {
-    assert.deepEqual(errs([{ ...TRIVIA, spotCap: 1.5 }]), [
-      "Activity 1, spotCap: 1.5 is not a whole number of awards.",
-    ]);
-    assert.deepEqual(errs([{ ...TRIVIA, spotCap: "2" }]), [
-      'Activity 1, spotCap: "2" is not a whole number of awards.',
+/**
+ * `spotCap` configured the Spot Award budget and Spot Awards were removed.
+ *
+ * It is the one key that is neither read nor rejected. Every `session.json`
+ * written before the removal carries it — including the example in this
+ * repository — and files on disk are not migrated by a deploy, so rejecting it
+ * would turn a feature removal into "the session will not create", found by
+ * whoever is staging the event. See `RETIRED_ACTIVITY_KEYS` in import.ts.
+ */
+describe("spotCap, retired", () => {
+  it("loads a file that still sets one, and does not keep the value", () => {
+    const list = ok([{ ...TRIVIA, spotCap: 2 }, { ...ARCADE, spotCap: 0 }]);
+    assert.deepEqual(list, [
+      { id: "trivia", title: "Trivia", kind: "trivia" },
+      { id: "arcade", title: "Hashi Arcade", kind: "arcade" },
     ]);
   });
 
-  it("refuses a negative cap", () => {
-    assert.deepEqual(errs([{ ...TRIVIA, spotCap: -1 }]), [
-      "Activity 1, spotCap: -1 is not a whole number of awards.",
-    ]);
+  it("does not care what the value is, because nothing reads it", () => {
+    for (const value of [1.5, "2", -1, 99, null, { a: 1 }]) {
+      const list = ok([{ ...TRIVIA, spotCap: value }]);
+      assert.deepEqual(list, [{ id: "trivia", title: "Trivia", kind: "trivia" }]);
+    }
   });
 
-  it("refuses a cap past the ceiling", () => {
-    assert.deepEqual(errs([{ ...TRIVIA, spotCap: MAX_SPOT_CAP + 1 }]), [
-      `Activity 1, spotCap: ${MAX_SPOT_CAP + 1} awards; the most is ${MAX_SPOT_CAP}.`,
+  it("still refuses a misspelled one: only the exact retired key is forgiven", () => {
+    assert.deepEqual(errs([{ ...TRIVIA, spotcap: 4 }]), [
+      'Activity 1, spotcap: Nothing reads a "spotcap" key. Check the spelling.',
     ]);
   });
 });

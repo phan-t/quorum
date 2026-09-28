@@ -13,14 +13,11 @@ import type {
   ParticipantId,
   RawScore,
   SessionState,
-  SpotAward,
 } from "./types.ts";
 import {
-  SPOT_AWARD_POINTS,
   breakTie,
   computeStandings,
   normaliseActivity,
-  spotsRemaining,
   topFive,
 } from "./scoring.ts";
 
@@ -29,7 +26,7 @@ import {
 /* depend on the reducer being correct.                                 */
 /* ------------------------------------------------------------------ */
 
-type RawSpec = number | "bench" | "unset";
+type RawSpec = number | "unset";
 
 interface Build {
   readonly activities?: readonly (string | Activity)[];
@@ -37,13 +34,12 @@ interface Build {
   /** pids; the nickname is the pid. */
   readonly participants: readonly string[];
   readonly kicked?: readonly string[];
-  /** activityId -> pid -> raw | "bench" | "unset" */
+  /** activityId -> pid -> raw | "unset" */
   readonly scores?: Readonly<Record<string, Readonly<Record<string, RawSpec>>>>;
-  readonly spots?: readonly { pid: string; activityId: string }[];
 }
 
-function act(id: string, spotCap = 2): Activity {
-  return { id, title: id, kind: "manual", spotCap };
+function act(id: string): Activity {
+  return { id, title: id, kind: "manual" };
 }
 
 function build(b: Build): SessionState {
@@ -68,20 +64,9 @@ function build(b: Build): SessionState {
     const bucket = scores[aid] ?? (scores[aid] = {});
     for (const [pid, v] of Object.entries(byPid)) {
       bucket[pid] =
-        v === "bench"
-          ? { raw: 0, status: "bench" }
-          : v === "unset"
-            ? { raw: 0, status: "unset" }
-            : { raw: v, status: "played" };
+        v === "unset" ? { raw: 0, status: "unset" } : { raw: v, status: "played" };
     }
   }
-  const spots: SpotAward[] = (b.spots ?? []).map((s, i) => ({
-    seq: i + 1,
-    pid: s.pid,
-    activityId: s.activityId,
-    reason: "because",
-    at: i,
-  }));
   return {
     sid: "s",
     title: "t",
@@ -96,7 +81,6 @@ function build(b: Build): SessionState {
     tiebreakOrder: b.tiebreakOrder ?? activities.map((a) => a.id),
     participants,
     scores,
-    spots,
     holding: null,
     trivia: null,
     arcade: null,
@@ -194,25 +178,19 @@ describe("normalisation", () => {
     assert.deepEqual(normaliseActivity(s, "ttx"), { a: 100, b: 50 });
   });
 
-  test("bench participants are excluded from the top calculation", () => {
-    // The facilitator is on bench with a stale raw that would otherwise win.
-    const s = build({
-      participants: ["fac", "a", "b"],
-      scores: { ttx: { fac: "bench", a: 50, b: 25 } },
-    });
-    const n = normaliseActivity(s, "ttx");
-    assert.equal(n["a"], 100, "the top *played* scorer gets 100");
-    assert.equal(n["b"], 50);
-    assert.equal(n["fac"], undefined, "bench gets no normalised points");
-  });
-
-  test("a bench entry carrying a raw score (data hygiene) still cannot set the ceiling", () => {
+  test("an unset entry carrying a raw score (data hygiene) still cannot set the ceiling", () => {
+    // `setStatus` zeroes the raw when it clears a cell, so this shape should
+    // not exist — but a snapshot written by an older engine can hold one, and
+    // whatever it holds must not scale the whole room down against a number
+    // nobody can see. This is the guard the removed `bench` status carried,
+    // kept on the status that is left.
     const s = build({ participants: ["fac", "a"], scores: { ttx: { a: 10 } } });
     const dirty: SessionState = {
       ...s,
-      scores: { ...s.scores, ttx: { ...s.scores["ttx"], fac: { raw: 1_000_000, status: "bench" } } },
+      scores: { ...s.scores, ttx: { ...s.scores["ttx"], fac: { raw: 1_000_000, status: "unset" } } },
     };
     assert.equal(normaliseActivity(dirty, "ttx")["a"], 100);
+    assert.equal(normaliseActivity(dirty, "ttx")["fac"], undefined);
   });
 
   test("unset participants are excluded from the top and receive no points", () => {
@@ -265,205 +243,6 @@ describe("normalisation", () => {
 });
 
 /* ------------------------------------------------------------------ */
-/* Bench Credit                                                         */
-/* ------------------------------------------------------------------ */
-
-describe("bench credit", () => {
-  test("the documented example: 90 and 70 -> credited 80 for the one they ran", () => {
-    const s = build({
-      participants: ["fac", "top"],
-      scores: {
-        ttx: { top: 100, fac: 90 },
-        trivia: { top: 100, fac: 70 },
-        arcade: { top: 10, fac: "bench" },
-      },
-    });
-    const arcade = pointsOf(s, "fac", "arcade");
-    assert.deepEqual(arcade, { points: 80, source: "bench", raw: null });
-    assert.equal(standingOf(s, "fac").total, 90 + 70 + 80);
-  });
-
-  test("a non-integer mean is a whole number of points (90 and 75 -> 83)", () => {
-    // SCORING.md gives round() for normalisation and says "mean" for bench
-    // credit without stating rounding. Points are whole numbers everywhere
-    // else in the document, so this asserts the same round(); see report.
-    const s = build({
-      participants: ["fac", "top"],
-      scores: {
-        ttx: { top: 100, fac: 90 },
-        trivia: { top: 100, fac: 75 },
-        arcade: { top: 10, fac: "bench" },
-      },
-    });
-    const pts = pointsOf(s, "fac", "arcade").points;
-    assert.ok(Number.isInteger(pts), `credit ${pts} should be whole`);
-    assert.equal(pts, 83);
-    assert.ok(Number.isInteger(standingOf(s, "fac").total));
-  });
-
-  test("benched for everything (nothing played) reads as null, never 0", () => {
-    const s = build({
-      participants: ["fac", "top"],
-      scores: {
-        ttx: { top: 10, fac: "bench" },
-        trivia: { top: 10, fac: "bench" },
-        arcade: { top: 10, fac: "bench" },
-      },
-    });
-    for (const a of ["ttx", "trivia", "arcade"]) {
-      const p = pointsOf(s, "fac", a);
-      assert.equal(p.points, null, `${a} should be "—"`);
-      assert.equal(p.source, "bench");
-    }
-    assert.equal(standingOf(s, "fac").total, 0);
-  });
-
-  test("bench with nothing played yet is null even while others are unset too", () => {
-    const s = build({ participants: ["fac", "a"], scores: { ttx: { fac: "bench" } } });
-    assert.equal(pointsOf(s, "fac", "ttx").points, null);
-  });
-
-  test("activities that are unset do not enter the mean", () => {
-    const s = build({
-      participants: ["fac", "top"],
-      scores: {
-        ttx: { top: 100, fac: 60 },
-        trivia: { top: 100, fac: "unset" },
-        arcade: { top: 10, fac: "bench" },
-      },
-    });
-    assert.equal(pointsOf(s, "fac", "arcade").points, 60);
-  });
-
-  test("generalises unchanged when one person runs two activities", () => {
-    const s = build({
-      participants: ["fac", "top"],
-      scores: {
-        ttx: { top: 10, fac: "bench" },
-        trivia: { top: 10, fac: "bench" },
-        arcade: { top: 100, fac: 80 },
-      },
-    });
-    assert.equal(pointsOf(s, "fac", "ttx").points, 80);
-    assert.equal(pointsOf(s, "fac", "trivia").points, 80);
-    assert.equal(standingOf(s, "fac").total, 240);
-  });
-
-  test("the mean is of normalised points only; Spot Awards do not feed it", () => {
-    const s = build({
-      participants: ["fac", "top"],
-      scores: {
-        ttx: { top: 100, fac: 100 },
-        trivia: { top: 10, fac: "bench" },
-      },
-      spots: [{ pid: "fac", activityId: "ttx" }],
-    });
-    assert.equal(pointsOf(s, "fac", "trivia").points, 100, "credit is 100, not 110");
-    assert.equal(standingOf(s, "fac").total, 100 + 100 + 10 + 0);
-  });
-
-  test("bench credit is recomputed as activities complete", () => {
-    const before = build({
-      participants: ["fac", "top"],
-      scores: { ttx: { top: 100, fac: 90 }, trivia: { top: 10, fac: "bench" } },
-    });
-    assert.equal(pointsOf(before, "fac", "trivia").points, 90);
-    const after = build({
-      participants: ["fac", "top"],
-      scores: {
-        ttx: { top: 100, fac: 90 },
-        trivia: { top: 10, fac: "bench" },
-        arcade: { top: 100, fac: 50 },
-      },
-    });
-    assert.equal(pointsOf(after, "fac", "trivia").points, 70);
-  });
-
-  test("bench credit changes nobody else's score", () => {
-    // fac's trivia raw is deliberately below the top so fac sets no ceiling
-    // anywhere; the only thing fac contributes is a bench credit in ttx.
-    const withFac = build({
-      participants: ["fac", "a", "b"],
-      scores: { ttx: { fac: "bench", a: 30, b: 15 }, trivia: { fac: 20, a: 50, b: 25 } },
-    });
-    const withoutFac = build({
-      participants: ["a", "b"],
-      scores: { ttx: { a: 30, b: 15 }, trivia: { a: 50, b: 25 } },
-    });
-    for (const pid of ["a", "b"]) {
-      assert.equal(standingOf(withFac, pid).total, standingOf(withoutFac, pid).total, pid);
-    }
-  });
-});
-
-/* ------------------------------------------------------------------ */
-/* Spot Awards                                                          */
-/* ------------------------------------------------------------------ */
-
-describe("spot awards", () => {
-  test("are worth 10 points each", () => {
-    assert.equal(SPOT_AWARD_POINTS, 10);
-    const s = build({
-      participants: ["a", "b"],
-      scores: { ttx: { a: 10, b: 5 } },
-      spots: [
-        { pid: "b", activityId: "ttx" },
-        { pid: "b", activityId: "trivia" },
-      ],
-    });
-    const b = standingOf(s, "b");
-    assert.equal(b.spotCount, 2);
-    assert.equal(b.spotPoints, 20);
-    assert.equal(b.total, 50 + 20);
-  });
-
-  test("are added after normalisation and never move the ceiling", () => {
-    const s = build({
-      participants: ["a", "b"],
-      scores: { ttx: { a: 10, b: 5 } },
-      spots: [{ pid: "a", activityId: "ttx" }],
-    });
-    assert.equal(pointsOf(s, "a", "ttx").points, 100, "activity points stay at 100");
-    assert.equal(standingOf(s, "a").total, 110);
-    assert.equal(standingOf(s, "b").total, 50, "b is unaffected by a's spot");
-  });
-
-  test("count towards a participant who has no activity points yet", () => {
-    const s = build({ participants: ["a"], spots: [{ pid: "a", activityId: "ttx" }] });
-    assert.equal(standingOf(s, "a").total, 10);
-  });
-
-  test("a spot recorded against an activity the participant is on bench for does not count", () => {
-    // SCORING.md: "A participant on bench for an activity cannot receive
-    // that activity's Spot Awards." The rule is about the scores, not just
-    // the console button — a spot that slipped in (granted before the
-    // participant was benched) must not be worth points.
-    const s = build({
-      participants: ["fac", "a"],
-      scores: { ttx: { fac: "bench", a: 10 }, trivia: { fac: 100, a: 50 } },
-      spots: [{ pid: "fac", activityId: "ttx" }],
-    });
-    assert.equal(standingOf(s, "fac").spotPoints, 0);
-    assert.equal(standingOf(s, "fac").total, 100 + 100);
-  });
-
-  test("spotsRemaining counts down per activity and never goes negative", () => {
-    const s = build({
-      activities: [act("ttx", 2), act("trivia", 1)],
-      participants: ["a"],
-      spots: [
-        { pid: "a", activityId: "ttx" },
-        { pid: "a", activityId: "trivia" },
-        { pid: "a", activityId: "trivia" },
-      ],
-    });
-    assert.equal(spotsRemaining(s, act("ttx", 2)), 1);
-    assert.equal(spotsRemaining(s, act("trivia", 1)), 0);
-    assert.equal(spotsRemaining(s, act("arcade", 2)), 2);
-  });
-});
-
-/* ------------------------------------------------------------------ */
 /* Ranking                                                              */
 /* ------------------------------------------------------------------ */
 
@@ -497,15 +276,17 @@ describe("ranking", () => {
     assert.deepEqual(ranks, [1, 2, 2, 2, 5]);
   });
 
-  test("ties are on the total, including spot points", () => {
+  test("ties are on the total across activities, not on any one of them", () => {
+    // a wins ttx and loses trivia by the same margin. Nothing but normalisation
+    // feeds a total any more, so a tie is two people whose activity points
+    // happen to add up the same.
     const s = build({
       participants: ["a", "b"],
-      scores: { ttx: { a: 10, b: 9 } },
-      spots: [{ pid: "b", activityId: "ttx" }],
+      scores: { ttx: { a: 10, b: 5 }, trivia: { a: 5, b: 10 } },
     });
     assert.deepEqual(
       computeStandings(s).map((x) => [x.total, x.rank]),
-      [[100, 1], [100, 1]],
+      [[150, 1], [150, 1]],
     );
   });
 
@@ -520,8 +301,8 @@ describe("ranking", () => {
     assert.equal(standingOf(s, "b").rank, 2);
   });
 
-  test("a participant benched everywhere totals 0, not NaN", () => {
-    const s = build({ participants: ["a"], scores: { ttx: { a: "bench" } } });
+  test("a participant unset everywhere totals 0, not NaN", () => {
+    const s = build({ participants: ["a"], scores: { ttx: { a: "unset" } } });
     assert.equal(standingOf(s, "a").total, 0);
   });
 
@@ -529,22 +310,20 @@ describe("ranking", () => {
     assert.deepEqual(computeStandings(build({ participants: [] })), []);
   });
 
-  test("totals sum across all activities, bench included: 3 activities -> up to 300 + 60", () => {
+  test("three activities cap a total at 300, and nothing can exceed it", () => {
+    // SCORING.md: "Three activities, 300 points available, and that is the
+    // whole of it." Spot Awards used to put 60 more on top of that; the ceiling
+    // is now the normalisation and nothing else, so joint top in all three is
+    // the most the model can produce.
     const s = build({
-      activities: [act("ttx", 2), act("trivia", 2), act("arcade", 2)],
       participants: ["a", "b"],
       scores: { ttx: { a: 1, b: 1 }, trivia: { a: 1, b: 1 }, arcade: { a: 1, b: 1 } },
-      spots: [
-        { pid: "a", activityId: "ttx" },
-        { pid: "a", activityId: "ttx" },
-        { pid: "a", activityId: "trivia" },
-        { pid: "a", activityId: "trivia" },
-        { pid: "a", activityId: "arcade" },
-        { pid: "a", activityId: "arcade" },
-      ],
     });
-    assert.equal(standingOf(s, "a").total, 360);
+    assert.equal(standingOf(s, "a").total, 300);
     assert.equal(standingOf(s, "b").total, 300);
+    for (const st of computeStandings(s)) {
+      assert.ok(st.total <= 300, `${st.pid} totals ${st.total}, above the 300 ceiling`);
+    }
   });
 
   test("does not mutate the state it reads", () => {
@@ -638,27 +417,24 @@ describe("breakTie", () => {
   });
 
   test("walks on to the next activity when the first leaves contenders level", () => {
-    // Totals all 250. ttx (100/100/50) drops c; trivia (50/50/100) leaves
-    // a and b level; arcade (100/50/100) picks a. b's five spots make up the
-    // difference so the three-way tie on total is genuine.
+    // Totals all 300, over four activities with the walk covering the first
+    // three. ttx (100/100/50) drops c; trivia (50/50/100) leaves a and b level;
+    // arcade (100/50/100) picks a. The fourth activity, outside the walk
+    // (50/100/50), is what makes the three-way tie on total genuine — with Spot
+    // Awards gone there is nothing else that can level a total.
     const tied = build({
+      activities: ["ttx", "trivia", "arcade", "extra"],
       tiebreakOrder: ["ttx", "trivia", "arcade"],
       participants: ["a", "b", "c"],
       scores: {
         ttx: { a: 10, b: 10, c: 5 },
         trivia: { a: 5, b: 5, c: 10 },
         arcade: { a: 10, b: 5, c: 10 },
+        extra: { a: 5, b: 10, c: 5 },
       },
-      spots: [
-        { pid: "b", activityId: "ttx" },
-        { pid: "b", activityId: "ttx" },
-        { pid: "b", activityId: "trivia" },
-        { pid: "b", activityId: "trivia" },
-        { pid: "b", activityId: "arcade" },
-      ],
     });
     const st = computeStandings(tied);
-    assert.deepEqual(st.map((x) => x.total), [250, 250, 250]);
+    assert.deepEqual(st.map((x) => x.total), [300, 300, 300]);
     assert.deepEqual(st.map((x) => x.rank), [1, 1, 1], "all three tied for first");
     const r = breakTie(tied, st);
     assert.equal(r.winner, "a", "ttx drops c; trivia keeps a and b level; arcade picks a");
@@ -734,12 +510,12 @@ describe("breakTie", () => {
       tiebreakOrder: ["ttx"],
       participants: ["a", "b"],
       scores: {
-        ttx: { a: 5, b: "unset" }, // a 100
-        trivia: { a: 1, b: 10 }, // a 10, b 100 -> a 110, b 100... adjust
+        ttx: { a: 5, b: "unset" }, // a 100, b nothing
+        trivia: { a: 0, b: 10 }, // a 0 (a real zero), b 100 -> both on 100
       },
-      spots: [{ pid: "b", activityId: "trivia" }], // b 110
     });
     const st = computeStandings(s);
+    assert.deepEqual(st.map((x) => x.total), [100, 100]);
     assert.deepEqual(st.map((x) => x.rank), [1, 1]);
     assert.equal(breakTie(s, st).winner, "a");
   });

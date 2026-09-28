@@ -60,7 +60,6 @@ export interface QuorumClientOptions {
   onStatus?: (status: ConnStatus, detail: string) => void;
   onWelcome?: (welcome: Welcome) => void;
   onRefused?: (reason: RefusedReason, message: string) => void;
-  onToast?: (kind: "spot" | "text", text: string) => void;
   onCommandResult?: (cid: string, result: CommandResult) => void;
 }
 
@@ -386,12 +385,6 @@ export class QuorumClient {
         if (this.#state === null) return this.#requestResync();
         this.#state = { ...this.#state, seal: msg.state };
         this.#opts.onState?.(this.#state);
-        return;
-      }
-
-      case "toast": {
-        if (!this.#accept(msg.seq)) return;
-        this.#opts.onToast?.(msg.kind, msg.text);
         return;
       }
 

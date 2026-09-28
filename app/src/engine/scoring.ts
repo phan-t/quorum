@@ -9,21 +9,22 @@
  */
 
 import type {
-  Activity,
   ActivityId,
   ParticipantId,
   SessionState,
-  SpotAward,
 } from "./types.ts";
-
-export const SPOT_AWARD_POINTS = 10;
 
 /** What a participant scored in one activity, and how that number was reached. */
 export interface ActivityPoints {
   /** Normalised 0–100, or null when there is nothing to show yet. */
   readonly points: number | null;
-  readonly source: "normalised" | "bench" | "unset";
-  /** The raw score this came from. Null for bench and unset. */
+  /**
+   * Two sources, not three. There was a `bench`, which carried Bench Credit's
+   * mean of what somebody scored elsewhere; it came out with Bench Credit. An
+   * activity a participant did not play is `unset` and worth nothing.
+   */
+  readonly source: "normalised" | "unset";
+  /** The raw score this came from. Null when unset. */
   readonly raw: number | null;
 }
 
@@ -31,9 +32,13 @@ export interface Standing {
   readonly pid: ParticipantId;
   readonly nickname: string;
   readonly perActivity: Readonly<Record<ActivityId, ActivityPoints>>;
-  readonly spotPoints: number;
-  readonly spotCount: number;
-  /** Sum of activity points (treating null as 0) plus spot points. */
+  /**
+   * Sum of activity points, treating null as 0, and nothing else.
+   *
+   * Spot Awards used to be added here — 10 a piece, on top of the 300 — and
+   * removing them is why this is now the sum of the normalisation and full
+   * stop. SCORING.md's "Removed" section has the rest.
+   */
   readonly total: number;
   /** 1-based. Ties share a rank and the next rank skips accordingly. */
   readonly rank: number;
@@ -42,9 +47,10 @@ export interface Standing {
 /**
  * Normalise one activity: top raw among `played` participants becomes 100.
  *
- * Participants on `bench` are excluded from the top calculation — a
- * facilitator's absence must not define the ceiling for everyone else.
- * Returns points only for `played` participants.
+ * Returns points only for `played` participants. A cell nobody has typed into
+ * is `unset`, contributes no raw and cannot set the ceiling — which used to be
+ * true of a benched facilitator too, for the sharper reason that their absence
+ * must not scale the room down.
  */
 export function normaliseActivity(
   state: SessionState,
@@ -79,43 +85,6 @@ export function normaliseActivity(
 }
 
 /**
- * Bench Credit: the mean of this participant's normalised points across the
- * activities they played in full.
- *
- * Returns null when they have played nothing yet — the console shows "—"
- * rather than a misleading zero.
- *
- * The mean is rounded half-up, matching normalisation: 90 and 75 gives 83.
- * Exact halves are common (a raw of 1 against a top of 8), so the rule needs
- * to be stated rather than left to whatever the runtime does.
- */
-function benchCredit(
-  played: readonly number[],
-): number | null {
-  if (played.length === 0) return null;
-  const sum = played.reduce((a, b) => a + b, 0);
-  return Math.round(sum / played.length);
-}
-
-/**
- * Spot Awards a participant actually holds.
- *
- * An award for an activity they are on bench credit for does not count.
- * Granting is refused while benched, but benching *after* a grant would
- * otherwise be a back door to keeping it.
- */
-function spotsFor(
-  state: SessionState,
-  pid: ParticipantId,
-): { points: number; count: number } {
-  const count = state.spots.filter(
-    (s) =>
-      s.pid === pid && state.scores[s.activityId]?.[pid]?.status !== "bench",
-  ).length;
-  return { points: count * SPOT_AWARD_POINTS, count };
-}
-
-/**
  * Full standings, ranked. Ties share a rank; the following rank skips
  * (two firsts are followed by a third, not a second).
  *
@@ -134,14 +103,6 @@ export function computeStandings(state: SessionState): Standing[] {
     const p = state.participants[pid];
     if (!p || p.kicked) continue;
 
-    // First pass: everything they actually played, so bench credit has a base.
-    const playedPoints: number[] = [];
-    for (const a of state.activities) {
-      const pts = normalised.get(a.id)?.[pid];
-      if (pts !== undefined) playedPoints.push(pts);
-    }
-    const credit = benchCredit(playedPoints);
-
     const perActivity: Record<ActivityId, ActivityPoints> = {};
     for (const a of state.activities) {
       const score = state.scores[a.id]?.[pid];
@@ -149,28 +110,17 @@ export function computeStandings(state: SessionState): Standing[] {
 
       if (pts !== undefined && score) {
         perActivity[a.id] = { points: pts, source: "normalised", raw: score.raw };
-      } else if (score?.status === "bench") {
-        perActivity[a.id] = { points: credit, source: "bench", raw: null };
       } else {
         perActivity[a.id] = { points: null, source: "unset", raw: null };
       }
     }
 
-    const spot = spotsFor(state, pid);
-    const total =
-      state.activities.reduce(
-        (sum, a) => sum + (perActivity[a.id]?.points ?? 0),
-        0,
-      ) + spot.points;
+    const total = state.activities.reduce(
+      (sum, a) => sum + (perActivity[a.id]?.points ?? 0),
+      0,
+    );
 
-    rows.push({
-      pid,
-      nickname: p.nickname,
-      perActivity,
-      spotPoints: spot.points,
-      spotCount: spot.count,
-      total,
-    });
+    rows.push({ pid, nickname: p.nickname, perActivity, total });
   }
 
   rows.sort((a, b) => b.total - a.total || a.nickname.localeCompare(b.nickname));
@@ -247,13 +197,4 @@ export function breakTie(
     contenders = next;
   }
   return { winner: null, tied: contenders };
-}
-
-/** How many Spot Awards remain for an activity. */
-export function spotsRemaining(
-  state: SessionState,
-  activity: Activity,
-): number {
-  const granted = state.spots.filter((s) => s.activityId === activity.id).length;
-  return Math.max(0, activity.spotCap - granted);
 }

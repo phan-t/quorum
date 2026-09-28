@@ -285,21 +285,20 @@ export type HostCommand =
   /* ---- scoring (phase 2) ---- */
   /** Raw score for one person in one activity. Whatever it scored out of. */
   | { name: "score.set"; activityId: string; pid: ParticipantId; raw: number }
-  /** played / bench / unset. Bench is what triggers Bench Credit. */
+  /**
+   * played / unset. `unset` clears a cell back to nothing.
+   *
+   * There was a `bench` arm, which is what triggered Bench Credit; it came out
+   * with the feature. The command stays because clearing a cell is a real thing
+   * a host does, and it is now the only thing this command does besides putting
+   * one back to `played`.
+   */
   | {
       name: "score.status";
       activityId: string;
       pid: ParticipantId;
       status: ScoreStatus;
     }
-  /** 10 points, and the reason is required — it gets read out. */
-  | {
-      name: "spot.grant";
-      pid: ParticipantId;
-      activityId: string;
-      reason: string;
-    }
-  | { name: "spot.revoke"; seq: number }
   /* ---- trivia (phase 3) ---- */
   /**
    * Open the current question. The timer starts on the server and every
@@ -463,12 +462,14 @@ export interface StandingRow {
   readonly total: number;
   /**
    * Points per activity, so the big screen can draw the stacked bar in
-   * activity hues. Null where nothing has been scored yet; a bench credit
-   * reads as a number like any other, with `bench` saying where it came from.
+   * activity hues. Null where nothing has been scored yet.
+   *
+   * There were two more fields beside this: `bench`, the activity ids a
+   * participant was on bench credit for, and `spot`, their Spot Award points.
+   * Both features are gone, so a row is a total and the normalised points that
+   * add up to it.
    */
   readonly perActivity: Readonly<Record<string, number | null>>;
-  readonly bench: readonly string[];
-  readonly spot: number;
 }
 
 /** One row of the console's scoring grid. Host only. */
@@ -480,7 +481,6 @@ export interface ScoreRow {
   readonly raw: Readonly<Record<string, number | null>>;
   readonly status: Readonly<Record<string, ScoreStatus>>;
   readonly points: Readonly<Record<string, number | null>>;
-  readonly spot: number;
   readonly total: number;
   readonly rank: number;
 }
@@ -489,8 +489,6 @@ export interface ActivitySummary {
   readonly id: string;
   readonly title: string;
   readonly kind: string;
-  readonly spotCap: number;
-  readonly spotsLeft: number;
 }
 
 /* ------------------------------------------------------------------ */
@@ -1544,12 +1542,6 @@ export interface RenderState {
     readonly awayCount: number;
     /** The full grid, unsealed — the host cannot run the session blind. */
     readonly scores: readonly ScoreRow[];
-    readonly spots: readonly {
-      readonly seq: number;
-      readonly pid: ParticipantId;
-      readonly activityId: string;
-      readonly reason: string;
-    }[];
     /**
      * Per-participant answer state, which ARCHITECTURE gives the host and
      * nobody else. *Who* has answered, never *what* they answered: the
@@ -1642,7 +1634,6 @@ export type ServerMessage =
   | { t: "state"; seq: number; state: RenderState }
   | { t: "roster"; seq: number; roster: readonly RosterEntry[] }
   | { t: "seal"; seq: number; state: Seal }
-  | { t: "toast"; seq: number; kind: "spot" | "text"; text: string }
   | { t: "ack"; cid: string; applied: boolean }
   | {
       t: "refusedCmd";
@@ -1965,23 +1956,13 @@ function parseHostCommand(v: unknown): HostCommand | null {
       const activityId = str("activityId");
       const pid = str("pid");
       const st = c["status"];
-      const OK: readonly ScoreStatus[] = ["played", "bench", "unset"];
+      // `bench` was here and is not any more, so a console left open across
+      // the deploy that sends one gets a null command and a `refusedCmd` on its
+      // own cid — which is the right answer, and better than the old status
+      // quietly landing as an `unset` that clears the cell it was aimed at.
+      const OK: readonly ScoreStatus[] = ["played", "unset"];
       return activityId !== null && pid !== null && OK.includes(st as ScoreStatus)
         ? { name: "score.status", activityId, pid, status: st as ScoreStatus }
-        : null;
-    }
-    case "spot.grant": {
-      const pid = str("pid");
-      const activityId = str("activityId");
-      const reason = str("reason");
-      return pid !== null && activityId !== null && reason !== null
-        ? { name: "spot.grant", pid, activityId, reason }
-        : null;
-    }
-    case "spot.revoke": {
-      const seq = c["seq"];
-      return typeof seq === "number" && Number.isInteger(seq)
-        ? { name: "spot.revoke", seq }
         : null;
     }
     case "trivia.open":

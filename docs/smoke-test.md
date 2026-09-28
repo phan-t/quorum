@@ -41,7 +41,7 @@ npm run swarm -- 60 --url https://quorum.example.com --code … --host-token …
 ## Why it exists
 
 `npm run bots` drives the reducer in memory. It is the right tool for the game
-rules at headcount — normalisation, ties, Bench Credit, refused joins — and it
+rules at headcount — normalisation, ties, refused joins — and it
 proves none of the following, because it opens no socket:
 
 - twenty phones connecting at once, which is what a QR code on a screen
@@ -64,7 +64,7 @@ with sleeps between them tests the server's willingness to accept commands in
 an order somebody wrote down, which is not what a host does.
 
 **It runs a whole event.** Lobby, a holding card, trivia, every arcade round,
-sealed standings, Spot Awards, the reveal, the send-off and the final frame.
+sealed standings, the reveal, the send-off and the final frame.
 Every round plays because the point is that every round's *code* runs; a sample
 leaves branches that typecheck and have never once executed.
 
@@ -88,7 +88,8 @@ state on every roster change, so they carry the heaviest frames — which is why
 they are worth measuring and why leaving them out understates the load.
 
 **People behave like people.** `--late` brings bots in after the session has
-started, which is the Bench Credit path. `--churn` drops bots and reconnects
+started, which is the path where somebody takes a zero in an activity they were
+never in. `--churn` drops bots and reconnects
 them on their `rejoinToken`, the path every event hits when a phone sleeps.
 
 **Bots play by reacting to `state`.** No script of expected frames: a bot reads

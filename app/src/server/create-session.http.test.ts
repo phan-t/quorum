@@ -90,13 +90,15 @@ describe("an event's own list", () => {
       activities: [
         { id: "trivia", title: "Trivia", kind: "trivia" },
         { id: "arcade", title: "Hashi Arcade", kind: "arcade" },
+        // `spotCap` is retired, not rejected: files written before Spot Awards
+        // were removed still create a session. See `RETIRED_ACTIVITY_KEYS`.
         { id: "ttx", title: "Security TTX", kind: "manual", spotCap: 2 },
       ],
     });
     assert.deepEqual(state.activities, [
-      { id: "trivia", title: "Trivia", kind: "trivia", spotCap: 2 },
-      { id: "arcade", title: "Hashi Arcade", kind: "arcade", spotCap: 2 },
-      { id: "ttx", title: "Security TTX", kind: "manual", spotCap: 2 },
+      { id: "trivia", title: "Trivia", kind: "trivia" },
+      { id: "arcade", title: "Hashi Arcade", kind: "arcade" },
+      { id: "ttx", title: "Security TTX", kind: "manual" },
     ]);
     // A score bucket per activity, and the list's order is the tiebreak order:
     // the file says which activity settles a tie by saying which comes first.
@@ -107,10 +109,10 @@ describe("an event's own list", () => {
   it("can score one thing and nothing else", async () => {
     const state = await created({
       title: "Arcade only",
-      activities: [{ id: "arcade", title: "Hashi Arcade", kind: "arcade", spotCap: 0 }],
+      activities: [{ id: "arcade", title: "Hashi Arcade", kind: "arcade" }],
     });
     assert.deepEqual(state.activities, [
-      { id: "arcade", title: "Hashi Arcade", kind: "arcade", spotCap: 0 },
+      { id: "arcade", title: "Hashi Arcade", kind: "arcade" },
     ]);
     assert.deepEqual(state.tiebreakOrder, ["arcade"]);
   });

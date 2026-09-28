@@ -47,7 +47,7 @@ import type { RenderState } from "../protocol.ts";
 /* ------------------------------------------------------------------ */
 
 const ACTIVITIES: readonly Activity[] = [
-  { id: "trivia", title: "Trivia", kind: "trivia", spotCap: 2 },
+  { id: "trivia", title: "Trivia", kind: "trivia" },
 ];
 
 /**

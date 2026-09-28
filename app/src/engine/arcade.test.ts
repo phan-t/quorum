@@ -104,7 +104,6 @@ const ARCADE: Activity = {
   id: "arcade",
   title: "Hashi Arcade",
   kind: "arcade",
-  spotCap: 2,
 };
 
 /** A running session with `pids` joined, in that order. */
@@ -231,7 +230,7 @@ describe("player numbers", () => {
    * fails and that rule should be revisited rather than kept out of habit.
    */
   test("a second arcade activity can never be entered — the slot is single", () => {
-    const second: Activity = { id: "arcade-2", title: "Arcade II", kind: "arcade", spotCap: 2 };
+    const second: Activity = { id: "arcade-2", title: "Arcade II", kind: "arcade" };
     const base = accept(
       newSession({ sid: "s", title: "Offsite", joinCode: "RAFT", activities: [ARCADE, second] }),
       [{ type: "open" }, { type: "start" }, { type: "join", pid: "p1", nickname: "Player one" }],
@@ -1179,16 +1178,30 @@ describe("the arcade raw score", () => {
     assert.equal(bottom?.perActivity["arcade"]?.points, 0);
   });
 
-  test("bench credit is not overwritten by an arcade total", () => {
+  test("a cleared cell is overwritten by the round's own total", () => {
+    // The inverse of what this asserted before. A `bench` cell survived an
+    // activity's totals — that was the whole point of Bench Credit, and
+    // `withActivityTotals` skipped it. With the status gone, `unset` is just a
+    // cell nobody has typed into, and whoever the round produced a total for is
+    // scored for it. A host who does not want somebody on the board keeps them
+    // out of the round, not out of the grid.
     let s = recruiting(["p1", "p2"]);
     s = accept(s, [{ type: "submitAnswer", pid: "p1", answer: "Vault" }], T0 + 1000);
     s = accept(
       s,
-      [{ type: "setStatus", activityId: "arcade", pid: "p1", status: "bench" }],
+      [
+        // Typed and then cleared, so the clear is a real change rather than a
+        // no-op on a cell that was never there.
+        { type: "setScore", activityId: "arcade", pid: "p1", raw: 3 },
+        { type: "setStatus", activityId: "arcade", pid: "p1", status: "unset" },
+      ],
       T0 + 2000,
     );
+    assert.deepEqual(s.scores["arcade"]?.["p1"], { raw: 0, status: "unset" });
     s = accept(s, [{ type: "endRound" }, { type: "revealRound" }], T0 + 30_000);
-    assert.deepEqual(s.scores["arcade"]?.["p1"], { raw: 0, status: "bench" });
+    const cell = s.scores["arcade"]?.["p1"];
+    assert.equal(cell?.status, "played");
+    assert.ok((cell?.raw ?? 0) > 0, `the round's total reached the cell, got ${cell?.raw}`);
   });
 });
 

@@ -28,7 +28,8 @@ Every activity is normalised to the same ceiling:
 > **The top scorer in an activity gets 100.**
 > **Everyone else gets `round(100 × their raw ÷ the top raw)`.**
 
-One formula, applied per activity. Three activities, 300 points available.
+One formula, applied per activity, and nothing else adds to a total. Three
+activities, 300 points available, and that is the whole of it.
 
 | | Raw | Top raw | Points |
 | --- | --- | --- | --- |
@@ -47,50 +48,12 @@ and throws away every margin.
 **No floor.** Someone will suggest a minimum — 40 points for turning up. It
 compresses the field exactly where the competition is interesting. A person
 sitting on 12 after the trivia is not demoralised by the number; they are
-demoralised if there is nothing left to play for, which is what Spot Awards are
-for.
+demoralised if there is nothing left to play for, and what keeps that true is
+that every remaining activity is worth a fresh 100 to them however the last one
+went.
 
-## Spot Awards
-
-10 points, granted by the facilitator of an activity to any individual, for
-anything they like: the sharpest question, the best recovery, the answer that
-made the room laugh, the person who drew out someone who had not spoken.
-
-Two per activity by default. They exist so that someone who reads the room well
-is never mathematically out of it by the last activity.
-
-**A reason is mandatory.** They are a facilitation tool, announced out loud —
-not a rounding error. Quorum requires the field because a field that may be
-blank will be blank.
-
-## Bench Credit
-
-A facilitator knows the answers to the activity they run. They should still be
-able to win: they are part of the team, and excluding them punishes the people
-who volunteer to do the work.
-
-1. **They sit out the activity they run.** No answering, no advising, no
-   hinting. Staff for that activity, not a player.
-2. **They are credited their own average.** For the activity they facilitated,
-   they score the mean of their normalised points across the activities they
-   played in full. Someone who scores 90 and 70 is credited 80 for the one they
-   ran — their own demonstrated level, so volunteering neither rewards nor
-   punishes them. It generalises unchanged if one person runs two activities.
-3. **Nobody scores themselves.** Where a facilitator competes in an activity
-   someone else judges, the judge scores blind.
-
-Bench Credit is applied after normalisation and changes nobody else's score. A
-participant on bench for an activity cannot receive that activity's Spot
-Awards.
-
-**Say it out loud before the first activity.** Thirty seconds:
-
-> "Three of us are running an activity each. We each sit out the one we run,
-> and we're credited our own average for it, so volunteering doesn't cost us
-> the prize. Nobody scores themselves."
-
-Said up front it reads as fair. Discovered at the prize-giving it reads as a
-stitch-up, however good the arithmetic is.
+**Nobody scores themselves.** Where a facilitator competes in an activity
+someone else judges, the judge scores blind.
 
 ## Tiebreak
 
@@ -125,3 +88,60 @@ This is a real mechanic, not a display toggle. With a single prize, only a
 handful of people can still mathematically win by the last activity, and the
 only thing keeping everyone else playing is that nobody knows who those people
 are. Seal before the final activity; reveal at the end.
+
+## Removed: Spot Awards and Bench Credit
+
+Both were rules here and both are gone. Recorded rather than deleted, because
+the arguments for them were good ones and the reason they went was evidence
+about twelve particular sessions, not a finding that the reasoning was wrong. If
+the shape of a session changes, this is the section to read before reinventing
+either of them.
+
+**Spot Awards** were 10 points, granted by the facilitator of an activity to any
+individual for anything they liked — the sharpest question, the best recovery,
+the person who drew out someone who had not spoken. Two per activity, with a
+mandatory reason, announced out loud. They existed so that someone who reads the
+room well is never mathematically out of it by the last activity. They were
+granted **twice, in one of twelve sessions**. A total of 300 with no side
+channel is simpler to run and simpler to explain, and the thing they were
+guarding against — a player out of contention early — is already handled by
+every activity being worth a fresh 100.
+
+**Bench Credit** let a facilitator sit out the activity they ran and be credited
+the mean of their normalised points across the activities they played in full:
+someone who scored 90 and 70 was credited 80 for the one they ran, their own
+demonstrated level, so volunteering neither rewarded nor punished them. It was
+applied after normalisation, changed nobody else's score, and generalised
+unchanged if one person ran two activities. The same status was used for a late
+joiner, so that an activity they were never in was not a zero. **It never fired
+in twelve sessions**, which is consistent with the facilitator running
+everything and simply not competing.
+
+### What was lost with Bench Credit, in the words that were here
+
+The case for it was:
+
+> A facilitator knows the answers to the activity they run. They should still be
+> able to win: they are part of the team, and excluding them punishes the people
+> who volunteer to do the work.
+
+And the failure mode it was guarding against:
+
+> Said up front it reads as fair. Discovered at the prize-giving it reads as a
+> stitch-up, however good the arithmetic is.
+
+That failure mode has not been removed, only the arithmetic that answered it. A
+facilitator who runs one activity and plays the others is now either scored
+normally in the round where they knew the answers, or left off the board by a
+human decision — there is no status in the software that credits them, and an
+activity somebody did not play counts as zero towards their total. The same goes
+for a late joiner. Both are now things to say out loud before the first activity
+rather than things the arithmetic handles:
+
+> "Whoever runs an activity isn't competing in it. There's no clever
+> compensation for that any more — we just say so now, up front."
+
+Removed on evidence from twelve sessions. If a session ever has three people
+each running one activity and all three expecting to compete, the arithmetic
+above is the thing to bring back, and it is written down here so that nobody has
+to work it out again at a prize-giving.

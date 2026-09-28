@@ -1052,7 +1052,7 @@ body.phone #app {
 }
 .t-streak {
   margin: 0;
-  color: var(--spot);
+  color: var(--streak);
 }
 .t-note {
   margin: 0;

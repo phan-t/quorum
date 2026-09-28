@@ -1,5 +1,12 @@
 /**
- * The console's scoring panel: the grid, and the Spot Award box.
+ * The console's scoring panel: the grid.
+ *
+ * It was the grid *and* the Spot Award box — an activity picker, a person
+ * picker, a required-reason field, a Grant button, a per-activity "2 left"
+ * counter and a revocable list of what had been granted — plus a bench line
+ * under the grid naming everybody credited rather than scored. Both features
+ * came out; see SCORING.md's "Removed" section. What is left is the thing a host
+ * actually used.
  *
  * This is used with thirty people watching, so it is keyboard-first and it
  * never opens anything:
@@ -11,15 +18,16 @@
  *   one activity, down the list. Shift+Enter goes back up. Leaving a cell with
  *   an uncommitted number commits it too — a score the host typed and tabbed
  *   past is a score they entered.
- * - **Alt+B benches the cell, Alt+U clears it**, from the keyboard, without
- *   leaving the field. The same two actions are small buttons for the mouse.
+ * - **Alt+U clears the cell**, from the keyboard, without leaving the field. The
+ *   same action is a small button for the mouse. There was an Alt+B beside it
+ *   that benched the cell, and it went with Bench Credit.
  * - **Escape puts the cell back** to what the server last said.
  * - **Refusals appear in the cell or the button that caused them**, for three
  *   seconds, and nothing steals focus. There are no dialogs in this file.
  *
- * What it does not do: any arithmetic. Normalisation, Bench Credit, the spot
- * total and the rank all arrive in `hostExtras.scores`. The grid is a view of
- * that, plus the raw numbers the host is typing into it.
+ * What it does not do: any arithmetic. The normalised points, the total and the
+ * rank all arrive in `hostExtras.scores`. The grid is a view of that, plus the
+ * raw numbers the host is typing into it.
  */
 
 import type {
@@ -59,7 +67,6 @@ interface CellRefs {
   input: HTMLInputElement;
   points: HTMLElement;
   flash: HTMLElement;
-  benchButton: HTMLButtonElement;
   control: Control;
   timer: ReturnType<typeof setTimeout> | null;
 }
@@ -69,31 +76,9 @@ interface RowRefs {
   num: HTMLElement;
   name: HTMLElement;
   cells: Map<string, CellRefs>;
-  spot: HTMLElement;
   mix: HTMLElement;
   total: HTMLElement;
   rank: HTMLElement;
-}
-
-/**
- * A grid row in the shape the stacked bar reads.
- *
- * `stackedBar` was written for `StandingRow`, which carries the bench flags as
- * a list of activity ids; the grid carries them as a status per activity,
- * because that is what a cell has to draw. Same facts, two shapes, and the
- * conversion belongs here rather than in a second bar function — the whole
- * point of reusing it is that the console and the Desktop cannot drift.
- */
-function barRow(row: ScoreRow, activities: readonly ActivitySummary[]): {
-  perActivity: Readonly<Record<string, number | null>>;
-  bench: readonly string[];
-  spot: number;
-} {
-  return {
-    perActivity: row.points,
-    bench: activities.filter((a) => row.status[a.id] === "bench").map((a) => a.id),
-    spot: row.spot,
-  };
 }
 
 /**
@@ -133,7 +118,7 @@ export function createScoringPanel(opts: Opts): ScoringPanel {
 
   const hint = h("span", {
     class: "mono sc-hint",
-    text: "G jumps here · Tab along the row · Enter saves and drops a row · Alt+B bench · Alt+U clear · Esc undo",
+    text: "G jumps here · Tab along the row · Enter saves and drops a row · Alt+U clear · Esc undo",
   });
   const head = h("div", { class: "sc-head" }, [
     h("span", { class: "label", text: "Scoring" }),
@@ -150,76 +135,7 @@ export function createScoringPanel(opts: Opts): ScoringPanel {
     text: "Nobody has joined yet. The grid fills as people arrive.",
   });
 
-  const benchLine = h("p", { class: "mono sc-bench-line" });
-
-  /* ---- the Spot Award box ---- */
-
-  const spotActivity = h("select", {
-    class: "sc-select mono",
-    attrs: { "aria-label": "Spot Award activity" },
-  });
-  const spotPerson = h("select", {
-    class: "sc-select sc-select-person mono",
-    attrs: { "aria-label": "Spot Award recipient" },
-  });
-  const spotReason = h("input", {
-    class: "field sc-reason",
-    type: "text",
-    placeholder: "Reason",
-    attrs: { maxlength: "120", "aria-label": "Spot Award reason" },
-  });
-  const spotNote = h("span", { class: "mono sc-spot-note" });
-  const spotLeft = h("span", { class: "mono sc-spot-left" });
-
-  /**
-   * The reason is mandatory. The server refuses an empty one, so this never
-   * sends it: the button is disabled until there is something to read out,
-   * and the note says why rather than leaving a dead button on screen.
-   */
-  const grant = control({
-    label: "Grant award",
-    className: "ctl-secondary ctl-spot",
-    onFire: (c) => {
-      const pid = spotPerson.value;
-      const activityId = spotActivity.value;
-      const reason = spotReason.value.trim();
-      if (reason === "") {
-        c.flash("A spot award needs a reason. It gets read out.");
-        spotReason.focus();
-        return;
-      }
-      if (pid === "" || activityId === "") {
-        c.flash("Pick a person and an activity.");
-        return;
-      }
-      opts.issue({ name: "spot.grant", pid, activityId, reason }, c);
-      spotReason.value = "";
-      syncGrant();
-    },
-  });
-
-  const spotList = h("ul", { class: "sc-spot-list" });
-
-  const spotBox = h("section", { class: "sc-spot" }, [
-    h("div", { class: "sc-spot-form" }, [
-      h("span", { class: "label", text: "Spot award" }),
-      spotActivity,
-      spotPerson,
-      spotReason,
-      grant.el,
-      spotLeft,
-    ]),
-    spotNote,
-    spotList,
-  ]);
-
-  const el = h("section", { class: "scoring" }, [
-    head,
-    gridWrap,
-    gridEmpty,
-    benchLine,
-    spotBox,
-  ]);
+  const el = h("section", { class: "scoring" }, [head, gridWrap, gridEmpty]);
 
   /* ---------------------------------------------------------------- */
   /* State                                                             */
@@ -230,32 +146,6 @@ export function createScoringPanel(opts: Opts): ScoringPanel {
   const refsFor = new WeakMap<HTMLElement, RowRefs>();
   /** Last value the server told us, per `pid|activityId`. Escape restores it. */
   const serverRaw = new Map<string, string>();
-  let personOptions = "";
-
-  function syncGrant(): void {
-    const empty = spotReason.value.trim() === "";
-    grant.setDisabled(empty || spotPerson.value === "" || spotActivity.value === "");
-    setText(
-      spotNote,
-      empty
-        ? "A reason is required."
-        : "Worth 10 points. Two per activity by default.",
-    );
-    spotNote.classList.toggle("sc-spot-note-warn", empty);
-  }
-
-  spotReason.addEventListener("input", syncGrant);
-  spotReason.addEventListener("keydown", (ev) => {
-    if ((ev as KeyboardEvent).key !== "Enter") return;
-    ev.preventDefault();
-    grant.el.querySelector("button")?.click();
-  });
-  spotActivity.addEventListener("change", () => {
-    renderPeople(lastRows, true);
-    syncGrant();
-  });
-  spotPerson.addEventListener("change", syncGrant);
-  syncGrant();
 
   /* ---------------------------------------------------------------- */
   /* The grid                                                          */
@@ -274,7 +164,6 @@ export function createScoringPanel(opts: Opts): ScoringPanel {
           h("span", { class: "sc-th-title", text: a.title }),
         ]),
       ),
-      h("th", { class: "sc-th sc-th-spot", text: "Spot" }),
       h("th", { class: "sc-th sc-th-mix", text: "Mix" }),
       h("th", { class: "sc-th sc-th-total", text: "Total" }),
       h("th", { class: "sc-th sc-th-rank", text: "Rank" }),
@@ -332,14 +221,6 @@ export function createScoringPanel(opts: Opts): ScoringPanel {
     });
     const points = h("span", { class: "sc-pts mono" });
     const flash = h("span", { class: "sc-flash mono", attrs: { hidden: true, role: "status" } });
-    const benchButton = h("button", {
-      class: "sc-mini",
-      type: "button",
-      text: "B",
-      title:
-        "Bench: they sat this one out. They are credited their own average instead of a zero, so missing an activity does not sink them. (Alt+B)",
-      attrs: { tabindex: "-1" },
-    });
     const clearButton = h("button", {
       class: "sc-mini",
       type: "button",
@@ -350,7 +231,7 @@ export function createScoringPanel(opts: Opts): ScoringPanel {
     const td = h("td", { class: "sc-cell" }, [
       input,
       points,
-      h("span", { class: "sc-acts" }, [benchButton, clearButton]),
+      h("span", { class: "sc-acts" }, [clearButton]),
       flash,
     ]);
 
@@ -359,7 +240,6 @@ export function createScoringPanel(opts: Opts): ScoringPanel {
       input,
       points,
       flash,
-      benchButton,
       control: null as unknown as Control,
       timer: null,
     };
@@ -388,16 +268,6 @@ export function createScoringPanel(opts: Opts): ScoringPanel {
         input.value = serverRaw.get(cellKey(pid, id)) ?? "";
         return;
       }
-      if (ev.altKey && (key === "b" || key === "B")) {
-        ev.preventDefault();
-        setStatus(
-          pid,
-          id,
-          td.dataset["status"] === "bench" ? "played" : "bench",
-          cell,
-        );
-        return;
-      }
       if (ev.altKey && (key === "u" || key === "U")) {
         ev.preventDefault();
         setStatus(pid, id, "unset", cell);
@@ -406,9 +276,6 @@ export function createScoringPanel(opts: Opts): ScoringPanel {
     // A number typed and tabbed past is a number the host entered.
     input.addEventListener("blur", () => commit(pid, id, cell));
 
-    benchButton.addEventListener("click", () => {
-      setStatus(pid, id, td.dataset["status"] === "bench" ? "played" : "bench", cell);
-    });
     clearButton.addEventListener("click", () => setStatus(pid, id, "unset", cell));
 
     return cell;
@@ -426,16 +293,11 @@ export function createScoringPanel(opts: Opts): ScoringPanel {
     if (document.activeElement !== cell.input) cell.input.value = asTyped;
 
     setAttr(cell.td, "data-status", status);
-    cell.input.disabled = status === "bench";
-    cell.benchButton.setAttribute("aria-pressed", status === "bench" ? "true" : "false");
-    cell.benchButton.classList.toggle("on", status === "bench");
-
-    // A benched cell shows what it is worth. The whole point of Bench Credit
-    // is that it is a number, not a blank — and "—" only until they have
-    // played something for the mean to be taken of.
+    // No cell is ever disabled now. A benched one was — the raw was meaningless
+    // and the server refused a score for it — and with the status gone every
+    // cell in the grid is typeable.
     setText(cell.points, points === null ? "—" : String(points));
     cell.points.classList.toggle("sc-pts-top", points === 100 && status === "played");
-    cell.points.classList.toggle("sc-pts-bench", status === "bench");
   }
 
   /**
@@ -450,7 +312,6 @@ export function createScoringPanel(opts: Opts): ScoringPanel {
       const num = h("span", { class: "mono sc-num" });
       const name = h("span", { class: "sc-name" });
       const cells = new Map<string, CellRefs>();
-      const spot = h("span", { class: "mono sc-spot-cell" });
       const mix = h("div", { class: "sc-bar" });
       const total = h("span", { class: "mono sc-total" });
       const rank = h("span", { class: "mono sc-rank" });
@@ -462,14 +323,13 @@ export function createScoringPanel(opts: Opts): ScoringPanel {
           cells.set(a.id, cell);
           return cell.td;
         }),
-        h("td", { class: "sc-cell-spot" }, [spot]),
         // Not focusable, so the tab order along the row is still exactly the
         // editable cells and nothing else.
         h("td", { class: "sc-cell-mix" }, [mix]),
         h("td", { class: "sc-cell-total" }, [total]),
         h("td", { class: "sc-cell-rank" }, [rank]),
       ]);
-      const refs: RowRefs = { tr, num, name, cells, spot, mix, total, rank };
+      const refs: RowRefs = { tr, num, name, cells, mix, total, rank };
       refsFor.set(tr, refs);
       return tr;
     },
@@ -483,8 +343,6 @@ export function createScoringPanel(opts: Opts): ScoringPanel {
         const cell = refs.cells.get(a.id);
         if (cell) updateCell(cell, r, a);
       }
-      setText(refs.spot, r.spot === 0 ? "—" : String(r.spot));
-      refs.spot.classList.toggle("sc-has-spot", r.spot > 0);
       // Where the total came from, drawn by the same function the Desktop
       // uses. The numbers are already along this row; the bar is what makes a
       // row readable at a glance and comparable to the one under it, which is
@@ -492,13 +350,13 @@ export function createScoringPanel(opts: Opts): ScoringPanel {
       // trivia" but "why are they third".
       replace(
         refs.mix,
-        stackedBar(barRow(r, activities), activities, barScale).map((seg) =>
+        stackedBar({ perActivity: r.points }, activities, barScale).map((seg) =>
           h("div", {
-            class: seg.bench ? "sc-seg sc-seg-bench" : "sc-seg",
+            class: "sc-seg",
             attrs: {
               style: `flex-basis:${seg.percent}%;background-color:${seg.hue}`,
               "data-activity": seg.key,
-              title: `${seg.label}: ${seg.points}${seg.bench ? " (bench credit)" : ""}`,
+              title: `${seg.label}: ${seg.points}`,
             },
           }),
         ),
@@ -510,10 +368,6 @@ export function createScoringPanel(opts: Opts): ScoringPanel {
 
   let rows = makeRowList();
 
-  /* ---------------------------------------------------------------- */
-  /* The Spot Award box                                                */
-  /* ---------------------------------------------------------------- */
-
   let lastRows: readonly ScoreRow[] = [];
   /**
    * The biggest total on the board, so every row's bar is drawn against the
@@ -524,104 +378,6 @@ export function createScoringPanel(opts: Opts): ScoringPanel {
    * already treats as "draw nothing".
    */
   let barScale = 0;
-  let spotListSig = "";
-
-  function renderActivities(): void {
-    const wanted = activities.map((a) => `${a.id}:${a.spotsLeft}`).join(",");
-    if (spotActivity.dataset["sig"] === wanted) return;
-    spotActivity.dataset["sig"] = wanted;
-    const keep = spotActivity.value;
-    replace(
-      spotActivity,
-      activities.map((a) =>
-        h("option", { text: a.title, attrs: { value: a.id } }),
-      ),
-    );
-    if (activities.some((a) => a.id === keep)) spotActivity.value = keep;
-    else spotActivity.value = activities[0]?.id ?? "";
-  }
-
-  /**
-   * Who can receive one. A participant on bench for the chosen activity is not
-   * offered — SCORING.md says they cannot receive that activity's awards, and
-   * the server refuses it, so putting them in the list is only a trap.
-   */
-  function renderPeople(source: readonly ScoreRow[], force: boolean): void {
-    const activityId = spotActivity.value;
-    const eligible = source.filter((r) => r.status[activityId] !== "bench");
-    const sig = `${activityId}|${eligible.map((r) => `${r.pid}:${r.nickname}`).join(",")}`;
-    if (!force && sig === personOptions) return;
-    personOptions = sig;
-    const keep = spotPerson.value;
-    replace(
-      spotPerson,
-      eligible.map((r) =>
-        h("option", {
-          // Never innerHTML: the nickname is text on an option, like anywhere.
-          text: `${String(r.playerNumber).padStart(3, "0")}  ${r.nickname}`,
-          attrs: { value: r.pid },
-        }),
-      ),
-    );
-    if (eligible.some((r) => r.pid === keep)) spotPerson.value = keep;
-    else spotPerson.value = eligible[0]?.pid ?? "";
-  }
-
-  function renderSpots(state: RenderState): void {
-    const extras = state.hostExtras;
-    const granted = extras?.spots ?? [];
-    const nameOf = new Map((extras?.scores ?? []).map((r) => [r.pid, r.nickname]));
-    const titleOf = new Map(state.activities.map((a) => [a.id, a.title]));
-
-    setText(
-      spotLeft,
-      activities
-        .map((a) => `${a.title.split(" ")[0] ?? a.id}: ${a.spotsLeft} left`)
-        .join(" · "),
-    );
-
-    // Only when the awards themselves change. A state arrives on every score
-    // the host types, and rebuilding this list would disarm a half-pressed
-    // "Revoke?" under their finger.
-    const sig = granted.map((sp) => `${sp.seq}:${sp.pid}:${sp.reason}`).join("|");
-    if (sig === spotListSig) return;
-    spotListSig = sig;
-
-    replace(
-      spotList,
-      [...granted].reverse().map((sp) => {
-        const revoke = control({
-          label: "revoke",
-          className: "ctl-row ctl-danger",
-          question: "Revoke?",
-          onFire: (c) => opts.issue({ name: "spot.revoke", seq: sp.seq }, c),
-        });
-        return h("li", { class: "sc-spot-row" }, [
-          h("span", {
-            class: "mono sc-spot-activity",
-            text: titleOf.get(sp.activityId) ?? sp.activityId,
-          }),
-          h("span", { class: "sc-spot-who", text: nameOf.get(sp.pid) ?? sp.pid }),
-          h("span", { class: "sc-spot-reason", text: sp.reason }),
-          revoke.el,
-        ]);
-      }),
-    );
-  }
-
-  /** `Ade (Agentic Security TTX) · Grace (Trivia)`, from the grid. */
-  function renderBench(source: readonly ScoreRow[]): void {
-    const titleOf = new Map(activities.map((a) => [a.id, a.title]));
-    const parts: string[] = [];
-    for (const r of source) {
-      for (const a of activities) {
-        if (r.status[a.id] === "bench") {
-          parts.push(`${r.nickname} (${titleOf.get(a.id) ?? a.id})`);
-        }
-      }
-    }
-    setText(benchLine, parts.length === 0 ? "Bench: nobody" : `Bench: ${parts.join(" · ")}`);
-  }
 
   /* ---------------------------------------------------------------- */
 
@@ -651,12 +407,6 @@ export function createScoringPanel(opts: Opts): ScoringPanel {
 
       gridWrap.hidden = lastRows.length === 0;
       gridEmpty.hidden = lastRows.length > 0;
-
-      renderActivities();
-      renderPeople(lastRows, false);
-      renderSpots(state);
-      renderBench(lastRows);
-      syncGrant();
     },
 
     focusFirst() {

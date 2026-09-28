@@ -85,7 +85,7 @@ function metaFor(state: SessionState, at: number): SessionMeta {
 }
 
 const ACTIVITIES: readonly Activity[] = [
-  { id: "trivia", title: "Trivia", kind: "trivia", spotCap: 2 },
+  { id: "trivia", title: "Trivia", kind: "trivia" },
 ];
 
 const QUESTIONS: readonly Question[] = [

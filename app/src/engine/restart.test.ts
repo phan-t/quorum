@@ -8,9 +8,9 @@
  *
  * The expected behaviour here is the contract those two events promise — kept:
  * the session id, the join code, the roster with nicknames and join-order
- * numbers, the loaded question set, the activity list. Cleared: scores, Spot
- * Awards, trivia progress, the arcade, the holding card, the seal, the
- * segment and the join lock. It is asserted field by field rather than by
+ * numbers, the loaded question set, the activity list. Cleared: scores, trivia
+ * progress, the arcade, the holding card, the seal, the segment and the join
+ * lock. It is asserted field by field rather than by
  * comparing against a freshly built session, because "everything is default"
  * and "everything the host needed is still here" are different claims and
  * only one of them is the feature.
@@ -102,7 +102,6 @@ const act = (id: string, kind: Activity["kind"] = "manual"): Activity => ({
   id,
   title: id,
   kind,
-  spotCap: 2,
 });
 
 const ACTIVITIES = [act("ttx"), act("trivia", "trivia"), act("arcade", "arcade")];
@@ -155,8 +154,8 @@ function arcade(s: SessionState): ArcadeState {
 /**
  * The state of a session that has actually been played: a trivia question
  * asked, answered, closed and revealed; a Recruitment round entered, played,
- * ended and revealed; a Spot Award granted; a score typed by hand; the board
- * sealed; the holding card up; joins locked.
+ * ended and revealed; a score typed by hand and another typed and cleared; the
+ * board sealed; the holding card up; joins locked.
  *
  * Every assertion about what a restart *clears* is made against this, so that
  * "the scores are gone" means the scores that were really there and not an
@@ -182,8 +181,8 @@ function played(pids: readonly ParticipantId[] = PIDS): SessionState {
   s = accept(s, [{ type: "endRound" }, { type: "revealRound" }]);
   return accept(s, [
     { type: "setScore", activityId: "ttx", pid: "p1", raw: 12 },
-    { type: "setStatus", activityId: "ttx", pid: "p3", status: "bench" },
-    { type: "grantSpot", pid: "p2", activityId: "ttx", reason: "carried the room" },
+    { type: "setScore", activityId: "ttx", pid: "p3", raw: 4 },
+    { type: "setStatus", activityId: "ttx", pid: "p3", status: "unset" },
     { type: "setHolding", holding: { title: "Back shortly", line: "two minutes" } },
     { type: "setSeal", seal: "sealed" },
     { type: "setJoinsLocked", locked: true },
@@ -202,13 +201,12 @@ const FROM: Readonly<Record<Exclude<SessionPhase, "draft">, () => SessionState>>
 /* ------------------------------------------------------------------ */
 
 describe("a session that has been played", () => {
-  test("really has scores, spots, trivia progress and an arcade on it", () => {
+  test("really has scores, trivia progress and an arcade on it", () => {
     const s = played();
     assert.ok(must(s.scores["trivia"])["p1"], "p1 scored in trivia");
     assert.ok(must(s.scores["arcade"])["p1"], "p1 has an arcade score");
     assert.equal(must(s.scores["ttx"])["p1"]?.raw, 12);
-    assert.equal(must(s.scores["ttx"])["p3"]?.status, "bench");
-    assert.equal(s.spots.length, 1);
+    assert.equal(must(s.scores["ttx"])["p3"]?.status, "unset", "typed and cleared again");
     assert.equal(trivia(s).phase, "revealed");
     assert.ok(Object.keys(trivia(s).totals).length > 0, "trivia totals were banked");
     assert.deepEqual(arcade(s).playerNumbers, { p1: 1, p2: 2, p3: 3 });
@@ -232,7 +230,6 @@ describe("restartSession clears", () => {
           `${a.id} should have no scores left`,
         );
       }
-      assert.deepEqual(s.spots, [], "no Spot Awards left");
       assert.deepEqual(
         computeStandings(s).map((x) => x.total),
         [0, 0, 0],
@@ -461,7 +458,6 @@ describe("reopen", () => {
     assert.equal(s.phase, "running");
     assert.deepEqual(computeStandings(s).map((x) => [x.pid, x.total]), totals);
     assert.deepEqual(s.scores, closed.scores);
-    assert.deepEqual(s.spots, closed.spots);
     assert.deepEqual(s.trivia, closed.trivia);
     assert.deepEqual(s.arcade, closed.arcade);
     assert.deepEqual(s.participants, closed.participants);
@@ -537,7 +533,7 @@ describe("replay", () => {
       { type: "submitAnswer", pid: "p2", answer: "terraform" },
       { type: "endRound" },
       { type: "revealRound" },
-      { type: "grantSpot", pid: "p1", activityId: "ttx", reason: "spotted it" },
+      { type: "setScore", activityId: "ttx", pid: "p1", raw: 6 },
       { type: "setSeal", seal: "sealed" },
       { type: "close" },
       { type: "reopen" },
@@ -562,7 +558,11 @@ describe("replay", () => {
   test("the replay is the state the room ended on, not the one it was wiped from", () => {
     const s = replay(draft(), log());
     assert.equal(s.phase, "running");
-    assert.deepEqual(s.spots, [], "the Spot Award was granted before the wipe");
+    assert.deepEqual(
+      s.scores["ttx"],
+      {},
+      "the hand-typed TTX score was set before the wipe",
+    );
     // Only p2's post-restart answer is on the board. p1 and p3 answered the
     // same question before the wipe and are back to nothing.
     const totals = Object.fromEntries(computeStandings(s).map((x) => [x.pid, x.total]));

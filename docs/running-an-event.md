@@ -201,11 +201,13 @@ Leave streaks and speed bonuses on. They are most of the fun, and normalising
 against the top scorer ([SCORING.md](../SCORING.md)) absorbs the inflated
 numbers.
 
-**If you are running an activity you do not play it**, and you are credited
-your own average for it. Say the Bench Credit rule out loud before the first
-activity — thirty seconds, and it reads as fair up front where it reads as a
-stitch-up at the prize-giving. Do not play anyway "for fun, unscored": the row
-pollutes the export.
+**If you are running an activity you do not play it**, and nothing credits you
+for it — the activity is simply a zero on your row. Say that out loud before the
+first activity. Thirty seconds, and it reads as fair up front where it reads as a
+stitch-up at the prize-giving. There used to be arithmetic for this and there
+is not any more: [SCORING.md](../SCORING.md#removed-spot-awards-and-bench-credit)
+has it written down if a session ever needs it back. Do not play anyway "for fun,
+unscored": the row pollutes the export.
 
 ## When something breaks
 
@@ -214,16 +216,15 @@ It will. None of these is a reason to stop the session.
 - **Somebody cannot get the page to work.** Have them answer in chat and enter
   the score from the console by hand — manual entry is a host action and works
   while any segment is up. Do not stop thirty people to debug one laptop.
-- **Somebody joins twenty minutes late.** They play what is left and are marked
-  bench for the activity they missed, exactly like a facilitator. **Nothing
-  flags them for you** — mark the bench yourself, as they arrive, because an
-  unbenched late joiner is a zero in an activity they were never in and it
-  looks identical to a score nobody has typed yet. Decide this before it
+- **Somebody joins twenty minutes late.** They play what is left, and the
+  activity they missed is a zero. **There is nothing to mark and nothing flags
+  them for you**, so the only handling is what you say: tell the room they came
+  in late and are not in contention for that column. Decide this before it
   happens rather than in front of them.
 - **The server restarts.** It comes back with the session intact in about
   twenty seconds and everyone reconnects by themselves. Answers that arrived in
   the gap are lost, and there is no way to ask the question again: score the
-  people it cost by hand, or bench them for the activity. Say "we'll sort it"
+  people it cost by hand. Say "we'll sort it"
   and keep moving — stopping the room to reconstruct one question costs more
   than the question is worth.
 - **Everything is down.** The activity content is plain text in this
@@ -238,7 +239,7 @@ curl -s "$QUORUM_URL/api/sessions/$SID/export.csv" \
   -H "Authorization: Bearer $HT" -o scores.csv
 ```
 
-Name, every activity's raw score and points, Spot Awards, total — the sheet
+Name, every activity's raw score and points, total — the sheet
 somebody used to keep by hand. The token goes in the header, never the URL. The
 export still works after the session has closed and after a restart, because it
 falls back to the store, but it needs the host token, so pull it while you

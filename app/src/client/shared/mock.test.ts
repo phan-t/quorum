@@ -92,8 +92,9 @@
  *   file. Its first three are things a person watching the demo would see: the
  *   send-off's Auto never advancing a slide, which is the one row in any of these
  *   issues that needed *machinery* rather than a guard; the Spot Award toast
- *   naming somebody the server does not name; and "Clear the card" putting the
- *   session title on the big screen where a real room goes blank. Then a closed
+ *   naming somebody the server does not name, whose whole section came out with
+ *   Spot Awards; and "Clear the card" putting the session title on the big screen
+ *   where a real room goes blank. Then a closed
  *   session that was not frozen, a door with no phase gate and one nickname rule
  *   where the reducer has five, three commands that would still name a kicked
  *   person, a kicked phone still being counted, and the points arithmetic —
@@ -212,7 +213,6 @@ import type {
   UnsealShape,
 } from "../../engine/types.ts";
 import { renderStateFor } from "../../server/views.ts";
-import { spotToastText } from "../../server/runtime.ts";
 import type {
   ClientMessage,
   HostCommand,
@@ -623,8 +623,8 @@ function untilTheLightIs(r: Room, want: "plan" | "apply"): void {
 const T0 = 1_700_000_000_000;
 
 const ACTIVITIES: readonly Activity[] = [
-  { id: "trivia", title: "Trivia", kind: "trivia", spotCap: 2 },
-  { id: "arcade", title: "Hashi Arcade", kind: "arcade", spotCap: 2 },
+  { id: "trivia", title: "Trivia", kind: "trivia" },
+  { id: "arcade", title: "Hashi Arcade", kind: "arcade" },
 ];
 
 /**
@@ -1222,8 +1222,6 @@ describe("the scripted loop holds a beat for as long as the beat takes to play",
         nickname: "",
         total: 0,
         perActivity: {},
-        bench: [],
-        spot: 0,
       })),
     );
     assert.ok(need > 0, "finalRevealMs has stopped pacing anything");
@@ -1560,7 +1558,7 @@ describe("the trivia podium is the people who have played", () => {
    *
    * (#24 reads the rule as "answered correctly". It is not: a wrong tap gets
    * a zero entry, deliberately, because "played and scored nothing" is a
-   * different statement from the absent cell a host benches somebody off.
+   * different statement from the absent cell of a question nobody answered.
    * The fix is to the set, not to a narrower one.)
    */
   it("sends a row per person who played and no more, exactly as the engine does", async (t) => {
@@ -1771,7 +1769,7 @@ describe("the send-off's advanceAt is anchored to the slide, not to the frame", 
    * The mock had no `slideAt` at all and computed `Date.now() + slideMs(...)`
    * inside the projection — so every broadcast reset the countdown to full.
    * Under Auto, a surface drawing it never counted down on the mock, and any
-   * unrelated frame at all — a join, a bot answering, a Spot Award — pushed
+   * unrelated frame at all — a join, a bot answering, a score typed in — pushed
    * the deadline back out. That is exactly the property the field exists to
    * provide, absent from the only place anybody watches the send-off.
    *
@@ -2108,9 +2106,9 @@ describe("the trivia points reach the score grid at the reveal", () => {
    * it is the same two lines: the grid is filled for the people who have a
    * **total**, which is the people who answered, and not for the whole roster
    * at zero. Three of the six here never touch their phone and must stay
-   * `unset` — the empty cell a host benches somebody off. `board()` averages
-   * Bench Credit over the `played` entries, so "played, 0" moves a number as
-   * well as a colour.
+   * `unset`, which normalisation excludes from the ceiling: "played, 0" would put
+   * three people on the board for a question none of them answered, and would
+   * scale the room down against a raw nobody earned.
    */
   it("holds the grid still at the close and moves it at the reveal, as the engine does", async (t) => {
     const r = await room(t, 6);
@@ -2554,11 +2552,10 @@ describe("a round's totals are folded over the people who were in it", () => {
    *
    * The consequence is not arithmetic, it is a cell. A raw of `0` on the
    * console's arcade totals means "played and scored nothing", and an absent
-   * entry means "did not play" — which is the cell a host needs in order to
-   * bench somebody. So the old fold wrote "played, 0" against a person who
-   * arrived after the round and against a person who had left the room, and
-   * "played, 0" also changes Bench Credit, which `board()` averages over the
-   * entries that say `played`.
+   * entry means "did not play". So the old fold wrote "played, 0" against a
+   * person who arrived after the round and against a person who had left the
+   * room, and a "played, 0" is a row on the board and a divisor in the
+   * normalisation that the engine does not have.
    *
    * Both halves in one room, because each catches a different wrong fold:
    *
@@ -5930,135 +5927,6 @@ describe("the send-off walks itself under Auto, as the runtime's slide timer doe
 });
 
 /* ------------------------------------------------------------------ */
-/* #29.2 / #31 — what the Spot Award toast says                        */
-/* ------------------------------------------------------------------ */
-
-describe("the Spot Award toast carries what the server puts on the wire", () => {
-  /**
-   * SPEC.md, "Spot Awards": the reason is "shown as a toast: *Spot Award —
-   * Kenji — best recovery of the afternoon*". Three parts from three places.
-   * The **Spot Award** label is the Desktop's, drawn in its own `.label` span
-   * by `showToast` in screen/main.ts. The reason is the host's, carried as the
-   * toast effect's `detail`. The name is the boundary's: `grantSpot` emits
-   * `subject: event.pid` and `spotToastText` in server/runtime.ts resolves it
-   * against the state it is about to send. So the wire carries `Kenji — <the
-   * reason>` and the room reads the spec's sentence.
-   *
-   * **This scenario has been right, then wrong, then right again, and the
-   * middle step was not a mistake.** This file sent `Spot Award — ${nickname}
-   * — ${reason}`, which on a surface that draws its own label reads "Spot
-   * Award  Spot Award — Player 1 — …": the name was right and the label was
-   * doubled. #29 found the mock and the server disagreeing and matched the
-   * mock *down* to the server's bare reason, which was the correct call for
-   * its scope — the mock is an oracle *for* the server, and a demo that shows
-   * a better toast than the room will get is precisely the lie `?mock=1`
-   * exists not to tell. It filed the server's half as #31 rather than deciding
-   * it in passing. #31 found SPEC.md deciding it: the example names Kenji, so
-   * the nameless toast was a gap, the mock had the name right all along, and
-   * the fix ran back up into `engine/` and `server/`. The doubled label did
-   * **not** come back.
-   *
-   * The audience is checked too, because it is the other half of a toast: the
-   * reducer's effect is `to: "all"` and runtime.ts fans it with `sendAll`, so
-   * the big screen and every phone get it and not just the console.
-   */
-  function toastsOn(wire: Wire): readonly string[] {
-    return wire.frames.flatMap((f) => (f.t === "toast" ? [f.text] : []));
-  }
-
-  /**
-   * The text the runtime would put on the wire for one event's toast effect.
-   *
-   * The boundary's own `spotToastText`, imported rather than reproduced. #29's
-   * version copied runtime.ts's two lines into this file, on the grounds that
-   * the comparison has to reach the wire and not stop at the reducer. It still
-   * does — but a copy is an oracle that agrees with itself, and this one now
-   * composes a name, which is more than an `?? ""` worth of behaviour to keep
-   * in step by hand. Importing it means the mock is compared against the line
-   * the server actually sends. The *reducer* half stays a real `reduce` call:
-   * `subject` and `detail` have to come out of the engine and not out of a
-   * fixture.
-   */
-  function engineToast(state: SessionState, event: Event, at: number): string {
-    const result = reduce(state, event, at);
-    const toast = result.effects.find(
-      (e) => e.kind === "broadcast" && e.what === "toast",
-    );
-    assert.ok(
-      toast !== undefined && toast.kind === "broadcast",
-      "the engine emitted no toast for this event",
-    );
-    assert.equal(toast.to, "all", "the engine's toast is not addressed to the room");
-    // The state *after* the event, which is the one runtime.ts resolves against.
-    return spotToastText(result.state, toast);
-  }
-
-  it("names the recipient and says the reason, exactly as the server does", async (t) => {
-    const REASON = "  asked the question nobody else would  ";
-    const r = await room(t, 3);
-    r.cmd({ name: "start" });
-    const engine = engineRoom(3);
-    const grant: Event = {
-      type: "grantSpot",
-      activityId: "trivia",
-      pid: "p1",
-      reason: REASON,
-    };
-    const real = engineToast(engine, grant, T0);
-    // The server's own answer, spelled out, so this scenario says what it is
-    // claiming rather than only that the two sides agree. Every part matters:
-    // the name is there, the reason is trimmed, and the separator is the em
-    // dash SPEC.md's example uses.
-    const nickname = engineView(engine).roster[0]?.nickname;
-    assert.ok(nickname !== undefined, "the engine's room has no first row");
-    assert.equal(real, `${nickname} — ${REASON.trim()}`, "the server's toast");
-    // And the Desktop's label is *not* in it. This is the half of the old bug
-    // that stays fixed: screen/main.ts draws "Spot Award" itself, so a toast
-    // carrying it would print it twice.
-    assert.ok(
-      !real.includes("Spot Award"),
-      "the toast carries the Desktop's own label, which would print it twice",
-    );
-
-    r.cmd({ name: "spot.grant", activityId: "trivia", pid: "p1", reason: REASON });
-    assert.deepEqual(toastsOn(r.host), [real], "the console's toast");
-    assert.deepEqual(toastsOn(r.screen), [real], "the big screen's toast");
-    // Every phone, not only the one being praised: `to: "all"`. Nothing on a
-    // phone renders it — participant/main.ts passes no `onToast` and net.ts's
-    // call is optional — but the frame is on the wire, and the mock has to put
-    // it on the same wires the server does.
-    for (const [i, phone] of r.phones.entries()) {
-      assert.deepEqual(toastsOn(phone), [real], `phone ${i + 1}'s toast`);
-    }
-  });
-
-  it("names the person it was granted to, not whoever is first on the roster", async (t) => {
-    // The mock looks the pid up, the same as the boundary does. A demo that
-    // hard-wired the star of the scripted loop, or `participants[0]`, would
-    // pass the scenario above and be wrong on every award but one.
-    const REASON = "steadied the whole table";
-    const r = await room(t, 3);
-    r.cmd({ name: "start" });
-    const engine = engineRoom(3);
-    const grant: Event = {
-      type: "grantSpot",
-      activityId: "trivia",
-      pid: "p3",
-      reason: REASON,
-    };
-    const real = engineToast(engine, grant, T0);
-    const third = engineView(engine).roster[2]?.nickname;
-    const first = engineView(engine).roster[0]?.nickname;
-    assert.ok(third !== undefined && first !== undefined, "the engine's room is short");
-    assert.notEqual(third, first, "the fixture's nicknames are not distinct");
-    assert.equal(real, `${third} — ${REASON}`, "the server named the wrong person");
-
-    r.cmd({ name: "spot.grant", activityId: "trivia", pid: "p3", reason: REASON });
-    assert.deepEqual(toastsOn(r.screen), [real], "the big screen's toast");
-  });
-});
-
-/* ------------------------------------------------------------------ */
 /* #29.3 — what "Clear the card" leaves behind                         */
 /* ------------------------------------------------------------------ */
 
@@ -6148,21 +6016,24 @@ describe("a closed session refuses every press the reducer refuses", () => {
    * everything but `disconnect` / `reconnect` / `close` / `reopen` /
    * `restartSession` is refused `session_closed`. `#hostCmd` had no such gate at
    * all, and a probe pressed six buttons after a Close and was acked
-   * `applied: true` on every one — it sealed the scoreboard, granted a Spot
-   * Award, shrank the roster and opened a question in a session the engine had
-   * frozen.
+   * `applied: true` on every one — it sealed the scoreboard, typed a score in,
+   * shrank the roster and opened a question in a session the engine had frozen.
    *
    * **Reachable from the console, not only from the socket**, which is what makes
    * this the one a host walks into. After Close the segment rail and the primary
    * button are disabled in `host/main.ts` and nothing else is: not the scoring
-   * grid, not Spot Award, not kick or release, not seal, not practice, not the
-   * lobby lock. "Close the session, then tidy the scores" is a reasonable thing
-   * to rehearse, and the demo taught that it works.
+   * grid, not kick or release, not seal, not practice, not the lobby lock.
+   * "Close the session, then tidy the scores" is a reasonable thing to rehearse,
+   * and the demo taught that it works.
    *
    * Each press is paired with the engine's answer to the same event *before* the
-   * close, which is the non-vacuity line: every one of these six is an
+   * close, which is the non-vacuity line: every one of these is an
    * `applied: true` in a running session, so a mock that refused them for some
    * other reason would fail that half.
+   *
+   * Six presses until Spot Awards were removed, and the `spot.grant` among them
+   * is now a `score.status` — a second scoring command, so the gate is still
+   * checked against more than one arm of the switch.
    */
   it("answers six presses after a Close the way the reducer answers them", async (t) => {
     const r = await room(t, 3);
@@ -6185,18 +6056,8 @@ describe("a closed session refuses every press the reducer refuses", () => {
         event: { type: "setScore", activityId: "trivia", pid: "p1", raw: 11 },
       },
       {
-        cmd: {
-          name: "spot.grant",
-          activityId: "trivia",
-          pid: "p1",
-          reason: "held the room together",
-        },
-        event: {
-          type: "grantSpot",
-          activityId: "trivia",
-          pid: "p1",
-          reason: "held the room together",
-        },
+        cmd: { name: "score.status", activityId: "trivia", pid: "p1", status: "played" },
+        event: { type: "setStatus", activityId: "trivia", pid: "p1", status: "played" },
       },
       { cmd: { name: "participant.kick", pid: "p2" }, event: { type: "kick", pid: "p2" } },
       { cmd: { name: "practice", on: true }, event: { type: "setPractice", on: true } },
@@ -6472,10 +6333,11 @@ describe("a command naming a kicked or unknown participant is answered as the re
   /**
    * `find_pid` includes kicked people, deliberately — it is how a kicked row is
    * still found for `houseThePairOf` and for the projections that mark it — so
-   * `setScore`, `setStatus` and `grantSpot` have to say `!p || p.kicked`
-   * themselves, which is what the reducer does. Here they asked only `!p`, so the
-   * probe granted a Spot Award to somebody the host had just removed and toasted
-   * it to the whole room.
+   * `setScore` and `setStatus` have to say `!p || p.kicked` themselves, which is
+   * what the reducer does. Here they asked only `!p`. The loudest case was a
+   * third command, `grantSpot`, which granted a Spot Award to somebody the host
+   * had just removed and toasted it to the whole room; Spot Awards are gone and
+   * the two that are left share the rule it broke.
    *
    * The same scenario carries the three idempotence rows beside it, because they
    * are the same lookup from the other end: kicking an unknown pid was a refusal
@@ -6484,7 +6346,7 @@ describe("a command naming a kicked or unknown participant is answered as the re
    * holding. The console reads that difference — `applied: false` is a button
    * that was already where it is, and a refusal is a sentence on the glass.
    *
-   * Six answers, and they are not all the same answer: three refusals with a pid
+   * Five answers, and they are not all the same answer: two refusals with a pid
    * in them, one ack that did something, and three acks that did not.
    */
   it("walks the six, and compares each one", async (t) => {
@@ -6507,24 +6369,9 @@ describe("a command naming a kicked or unknown participant is answered as the re
         event: { type: "setScore", activityId: "trivia", pid: "p2", raw: 7 },
       },
       {
-        what: "benching somebody who has been kicked",
-        cmd: { name: "score.status", activityId: "trivia", pid: "p2", status: "bench" },
-        event: { type: "setStatus", activityId: "trivia", pid: "p2", status: "bench" },
-      },
-      {
-        what: "a Spot Award for somebody who has been kicked",
-        cmd: {
-          name: "spot.grant",
-          activityId: "trivia",
-          pid: "p2",
-          reason: "was here a moment ago",
-        },
-        event: {
-          type: "grantSpot",
-          activityId: "trivia",
-          pid: "p2",
-          reason: "was here a moment ago",
-        },
+        what: "clearing the cell of somebody who has been kicked",
+        cmd: { name: "score.status", activityId: "trivia", pid: "p2", status: "unset" },
+        event: { type: "setStatus", activityId: "trivia", pid: "p2", status: "unset" },
       },
       {
         what: "kicking somebody twice",
@@ -6544,20 +6391,19 @@ describe("a command naming a kicked or unknown participant is answered as the re
     ];
 
     const answers = rows.map((row) => engineAnswer(engine, row.event).answer);
-    // The engine's own six, written out. Three refusals naming the pid and three
-    // acks that changed nothing: a mock that gave one answer to all six — which
+    // The engine's own five, written out. Two refusals naming the pid and three
+    // acks that changed nothing: a mock that gave one answer to all five — which
     // is close to what this file did — cannot pass this line.
     assert.deepEqual(
       answers,
       [
         { kind: "refused", code: "unknown_participant", message: "No participant p2." },
         { kind: "refused", code: "unknown_participant", message: "No participant p2." },
-        { kind: "refused", code: "unknown_participant", message: "No participant p2." },
         { kind: "ack", applied: false },
         { kind: "ack", applied: false },
         { kind: "ack", applied: false },
       ],
-      "the engine's own answers to the six",
+      "the engine's own answers to the five",
     );
     rows.forEach((row, i) => {
       assert.deepEqual(r.attempt(row.cmd), answers[i], row.what);
@@ -6584,12 +6430,15 @@ describe("a command naming a kicked or unknown participant is answered as the re
     assert.deepEqual(
       triviaGrid(r.host.state()),
       triviaGrid(engineView(second.next)),
-      "the score grid after six presses that should have changed nothing",
+      "the score grid after five presses that should have changed nothing",
     );
+    // And the roster, which is where a kick or a release that applied twice would
+    // show. This checked `hostExtras.spots` when there were Spot Awards to grant
+    // to somebody who was not in the room.
     assert.deepEqual(
-      r.host.state().hostExtras?.spots ?? [],
-      engineView(second.next).hostExtras?.spots ?? [],
-      "a Spot Award was granted to somebody who is not in the room",
+      r.host.state().roster,
+      engineView(second.next).roster,
+      "the roster after five presses that should have changed nothing",
     );
   });
 });
@@ -6844,7 +6693,7 @@ describe("the door applies the reducer's nickname rules", () => {
    * The reducer refuses any non-kicked holder of the key, connected or not. This
    * file asked `clash.conn === "on"` and, when the holder was away, **handed the
    * newcomer their row** — their pid, their player number, their raw scores and
-   * their Spot Awards. A door that gives the next arrival the row is a door that
+   * their scores. A door that gives the next arrival the row is a door that
    * makes `participant.release` pointless.
    *
    * **Driven off the scripted director, and it has to be.** Nothing in

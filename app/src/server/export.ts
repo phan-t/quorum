@@ -2,7 +2,7 @@
  * Export: the two files a host takes away from a session.
  *
  * `scoresheet.csv` is the shape of the spreadsheet this service replaces —
- * `Name, <Activity> Raw, <Activity> Pts, …, Spot Awards, TOTAL` — so the
+ * `Name, <Activity> Raw, <Activity> Pts, …, TOTAL` — so the
  * numbers land where whoever has kept the scores for years expects them.
  * Both raw and points are there because the raw column is what makes a
  * normalised score checkable: SCORING.md's rule is one line of arithmetic, and
@@ -45,7 +45,7 @@ export function scoresheetHeader(state: SessionState): string[] {
   for (const a of state.activities) {
     cols.push(`${a.title} Raw`, `${a.title} Pts`);
   }
-  cols.push("Spot Awards", "TOTAL");
+  cols.push("TOTAL");
   return cols;
 }
 
@@ -56,9 +56,12 @@ export function scoresheetHeader(state: SessionState): string[] {
  * nickname was released still appears: they played, the points are theirs, and
  * a phone swap must not cost anyone their afternoon.
  *
- * A bench row reads `bench` in the raw column and carries the credited points,
- * because "no raw score and 80 points" is otherwise the one cell in the file
- * that looks like a mistake.
+ * An activity somebody did not play is empty in both of its columns and
+ * contributes nothing to TOTAL. There used to be a third case: a `bench` row
+ * read `bench` in the raw column and carried the credited points, because "no
+ * raw score and 80 points" is otherwise the one cell in the file that looks
+ * like a mistake. Bench Credit is gone, so two empty cells is the honest
+ * rendering — and the `Spot Awards` column went the same way.
  */
 export function scoresheetCsv(state: SessionState): string {
   const standings = computeStandings(state);
@@ -68,11 +71,10 @@ export function scoresheetCsv(state: SessionState): string {
     const cells: (string | number | null)[] = [s.nickname];
     for (const a of state.activities) {
       const cell = s.perActivity[a.id];
-      if (cell?.source === "bench") cells.push("bench", cell.points);
-      else if (cell?.source === "normalised") cells.push(cell.raw, cell.points);
+      if (cell?.source === "normalised") cells.push(cell.raw, cell.points);
       else cells.push(null, null);
     }
-    cells.push(s.spotPoints, s.total);
+    cells.push(s.total);
     lines.push(csvRow(cells));
   }
 

@@ -163,7 +163,12 @@
   --ttx: var(--terraform-ink);
   --trivia: var(--consul-ink);
   --arcade: var(--nomad-ink);
-  --spot: var(--vault-ink);
+
+  /* Gold, for a trivia streak. This was `--spot`, a fourth activity accent for
+     Spot Awards, drawn on the stacked bar and the Desktop's legend. Spot Awards
+     are gone and the streak counter is the one thing still asking for gold, so
+     the token is named after what uses it. */
+  --streak: var(--vault-ink);
 
   /* Ink for text sitting *on* a product hue — an answer tile, a distribution
      bar's label. Fixed in both themes, because the hue underneath is fixed:
@@ -273,12 +278,12 @@
     --danger: #dc121f;
 
     /* The activity accents are read as text on this theme as well as drawn as
-       bars, so they take the ink. Left on the brand hue they were --spot
-       #ffcf25 on white at 1.48:1 and --trivia #dc477d on --panel-2 at 3.81:1. */
+       bars, so they take the ink. Left on the brand hue --trivia #dc477d was
+       3.81:1 on --panel-2. */
     --ttx: var(--terraform-ink);
     --trivia: var(--consul-ink);
     --arcade: var(--nomad-ink);
-    --spot: var(--vault-ink);
+    --streak: var(--vault-ink);
 
     --arc-players: var(--nomad-ink);
     --arc-staff: var(--consul-ink);
@@ -333,12 +338,12 @@
   --danger: #dc121f;
 
   /* The activity accents are read as text on this theme as well as drawn as
-     bars, so they take the ink. Left on the brand hue they were --spot
-     #ffcf25 on white at 1.48:1 and --trivia #dc477d on --panel-2 at 3.81:1. */
+     bars, so they take the ink. Left on the brand hue --trivia #dc477d was
+     3.81:1 on --panel-2. */
   --ttx: var(--terraform-ink);
   --trivia: var(--consul-ink);
   --arcade: var(--nomad-ink);
-  --spot: var(--vault-ink);
+  --streak: var(--vault-ink);
 
   --arc-players: var(--nomad-ink);
   --arc-staff: var(--consul-ink);
@@ -374,7 +379,7 @@
   --ttx: var(--terraform-ink);
   --trivia: var(--consul-ink);
   --arcade: var(--nomad-ink);
-  --spot: var(--vault-ink);
+  --streak: var(--vault-ink);
 
   --arc-players: var(--nomad-ink);
   --arc-staff: var(--consul-ink);
@@ -413,7 +418,7 @@
   --ttx: var(--terraform-ink);
   --trivia: var(--consul-ink);
   --arcade: var(--nomad-ink);
-  --spot: var(--vault-ink);
+  --streak: var(--vault-ink);
 
   --arc-players: var(--nomad-ink);
   --arc-staff: var(--consul-ink);

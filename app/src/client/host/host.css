@@ -74,7 +74,6 @@ body {
 .rail .label,
 .panel .label,
 .tray-preview > .label,
-.tray-toasts > .label,
 .cp .label {
   font-size: 11px;
 }
@@ -694,24 +693,17 @@ body {
 .h-seg {
   min-width: 0;
 }
-/* Bench Credit, hatched as well as dimmed. Nothing here may be carried by
-   colour alone, and a credited block is not the same claim as a played one. */
-.h-seg-bench {
-  opacity: 0.55;
-  background-image: repeating-linear-gradient(
-    45deg,
-    rgb(0 0 0 / 0.35) 0 2px,
-    transparent 2px 4px
-  );
-}
-
 /* ------------------------------------------------------------ scoring -- */
 
-/* The grid, and the Spot Award box. Dense, mono, tabular: this is the one
-   surface in the product allowed to look like a terminal, and it is read at a
-   glance between sentences. Scoring is not a segment — it sits under whatever
-   segment is up, because manual entry happens while the holding card or the
-   standings are in front of the room. */
+/* The grid. Dense, mono, tabular: this is the one surface in the product allowed
+   to look like a terminal, and it is read at a glance between sentences. Scoring
+   is not a segment — it sits under whatever segment is up, because manual entry
+   happens while the holding card or the standings are in front of the room.
+
+   The Spot Award box was the other half of this block: a form row and a
+   revocable list of what had been granted, plus a bench line above it. Both
+   features are gone — see SCORING.md's "Removed" section — so the block is the
+   head and the grid. */
 
 /*
  * Sized to its rows, and the last thing on the panel to give ground.
@@ -727,21 +719,23 @@ body {
  * of the screen, silently, with nothing to scroll it back. And `min-height:
  * auto` does not save it: Chrome resolves a column flex container's automatic
  * minimum to the full height of its contents, so the item refuses to shrink at
- * all. 272px is the head, the bench line, the Spot Award box and three rows —
- * a floor, tested against a thirty-row grid at 1280 × 800.
+ * all. 128px is the head and three rows — a floor, tested against a thirty-row
+ * grid at 1280 × 800. It was 272px when the head was followed by a bench line
+ * and the Spot Award box; both are gone and the floor came down with them,
+ * because a floor sized for pieces that no longer exist is an empty bordered
+ * box on a short window.
  */
 .scoring {
   flex: 0 30 auto;
   display: flex;
   flex-direction: column;
   gap: 8px;
-  min-height: 272px;
+  min-height: 128px;
   padding-top: 10px;
   border-top: 1px solid var(--line);
 }
 /* Everything in here is a fixed piece except the grid, which is the one thing
-   worth scrolling. Without this the bench line shrank to eight pixels and the
-   Spot Award box was clipped off its own bottom edge. */
+   worth scrolling. Without it the head gave way before the grid did. */
 .scoring > * {
   flex: none;
 }
@@ -786,13 +780,13 @@ body {
  * to the right of Rank and a Name column truncating at 150.
  *
  * `width: 100%` alone is not the fix. A table given a width distributes the
- * slack *proportionally* across every column, which widens # and Spot and
- * Rank for no reason — they hold two or three characters and they are read
+ * slack *proportionally* across every column, which widens # and Rank for no
+ * reason — they hold two or three characters and they are read
  * down, so every pixel they gain is a pixel between the eye and the number.
  * A cell at `width: 100%` takes all the remaining space instead, so the pair
  * of rules below puts the slack in exactly one column by construction. Name
  * goes 150 -> 294 at 1512 and every other column stays where it was: # 30,
- * activities 104, Spot 52, Total 60, Rank 52.
+ * activities 104, Total 60, Rank 52.
  *
  * Names are also the right column to give it to. They are the one thing in
  * the grid that gets truncated on a real roster, and a nickname is how the
@@ -845,7 +839,6 @@ body {
   overflow-wrap: break-word;
   vertical-align: top;
 }
-.sc-th-spot,
 .sc-th-total,
 .sc-th-rank {
   padding-left: 10px;
@@ -857,7 +850,6 @@ body {
   border-radius: 2px;
   margin-right: 6px;
 }
-.sc-th-spot,
 .sc-th-total,
 .sc-th-rank {
   text-align: right;
@@ -933,25 +925,6 @@ body {
   color: var(--nomad-ink);
   font-weight: 600;
 }
-/* Bench Credit shows the credited number — never a blank — and says so. */
-.sc-pts-bench {
-  color: var(--vault-ink);
-}
-.sc-pts-bench::after {
-  content: " B";
-  font-size: 11px;
-  letter-spacing: 0.12em;
-}
-.sc-cell[data-status="bench"] {
-  background-image: repeating-linear-gradient(
-    -45deg,
-    color-mix(in srgb, var(--vault) 10%, transparent) 0,
-    color-mix(in srgb, var(--vault) 10%, transparent) 3px,
-    transparent 3px,
-    transparent 8px
-  );
-}
-
 .sc-acts {
   display: none;
   gap: 2px;
@@ -975,12 +948,6 @@ body {
   color: var(--ink);
   border-color: var(--muted);
 }
-.sc-mini.on {
-  background: var(--sealed);
-  border-color: var(--sealed);
-  color: #2a2205;
-}
-
 /* A refusal belongs in the thing that caused it. This one is a bubble under
    the cell: inline, three seconds, and it never takes focus. */
 .sc-flash {
@@ -1003,7 +970,6 @@ body {
   border-color: var(--danger);
 }
 
-.sc-cell-spot,
 .sc-cell-total,
 .sc-cell-rank {
   text-align: right;
@@ -1028,131 +994,12 @@ body {
 .sc-seg {
   min-width: 0;
 }
-.sc-seg-bench {
-  opacity: 0.55;
-  background-image: repeating-linear-gradient(
-    45deg,
-    rgb(0 0 0 / 0.35) 0 2px,
-    transparent 2px 4px
-  );
-}
-.sc-spot-cell {
-  color: var(--dim);
-  font-size: 11px;
-}
-.sc-has-spot {
-  color: var(--spot);
-  font-weight: 600;
-}
 .sc-total {
   font-weight: 600;
 }
 .sc-rank {
   color: var(--muted);
   font-size: 11px;
-}
-
-.sc-bench-line {
-  margin: 0;
-  font-size: 11px;
-  color: var(--muted);
-  letter-spacing: 0.06em;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-/* ---- the Spot Award box ---- */
-
-.sc-spot {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-.sc-spot-form {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  flex-wrap: wrap;
-}
-.sc-spot-form .label {
-  font-size: 11px;
-}
-.sc-select {
-  height: 26px;
-  max-width: 220px;
-  padding: 0 6px;
-  background: var(--panel);
-  border: 1px solid var(--line);
-  border-radius: 3px;
-  font-size: 11px;
-}
-.sc-reason {
-  flex: 1;
-  min-width: 200px;
-  height: 26px;
-  font-size: 13px;
-}
-.ctl-spot .ctl-button {
-  color: var(--spot);
-  border-color: color-mix(in srgb, var(--spot) 45%, var(--line));
-}
-.sc-spot-left {
-  font-size: 11px;
-  color: var(--muted);
-}
-.sc-spot-note {
-  font-size: 11px;
-  color: var(--dim);
-  letter-spacing: 0.04em;
-}
-/* The reason is mandatory, so the state of "you cannot send this yet" is
-   said in words, not by a button that silently does nothing. */
-.sc-spot-note-warn {
-  color: var(--sealed);
-}
-
-.sc-spot-list {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  max-height: 84px;
-  overflow-y: auto;
-}
-.sc-spot-row {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  font-size: 11px;
-  padding: 2px 4px;
-  border-left: 2px solid var(--spot);
-  background: var(--panel);
-  border-radius: 2px;
-}
-.sc-spot-activity {
-  font-size: 11px;
-  letter-spacing: 0.14em;
-  text-transform: uppercase;
-  color: var(--muted);
-  flex: none;
-}
-.sc-spot-who {
-  font-weight: 600;
-  max-width: 140px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.sc-spot-reason {
-  flex: 1;
-  min-width: 0;
-  color: var(--muted);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
 /* --------------------------------------------------------- the foot -- */
@@ -1426,42 +1273,6 @@ body {
   display: flex;
   flex-direction: column;
   gap: 16px;
-}
-.tray-toasts {
-  flex: 1 1 auto;
-  min-height: 84px;
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-.toasts {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  overflow-y: auto;
-  min-height: 0;
-}
-.toast {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  padding: 6px 8px;
-  background: var(--panel);
-  border-left: 2px solid var(--line);
-  border-radius: 3px;
-  font-size: 13px;
-}
-.toast-spot {
-  border-left-color: var(--spot);
-}
-.toast-kind {
-  font-size: 11px;
-  letter-spacing: 0.18em;
-  text-transform: uppercase;
-  color: var(--muted);
 }
 
 /* ---------------------------------------------------------------- gate -- */

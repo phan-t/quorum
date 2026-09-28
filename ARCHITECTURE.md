@@ -141,10 +141,9 @@ it drifting from them; it came out with #22, which is about exactly that kind
 of drift between the other two. Rows written before then are left alone and
 expire on their own `ttl`.
 
-**Scores and spot awards have no items of their own.** They are fields of the
-session state, so they ride in the `SNAPSHOT` and are derivable from the
-`EVENT#` log, and the CSV export is built from the loaded state rather than
-from a second set of rows. A row per score per activity would be a second
+**Scores have no items of their own.** They are fields of the session state, so
+they ride in the `SNAPSHOT` and are derivable from the `EVENT#` log, and the CSV
+export is built from the loaded state rather than from a second set of rows. A row per score per activity would be a second
 place for the same number to live, and the first time the two disagreed it
 would be in front of a room.
 
@@ -203,10 +202,17 @@ There are **nine** of them, and that is the whole list.
 | `state` | S→C | `seq`, and the whole `RenderState` projected for that role |
 | `roster` | S→all | `seq`, `[{ pid, nickname, playerNumber, conn }]` — `conn` is `on`/`away` |
 | `seal` | S→all | `seq`, `state`: `live`/`sealed`/`revealed` |
-| `toast` | S→all | `seq`, `kind`: `spot`/`text`, `text` |
 | `ack` | S→C | `cid`, `applied` |
 | `refusedCmd` | S→C | `cid`, `code`, `message` — why a host command was refused |
 | `pong` | S→C | `t0`, `t1` — see [clocks](#clocks-and-fairness) |
+
+**There is no `toast` frame any more.** There was one — `seq`, `kind`, `text` —
+and Spot Awards were the only thing that ever produced one. It came out with
+them, along with `Effect`'s `what: "toast"` and its `subject` pid, the Desktop's
+toast bar and the console's toast list. A broadcast channel with no producer is
+not a spare mechanism, it is unreachable code that the next person has to work
+out is unreachable; the frame can come back with whatever needs it, and
+[SCORING.md](SCORING.md#removed-spot-awards-and-bench-credit) says what was here.
 
 **There is no `segment` frame and no `own` frame.** Both were sketched here and
 neither was built, for the reason the trivia deltas below were not: a segment
@@ -423,8 +429,8 @@ One frame carries every console button:
   "title": "Agentic Security TTX", "line": "Ade has the room. Back here at 2:40." } }
 { "t": "host.cmd", "cid": "h43", "cmd": { "name": "seal", "state": "sealed" } }
 { "t": "host.cmd", "cid": "h44", "cmd": { "name": "participant.release", "pid": "p07" } }
-{ "t": "host.cmd", "cid": "h45", "cmd": { "name": "spot.grant", "pid": "p12",
-  "activityId": "trivia", "reason": "best recovery of the afternoon" } }
+{ "t": "host.cmd", "cid": "h45", "cmd": { "name": "score.set", "activityId": "ttx",
+  "pid": "p12", "raw": 17 } }
 ```
 
 The command is an object with a `name`, not a bare string with sibling fields,
@@ -441,7 +447,7 @@ one.
 | Session | `open`, `start`, `close`, `session.reopen`, `session.restart` |
 | Room | `segment`, `holding`, `seal`, `practice`, `lobby.lock` |
 | People | `participant.kick`, `participant.release` |
-| Scoring | `score.set`, `score.status`, `spot.grant`, `spot.revoke` |
+| Scoring | `score.set`, `score.status` |
 | Trivia | `trivia.open`, `trivia.close`, `trivia.reveal`, `trivia.next` |
 | Arcade | `arcade.enter`, `arcade.round`, `arcade.begin`, `arcade.next`, `arcade.nextStep`, `arcade.nextWave`, `arcade.nextPull`, `arcade.end`, `arcade.reveal` |
 | Send-off | `sendoff.next`, `sendoff.back`, `sendoff.auto`, `sendoff.speed` |
@@ -517,7 +523,7 @@ the socket.
 | `GET` | `/api/sessions/:sid/assets/<key>` | — | That asset back, for the Desktop to draw. No token; see below |
 | `GET`/`HEAD` | `/api/sessions/:sid/promo` | — | The promo card. No token; `HEAD` is how the Desktop asks whether there is one to frame |
 | `GET` | `/api/sessions/:sid/setup` | host | The staged console setup, as the text it arrived as. The console asks once, on load |
-| `GET` | `/api/sessions/:sid/export.csv` | host | The scoresheet: `Name, <Activity> Raw, <Activity> Pts, …, Spot Awards, TOTAL` |
+| `GET` | `/api/sessions/:sid/export.csv` | host | The scoresheet: `Name, <Activity> Raw, <Activity> Pts, …, TOTAL` |
 | `GET` | `/api/sessions/:sid/events.jsonl` | host | The event log, for disputes |
 | `GET` | `/healthz` | — | `200 { ok, sessionsLive, socketsOpen, version, store, persist }` |
 | `GET` | `/status` | — | Plain-text version of the above, for humans |
@@ -613,10 +619,10 @@ affected question and a button to ask it again — and none of it exists: no
 event in the engine, no command on the wire, and nothing in the console that
 counts how many answers a gap swallowed. A host who loses answers to a restart
 is holding a question that scored some of the room and not the rest, and the
-only tools for that are the ones any other scoring problem uses: `score.set`
-for a raw number, or `score.status` to bench somebody for the activity. Said
-plainly here because a host who believes in a re-ask button will go looking for
-it at the worst possible moment.
+only tool for that is the one any other scoring problem uses: `score.set` for a
+raw number, or `score.status` to clear the cell back to `unset`. Said plainly
+here because a host who believes in a re-ask button will go looking for it at the
+worst possible moment.
 
 **What is not durable.** Socket-level state (who is connected) is rebuilt
 from reconnects. Rate-limit counters reset. That is fine.
@@ -747,9 +753,9 @@ for the reason there is no bundler: the runtime already does it. A fake clock is
 a number passed to `reduce`, because `reduce` cannot read one.
 
 The bots matter more than they sound. The failure modes that hurt in a live
-room (thirty joins at once, a duplicate nickname, a late arrival, a facilitator
-on bench credit) do not appear with two browser tabs, and a bot swarm is the
-only rehearsal a host can run alone.
+room (thirty joins at once, a duplicate nickname, a late arrival with a zero in
+the activity they missed) do not appear with two browser tabs, and a bot swarm is
+the only rehearsal a host can run alone.
 
 **The bots are not a load test and cannot be pointed at a deployment.** They
 have no network layer at all: events go straight into `reduce`, the clock is a

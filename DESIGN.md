@@ -27,9 +27,10 @@ will be screenshotted side by side and need to read as one product.
   /* semantic */
   --hit: var(--nomad);   --miss: #FF6B5A;
   --live: var(--nomad);  --sealed: var(--vault);  --danger: #FF6B5A;
+  --streak: var(--vault);
 
   /* activity accents — fixed per activity across every surface */
-  --ttx: var(--terraform);  --trivia: var(--consul);  --arcade: var(--nomad);  --spot: var(--vault);
+  --ttx: var(--terraform);  --trivia: var(--consul);  --arcade: var(--nomad);
 }
 ```
 
@@ -183,8 +184,8 @@ seconds between sentences and knows what is happening and what to press.
 │               │  [ Close early ]                  [ Reveal (space) ]│
 │ ─────────     │                                                     │
 │ PARTICIPANTS  ├─────────────────────────────────────────────────────┤
-│ ● Priya   6420│  SPOT AWARDS  trivia 2 left   [ + award ]           │
-│ ● Kenji   5910│  BENCH  Ade (TTX) · Grace (joined late, trivia)│
+│ ● Priya   6420│  SCORES  Priya 100 · 92 · 88 = 280                  │
+│ ● Kenji   5910│  G jumps to the grid · Tab along the row            │
 │ ◐ Sam     4200│                                                     │
 │ …             │  ┌──────────┐  phone preview                        │
 └───────────────┴──┴──────────┴───────────────────────────────────────┘
@@ -222,9 +223,10 @@ seconds between sentences and knows what is happening and what to press.
   the room see right now" without the host switching tabs, which is the
   question the host asks most.
 
-**Manual entry** is a grid: nickname, raw score field, bench toggle, computed
-points in the next column updating as you type, and the top scorer's row
-highlighted so the host sees it land on 100.
+**Manual entry** is a grid: nickname, raw score field, computed points in the
+next column updating as you type, and the top scorer's row highlighted so the
+host sees it land on 100. A cell can be cleared back to `unset`; there is no
+third state, and no per-cell toggle beyond that.
 
 **Paste-mode and Publish are not built.** The design had a match list —
 `"A. Okafor" → Ade Okafor (92%) [✓] [pick…]` — behind a two-step Publish, so a
@@ -233,9 +235,12 @@ exists: each field is its own command and lands as it is typed. See
 [SPEC.md](SPEC.md#manual-entry--the-ttx-and-anything-off-platform) for what
 that costs and why sealing first is the answer for now.
 
-**Spot Award** is a small form: pick a person (typeahead, mono, like the
-existing award box), a required reason, grant. Participants on bench for
-that activity are not in the list.
+**Spot Awards are gone.** This described a small form — pick a person, a required
+reason, grant — as a permanent row on the scoring panel, and a bench line beside
+it. Both are removed, along with the `--spot` accent above:
+[SCORING.md](SCORING.md#removed-spot-awards-and-bench-credit) records what they
+were and the twelve sessions that decided it. The scoring panel is the grid and
+nothing else now, which is the point of the change.
 
 ## Desktop
 
@@ -278,8 +283,7 @@ is about surviving that.
 Five slots, bottom to top, each held for four seconds: 5th, 4th, 3rd, 2nd —
 then a hold on an empty first slot for longer than is comfortable — then the
 winner in display type at 200 px with their total and the activity bar.
-Spot Award toasts that landed during the sealed period replay as a scroll
-above it. Nothing else animates; the arrival of each name is a hard cut with
+Nothing else animates; the arrival of each name is a hard cut with
 the `pop` easing. The host controls the pace with the space bar so they can
 talk over it.
 

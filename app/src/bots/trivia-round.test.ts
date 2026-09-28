@@ -451,8 +451,8 @@ function expectRound(): ExpectedQuestion[] {
 /* ------------------------------------------------------------------ */
 
 const ACTIVITIES: readonly Activity[] = [
-  { id: "ttx", title: "Agentic Security TTX", kind: "manual", spotCap: 2 },
-  { id: "trivia", title: "Trivia", kind: "trivia", spotCap: 2 },
+  { id: "ttx", title: "Agentic Security TTX", kind: "manual" },
+  { id: "trivia", title: "Trivia", kind: "trivia" },
 ];
 
 /** A fixed wall clock: 25 Sep 2026 14:00 UTC. The runtime never reads the real one. */

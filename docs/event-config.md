@@ -80,28 +80,27 @@ two.
 
 ## What the session scores
 
-`activities` is the list of things this event scores: a leaderboard column
-each, a Spot Award budget each, and a term each in the tiebreak.
+`activities` is the list of things this event scores: a leaderboard column each,
+and a term each in the tiebreak.
 
 ```json
 "activities": [
   { "id": "trivia",  "title": "Trivia",       "kind": "trivia" },
   { "id": "arcade",  "title": "Hashi Arcade", "kind": "arcade" },
-  { "id": "ttx",     "title": "Security TTX", "kind": "manual", "spotCap": 2 }
+  { "id": "ttx",     "title": "Security TTX", "kind": "manual" }
 ]
 ```
 
-**Leave it out and the session gets the default set** — trivia and the arcade,
-with two Spot Awards each. That is what every session created before this key
-existed got, and it is what most events want; the key is for the event that
-wants something else.
+**Leave it out and the session gets the default set** — trivia and the arcade.
+That is what every session created before this key existed got, and it is what
+most events want; the key is for the event that wants something else.
 
 | | |
 | --- | --- |
 | `id` | Required. Lowercase letters, digits, `-` and `_`, starting with a letter or a digit, ≤ 32 characters. Unique within the list. |
 | `title` | Required, ≤ 40 characters. What the room, the console and the CSV call it. |
 | `kind` | Required. `trivia`, `arcade` or `manual`. |
-| `spotCap` | Optional, default 2, 0–10. Spot Awards this activity's facilitator may grant. |
+| `spotCap` | **Retired.** Spot Awards are gone, so this sets nothing. Accepted and ignored so that a file written for an earlier version still creates a session — see below. |
 
 **At most one `trivia` and at most one `arcade`.** The engine holds one of each
 — `state.trivia` and `state.arcade` are single slots, not maps keyed by
@@ -136,11 +135,21 @@ activity, or expect staging to stop at step 2.
 
 The whole list is rejected or none of it is, with an error per problem,
 addressed by position — `Activity 3, kind: "trvia" is not an activity kind.` —
-and staging prints those lines rather than the JSON. **Unknown keys are
-errors**: a `"spotcap"` is somebody who believes they set a cap, and silently
-defaulting it to 2 is how a facilitator runs out of awards in front of the
-room. The rules are in `app/src/activities/import.ts`, written to the same
-three rules as the question and send-off importers.
+and staging prints those lines rather than the JSON. **Unknown keys are errors**:
+a `"titel"` is somebody who believes they named the activity, and silently
+defaulting it is how a column ends up called `trivia` on the screen. The rules
+are in `app/src/activities/import.ts`, written to the same three rules as the
+question and send-off importers.
+
+**With one exception, `spotCap`.** It configured the Spot Award budget, Spot
+Awards were removed, and it is now accepted and ignored rather than rejected.
+Every `session.json` written before that change carries it — the example in this
+repository did — and files on disk are not migrated by a deploy. Rejecting it
+would turn "we removed a feature" into "the session will not create", found by
+whoever is staging the event. The value is not read and nothing warns, because
+there is nothing the operator can do about it except delete a key that no longer
+means anything. Retire it — reject it again — once no file anybody stages still
+has it in.
 
 **A session's activities cannot be changed after it is created.** They are
 engine state, fixed at `POST /api/sessions`, and there is no endpoint that
