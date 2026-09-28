@@ -28,7 +28,43 @@ import type {
   WaveSeconds,
 } from "./engine/types.ts";
 
-export const PROTOCOL_VERSION = 1;
+/**
+ * The shape of the frames in this file, as a number the server puts on
+ * `welcome` and every client checks against its own compiled-in copy.
+ *
+ * ## When this moves
+ *
+ * **It moves when a frame's shape narrows or a field is removed. It does not
+ * move when a field is added.**
+ *
+ * The asymmetry is the whole rule, and it is about what an *old* client does
+ * with a *new* server's frame. An old client ignoring a field it has never
+ * heard of is safe — it reads what it knows and the extra key sits there
+ * unread. An old client reading a field that is no longer sent is not: it gets
+ * `undefined` where it expected a value, and the first thing it does with it
+ * throws. #32 is the worked example — `StandingRow` lost `bench` and `spot`,
+ * and `stackedBar`'s `row.bench.includes(...)` threw as soon as any row had
+ * points, which stopped the standings scene updating in front of the room.
+ *
+ * So: narrowing a union, removing a field, tightening a type, changing what a
+ * field means — bump it. Adding an optional field, adding a message type,
+ * adding a member to a union a client switches over with a default — leave it.
+ *
+ * Bumping costs a reload on every surface that was open across the deploy (see
+ * `client/shared/protocol-guard.ts`), which is cheap. Not bumping when the
+ * shape narrowed costs a surface that has silently stopped updating, which is
+ * not.
+ *
+ * ## What the check does not cover
+ *
+ * **It does not fix the deploy it ships in.** The comparison runs in the
+ * client that is already open, and across any given deploy that client is the
+ * *previous* build. A build that adds the check cannot make the build before
+ * it do anything. It closes the gap from the following deploy onward, which
+ * is why `docs/running-an-event.md` still says to reload an open Desktop or
+ * console after a deploy that changes a frame's shape.
+ */
+export const PROTOCOL_VERSION = 2;
 
 export type Role = "participant" | "host" | "screen";
 

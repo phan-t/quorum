@@ -30,6 +30,7 @@ import {
 } from "../../engine/trivia.ts";
 import { h, keyedList, qs, replace, setAttr, setText } from "../shared/dom.ts";
 import { QuorumClient } from "../shared/net.ts";
+import { checkProtocol } from "../shared/protocol-guard.ts";
 import { mockBadge, mockTransport, readMockConfig } from "../shared/mock.ts";
 import {
   ARCADE_ROUND_LABEL,
@@ -198,6 +199,61 @@ const statusBar = h("header", { class: "statusbar" }, [
   elScoreboard,
   elTheme,
 ]);
+
+/* ---- the console is older than the server ---------------------------- */
+
+/**
+ * The console does **not** reload itself, and that is the decision, not an
+ * omission.
+ *
+ * The facilitator is mid-session and driving. A console that reloads while
+ * somebody is typing a reason into the scoring grid, or in the half second
+ * before the space bar lands on the primary, is worse than a console that
+ * waits and says something — the reload takes work away, and the waiting only
+ * costs a stale panel the host can read around. So: a banner that stays up
+ * until it is acted on, a reload control on it, and the host picks the moment
+ * (between segments, which is the same moment the Desktop's version wants).
+ *
+ * The phone's answer is the opposite one, for reasons that are about who is
+ * holding it; see `shared/protocol-guard.ts`, which holds all three.
+ */
+const elStaleText = h("span", { class: "sb-stale-text" });
+let staleRetry: (() => void) | null = null;
+const elStaleGo = handsBackSpace(
+  h("button", {
+    class: "sb-stale-go",
+    type: "button",
+    text: "Reload the console",
+    on: {
+      click: () => {
+        staleRetry?.();
+      },
+    },
+  }),
+);
+const staleBar = h(
+  "div",
+  { class: "sb-stale", attrs: { hidden: true, role: "alert" } },
+  [elStaleText, elStaleGo],
+);
+
+/**
+ * Show it, and keep showing it. `retry` is null once the loop guard has
+ * stopped offering — two reloads into the same mismatch is a console whose
+ * build is not going to get newer by being asked a third time, and a button
+ * that cannot help should not keep implying it can.
+ */
+function showStale(retry: (() => void) | null): void {
+  staleRetry = retry;
+  setText(
+    elStaleText,
+    retry === null
+      ? "This console is still running an older build than the server, and reloading has not fixed it. Whatever is serving this page is stale — the session on the server is not."
+      : "This console is running an older build than the server. Reload it — between segments, not mid-question.",
+  );
+  elStaleGo.hidden = retry === null;
+  staleBar.hidden = false;
+}
 
 const railSegments = h("ul", { class: "rail-list" });
 const railRoster = h("ul", { class: "roster" });
@@ -487,7 +543,11 @@ const drivingView = h("section", { class: "driving-view", attrs: { hidden: true 
 
 const cols = h("div", { class: "cols" }, [rail, panel, trayGrip, tray]);
 
-replace(app, [statusBar, cols, drivingView]);
+// The stale bar sits directly under the status bar and above everything else,
+// which puts it on screen in driving mode too — driving mode hides `cols`, and
+// a host who has turned the rest of the console off is exactly the host who
+// would otherwise never see this.
+replace(app, [statusBar, staleBar, cols, drivingView]);
 
 /* ---- the splitter, by pointer and by key ---- */
 
@@ -5242,6 +5302,24 @@ function roomView(s: RenderState): RenderState {
 client = new QuorumClient({
   hello: () => ({ t: "hello", role: "host", hostToken }),
   ...(mock ? { transport: mockTransport(mock) } : {}),
+
+  // Visible and persistent, never automatic — see `showStale` above.
+  onProtocol: (theirs, ours) =>
+    checkProtocol(
+      {
+        surface: "host",
+        ours,
+        reload: () => {
+          location.reload();
+        },
+        show: showStale,
+        clear: () => {
+          staleRetry = null;
+          staleBar.hidden = true;
+        },
+      },
+      theirs,
+    ),
 
   onState(state) {
     render(state);

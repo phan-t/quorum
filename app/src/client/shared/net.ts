@@ -25,6 +25,8 @@ import type {
   RenderState,
   ServerMessage,
 } from "../../protocol.ts";
+import { PROTOCOL_VERSION } from "../../protocol.ts";
+import type { ProtocolAction } from "./protocol-guard.ts";
 import type { OverUnder, UnsealShape } from "../../engine/types.ts";
 import {
   socketUrl,
@@ -59,6 +61,27 @@ export interface QuorumClientOptions {
   onState?: (state: RenderState) => void;
   onStatus?: (status: ConnStatus, detail: string) => void;
   onWelcome?: (welcome: Welcome) => void;
+  /**
+   * Every `welcome`, with the version the server sent and the one this build
+   * compiled in — the one comparison #33 exists for, and the reason this file
+   * imports `PROTOCOL_VERSION` at all. Nothing under `client/` did until now,
+   * which is what made a constant the server sends on every connection worth
+   * exactly nothing.
+   *
+   * It fires on a match as well as a mismatch. The matching case is what tells
+   * a surface it may forget an earlier mismatch, and a hook that only fired on
+   * the bad case would leave that to each of the three pages to remember.
+   *
+   * Returning `"halt"` stops this client dead: the frame is not processed, no
+   * state is delivered, no pings start, and the socket is closed without a
+   * reconnect. That is what a surface says when it is reloading — rendering a
+   * frame whose shape this build may not understand, in the moment before the
+   * page goes away, is the exact failure being fixed.
+   *
+   * See `protocol-guard.ts` for the three surfaces' answers, and for the limit:
+   * this cannot help the deploy it ships in, only the ones after it.
+   */
+  onProtocol?: (theirs: number, ours: number) => ProtocolAction;
   onRefused?: (reason: RefusedReason, message: string) => void;
   onCommandResult?: (cid: string, result: CommandResult) => void;
 }
@@ -314,6 +337,23 @@ export class QuorumClient {
     this.#reconnectTimer = setTimeout(() => this.#connect(), delay);
   }
 
+  /**
+   * Stop, because the page is being replaced.
+   *
+   * Deliberately the same shape as `stop()` minus the listener teardown: this
+   * is not a dropped socket and must not be reconnected, or the backoff would
+   * race the reload and open a second socket into the same mismatch. `gone` is
+   * the honest status — we stopped on purpose — and it is what the pages
+   * already treat as "not an error to shout about".
+   */
+  #haltForProtocol(): void {
+    this.#stopped = true;
+    this.#clearTimers();
+    this.#transport?.close();
+    this.#transport = null;
+    this.#setStatus("gone", "protocol");
+  }
+
   #onVisible = (): void => {
     if (this.#stopped) return;
     if (document.visibilityState === "hidden") return;
@@ -335,8 +375,26 @@ export class QuorumClient {
   /* ----------------------------------------------------------------- */
 
   #onMessage(msg: ServerMessage): void {
+    // A stopped client renders nothing, whatever is still in flight.
+    //
+    // Closing a WebSocket does not un-queue what the far end already sent, and
+    // `close()` leaves the `message` listener attached, so a frame can arrive
+    // after we have decided not to want any. Before #33 that was harmless —
+    // the only stop was `stop()`, on a page that was leaving anyway. It is not
+    // harmless now: a surface that halted on a protocol mismatch halted
+    // *because* the next frame may be a shape it cannot render, and letting
+    // one through on the way out is the exact failure being fixed.
+    if (this.#stopped) return;
+
     switch (msg.t) {
       case "welcome": {
+        // Before anything else touches this frame. A surface that is about to
+        // reload must not first be handed a state of a shape it may not be
+        // able to render — that throw, escaping into the page, is the bug.
+        if (this.#opts.onProtocol?.(msg.protocol, PROTOCOL_VERSION) === "halt") {
+          this.#haltForProtocol();
+          return;
+        }
         this.#attempt = 0;
         // A first, latency-blind offset so the page is never wildly wrong
         // before the first pong lands.

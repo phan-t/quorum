@@ -165,6 +165,48 @@ body {
   display: none;
 }
 
+/* The console is running an older build than the server (#33).
+
+   Its own bar rather than a chip in the status bar, because unlike
+   RECONNECTING this does not clear itself: it stays until the host reloads,
+   and it carries the control that does the reloading. Full width and under the
+   status bar so it is on screen in driving mode too, which hides everything
+   else. --warning on --panel is 4.6:1 dark and 5.1:1 light; the text is --ink
+   so the sentence itself is never the thing carrying the contrast. */
+.sb-stale {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 14px;
+  background: var(--panel);
+  border-bottom: 2px solid var(--warning);
+  font-size: 13px;
+  color: var(--ink);
+}
+.sb-stale[hidden] {
+  display: none;
+}
+.sb-stale-text {
+  flex: 1;
+  min-width: 0;
+}
+.sb-stale-go {
+  flex: none;
+  background: var(--panel-2);
+  border: 1px solid color-mix(in srgb, var(--warning) 45%, var(--line));
+  border-radius: 4px;
+  padding: 6px 12px;
+  min-height: 31px;
+  font: inherit;
+  color: var(--warning);
+  cursor: pointer;
+  white-space: nowrap;
+}
+.sb-stale-go[hidden] {
+  display: none;
+}
+
 /* ------------------------------------------------------------ layout -- */
 
 /*

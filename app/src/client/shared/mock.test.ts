@@ -219,6 +219,7 @@ import type {
   RenderState,
   ServerMessage,
 } from "../../protocol.ts";
+import { PROTOCOL_VERSION } from "../../protocol.ts";
 import { RECRUITMENT_ITEMS } from "../../arcade/recruitment.ts";
 import { GLASS_BRIDGE_STEPS } from "../../arcade/glass-bridge.ts";
 import { UNSEAL_ITEMS } from "../../arcade/unseal.ts";
@@ -7326,5 +7327,40 @@ describe("the four recorded divergences that a sequence can reach", () => {
       engineView(good.next).sendoff?.autoSeconds,
       "the beat the host chose",
     );
+  });
+});
+
+/**
+ * The demo is this build's server, so it speaks this build's protocol.
+ *
+ * #33 gave every client a check on `welcome.protocol`, and the phone's answer
+ * to a mismatch is to reload itself. The mock fabricates its own `welcome`, and
+ * for the whole life of the file that field was the literal `1` — which was
+ * harmless only for as long as `PROTOCOL_VERSION` was also 1. The moment it
+ * moved, `?mock=1` became a page that reloads itself on open, twice, and then
+ * sits under a banner telling the reader to reload a page that has no server
+ * behind it at all. Nothing else in this file would have noticed: every other
+ * assertion here is about a `state` frame.
+ *
+ * Asserted for all three roles because the mock builds the frame in two places
+ * — `#hello` for the console and the Desktop, `#admit` for a phone — and the
+ * participant path is the one where the consequence is a reload.
+ */
+describe("#33 the mock's welcome carries this build's protocol version", () => {
+  it("on every role's handshake", async (t) => {
+    const r = await room(t, 1);
+    for (const [who, wire] of [
+      ["the console", r.host],
+      ["the Desktop", r.screen],
+      ["a phone", r.phones[0]!],
+    ] as const) {
+      const welcomes = wire.frames.filter((f) => f.t === "welcome");
+      assert.equal(welcomes.length, 1, `${who} was welcomed once`);
+      assert.equal(
+        welcomes[0]?.protocol,
+        PROTOCOL_VERSION,
+        `${who} would reload itself on open against a literal here`,
+      );
+    }
   });
 });
