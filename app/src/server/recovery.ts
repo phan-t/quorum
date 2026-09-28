@@ -452,7 +452,22 @@ function migrateRetiredScoring(
     }
   }
 
-  if (!hasSpots && benched.length === 0) return state;
+  // `spotCap` was a required field on every activity, so all twelve rows in the
+  // table carry one. It is dropped for exactly the reason `spots` is: a field
+  // the type no longer owns still rides every `{ ...state }` and gets re-stamped
+  // at the current version on every boot, so a row would claim version 3 while
+  // carrying a version 2 field for ever. The first pass stripped `spots` on that
+  // argument and left this one, which is the same field in a nested position.
+  //
+  // Not a refusal, and not a note: `import.ts` already accepts `spotCap` in a
+  // `session.json` and discards it — see `RETIRED_ACTIVITY_KEYS` — because
+  // rejecting it would turn a removed feature into a session that will not
+  // create. This is the same decision one layer down.
+  type LooseActivity = SessionState["activities"][number] & { spotCap?: unknown };
+  const activities = state.activities as readonly LooseActivity[];
+  const capped = activities.some((a) => "spotCap" in a);
+
+  if (!hasSpots && benched.length === 0 && !capped) return state;
 
   // As in `migrateSendoff`: the fields decided, the version gets to comment.
   if (claimsField(vintage, NO_RETIRED_SCORING_FROM)) {
@@ -488,7 +503,18 @@ function migrateRetiredScoring(
     nextScores[activityId] = out;
   }
 
-  const next: SessionState & { spots?: unknown } = { ...loose, scores: nextScores };
+  const nextActivities = capped
+    ? activities.map((a) => {
+        const { spotCap: _dropped, ...rest } = a;
+        return rest as SessionState["activities"][number];
+      })
+    : state.activities;
+
+  const next: SessionState & { spots?: unknown } = {
+    ...loose,
+    scores: nextScores,
+    activities: nextActivities,
+  };
   delete next.spots;
   return next;
 }
