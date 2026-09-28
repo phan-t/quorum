@@ -1730,15 +1730,6 @@ function commandToEvent(cmd: HostCommand, runtime: SessionRuntime): Event | null
         pid: cmd.pid,
         status: cmd.status,
       };
-    case "spot.grant":
-      return {
-        type: "grantSpot",
-        pid: cmd.pid,
-        activityId: cmd.activityId,
-        reason: cmd.reason,
-      };
-    case "spot.revoke":
-      return { type: "revokeSpot", seq: cmd.seq };
     case "trivia.open":
       return { type: "openQuestion", suddenDeath: cmd.suddenDeath };
     // The host closing early and the server's timer send the identical event.

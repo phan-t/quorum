@@ -181,9 +181,10 @@ software cannot tell an impostor from a phone swap.
 
 **Late join.** Allowed at any point until the host locks the lobby, and they
 land on whatever is running. Someone who arrives during question 9 plays from
-question 10. For the activity they missed, the host marks them **bench** (see
-Scoring) — the same treatment as a facilitator, decided in advance as the
-virtual playbook already says.
+question 10. The activity they missed scores zero for them and **nothing in the
+software changes that** — see [SCORING.md](SCORING.md#removed-spot-awards-and-bench-credit)
+for the status that used to, and why it went. A late join is something the host
+says out loud, not something the arithmetic absorbs.
 
 **Kick.** Host-only. Kicked participants can rejoin under a different nickname
 unless the lobby is locked.
@@ -240,9 +241,9 @@ back to the holding page, re-run a question, or reveal standings early because
 the TTX overran, and a wizard that insists on step 3 after step 2 is a wizard
 someone fights in front of thirty people.
 
-**Manual score entry and Spot Awards are host actions, not segments.** They
-happen from the console while any segment is up — typically the holding page
-for the TTX, or the standings between activities.
+**Manual score entry is a host action, not a segment.** It happens from the
+console while any segment is up — typically the holding page for the TTX, or the
+standings between activities.
 
 ## Scoring
 
@@ -255,33 +256,23 @@ produces whatever the facilitator typed. Raw numbers are never added across
 activities.
 
 **Normalisation.** For each activity, the top raw score becomes 100 and
-everyone else gets `round(100 × raw ÷ top)`. Participants on bench credit are
-excluded from the `top` calculation. This is computed live, so the standings
-after every activity are already in Huddle Points.
+everyone else gets `round(100 × raw ÷ top)`. A kicked participant is excluded
+from the `top` calculation. This is computed live, so the standings after every
+activity are already in Huddle Points.
 
-**Spot Awards.** 10 points each, granted from the console with a **required
-reason**, which the Desktop shows as a toast: *Spot Award — Kenji — best
-recovery of the afternoon*. The reason is mandatory because the existing
-design says to announce it with one, and a field that may be blank will be
-blank. The cap is two per activity and the console shows how many are left.
+**Score status.** Per participant, per activity, the status is `played` or
+`unset`. `unset` is a cell nobody has typed into; it contributes nothing and
+counts as zero towards a total. There is no third status — see
+[SCORING.md](SCORING.md#removed-spot-awards-and-bench-credit) for the `bench`
+one there used to be, what it credited, and the evidence it went on.
 
-**Raising the cap is not built.** The cap is set per activity when the session
-is created — it is a field on the activity in `session.json` — and a session's
-activities cannot be changed afterwards, so there is no command that raises it
-mid-session and could not be one without making activities mutable. An event
-that wants a bigger budget sets it in the file. The console's counter is
-`spotsLeft`, and when it reaches zero it stays there.
+**Totals.** Sum of normalised points across activities, and nothing else. Three
+activities: 300.
 
-**Bench Credit.** Per participant, per activity, the status is `played`,
-`bench` or `unset`. A `bench` participant is credited the mean of their
-normalised points across activities where they are `played`, recomputed as
-activities complete. Before they have played anything it shows "—". The host
-marks facilitators as bench for their own activity in the setup, and marks late
-joiners on the day. A bench participant for an activity cannot receive that
-activity's Spot Awards; the console will not offer them.
-
-**Totals.** Sum of normalised (or bench) points across activities, plus Spot
-Awards. Three activities: 300 plus up to 60.
+**Spot Awards are gone**, along with Bench Credit. They were 10 points with a
+required reason, granted from the console and toasted on the Desktop, capped per
+activity. Two grants in twelve sessions; removed with the cap, the commands and
+the toast kind. SCORING.md records what they were for.
 
 **Tiebreak for first.** The session config lists activities in tiebreak
 order (for the first huddle: the tabletop exercise first, as the design says).
@@ -901,8 +892,8 @@ gameplay. The Agentic Security TTX is one. So is anything a future event runs
 on a whiteboard.
 
 From the console, the host opens the activity and sees the roster with a raw
-score field per person and a bench toggle. **Type them.** The normalised points
-preview updates as you go, so the host can see the top scorer land on 100.
+score field per person. **Type them.** The normalised points preview updates as
+you go, so the host can see the top scorer land on 100.
 
 Each field is its own `score.set`, and each one lands immediately. There is no
 draft, no Publish and no paste.
@@ -925,7 +916,10 @@ Desktop for as long as it takes to notice, and the fix is to type the right one
 over it. Sealed, nobody sees either. Worth building if an event ever has a
 manual activity with more than a handful of scores.
 
-The facilitator of a manual activity is on bench for it, like any other.
+The facilitator of a manual activity is not scored for it, which now means the
+host simply leaves their cell `unset` and says so out loud. There is no status
+that credits them; see
+[SCORING.md](SCORING.md#removed-spot-awards-and-bench-credit).
 
 ## Holding page
 
@@ -958,16 +952,16 @@ alive without saying anything.
 ## Failure modes that matter at a live event
 
 **Someone joins late.** Covered above: they land on the current segment and
-play from the next question or round; the host marks them bench for what they
-missed.
+play from the next question or round. The activity they missed is a zero.
 
-**The console does not flag them.** This said it did, and nothing records when
-somebody joined relative to an activity or surfaces it anywhere. The host has to
-remember, which is a real thing to get wrong — an unbenched late joiner is a
-zero in an activity they were never in, and it drags their normalised score down
-without anyone noticing until the export. The scoring grid shows `unset` for
-them, which is the signal there is, and it looks identical to a score nobody has
-typed yet.
+**The console does not flag them, and there is no longer anything to flag them
+*for*.** Nothing records when somebody joined relative to an activity or
+surfaces it anywhere, and with Bench Credit removed there is no status that
+would have absorbed the gap either. A late joiner takes a zero in an activity
+they were never in, which drags their normalised total down and shows up as
+`unset` in the scoring grid — identical to a score nobody has typed yet. This is
+now a fact about the product rather than a host who forgot; see
+[SCORING.md](SCORING.md#removed-spot-awards-and-bench-credit).
 
 **A connection drops mid-question.** The answer they submitted before the
 drop counts (it was on the server). A question that closed while they were
@@ -992,8 +986,8 @@ every surface reconnects by itself. Answers that arrived in the gap are lost.
 **There is no re-ask. Not built.** This said the console offered one on the
 affected question; there is no such command, no event for it, and nothing that
 counts how many answers a gap swallowed. A host left holding a question that
-scored some of the room and not the rest has the ordinary scoring tools: a raw
-score typed in by hand, or bench for the activity. Details in
+scored some of the room and not the rest has one ordinary scoring tool: a raw
+score typed in by hand. Details in
 [ARCHITECTURE.md](ARCHITECTURE.md#durability-and-restart).
 
 **Two people pick the same nickname.** The second is refused with a message

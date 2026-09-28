@@ -17,9 +17,11 @@
  *    rejected with addressed errors, rather than creating the session out of
  *    whatever parsed. A session created with three of its four activities is
  *    discovered when the fourth one will not open.
- * 2. **Unknown keys are errors.** A file with `"spotcap"` in it is a file
- *    whose author believes they set a Spot Award cap. Silently defaulting it
- *    to 2 is how a facilitator runs out of awards in front of the room.
+ * 2. **Unknown keys are errors.** A file with `"titel"` in it is a file whose
+ *    author believes they named the activity. Silently defaulting it is how a
+ *    leaderboard column ends up headed `trivia` on the big screen. The one
+ *    exception is `spotCap`, retired rather than rejected — see
+ *    {@link RETIRED_ACTIVITY_KEYS}.
  * 3. **Errors are addressed by position.** `Activity 3, kind: …`, in the
  *    file's own order, so what gets fixed is the entry rather than the guess.
  *
@@ -38,7 +40,25 @@ import type { Activity, ActivityKind } from "../engine/types.ts";
 /* ------------------------------------------------------------------ */
 
 /** Keys an activity may carry. Anything else is rejected. */
-export const ACTIVITY_KEYS = ["id", "title", "kind", "spotCap"] as const;
+export const ACTIVITY_KEYS = ["id", "title", "kind"] as const;
+
+/**
+ * Keys that used to mean something, are accepted, and are read by nothing.
+ *
+ * `spotCap` set an activity's Spot Award budget. Spot Awards were removed, and
+ * rejecting the key would have turned "we removed a feature" into "the session
+ * will not create" — discovered by whoever is staging the event, from a
+ * `session.json` written months earlier and sitting in a repository that no
+ * deploy migrates. The example config in this repository carried it. So it is
+ * read, ignored, and not warned about: there is nothing an operator can do
+ * about it except delete a key that no longer means anything, and an error per
+ * stale key on the one path that creates a session is worse than silence.
+ *
+ * Retiring one of these — moving it back to being an unknown key, which is an
+ * error — needs the same kind of evidence a snapshot shim needs: no file anybody
+ * stages still has it in. `recovery.ts`'s RETIREMENT note is the pattern.
+ */
+export const RETIRED_ACTIVITY_KEYS = ["spotCap"] as const;
 
 /**
  * The kinds the engine actually has, in `ActivityKind`'s own order.
@@ -74,11 +94,10 @@ export const SINGLE_SLOT_KINDS: readonly ActivityKind[] = ["trivia", "arcade"];
  * Lowercase letters, digits, `-` and `_`, starting with a letter or a digit.
  * Narrower than `ActivityId`, which is a bare `string`, because an id is not
  * only a key into `state.scores`: it is an `<option value>` in the console's
- * Spot Award picker, half of the `id:spotsLeft` pairs that picker joins with
- * commas and colons to decide whether it needs redrawing, and a field on every
- * scoring event on the wire. Keeping it to this set means none of those has to
- * think about quoting, and it means `Trivia` and `trivia` cannot be two
- * scoring buckets that read as one on screen.
+ * console's scoring grid, an `<option value>` wherever an activity is picked,
+ * and a field on every scoring event on the wire. Keeping it to this set means
+ * none of those has to think about quoting, and it means `Trivia` and `trivia`
+ * cannot be two scoring buckets that read as one on screen.
  */
 export const ID_PATTERN = /^[a-z0-9][a-z0-9_-]*$/;
 
@@ -101,11 +120,6 @@ export const MAX_TITLE_CHARS = 40;
  * mistake than a validation error can fix.
  */
 export const MAX_ACTIVITIES = 8;
-
-/** Spot Awards a facilitator may grant, when the entry does not say. */
-export const DEFAULT_SPOT_CAP = 2;
-/** 0 is legal and means a facilitator who grants none. */
-export const MAX_SPOT_CAP = 10;
 
 /* ------------------------------------------------------------------ */
 /* Result                                                              */
@@ -149,9 +163,8 @@ export function importActivities(raw: unknown): ActivityImportResult {
       errors: [{ activity: null, field: null, message: "This must be a list of activities." }],
     };
   }
-  // A session that scores nothing has no leaderboard, no Spot Award picker and
-  // no tiebreak — and an empty list is far likelier to be a half-finished edit
-  // than a decision.
+  // A session that scores nothing has no leaderboard and no tiebreak — and an
+  // empty list is far likelier to be a half-finished edit than a decision.
   if (raw.length === 0) {
     return {
       ok: false,
@@ -216,9 +229,10 @@ function readActivity(
     return null;
   }
   for (const key of Object.keys(raw)) {
-    if (!(ACTIVITY_KEYS as readonly string[]).includes(key)) {
-      fail(key, `Nothing reads a "${key}" key. Check the spelling.`);
-    }
+    if ((ACTIVITY_KEYS as readonly string[]).includes(key)) continue;
+    // Silently, and on purpose. See {@link RETIRED_ACTIVITY_KEYS}.
+    if ((RETIRED_ACTIVITY_KEYS as readonly string[]).includes(key)) continue;
+    fail(key, `Nothing reads a "${key}" key. Check the spelling.`);
   }
 
   /* id */
@@ -245,21 +259,8 @@ function readActivity(
   /* kind */
   const kind = readKind(at, raw["kind"], fail, slotsSeen);
 
-  /* spotCap */
-  let spotCap = DEFAULT_SPOT_CAP;
-  const rawCap = raw["spotCap"];
-  if (rawCap !== undefined && rawCap !== null) {
-    if (!isWholeNumber(rawCap) || rawCap < 0) {
-      fail("spotCap", `${JSON.stringify(rawCap)} is not a whole number of awards.`);
-    } else if (rawCap > MAX_SPOT_CAP) {
-      fail("spotCap", `${rawCap} awards; the most is ${MAX_SPOT_CAP}.`);
-    } else {
-      spotCap = rawCap;
-    }
-  }
-
   if (id === null || title === null || kind === null) return null;
-  return { id, title, kind, spotCap };
+  return { id, title, kind };
 }
 
 /**

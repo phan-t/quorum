@@ -29,9 +29,9 @@ service is parked at zero between events and raised with `make up`.
 ## What carries over from the old way
 
 **Scoring** is [SCORING.md](SCORING.md), made automatic. The top scorer in
-each activity gets 100 and everyone else scales from there. Spot Awards are
-10 points and need a reason. Facilitators and late joiners get Bench Credit.
-The service applies those rules without changing them.
+each activity gets 100 and everyone else scales from there, three activities
+make 300, and nothing else adds to a total. The service applies those rules
+without changing them.
 
 **Seal and reveal** is a state rather than a display toggle. While a session
 is sealed, no surface shows cumulative standings. Not the Desktop, not a

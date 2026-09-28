@@ -137,7 +137,7 @@ export function retiredByAge(
  * the row by its fields and ignores the number, and newer code treats anything
  * below {@link SNAPSHOT_SELF_DESCRIBING_VERSION} as unknown vintage.
  */
-export const SNAPSHOT_VERSION = 2;
+export const SNAPSHOT_VERSION = 3;
 
 /**
  * The lowest version a row can claim and be believed.

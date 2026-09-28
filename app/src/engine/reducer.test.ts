@@ -91,8 +91,8 @@ function assertNoOp(before: SessionState, r: { state: SessionState; effects: rea
   assert.deepEqual(r.effects, [], "a no-op emits no effects");
 }
 
-function act(id: string, spotCap = 2): Activity {
-  return { id, title: id, kind: "manual", spotCap };
+function act(id: string): Activity {
+  return { id, title: id, kind: "manual" };
 }
 
 const ACTIVITIES = [act("ttx"), act("trivia"), act("arcade")];
@@ -143,7 +143,6 @@ describe("newSession", () => {
     assert.equal(s.seq, 0);
     assert.equal(s.nextPlayerNumber, 1);
     assert.deepEqual(s.participants, {});
-    assert.deepEqual(s.spots, []);
   });
 
   test("defaults the tiebreak order to the activity order, or takes the one given", () => {
@@ -167,9 +166,7 @@ describe("purity", () => {
   test("no event type mutates the input state, accepted or not", () => {
     const s = accept(running(), [
       { type: "setScore", activityId: "ttx", pid: "p1", raw: 10 },
-      { type: "grantSpot", activityId: "ttx", pid: "p1", reason: "r" },
     ]);
-    const spotSeq = must(s.spots[0]).seq;
     const events: Event[] = [
       join("p9", "New"),
       join("p1"),
@@ -184,11 +181,9 @@ describe("purity", () => {
       { type: "setJoinsLocked", locked: true },
       { type: "setScore", activityId: "ttx", pid: "p2", raw: 5 },
       { type: "setScore", activityId: "nope", pid: "p2", raw: 5 },
-      { type: "setStatus", activityId: "ttx", pid: "p3", status: "bench" },
-      { type: "grantSpot", activityId: "ttx", pid: "p2", reason: "great" },
-      { type: "grantSpot", activityId: "ttx", pid: "p2", reason: "  " },
-      { type: "revokeSpot", seq: spotSeq },
-      { type: "revokeSpot", seq: 999 },
+      { type: "setStatus", activityId: "ttx", pid: "p1", status: "unset" },
+      { type: "setStatus", activityId: "ttx", pid: "p3", status: "unset" },
+      { type: "setStatus", activityId: "ghost", pid: "p1", status: "played" },
       { type: "kick", pid: "p3" },
       { type: "releaseNickname", pid: "p2" },
       { type: "close" },
@@ -198,15 +193,18 @@ describe("purity", () => {
 
   test("is deterministic: the same inputs give deep-equal outputs", () => {
     const s = running();
-    const e: Event = { type: "grantSpot", activityId: "ttx", pid: "p1", reason: "x" };
+    const e: Event = { type: "setScore", activityId: "ttx", pid: "p1", raw: 7 };
     assert.deepEqual(run(s, e, 42), run(s, e, 42));
   });
 
-  test("the clock only reaches state through `now`: joinedAt and spot.at", () => {
+  // This used to check `spot.at` as well, which was the other field a bare
+  // host command stamped a clock onto. Spot Awards are gone and `joinedAt` is
+  // what is left: every other timestamp in the state belongs to a round.
+  test("the clock only reaches state through `now`: joinedAt", () => {
     const s = accept(lobby(), [join("p1")], 1234);
     assert.equal(participant(s, "p1").joinedAt, 1234);
-    const r = run(accept(s, [{ type: "start" }]), { type: "grantSpot", activityId: "ttx", pid: "p1", reason: "r" }, 5678);
-    assert.equal(must(r.state.spots[0]).at, 5678);
+    const later = accept(s, [{ type: "disconnect", pid: "p1" }, join("p1")], 5678);
+    assert.equal(participant(later, "p1").joinedAt, 1234, "a rejoin keeps the original");
   });
 });
 
@@ -510,9 +508,9 @@ describe("kick", () => {
     assertRefused(s, run(s, { type: "setScore", activityId: "ttx", pid: "p3", raw: 7 }), "unknown_participant");
   });
 
-  test("a Spot Award cannot be granted to a kicked participant", () => {
+  test("a status cannot be set for a kicked participant", () => {
     const s = accept(running(), [{ type: "kick", pid: "p3" }]);
-    assertRefused(s, run(s, { type: "grantSpot", activityId: "ttx", pid: "p3", reason: "?" }), "unknown_participant");
+    assertRefused(s, run(s, { type: "setStatus", activityId: "ttx", pid: "p3", status: "played" }), "unknown_participant");
   });
 });
 
@@ -611,7 +609,6 @@ describe("lifecycle", () => {
       accept(running(["p1", "p2"]), [
         { type: "setScore", activityId: "ttx", pid: "p1", raw: 10 },
         { type: "setScore", activityId: "ttx", pid: "p2", raw: 5 },
-        { type: "grantSpot", activityId: "ttx", pid: "p1", reason: "r" },
         { type: "setHolding", holding: { title: "Done", line: "thanks" } },
         { type: "close" },
       ]);
@@ -623,8 +620,7 @@ describe("lifecycle", () => {
       ["setHolding", { type: "setHolding", holding: { title: "x", line: "y" } }],
       ["setScore (existing)", { type: "setScore", activityId: "ttx", pid: "p1", raw: 1 }],
       ["setScore (new)", { type: "setScore", activityId: "trivia", pid: "p2", raw: 1 }],
-      ["setStatus", { type: "setStatus", activityId: "ttx", pid: "p2", status: "bench" }],
-      ["grantSpot", { type: "grantSpot", activityId: "ttx", pid: "p2", reason: "late" }],
+      ["setStatus", { type: "setStatus", activityId: "ttx", pid: "p2", status: "unset" }],
       ["kick", { type: "kick", pid: "p2" }],
       ["releaseNickname", { type: "releaseNickname", pid: "p2" }],
       ["start", { type: "start" }],
@@ -637,12 +633,6 @@ describe("lifecycle", () => {
         assertRefused(s, run(s, e));
       });
     }
-
-    test("revokeSpot is refused after close: the final standings are frozen", () => {
-      const s = closed();
-      const seq = must(s.spots[0]).seq;
-      assertRefused(s, run(s, { type: "revokeSpot", seq }));
-    });
 
     test("standings are literally frozen: totals before and after an attempted score change match", () => {
       const s = closed();
@@ -805,46 +795,45 @@ describe("setScore", () => {
 /* ------------------------------------------------------------------ */
 
 describe("setStatus", () => {
-  test("bench discards the raw score", () => {
+  test("clearing a cell discards the raw score", () => {
     const s = accept(running(), [{ type: "setScore", activityId: "ttx", pid: "p1", raw: 50 }]);
-    const r = run(s, { type: "setStatus", activityId: "ttx", pid: "p1", status: "bench" });
-    assert.deepEqual(score(r.state, "ttx", "p1"), { raw: 0, status: "bench" });
+    const r = run(s, { type: "setStatus", activityId: "ttx", pid: "p1", status: "unset" });
+    assert.deepEqual(score(r.state, "ttx", "p1"), { raw: 0, status: "unset" });
     assert.equal(r.state.seq, s.seq + 1);
     assert.ok(has(r.effects, isBroadcast("standings")));
   });
 
-  test("bench then played does not resurrect the old raw", () => {
+  test("unset then played does not resurrect the old raw", () => {
     const s = accept(running(), [
       { type: "setScore", activityId: "ttx", pid: "p1", raw: 50 },
-      { type: "setStatus", activityId: "ttx", pid: "p1", status: "bench" },
+      { type: "setStatus", activityId: "ttx", pid: "p1", status: "unset" },
       { type: "setStatus", activityId: "ttx", pid: "p1", status: "played" },
     ]);
     assert.notEqual(score(s, "ttx", "p1")?.raw, 50);
   });
 
-  test("bench removes them from the ceiling and credits their average", () => {
+  test("clearing removes them from the ceiling and credits them nothing", () => {
+    // This was the Bench Credit case, and the numbers are the point of the
+    // change: `fac` used to be credited the mean of what they scored elsewhere
+    // — 90 for the activity they ran, so 180 — and is now credited zero for it.
+    // Everyone else's score is identical either way, which is what "applied
+    // after normalisation" meant and is still true of clearing a cell.
     const s = accept(running(["fac", "a", "b"]), [
       { type: "setScore", activityId: "ttx", pid: "fac", raw: 1000 },
       { type: "setScore", activityId: "ttx", pid: "a", raw: 10 },
       { type: "setScore", activityId: "ttx", pid: "b", raw: 5 },
       { type: "setScore", activityId: "trivia", pid: "fac", raw: 90 },
       { type: "setScore", activityId: "trivia", pid: "a", raw: 100 },
-      { type: "setStatus", activityId: "ttx", pid: "fac", status: "bench" },
+      { type: "setStatus", activityId: "ttx", pid: "fac", status: "unset" },
     ]);
     assert.equal(totalOf(s, "a"), 100 + 100);
     assert.equal(totalOf(s, "b"), 50);
-    assert.equal(totalOf(s, "fac"), 90 + 90);
-  });
-
-  test("benching before any score exists is allowed (facilitators are benched in setup)", () => {
-    const s = running(["fac"]);
-    const r = run(s, { type: "setStatus", activityId: "ttx", pid: "fac", status: "bench" });
-    assert.equal(score(r.state, "ttx", "fac")?.status, "bench");
+    assert.equal(totalOf(s, "fac"), 90, "trivia only; nothing for the activity they sat out");
   });
 
   test("the same status again is a no-op", () => {
-    const s = accept(running(), [{ type: "setStatus", activityId: "ttx", pid: "p1", status: "bench" }]);
-    assertNoOp(s, run(s, { type: "setStatus", activityId: "ttx", pid: "p1", status: "bench" }));
+    const s = accept(running(), [{ type: "setScore", activityId: "ttx", pid: "p1", raw: 5 }]);
+    assertNoOp(s, run(s, { type: "setStatus", activityId: "ttx", pid: "p1", status: "played" }));
   });
 
   test("marking unset someone who has no entry is a no-op", () => {
@@ -855,7 +844,7 @@ describe("setStatus", () => {
 
   test("for an activity that does not exist is refused", () => {
     const s = running();
-    assertRefused(s, run(s, { type: "setStatus", activityId: "ghost", pid: "p1", status: "bench" }), "unknown_activity");
+    assertRefused(s, run(s, { type: "setStatus", activityId: "ghost", pid: "p1", status: "unset" }), "unknown_activity");
   });
 
   test("for a participant that does not exist is refused", () => {
@@ -865,207 +854,6 @@ describe("setStatus", () => {
     assert.equal(score(r.state, "ttx", "ghost"), undefined, "no phantom score row");
   });
 });
-
-/* ------------------------------------------------------------------ */
-/* Spot Awards                                                          */
-/* ------------------------------------------------------------------ */
-
-describe("grantSpot", () => {
-  test("records the award with a trimmed reason, worth 10, and toasts everyone", () => {
-    const s = running();
-    const r = run(s, { type: "grantSpot", activityId: "ttx", pid: "p1", reason: "  best recovery  " }, 99);
-    assert.equal(r.state.spots.length, 1);
-    const spot = must(r.state.spots[0]);
-    assert.equal(spot.pid, "p1");
-    assert.equal(spot.activityId, "ttx");
-    assert.equal(spot.reason, "best recovery");
-    assert.equal(spot.at, 99);
-    assert.equal(r.state.seq, s.seq + 1);
-    assert.equal(totalOf(r.state, "p1"), 10);
-    assert.ok(has(r.effects, (e) => e.kind === "broadcast" && e.what === "toast" && e.to === "all"));
-    assert.ok(has(r.effects, isBroadcast("standings")));
-    assert.ok(has(r.effects, isPersist));
-  });
-
-  /**
-   * #31. SPEC.md's toast is "Spot Award — Kenji — best recovery of the
-   * afternoon", so the recipient has to reach a surface — and the effect is
-   * how it gets there. The pid rather than the nickname, because this reducer
-   * is pure and because a name rendered here is a name as of the grant:
-   * `setNickname` moves it and `kick` frees it for the next joiner, and the
-   * event log would keep replaying the old one for ever. server/runtime.ts
-   * resolves it at projection time (`spotToastText`).
-   *
-   * `detail` staying the bare trimmed reason is half the claim, not decoration.
-   * The Desktop draws its own "Spot Award" label and the boundary prepends the
-   * name, so a reducer that helpfully rendered either into `detail` would put
-   * it on the big screen twice.
-   */
-  test("the toast carries the recipient as a pid, and the reason without them", () => {
-    const s = running();
-    const r = run(s, { type: "grantSpot", activityId: "ttx", pid: "p2", reason: "  best recovery  " }, 99);
-    const toast = r.effects.find((e) => e.kind === "broadcast" && e.what === "toast");
-    assert.ok(toast !== undefined && toast.kind === "broadcast", "a toast effect");
-    assert.equal(toast.subject, "p2", "the toast does not say who it is about");
-    assert.equal(toast.detail, "best recovery");
-    // The name is *not* in the rendered half, and the nickname here is a real
-    // one off the roster rather than a literal: if the fixture's nicknames
-    // change this still checks the thing it names.
-    const nickname = participant(r.state, "p2").nickname;
-    assert.ok(
-      !(toast.detail ?? "").includes(nickname),
-      "the nickname is baked into `detail`, which is what `subject` exists to avoid",
-    );
-  });
-
-  /**
-   * The other award's pid, not the first one's, and not the granting host's.
-   * A `subject` hard-wired to anything — `state.participants` order, the last
-   * spot, a constant — passes the test above, which grants to the only
-   * interesting pid in the room.
-   */
-  test("each award's toast names its own recipient", () => {
-    const s = running();
-    const subjects = (["p1", "p3"] as const).map((pid) => {
-      const r = run(s, { type: "grantSpot", activityId: "ttx", pid, reason: "r" }, 99);
-      const toast = r.effects.find((e) => e.kind === "broadcast" && e.what === "toast");
-      assert.ok(toast !== undefined && toast.kind === "broadcast", `a toast effect for ${pid}`);
-      return toast.subject;
-    });
-    assert.deepEqual(subjects, ["p1", "p3"]);
-  });
-
-  test("each award has a distinct seq so it can be revoked individually", () => {
-    const s = accept(running(), [
-      { type: "grantSpot", activityId: "ttx", pid: "p1", reason: "a" },
-      { type: "grantSpot", activityId: "ttx", pid: "p1", reason: "b" },
-    ]);
-    const seqs = s.spots.map((x) => x.seq);
-    assert.equal(new Set(seqs).size, 2);
-  });
-
-  for (const reason of ["", " ", "\t", "\n  \n"]) {
-    test(`with reason ${JSON.stringify(reason)} is refused`, () => {
-      const s = running();
-      const r = run(s, { type: "grantSpot", activityId: "ttx", pid: "p1", reason });
-      assertRefused(s, r, "reason_required");
-      assert.deepEqual(r.state.spots, []);
-    });
-  }
-
-  test("for an activity that does not exist is refused", () => {
-    const s = running();
-    assertRefused(s, run(s, { type: "grantSpot", activityId: "ghost", pid: "p1", reason: "r" }), "unknown_activity");
-  });
-
-  test("for a participant that does not exist is refused", () => {
-    const s = running();
-    assertRefused(s, run(s, { type: "grantSpot", activityId: "ttx", pid: "ghost", reason: "r" }), "unknown_participant");
-  });
-
-  test("a bench participant cannot receive that activity's award", () => {
-    const s = accept(running(), [{ type: "setStatus", activityId: "ttx", pid: "p1", status: "bench" }]);
-    assertRefused(s, run(s, { type: "grantSpot", activityId: "ttx", pid: "p1", reason: "r" }), "bench_cannot_receive_spot");
-  });
-
-  // Its own code, not the Spot Award one: a host typing into a cell someone
-  // else just benched should not be told about awards they never mentioned.
-  test("scoring a benched cell is refused under its own code", () => {
-    const s = accept(running(), [{ type: "setStatus", activityId: "ttx", pid: "p1", status: "bench" }]);
-    assertRefused(s, run(s, { type: "setScore", activityId: "ttx", pid: "p1", raw: 12 }), "bench_cannot_be_scored");
-  });
-
-  test("a bench participant can still receive another activity's award", () => {
-    const s = accept(running(), [{ type: "setStatus", activityId: "ttx", pid: "p1", status: "bench" }]);
-    const r = run(s, { type: "grantSpot", activityId: "trivia", pid: "p1", reason: "r" });
-    assert.deepEqual(rejectCodes(r.effects), []);
-    assert.equal(r.state.spots.length, 1);
-  });
-
-  test("an unset participant (not scored yet) can receive an award", () => {
-    const s = running();
-    const r = run(s, { type: "grantSpot", activityId: "ttx", pid: "p1", reason: "r" });
-    assert.deepEqual(rejectCodes(r.effects), []);
-  });
-
-  test("benching someone after they were awarded removes the award's value for that activity", () => {
-    // SCORING.md: "A participant on bench for an activity cannot receive
-    // that activity's Spot Awards." Grant-then-bench must not be a way
-    // around bench-then-grant.
-    const s = accept(running(), [
-      { type: "grantSpot", activityId: "ttx", pid: "p1", reason: "r" },
-      { type: "setStatus", activityId: "ttx", pid: "p1", status: "bench" },
-    ]);
-    assert.equal(totalOf(s, "p1"), 0);
-  });
-
-  describe("cap", () => {
-    test("default cap is two per activity; the third is refused", () => {
-      const s = accept(running(), [
-        { type: "grantSpot", activityId: "ttx", pid: "p1", reason: "one" },
-        { type: "grantSpot", activityId: "ttx", pid: "p2", reason: "two" },
-      ]);
-      const r = run(s, { type: "grantSpot", activityId: "ttx", pid: "p3", reason: "three" });
-      assertRefused(s, r, "spot_cap_reached");
-      assert.equal(r.state.spots.length, 2);
-    });
-
-    test("is per activity: a full ttx does not block trivia", () => {
-      const s = accept(running(), [
-        { type: "grantSpot", activityId: "ttx", pid: "p1", reason: "one" },
-        { type: "grantSpot", activityId: "ttx", pid: "p2", reason: "two" },
-      ]);
-      const r = run(s, { type: "grantSpot", activityId: "trivia", pid: "p3", reason: "three" });
-      assert.deepEqual(rejectCodes(r.effects), []);
-    });
-
-    test("the host can raise it", () => {
-      const s = accept(running(["p1", "p2", "p3"], [act("ttx", 3)]), [
-        { type: "grantSpot", activityId: "ttx", pid: "p1", reason: "one" },
-        { type: "grantSpot", activityId: "ttx", pid: "p2", reason: "two" },
-        { type: "grantSpot", activityId: "ttx", pid: "p3", reason: "three" },
-      ]);
-      assert.equal(s.spots.length, 3);
-      assertRefused(s, run(s, { type: "grantSpot", activityId: "ttx", pid: "p1", reason: "four" }), "spot_cap_reached");
-    });
-
-    test("a cap of zero refuses every award", () => {
-      const s = running(["p1"], [act("ttx", 0)]);
-      assertRefused(s, run(s, { type: "grantSpot", activityId: "ttx", pid: "p1", reason: "r" }), "spot_cap_reached");
-    });
-
-    test("revoking one frees a slot", () => {
-      const s = accept(running(), [
-        { type: "grantSpot", activityId: "ttx", pid: "p1", reason: "one" },
-        { type: "grantSpot", activityId: "ttx", pid: "p2", reason: "two" },
-      ]);
-      const revoked = accept(s, [{ type: "revokeSpot", seq: must(s.spots[0]).seq }]);
-      assert.equal(revoked.spots.length, 1);
-      assert.equal(totalOf(revoked, "p1"), 0);
-      const r = run(revoked, { type: "grantSpot", activityId: "ttx", pid: "p3", reason: "three" });
-      assert.deepEqual(rejectCodes(r.effects), []);
-    });
-  });
-});
-
-describe("revokeSpot", () => {
-  test("of an unknown seq is a no-op", () => {
-    const s = accept(running(), [{ type: "grantSpot", activityId: "ttx", pid: "p1", reason: "r" }]);
-    assertNoOp(s, run(s, { type: "revokeSpot", seq: 424242 }));
-  });
-
-  test("removes only the named award", () => {
-    const s = accept(running(), [
-      { type: "grantSpot", activityId: "ttx", pid: "p1", reason: "a" },
-      { type: "grantSpot", activityId: "trivia", pid: "p1", reason: "b" },
-    ]);
-    const [first, second] = s.spots;
-    const r = run(s, { type: "revokeSpot", seq: must(first).seq });
-    assert.deepEqual(r.state.spots, [second]);
-    assert.ok(has(r.effects, isBroadcast("standings")));
-  });
-});
-
 /* ------------------------------------------------------------------ */
 /* Replay                                                               */
 /* ------------------------------------------------------------------ */
@@ -1080,12 +868,12 @@ describe("replay", () => {
     { event: { type: "start" }, at: 6 },
     { event: { type: "setSegment", segment: "holding" }, at: 7 },
     { event: { type: "setHolding", holding: { title: "TTX", line: "back at 2:40" } }, at: 8 },
-    { event: { type: "setStatus", activityId: "ttx", pid: "p3", status: "bench" }, at: 9 },
+    { event: { type: "setScore", activityId: "ttx", pid: "p3", raw: 4 }, at: 9 },
     { event: { type: "setScore", activityId: "ttx", pid: "p1", raw: 18 }, at: 10 },
     { event: { type: "setScore", activityId: "ttx", pid: "p2", raw: 14 }, at: 11 },
     { event: { type: "setScore", activityId: "ttx", pid: "p2", raw: 14 }, at: 12 }, // no-op
-    { event: { type: "grantSpot", activityId: "ttx", pid: "p2", reason: "best recovery" }, at: 13 },
-    { event: { type: "grantSpot", activityId: "ttx", pid: "p3", reason: "x" }, at: 14 }, // bench: rejected
+    { event: { type: "setStatus", activityId: "ttx", pid: "p3", status: "unset" }, at: 13 },
+    { event: { type: "setStatus", activityId: "ttx", pid: "p3", status: "unset" }, at: 14 }, // no-op
     { event: { type: "disconnect", pid: "p1" }, at: 15 },
     { event: join("p1", "Priya"), at: 16 },
     { event: { type: "setSeal", seal: "sealed" }, at: 17 },
@@ -1118,8 +906,8 @@ describe("replay", () => {
   test("the replayed standings are the ones the room saw", () => {
     const s = replay(draft(), log);
     const totals = Object.fromEntries(computeStandings(s).map((x) => [x.pid, x.total]));
-    // ttx: p1 18 (100), p2 14 (78), p3 bench. trivia: p1 100, p3 50. spot: p2 +10.
-    // p3's bench credit = mean of [50] = 50.
-    assert.deepEqual(totals, { p1: 200, p2: 88, p3: 100 });
+    // ttx: p1 18 (100), p2 14 (78), p3 scored 4 and then cleared, so unset (0).
+    // trivia: p1 18,400 (100), p3 9,200 (50). Nothing else adds to a total.
+    assert.deepEqual(totals, { p1: 200, p2: 78, p3: 50 });
   });
 });

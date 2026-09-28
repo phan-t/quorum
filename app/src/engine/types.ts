@@ -127,8 +127,16 @@ export interface SendoffState {
 /** Whether cumulative standings are visible. See SPEC.md "Seal and reveal". */
 export type Seal = "live" | "sealed" | "revealed";
 
-/** Per participant, per activity. */
-export type ScoreStatus = "played" | "bench" | "unset";
+/**
+ * Per participant, per activity.
+ *
+ * Two states, not three. There was a `bench` — a facilitator or a late joiner
+ * credited the mean of what they scored elsewhere — and it came out with Bench
+ * Credit, which never fired in twelve sessions. `unset` is a cell nobody has
+ * typed into and it counts as zero towards a total; nothing credits an activity
+ * somebody did not play. See SCORING.md's "Removed" section.
+ */
+export type ScoreStatus = "played" | "unset";
 
 export type ActivityKind = "trivia" | "arcade" | "manual";
 
@@ -136,8 +144,6 @@ export interface Activity {
   readonly id: ActivityId;
   readonly title: string;
   readonly kind: ActivityKind;
-  /** Spot Awards the facilitator of this activity may grant. Default 2. */
-  readonly spotCap: number;
 }
 
 export interface Participant {
@@ -156,15 +162,6 @@ export interface RawScore {
   /** Whatever the activity produced. Never compared across activities. */
   readonly raw: number;
   readonly status: ScoreStatus;
-}
-
-export interface SpotAward {
-  readonly seq: number;
-  readonly pid: ParticipantId;
-  readonly activityId: ActivityId;
-  /** Mandatory. A field that may be blank will be blank. */
-  readonly reason: string;
-  readonly at: number;
 }
 
 export interface HoldingCard {
@@ -399,7 +396,7 @@ export interface SessionState {
    * practice run — and `scores`, and therefore standings, do not move.
    *
    * Deliberately *not* gated: `setScore` and `setStatus`. Those are the host
-   * typing a number in, for the TTX and for bench credit, and a host who does
+   * typing a number in for the TTX, or clearing a cell, and a host who does
    * that during a practice round meant it.
    */
   readonly practice: boolean;
@@ -411,7 +408,6 @@ export interface SessionState {
   readonly participants: Readonly<Record<ParticipantId, Participant>>;
   /** activityId -> pid -> score */
   readonly scores: Readonly<Record<ActivityId, Readonly<Record<ParticipantId, RawScore>>>>;
-  readonly spots: readonly SpotAward[];
   readonly holding: HoldingCard | null;
   /**
    * The loaded question set and where it is. Null until `loadTrivia`.
@@ -1101,7 +1097,7 @@ export type Event =
    * host, screen and rejoin tokens, which live in the runtime. Nobody rejoins
    * and nothing is re-uploaded.
    *
-   * **Clears** every score, every Spot Award, all trivia progress (back to
+   * **Clears** every score, all trivia progress (back to
    * question 1, with the same questions), the arcade entirely, the holding
    * card, the seal, the segment and the join lock.
    *
@@ -1145,8 +1141,6 @@ export type Event =
   // host — scoring
   | { type: "setScore"; activityId: ActivityId; pid: ParticipantId; raw: number }
   | { type: "setStatus"; activityId: ActivityId; pid: ParticipantId; status: ScoreStatus }
-  | { type: "grantSpot"; pid: ParticipantId; activityId: ActivityId; reason: string }
-  | { type: "revokeSpot"; seq: number }
   | { type: "kick"; pid: ParticipantId }
   /** Frees a nickname so a reconnecting participant can retake it. */
   | { type: "releaseNickname"; pid: ParticipantId }
@@ -1261,25 +1255,18 @@ export type Effect =
   | {
       kind: "broadcast";
       to: Audience;
-      what: "state" | "standings" | "toast";
-      detail?: string;
       /**
-       * Who the toast is *about* — not who it goes to, which is `to`. A Spot
-       * Award names its recipient, and SPEC.md settles that it must: "the
-       * Desktop shows as a toast: *Spot Award — Kenji — best recovery of the
-       * afternoon*". The name is not in `detail` because a rendered string is
-       * a snapshot, and both ends of it move: a kicked participant rejoining
-       * takes a *new* nickname on the *same* pid (`join` in reducer.ts), and
-       * `kick` and `releaseNickname` free the old name for a different pid to
-       * join under. Carrying the pid instead lets the projection layer — which
-       * has the state that the engine, being pure, must not reach for — look
-       * the name up as the frame goes out. See `spotToastText` in
-       * server/runtime.ts.
+       * There is no `toast` any more, and no `subject` that went with it.
        *
-       * Only `what: "toast"` uses it; a `state` or `standings` broadcast is
-       * about the room and has no subject.
+       * The only producer of a toast was `grantSpot`, and `subject` existed so
+       * the recipient could reach a surface as a pid rather than as a nickname
+       * frozen into an effect that outlives it. Spot Awards are gone, so both
+       * are gone, and with them the `t: "toast"` frame — see ARCHITECTURE.md.
+       * Whatever needs a room-wide notice next can add it back with a producer
+       * attached; an unreachable one is worse than none. `detail` went the same
+       * way: the toast's reason was the only thing that ever set it.
        */
-      subject?: ParticipantId;
+      what: "state" | "standings";
     }
   | { kind: "persist"; what: "snapshot" | "event" }
   /** `to` is an Audience, not a pid: host commands are rejected to the host. */
@@ -1301,11 +1288,6 @@ export type RejectCode =
   | "wrong_phase"
   /** A raw score that is not a finite, non-negative number. */
   | "invalid_score"
-  | "reason_required"
-  | "bench_cannot_receive_spot"
-  /** A raw score was typed into a cell the host has since benched. */
-  | "bench_cannot_be_scored"
-  | "spot_cap_reached"
   // trivia
   | "no_questions_loaded"
   | "no_arcade_content"

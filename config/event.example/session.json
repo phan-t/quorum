@@ -8,7 +8,7 @@
   "activities": [
     { "id": "trivia", "title": "Trivia", "kind": "trivia" },
     { "id": "arcade", "title": "Hashi Arcade", "kind": "arcade" },
-    { "id": "tabletop", "title": "Tabletop Exercise", "kind": "manual", "spotCap": 3 }
+    { "id": "tabletop", "title": "Tabletop Exercise", "kind": "manual" }
   ],
   "console": {
     "cards": {

@@ -18,7 +18,7 @@ import type { Activity, Event, SendoffContent, SessionState } from "./types.ts";
 import { newSession, reduce } from "./reducer.ts";
 import { buildPlan, longestSlide, partsOf, slideMs, splitMessage } from "./sendoff.ts";
 
-const ACT: Activity[] = [{ id: "trivia", title: "t", kind: "trivia", spotCap: 2 }];
+const ACT: Activity[] = [{ id: "trivia", title: "t", kind: "trivia" }];
 
 function content(over: Partial<SendoffContent> = {}): SendoffContent {
   return {

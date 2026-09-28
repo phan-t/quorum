@@ -21,7 +21,7 @@ Nothing deployed. Everything after this depends on it.
   This is the single most important structural decision in the build: it is what
   makes restart-mid-game recoverable and what makes the rules testable without
   a browser
-- Unit tests for scoring: normalisation, Bench Credit, Spot Awards, ties
+- Unit tests for scoring: normalisation, ties
 - `docker compose` for DynamoDB Local; `npm run dev` with hot reload
 - **The bot harness** (`npm run bots -- 30`). Build this in Phase 0, not later.
   Every phase after this is validated by thirty fake participants, and you will
@@ -78,8 +78,6 @@ Now it is useful even with no games in it.
 - Manual score entry for the TTX and anything off-platform
 - Normalisation to Huddle Points, live
 - Seal and reveal as a real state across all three surfaces
-- Spot Awards with a required reason
-- Bench Credit
 - Desktop surface
 - CSV export at the end of a session
 
@@ -249,10 +247,9 @@ Four things are never explained anywhere a participant can look:
   so its top scorer takes 100 and everyone else scales against them. This is
   the single most confusable thing in the scoring model and the one people
   will ask about at 3:15.
-- **Bench Credit** — why somebody has a score for an activity they ran instead
-  of played.
-- **Spot Awards** — that they exist, are worth 10, and that each facilitator
-  has two.
+- **That an activity you did not play is a zero**, because nothing credits it
+  any more. Bench Credit and Spot Awards were both here and both came out; see
+  [SCORING.md](SCORING.md#removed-spot-awards-and-bench-credit).
 - **That only the top five are ever shown**, and that this is deliberate so
   nobody's name sits at the bottom of a list in front of their team.
 

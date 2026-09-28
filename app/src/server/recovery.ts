@@ -20,7 +20,7 @@
 
 import { newSession, replay } from "../engine/reducer.ts";
 import { buildPlan, DEFAULT_AUTO_SECONDS } from "../engine/sendoff.ts";
-import type { SendoffPhase, SessionState } from "../engine/types.ts";
+import type { Event, RawScore, SendoffPhase, SessionState } from "../engine/types.ts";
 import type { SessionRegistry, SessionRuntime } from "./runtime.ts";
 import {
   REOPEN_WINDOW_MS,
@@ -178,6 +178,17 @@ const SENDOFF_PLAN_FROM = SNAPSHOT_SELF_DESCRIBING_VERSION;
 const UNSEAL_CRACKED_FROM = SNAPSHOT_SELF_DESCRIBING_VERSION;
 
 /**
+ * The first version written *without* `spots` and without a `bench` score
+ * status — the two things Spot Awards and Bench Credit left in the table.
+ *
+ * Sharp, unlike the two above, and the first constant here that can be: the
+ * removal ships with `SNAPSHOT_VERSION` 3, so a row at 3 or better genuinely
+ * cannot carry either field and a row below it may. That still does not make the
+ * version the thing the migration *decides* on — see `migrateRetiredScoring`.
+ */
+const NO_RETIRED_SCORING_FROM = 3;
+
+/**
  * Whether the row's own version says it already carries the field in question.
  *
  * Both halves matter and neither implies the other: an unversioned row cannot
@@ -238,8 +249,12 @@ export function rehydrate(loaded: LoadedSession): {
     );
   }
   const state = replay(
-    migrateUnseal(migrateSendoff(base, vintage, notes), vintage, notes),
-    after.map((e) => ({ event: e.event, at: e.at })),
+    migrateRetiredScoring(
+      migrateUnseal(migrateSendoff(base, vintage, notes), vintage, notes),
+      vintage,
+      notes,
+    ),
+    withoutRetiredEvents(after, notes),
   );
   return { state, from, replayed: after.length, notes };
 }
@@ -373,6 +388,167 @@ function migrateUnseal(
     ...state,
     arcade: { ...arcade, play: { ...play, cracked: {} } },
   };
+}
+
+/**
+ * Take Spot Awards and Bench Credit out of a snapshot written while they existed.
+ *
+ * Twelve live sessions carry one or both: a `spots` array on the state, and a
+ * `scores[activityId][pid].status` of `"bench"`. Both are fields of the session
+ * state, so they ride in the `SNAPSHOT` row, and `recoverSessions` loads every
+ * one of those rows before the server listens.
+ *
+ * **The `spots` array is read by nothing now, and that is not enough.** An
+ * unknown extra field is harmless to read, but a recovered state is written
+ * straight back (see the note in `recoverSessions`), so an array nothing owns
+ * would be copied forward through every `{ ...state }` in the engine and
+ * re-stamped at the current version on every boot — a field that says a row is
+ * newer than it is, forever. It is dropped here instead, once, on the way in.
+ *
+ * **A `bench` status is worse than dead weight.** `ScoreStatus` is now `played`
+ * or `unset`, and a third value that the type says cannot exist reaches the wire
+ * through `scoreRows` in views.ts, lands in the console's `data-status`, and is
+ * excluded from normalisation without any surface saying why. Rewritten to
+ * `unset` with a zeroed raw, which is what `setStatus` writes when a host clears
+ * a cell and the closest honest reading of what a benched cell was: nobody typed
+ * a score here, and nothing credits it. The participant's total changes — that
+ * is the scoring-model change, not a migration bug, and SCORING.md's "Removed"
+ * section is where it is written down.
+ *
+ * The fields decide, the version only comments — `migrateSendoff` has the long
+ * version of why, and it is the lesson of the nine-minute outage. Even with a
+ * sharp `NO_RETIRED_SCORING_FROM`, a row written by code that did not know this
+ * was coming can claim anything.
+ *
+ * Deletable once no row below `NO_RETIRED_SCORING_FROM`, and no row with no
+ * version at all, is left in the table — established by the boot log or the
+ * one-line scan in RETIREMENT above, and quoted in the commit that deletes it.
+ */
+function migrateRetiredScoring(
+  state: SessionState,
+  vintage: Vintage,
+  notes: string[],
+): SessionState {
+  // Cast, because the type no longer has the field and the table is older than
+  // the type. `in` rather than a truthiness test: an empty `spots: []` is still a
+  // field that would be copied forward, and a session that granted none wrote
+  // exactly that.
+  const loose = state as SessionState & { spots?: unknown };
+  const hasSpots = "spots" in loose;
+
+  // `Omit` then widen: intersecting `RawScore` with `{ status: string }` keeps
+  // the narrow union and the comparison below becomes a type error rather than a
+  // question about the table.
+  type LooseScore = Omit<RawScore, "status"> & { status: string };
+  const scores = state.scores as Readonly<
+    Record<string, Readonly<Record<string, LooseScore>>>
+  >;
+  const benched: string[] = [];
+  for (const activityId of Object.keys(scores)) {
+    const bucket = scores[activityId];
+    if (!bucket) continue;
+    for (const pid of Object.keys(bucket)) {
+      if (bucket[pid]?.status === "bench") benched.push(`${activityId}/${pid}`);
+    }
+  }
+
+  if (!hasSpots && benched.length === 0) return state;
+
+  // As in `migrateSendoff`: the fields decided, the version gets to comment.
+  if (claimsField(vintage, NO_RETIRED_SCORING_FROM)) {
+    notes.push(
+      `snapshot is version ${vintage.version}, which should carry neither spots nor a ` +
+        `bench status, and carries ${hasSpots ? "spots" : "no spots"} and ${benched.length} ` +
+        `bench cell(s) (migrated anyway; NO_RETIRED_SCORING_FROM=${NO_RETIRED_SCORING_FROM} may be wrong)`,
+    );
+  }
+
+  if (hasSpots) {
+    const count = Array.isArray(loose.spots) ? loose.spots.length : "an unreadable";
+    notes.push(`dropped ${count} Spot Award(s): the feature was removed`);
+  }
+  if (benched.length > 0) {
+    notes.push(
+      `cleared ${benched.length} Bench Credit cell(s) to unset (${benched.join(", ")}): ` +
+        `the feature was removed, so the activity is worth nothing rather than a credited mean`,
+    );
+  }
+
+  const nextScores: Record<string, Record<string, RawScore>> = {};
+  for (const activityId of Object.keys(scores)) {
+    const bucket = scores[activityId];
+    if (!bucket) continue;
+    const out: Record<string, RawScore> = {};
+    for (const pid of Object.keys(bucket)) {
+      const cell = bucket[pid];
+      if (!cell) continue;
+      out[pid] =
+        cell.status === "bench" ? { raw: 0, status: "unset" } : (cell as RawScore);
+    }
+    nextScores[activityId] = out;
+  }
+
+  const next: SessionState & { spots?: unknown } = { ...loose, scores: nextScores };
+  delete next.spots;
+  return next;
+}
+
+/**
+ * Drop the events the engine no longer has a case for, before they are replayed.
+ *
+ * This is the half of the removal that can actually take the service down, and
+ * it is the shape of #16 exactly. `reduce` switches on `event.type` with no
+ * `default` arm — the switch is exhaustive over `Event`, which is the right way
+ * to write it — so an event type the engine has never heard of falls off the end
+ * and `reduce` returns `undefined`. `replay` then reads `.state` off that, which
+ * is a TypeError inside `recoverSessions`, before the server listens. Under ECS
+ * that is a restart that recovers the same row, and it took the service down for
+ * nine minutes the last time it happened.
+ *
+ * A snapshot normally covers everything, so the tail is "none or one" — but the
+ * one can be a `grantSpot`, and a row with no snapshot at all replays its whole
+ * log, which for any session that used Spot Awards is full of them.
+ *
+ * - `grantSpot` and `revokeSpot` are dropped. There is nothing left for them to
+ *   write, and the points they carried are not in the model any more.
+ * - `setStatus` with `status: "bench"` is rewritten to `unset`, which is what
+ *   `migrateRetiredScoring` does to a stored bench cell. One mapping for both
+ *   paths, so a session recovered from a snapshot and the same session recovered
+ *   from its log do not end up on different totals.
+ *
+ * Every drop and rewrite is in `notes`, because a recovery that silently
+ * discarded events would be indistinguishable from a store that lost them.
+ */
+function withoutRetiredEvents(
+  events: readonly { readonly event: Event; readonly at: number }[],
+  notes: string[],
+): { event: Event; at: number }[] {
+  // The cast is the point: these types are gone from `Event`, and what is in the
+  // log is whatever the deploy before this one wrote.
+  const out: { event: Event; at: number }[] = [];
+  let dropped = 0;
+  let rewritten = 0;
+  for (const e of events) {
+    const type = (e.event as { type?: unknown } | null | undefined)?.type;
+    if (type === "grantSpot" || type === "revokeSpot") {
+      dropped += 1;
+      continue;
+    }
+    const loose = e.event as { type?: unknown; status?: unknown };
+    if (type === "setStatus" && loose.status === "bench") {
+      rewritten += 1;
+      out.push({ event: { ...(e.event as object), status: "unset" } as Event, at: e.at });
+      continue;
+    }
+    out.push({ event: e.event, at: e.at });
+  }
+  if (dropped > 0) {
+    notes.push(`skipped ${dropped} retired Spot Award event(s) in the replayed tail`);
+  }
+  if (rewritten > 0) {
+    notes.push(`rewrote ${rewritten} bench setStatus event(s) to unset in the replayed tail`);
+  }
+  return out;
 }
 
 /**

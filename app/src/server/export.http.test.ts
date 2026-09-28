@@ -59,8 +59,11 @@ function makeSession() {
     { type: "setScore", activityId: "trivia", pid: "p2", raw: 9200 },
     now,
   );
+  // A second activity scored by hand, so the log has more than one kind of
+  // scoring event in it and the CSV has a row with two filled columns. This was
+  // a `grantSpot`; Spot Awards are gone.
   created.runtime.apply(
-    { type: "grantSpot", pid: "p2", activityId: "trivia", reason: "best question" },
+    { type: "setScore", activityId: "arcade", pid: "p2", raw: 6 },
     now,
   );
   return created;
@@ -85,11 +88,11 @@ describe("GET /api/sessions/:sid/export.csv", () => {
     const lines = (await res.text()).trimEnd().split("\r\n");
     assert.equal(
       lines[0],
-      "Name,Trivia Raw,Trivia Pts,Hashi Arcade Raw,Hashi Arcade Pts,Spot Awards,TOTAL",
+      "Name,Trivia Raw,Trivia Pts,Hashi Arcade Raw,Hashi Arcade Pts,TOTAL",
     );
-    assert.equal(lines[1], "Priya,18400,100,,,0,100");
     // A comma in a nickname is quoted rather than shifting every column right.
-    assert.equal(lines[2], '"Lee, the host",9200,50,,,10,60');
+    assert.equal(lines[1], '"Lee, the host",9200,50,6,100,150');
+    assert.equal(lines[2], "Priya,18400,100,,,100");
   });
 
   it("refuses with no token", async () => {
@@ -147,12 +150,14 @@ describe("GET /api/sessions/:sid/events.jsonl", () => {
     );
     assert.deepEqual(
       parsed.map((p) => p.type),
-      ["open", "start", "join", "join", "setScore", "setScore", "grantSpot"],
+      ["open", "start", "join", "join", "setScore", "setScore", "setScore"],
     );
     // The detail a dispute is actually settled on.
-    const spot = parsed.find((p) => p.type === "grantSpot");
-    assert.equal(spot.event.reason, "best question");
-    assert.equal(spot.event.pid, "p2");
+    const scored = parsed.filter((p) => p.type === "setScore");
+    assert.deepEqual(
+      scored.map((p) => [p.event.activityId, p.event.pid, p.event.raw]),
+      [["trivia", "p1", 18400], ["trivia", "p2", 9200], ["arcade", "p2", 6]],
+    );
   });
 
   it("is host-only too", async () => {

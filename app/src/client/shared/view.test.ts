@@ -98,9 +98,9 @@ import type {
 } from "../../protocol.ts";
 
 const ACTIVITIES: readonly ActivitySummary[] = [
-  { id: "ttx", title: "Agentic Security TTX", kind: "manual", spotCap: 2, spotsLeft: 2 },
-  { id: "trivia", title: "Trivia", kind: "trivia", spotCap: 2, spotsLeft: 1 },
-  { id: "arcade", title: "Hashi Arcade", kind: "arcade", spotCap: 2, spotsLeft: 2 },
+  { id: "ttx", title: "Agentic Security TTX", kind: "manual" },
+  { id: "trivia", title: "Trivia", kind: "trivia" },
+  { id: "arcade", title: "Hashi Arcade", kind: "arcade" },
 ];
 
 describe("activityHue", () => {
@@ -120,8 +120,9 @@ describe("activityHue", () => {
   it("cycles the product hues for an activity it has never heard of", () => {
     const hue = activityHue({ id: "whiteboard", kind: "something-new" }, 1);
     assert.equal(hue, "var(--consul)");
-    // Never invisible, and never the same as the Spot Award gold.
-    assert.notEqual(hue, "var(--spot)");
+    // Never invisible. This also checked it was never the Spot Award gold,
+    // `var(--spot)`, which no longer exists as a token or as a segment.
+    assert.notEqual(hue, "transparent");
   });
 
   it("labels an activity by id, short and tabular", () => {
@@ -160,45 +161,34 @@ describe("pointsStrip", () => {
 });
 
 describe("stackedBar", () => {
-  const row = {
-    perActivity: { ttx: 100, trivia: 80, arcade: null },
-    bench: ["trivia"],
-    spot: 10,
-  };
+  const row = { perActivity: { ttx: 100, trivia: 80, arcade: null } };
 
-  it("draws a block per scored activity, then the Spot Awards", () => {
-    const segs = stackedBar(row, ACTIVITIES, 190);
-    assert.deepEqual(segs.map((s) => s.key), ["ttx", "trivia", "spot"]);
-    assert.deepEqual(segs.map((s) => s.points), [100, 80, 10]);
-    assert.equal(segs[2]?.hue, "var(--spot)");
-  });
-
-  it("marks the credited block as bench, so it can be drawn differently", () => {
-    const segs = stackedBar(row, ACTIVITIES, 190);
-    assert.equal(segs[0]?.bench, false);
-    assert.equal(segs[1]?.bench, true);
+  it("draws a block per scored activity and nothing else", () => {
+    // There was a fourth block on the end of this, keyed `spot` and gold, and a
+    // `bench` flag on the second one that drew it hatched. Both features are
+    // gone, so a bar is exactly the activities somebody has points in.
+    const segs = stackedBar(row, ACTIVITIES, 180);
+    assert.deepEqual(segs.map((s) => s.key), ["ttx", "trivia"]);
+    assert.deepEqual(segs.map((s) => s.points), [100, 80]);
+    assert.deepEqual(segs.map((s) => s.hue), ["var(--ttx)", "var(--trivia)"]);
   });
 
   it("scales against the leader, so rows compare to each other", () => {
-    const leader = stackedBar(row, ACTIVITIES, 190);
-    // 100 of a 190-point leader is a bar just over half the width.
-    assert.ok(Math.abs((leader[0]?.percent ?? 0) - 52.63) < 0.01);
+    const leader = stackedBar(row, ACTIVITIES, 180);
+    // 100 of a 180-point leader is a bar just over half the width.
+    assert.ok(Math.abs((leader[0]?.percent ?? 0) - 55.56) < 0.01);
     const sum = leader.reduce((n, s) => n + s.percent, 0);
     assert.ok(Math.abs(sum - 100) < 0.01, "the leader's own bar fills the width");
   });
 
   it("never draws a positive contribution too small to see", () => {
-    const tiny = stackedBar(
-      { perActivity: { ttx: 1 }, bench: [], spot: 0 },
-      ACTIVITIES,
-      1000,
-    );
+    const tiny = stackedBar({ perActivity: { ttx: 1 } }, ACTIVITIES, 1000);
     assert.equal(tiny[0]?.percent, 1);
   });
 
   it("draws nothing at all when nothing has been scored", () => {
     assert.deepEqual(
-      stackedBar({ perActivity: { ttx: null }, bench: [], spot: 0 }, ACTIVITIES, 0),
+      stackedBar({ perActivity: { ttx: null } }, ACTIVITIES, 0),
       [],
     );
   });
@@ -211,8 +201,6 @@ describe("the final reveal's pace", () => {
       nickname: `player ${i + 1}`,
       total: 100 - i,
       perActivity: { ttx: 100 - i },
-      bench: [],
-      spot: 0,
     }));
 
   it("lands the winner when the Desktop's climb and hold are both over", () => {

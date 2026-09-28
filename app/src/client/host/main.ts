@@ -233,10 +233,10 @@ const primary = primaryControl((c) => {
 });
 
 /**
- * Scoring is not a segment. Manual entry and Spot Awards happen from the
- * console while whatever segment is up stays up — typically the holding card
- * during the TTX, or the standings between activities — so the grid lives
- * below the segment body rather than replacing it.
+ * Scoring is not a segment. Manual entry happens from the console while whatever
+ * segment is up stays up — typically the holding card during the TTX, or the
+ * standings between activities — so the grid lives below the segment body rather
+ * than replacing it.
  */
 const scoring = createScoringPanel({ issue: (cmd, from) => issue(cmd, from) });
 
@@ -299,7 +299,6 @@ const preview = createParticipantView({
   // one. It must not be able to answer the question the host is running.
   now: () => client?.now() ?? Date.now(),
 });
-const toastList = h("ul", { class: "toasts" });
 const previewFrame = h("div", { class: "preview-frame" }, [preview.root]);
 const previewBox = h("div", { class: "tray-preview" }, [
   h("p", { class: "label", text: "Participant preview" }),
@@ -337,11 +336,11 @@ const trayControls = h("section", {
 const tray = h("aside", { class: "tray" }, [
   previewBox,
   h("div", { class: "tray-body" }, [
+    // The tray had a "Recent" list of the last five toasts under these
+    // controls. Spot Awards were the only thing that ever produced one, so the
+    // list, the `t: "toast"` frame it read and the effect behind it all came out
+    // together — see ARCHITECTURE.md.
     trayControls,
-    h("div", { class: "tray-toasts" }, [
-      h("p", { class: "label", text: "Recent" }),
-      toastList,
-    ]),
   ]),
 ]);
 
@@ -766,7 +765,7 @@ const restartPanel = h(
     h("p", { class: "label rs-label", text: "Restart session" }),
     h("p", {
       class: "rs-loses",
-      text: "This wipes every score, every Spot Award, and everything the arcade has done. It cannot be undone.",
+      text: "This wipes every score and everything the arcade has done. It cannot be undone.",
     }),
     restartKeeps,
     h("div", { class: "rs-row" }, [
@@ -4606,14 +4605,14 @@ function render(s: RenderState): void {
               { class: "h-bar" },
               stackedBar(row, s.activities, top).map((seg) =>
                 h("div", {
-                  class: seg.bench ? "h-seg h-seg-bench" : "h-seg",
+                  class: "h-seg",
                   attrs: {
                     style: `flex-basis:${seg.percent}%;background-color:${seg.hue}`,
                     // Not announced — the total beside it is the fact — but it
                     // makes the DOM legible to anyone inspecting a recording,
                     // and it is what the Desktop does.
                     "data-activity": seg.key,
-                    title: `${seg.label}: ${seg.points}${seg.bench ? " (bench credit)" : ""}`,
+                    title: `${seg.label}: ${seg.points}`,
                   },
                 }),
               ),
@@ -5236,15 +5235,6 @@ function roomView(s: RenderState): RenderState {
   };
 }
 
-function addToast(kind: "spot" | "text", text: string): void {
-  const li = h("li", { class: `toast toast-${kind}` }, [
-    h("span", { class: "mono toast-kind", text: kind }),
-    h("span", { class: "toast-text", text }),
-  ]);
-  toastList.insertBefore(li, toastList.firstChild);
-  while (toastList.childElementCount > 5) toastList.lastElementChild?.remove();
-}
-
 /* ------------------------------------------------------------------ */
 /* Wiring                                                              */
 /* ------------------------------------------------------------------ */
@@ -5273,10 +5263,6 @@ client = new QuorumClient({
         h("p", { class: "gate-note", text: `${reason}: ${message}` }),
       ]),
     ]);
-  },
-
-  onToast(kind, text) {
-    addToast(kind, text);
   },
 
   onCommandResult(cid, result) {

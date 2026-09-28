@@ -14,7 +14,7 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 
-import { newSession } from "../engine/reducer.ts";
+import { newSession, replay } from "../engine/reducer.ts";
 import { computeStandings } from "../engine/scoring.ts";
 import { Persister } from "./persist.ts";
 import {
@@ -52,7 +52,7 @@ function freshSession(store: MemoryStore) {
   return { registry, persister, created, sid: created.runtime.state.sid };
 }
 
-/** A session with two players, scores, a spot award and a sealed board. */
+/** A session with two players, scores in two activities and a sealed board. */
 async function playAnAfternoon(store: MemoryStore) {
   const s = freshSession(store);
   const { runtime } = s.created;
@@ -64,10 +64,7 @@ async function playAnAfternoon(store: MemoryStore) {
   const token = runtime.issueRejoinToken("p1");
   runtime.apply({ type: "setScore", activityId: "trivia", pid: "p1", raw: 18400 }, now);
   runtime.apply({ type: "setScore", activityId: "trivia", pid: "p2", raw: 14720 }, now);
-  runtime.apply(
-    { type: "grantSpot", pid: "p2", activityId: "trivia", reason: "best recovery" },
-    now,
-  );
+  runtime.apply({ type: "setScore", activityId: "arcade", pid: "p2", raw: 7 }, now);
   runtime.apply({ type: "setSeal", seal: "sealed" }, now);
   await s.persister.drain();
   return { ...s, token };
@@ -97,7 +94,7 @@ describe("the write path", () => {
     assert.equal(loaded.snapshot.state.seal, "sealed");
     assert.deepEqual(
       loaded.events.map((e) => e.event.type),
-      ["open", "start", "join", "join", "setScore", "setScore", "grantSpot", "setSeal"],
+      ["open", "start", "join", "join", "setScore", "setScore", "setScore", "setSeal"],
     );
     // Append-only, and in seq order. The log is sparse in seq rather than
     // contiguous — an event the engine accepted without asking for a persist
@@ -206,7 +203,6 @@ describe("restart recovery", () => {
     assert.equal(back.state.title, s.created.runtime.state.title);
     assert.deepEqual(Object.keys(back.state.participants).sort(), ["p1", "p2"]);
     assert.equal(back.state.participants["p1"]?.playerNumber, 1);
-    assert.equal(back.state.spots.length, 1);
     assert.deepEqual(computeStandings(back.state), wanted);
   });
 
@@ -393,7 +389,6 @@ describe("restarting a session, durably", () => {
       "the wipe is in the audit trail like everything else",
     );
     assert.deepEqual(loaded?.snapshot?.state.scores["trivia"], {});
-    assert.equal(loaded?.snapshot?.state.spots.length, 0);
     assert.equal(loaded?.snapshot?.state.phase, "lobby");
     assert.equal(loaded?.meta.phase, "lobby", "META is what a restart scans on");
   });
@@ -413,7 +408,6 @@ describe("restarting a session, durably", () => {
     assert.equal(back.state.phase, "lobby");
     assert.equal(back.state.seal, "live");
     assert.deepEqual(back.state.scores["trivia"], {});
-    assert.equal(back.state.spots.length, 0);
     assert.deepEqual(computeStandings(back.state).map((x) => x.total), [0, 0]);
     // And the room is still the room.
     assert.deepEqual(Object.keys(back.state.participants).sort(), ["p1", "p2"]);
@@ -627,6 +621,51 @@ function legacyUnsealState() {
   };
 }
 
+/**
+ * A session in the shape the engine wrote while Spot Awards and Bench Credit
+ * existed: a `spots` array on the state, and a `bench` cell in `scores`.
+ *
+ * Built by replaying real events and then reaching in, rather than written out by
+ * hand, so the rest of the state is a state this engine produced and only the two
+ * retired fields are fiction. `p1` played the trivia and was benched for the
+ * arcade — the facilitator shape, and the one that used to be credited a mean.
+ */
+function legacyScoringState() {
+  const played = replay(vintageBase(), [
+    { event: { type: "open" }, at: 1 },
+    { event: { type: "start" }, at: 2 },
+    { event: { type: "join", pid: "p1", nickname: "Ade" }, at: 3 },
+    { event: { type: "join", pid: "p2", nickname: "Kenji" }, at: 4 },
+    { event: { type: "setScore", activityId: "trivia", pid: "p1", raw: 90 }, at: 5 },
+    { event: { type: "setScore", activityId: "trivia", pid: "p2", raw: 100 }, at: 6 },
+    { event: { type: "setScore", activityId: "arcade", pid: "p2", raw: 8 }, at: 7 },
+  ]);
+  return {
+    ...played,
+    scores: {
+      ...played.scores,
+      arcade: {
+        ...played.scores["arcade"],
+        // The status the type no longer has. Written by the deploy before this one.
+        p1: { raw: 0, status: "bench" },
+      },
+    },
+    // Two awards, exactly the shape `SpotAward` had.
+    spots: [
+      { seq: 8, pid: "p2", activityId: "trivia", reason: "best recovery", at: 8 },
+      { seq: 9, pid: "p1", activityId: "trivia", reason: "held the room", at: 9 },
+    ],
+  };
+}
+
+/** The `EVENT#` rows a session that used both features left behind. */
+const LEGACY_SCORING_EVENTS = [
+  { seq: 10, event: { type: "setStatus", activityId: "arcade", pid: "p1", status: "bench" }, at: 10 },
+  { seq: 11, event: { type: "grantSpot", pid: "p2", activityId: "arcade", reason: "carried it" }, at: 11 },
+  { seq: 12, event: { type: "revokeSpot", seq: 9 }, at: 12 },
+  { seq: 13, event: { type: "setSeal", seal: "sealed" }, at: 13 },
+] as unknown as LoadedSession["events"];
+
 /** The row as the code before the version was read back wrote it. */
 function asWrittenByTheOldCode(loaded: LoadedSession): LoadedSession {
   assert.ok(loaded.snapshot, "the fixture has no snapshot to age");
@@ -768,11 +807,6 @@ describe("a snapshot written before the version field existed", () => {
     assert.deepEqual(computeStandings(back.state), wanted);
     assert.equal(back.state.seal, "sealed");
     assert.deepEqual(Object.keys(back.state.participants).sort(), ["p1", "p2"]);
-    assert.equal(
-      back.state.spots.filter((a) => a.pid === "p2").length,
-      1,
-      "the spot award did not survive",
-    );
 
     // And the boot said what it was looking at, rather than recovering it
     // silently and leaving nobody able to tell.
@@ -816,6 +850,168 @@ describe("a snapshot written before the version field existed", () => {
       {},
       "the crack record was not filled in",
     );
+  });
+});
+
+describe("a snapshot written while Spot Awards and Bench Credit existed", () => {
+  /**
+   * Twelve live sessions carry `spots` arrays and `bench` flags, and the removal
+   * has to load every one of them without throwing. #16's shape exactly: this
+   * runs before the server listens, so a row that throws is an ECS task that dies
+   * and a replacement that dies on the same row.
+   */
+  it("loads a row carrying both fields, and neither survives", () => {
+    const built = rehydrate(rowOf(legacyScoringState()));
+    assert.ok(built, "a row with spots and a bench cell did not come back");
+
+    // `spots` is gone, not carried forward into every future snapshot.
+    assert.ok(
+      !("spots" in (built.state as object)),
+      "the retired spots array is still on the state",
+    );
+
+    // The bench cell reads as a cleared one, and the raw with it.
+    assert.deepEqual(built.state.scores["arcade"]?.["p1"], { raw: 0, status: "unset" });
+    // Everything else is untouched.
+    assert.deepEqual(built.state.scores["trivia"]?.["p1"], { raw: 90, status: "played" });
+    assert.deepEqual(built.state.scores["arcade"]?.["p2"], { raw: 8, status: "played" });
+    assert.deepEqual(Object.keys(built.state.participants).sort(), ["p1", "p2"]);
+
+    // And the arithmetic is the new model's: Ade is credited nothing for the
+    // activity they sat out, where Bench Credit would have given them 90.
+    const totals = Object.fromEntries(
+      computeStandings(built.state).map((x) => [x.nickname, x.total]),
+    );
+    assert.deepEqual(totals, { Ade: 90, Kenji: 200 });
+
+    // Both changes are in the notes, because a recovery that silently rewrote a
+    // score is indistinguishable from one that lost it.
+    assert.equal(built.notes.length, 2, built.notes.join(" | "));
+    assert.match(built.notes.join(" | "), /dropped 2 Spot Award\(s\)/);
+    assert.match(built.notes.join(" | "), /cleared 1 Bench Credit cell\(s\)/);
+    assert.match(built.notes.join(" | "), /arcade\/p1/);
+  });
+
+  it("does not touch a row that has neither, and says nothing about it", () => {
+    const built = rehydrate(rowOf(vintageBase(), { version: SNAPSHOT_VERSION, writtenAt: 1 }));
+    assert.ok(built);
+    assert.deepEqual(built.notes, [], "a clean row is not an anomaly");
+  });
+
+  it("drops an empty spots array too: an absent field is the only clean one", () => {
+    // A session that granted none still wrote `spots: []`, and an empty array is
+    // still a field that would be copied forward and re-stamped at the current
+    // version on every boot.
+    const built = rehydrate(rowOf({ ...vintageBase(), spots: [] }));
+    assert.ok(built);
+    assert.ok(!("spots" in (built.state as object)), "an empty spots array survived");
+    assert.match(built.notes.join(" | "), /dropped 0 Spot Award\(s\)/);
+  });
+
+  /**
+   * The half that actually throws.
+   *
+   * `reduce` switches on `event.type` with no `default` arm — exhaustive over
+   * `Event`, which is the right way to write it — so an event type the engine has
+   * never heard of falls off the end and `reduce` returns `undefined`. `replay`
+   * then reads `.state` off that. A snapshot normally covers everything and the
+   * tail is "none or one", but the one can be a `grantSpot`, and a row with no
+   * snapshot replays its whole log.
+   */
+  it("replays a tail holding grantSpot and revokeSpot without throwing", () => {
+    const row: LoadedSession = {
+      ...rowOf(legacyScoringState()),
+      events: LEGACY_SCORING_EVENTS,
+    };
+    const built = rehydrate(row);
+    assert.ok(built, "the tail took recovery down");
+    assert.equal(built.replayed, 4, "the tail is still counted as it arrived");
+    // The `setSeal` at the end of the tail did land, which is the non-vacuity
+    // line: a shim that dropped the whole tail would also pass everything above.
+    assert.equal(built.state.seal, "sealed", "the events after the retired ones were lost");
+    // The rewritten `setStatus` landed as an `unset`, which is the same mapping the
+    // snapshot shim uses. Rewriting it to `played` instead would put somebody on
+    // the board for an activity they sat out, from the log rather than the row.
+    assert.deepEqual(built.state.scores["arcade"]?.["p1"], { raw: 0, status: "unset" });
+    assert.match(built.notes.join(" | "), /skipped 2 retired Spot Award event\(s\)/);
+    assert.match(built.notes.join(" | "), /rewrote 1 bench setStatus event\(s\)/);
+  });
+
+  it("rebuilds from the log alone, which is every retired event rather than one", () => {
+    // No snapshot, so `after` is the whole log. `newSession` with no activities is
+    // what `rehydrate` builds on, so the scores are refused rather than kept —
+    // that is the honest failure the log-only path already had. What matters is
+    // that it does not throw and the room comes back.
+    const row: LoadedSession = {
+      meta: metaOf("ses_vintage"),
+      snapshot: null,
+      events: [
+        { seq: 1, event: { type: "open" }, at: 1 },
+        { seq: 2, event: { type: "start" }, at: 2 },
+        { seq: 3, event: { type: "join", pid: "p1", nickname: "Ade" }, at: 3 },
+        ...LEGACY_SCORING_EVENTS,
+      ] as unknown as LoadedSession["events"],
+      participants: [],
+    };
+    const built = rehydrate(row);
+    assert.ok(built, "a log-only rebuild threw on a retired event");
+    assert.equal(built.from, "log");
+    assert.deepEqual(Object.keys(built.state.participants), ["p1"]);
+    assert.equal(built.state.seal, "sealed");
+  });
+
+  it("migrates anyway on a row whose version says it should not have to", () => {
+    // The safety property: the fields decide, the version only comments. A row
+    // stamped at the version the removal shipped in, still holding both.
+    const built = rehydrate(
+      rowOf(legacyScoringState(), { version: SNAPSHOT_VERSION, writtenAt: 1 }),
+    );
+    assert.ok(!("spots" in (built?.state as object)), "the shim skipped its work");
+    assert.deepEqual(built?.state.scores["arcade"]?.["p1"], { raw: 0, status: "unset" });
+    assert.match(built?.notes.join(" | ") ?? "", /NO_RETIRED_SCORING_FROM/);
+  });
+
+  it("survives a spots field that is not an array, and a score cell that is junk", () => {
+    // The table is older than the type and a row can hold anything. Neither of
+    // these should exist; neither may be the reason a boot fails.
+    for (const spots of [7, "two", null, {}]) {
+      const built = rehydrate(rowOf({ ...vintageBase(), spots }));
+      assert.ok(built, `a spots of ${String(spots)} took recovery down`);
+      assert.ok(!("spots" in (built.state as object)));
+    }
+    const junk = rehydrate(
+      rowOf({
+        ...vintageBase(),
+        scores: { trivia: { p1: null, p2: 7, p3: { raw: 5, status: "bench" } }, arcade: null },
+      }),
+    );
+    assert.ok(junk, "a junk score bucket took recovery down");
+    assert.deepEqual(junk.state.scores["trivia"]?.["p3"], { raw: 0, status: "unset" });
+  });
+
+  it("comes up through recoverSessions, which is where it would have died", async () => {
+    const store = new MemoryStore();
+    const good = await playAnAfternoon(store);
+    const real = await store.loadRecoverable();
+    store.loadRecoverable = async () => [
+      { ...rowOf(legacyScoringState()), events: LEGACY_SCORING_EVENTS },
+      ...real,
+    ];
+
+    const lines: string[] = [];
+    const registry2 = new SessionRegistry(new Persister(store, () => {}));
+    const recovered = await recoverSessions(store, registry2, (l) => lines.push(l));
+
+    assert.ok(
+      recovered.some((r) => r.sid === "ses_vintage"),
+      `the legacy row did not come back: ${lines.join(" | ")}`,
+    );
+    assert.ok(registry2.bySessionId(good.sid), "the healthy session went down with it");
+    // The notes reach the boot log with the sid beside them, the way the other
+    // shims' anomalies do — otherwise a rewritten score is invisible.
+    const said = lines.find((l) => l.includes("dropped 2 Spot Award"));
+    assert.ok(said, `nothing in the boot log said so: ${lines.join(" | ")}`);
+    assert.match(said, /ses_vintage/);
   });
 });
 

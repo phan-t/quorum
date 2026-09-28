@@ -81,7 +81,7 @@ playing, because losing durability is better than losing someone's answer.
 **The host's two exports**, both `Authorization: Bearer <host token>`:
 
 ```
-GET /api/sessions/:sid/export.csv      Name, <Activity> Raw, <Activity> Pts, …, Spot Awards, TOTAL
+GET /api/sessions/:sid/export.csv      Name, <Activity> Raw, <Activity> Pts, …, TOTAL
 GET /api/sessions/:sid/events.jsonl    the event log, for settling a dispute
 ```
 
@@ -89,7 +89,7 @@ GET /api/sessions/:sid/events.jsonl    the event log, for settling a dispute
 
 Unit tests prove a rule. The bot harness proves the rules hold together for a
 whole session at the headcount of a real huddle — thirty joins, awkward
-nicknames, a late arrival, a facilitator on bench credit, a seal before the last
+nicknames, a late arrival taking a zero, a seal before the last
 activity, and a reveal. Nobody is going to find thirty humans to rehearse with,
 and two browser tabs do not produce a duplicate nickname.
 
@@ -115,8 +115,8 @@ src/
 │                     # Every frame's type, and the only parser of inbound bytes
 ├── engine/
 │   ├── types.ts      # the domain: Event, Effect, SessionState. No behaviour
-│   ├── scoring.ts    # SCORING.md as code: normalisation, Bench Credit,
-│   │                 # Spot Awards, ranking, the tiebreak
+│   ├── scoring.ts    # SCORING.md as code: normalisation, ranking,
+│   │                 # the tiebreak
 │   ├── reducer.ts    # reduce(state, event, now) -> {state, effects}, and replay
 │   ├── trivia.ts · arcade.ts · sendoff.ts · tiebreak.ts
 │   └── *.test.ts     # the rules, with a fake clock

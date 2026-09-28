@@ -169,9 +169,9 @@ class Run {
 /* ------------------------------------------------------------------ */
 
 const ACTIVITIES: readonly Activity[] = [
-  { id: "ttx", title: "Agentic Security TTX", kind: "manual", spotCap: 2 },
-  { id: "trivia", title: "Trivia", kind: "trivia", spotCap: 2 },
-  { id: "arcade", title: "Hashi Arcade", kind: "arcade", spotCap: 2 },
+  { id: "ttx", title: "Agentic Security TTX", kind: "manual" },
+  { id: "trivia", title: "Trivia", kind: "trivia" },
+  { id: "arcade", title: "Hashi Arcade", kind: "arcade" },
 ];
 
 /** TTX first, as SPEC.md's tiebreak section says. */
@@ -287,19 +287,21 @@ function clamp(n: number, lo: number, hi: number): number {
   return Math.min(hi, Math.max(lo, n));
 }
 
-const SPOT_REASONS = [
-  "best recovery of the afternoon",
-  "talked the whole Lounge through the bridge",
-  "spotted the prompt injection nobody else did",
-  "kept the room together when the call dropped",
-];
-
 interface RunOutput {
   readonly run: Run;
   readonly bots: readonly Bot[];
   readonly joins: readonly JoinResult[];
   readonly probeJoins: readonly { readonly what: string; readonly result: Dispatched }[];
-  readonly benched: readonly { readonly pid: ParticipantId; readonly activityId: ActivityId; readonly why: string }[];
+  /**
+   * Who ends the run with an activity they were never scored for, and why.
+   *
+   * This was `benched` — the facilitator and the late joiner, both credited the
+   * mean of what they scored elsewhere. Bench Credit is gone, so the run still
+   * produces both people and the report says what it now costs them: a zero in
+   * an activity they were not in. Keeping them in the run is the point; they are
+   * the shapes a real session produces and the reason to look at a total.
+   */
+  readonly unscored: readonly { readonly pid: ParticipantId; readonly activityId: ActivityId; readonly why: string }[];
   readonly blips: { readonly dropped: number; readonly back: number };
 }
 
@@ -321,7 +323,7 @@ function runSession(n: number, seed: number): RunOutput {
 
   const joins: JoinResult[] = [];
   const probeJoins: { what: string; result: Dispatched }[] = [];
-  const benched: { pid: ParticipantId; activityId: ActivityId; why: string }[] = [];
+  const unscored: { pid: ParticipantId; activityId: ActivityId; why: string }[] = [];
 
   /* -- draft → lobby -------------------------------------------------- */
 
@@ -359,16 +361,22 @@ function runSession(n: number, seed: number): RunOutput {
   run.send({ type: "setSegment", segment: "holding" }, "segment holding");
   run.step("segment → holding", "Agentic Security TTX");
 
-  // Benching needs someone left to score. A two-bot run has nobody to spare.
+  // Standing somebody out needs someone left to score. A two-bot run has
+  // nobody to spare.
+  //
+  // This used to send `setStatus … "bench"` and credit them their own average.
+  // With Bench Credit gone the facilitator is simply never scored for the
+  // activity they ran: no command at all, an `unset` cell, and a zero towards
+  // their total. That is the behaviour to exercise, because it is the one a host
+  // now gets.
   const maybePick = <T,>(items: readonly T[]): T | undefined =>
     items.length > 0 ? rng.pick(items) : undefined;
   const facilitator = seated().length >= 3 ? maybePick(seated()) : undefined;
   if (facilitator) {
-    run.send({ type: "setStatus", activityId: "ttx", pid: facilitator.pid, status: "bench" }, "bench facilitator");
-    benched.push({ pid: facilitator.pid, activityId: "ttx", why: "facilitated the TTX" });
-    run.step("bench", `${facilitator.nickname} — facilitated the TTX`);
+    unscored.push({ pid: facilitator.pid, activityId: "ttx", why: "facilitated the TTX" });
+    run.step("stood out", `${facilitator.nickname} — facilitated the TTX, so unscored for it`);
   } else {
-    run.step("bench", "skipped — too few bots to spare a facilitator");
+    run.step("stood out", "skipped — too few bots to spare a facilitator");
   }
 
   let ttxScored = 0;
@@ -401,9 +409,12 @@ function runSession(n: number, seed: number): RunOutput {
     );
     joins.push({ bot: lateBot, result });
     if (result.outcome === "accepted") {
-      run.send({ type: "setStatus", activityId: "ttx", pid: lateBot.pid, status: "bench" }, "bench late joiner");
-      benched.push({ pid: lateBot.pid, activityId: "ttx", why: "joined during trivia, missed the TTX" });
-      run.step("late join", `${lateBot.nickname} — benched for the TTX`);
+      unscored.push({
+        pid: lateBot.pid,
+        activityId: "ttx",
+        why: "joined during trivia, missed the TTX",
+      });
+      run.step("late join", `${lateBot.nickname} — a zero for the TTX, and nothing to mark`);
     }
   }
 
@@ -417,15 +428,6 @@ function runSession(n: number, seed: number): RunOutput {
     if (d.outcome === "accepted") triviaScored += 1;
   }
   run.step("trivia scores", `${triviaScored} from the question flow`);
-
-  const spotOne = maybePick(seated().filter((b) => b.pid !== facilitator?.pid));
-  if (spotOne) {
-    run.send(
-      { type: "grantSpot", pid: spotOne.pid, activityId: "trivia", reason: SPOT_REASONS[0] ?? "" },
-      `grantSpot trivia ${spotOne.nickname}`,
-    );
-    run.step("spot award", `${spotOne.nickname} — trivia`);
-  }
 
   run.send({ type: "setSegment", segment: "standings" }, "segment standings");
 
@@ -477,34 +479,17 @@ function runSession(n: number, seed: number): RunOutput {
   }
   run.step("connection blips", `${dropped} dropped · ${back} came back`);
 
-  const spotTwo = maybePick(
-    seated().filter((b) => b.pid !== facilitator?.pid && b.pid !== spotOne?.pid),
-  );
-  if (spotTwo) {
-    run.send(
-      { type: "grantSpot", pid: spotTwo.pid, activityId: "arcade", reason: SPOT_REASONS[1] ?? "" },
-      `grantSpot arcade ${spotTwo.nickname}`,
-    );
-    run.step("spot award", `${spotTwo.nickname} — arcade`);
-  }
-
   /* -- deliberate probes of the rules the console must not break ------- */
 
   const anyone = maybePick(seated());
   if (anyone) {
     run.send(
-      { type: "grantSpot", pid: anyone.pid, activityId: "arcade", reason: "   " },
-      "probe: spot award with a blank reason",
+      { type: "setScore", activityId: "arcade", pid: anyone.pid, raw: -1 },
+      "probe: a negative raw score",
     );
     run.send(
       { type: "setScore", activityId: "lounge", pid: anyone.pid, raw: 10 },
       "probe: score for an activity that does not exist",
-    );
-  }
-  if (facilitator) {
-    run.send(
-      { type: "grantSpot", pid: facilitator.pid, activityId: "ttx", reason: "ran it beautifully" },
-      "probe: spot award to someone on bench credit",
     );
   }
   run.send(
@@ -523,7 +508,7 @@ function runSession(n: number, seed: number): RunOutput {
     result: run.send({ type: "join", pid: "probe-closed", nickname: "TooLate" }, "join (closed)"),
   });
 
-  return { run, bots, joins, probeJoins, benched, blips: { dropped, back } };
+  return { run, bots, joins, probeJoins, unscored, blips: { dropped, back } };
 }
 
 /* ------------------------------------------------------------------ */
@@ -579,12 +564,11 @@ function say(line = ""): void {
 
 function cell(p: ActivityPoints | undefined): string {
   if (!p || p.source === "unset") return "—";
-  if (p.source === "bench") return p.points === null ? "bench —" : `${p.points} bench`;
   return `${p.points ?? 0} (${p.raw ?? 0})`;
 }
 
 function report(o: RunOutput, n: number, seed: number, seedLabel: string): boolean {
-  const { run, joins, probeJoins, benched, blips } = o;
+  const { run, joins, probeJoins, unscored, blips } = o;
   const state = run.state;
   const standings = computeStandings(state);
   const accepted = joins.filter((j) => j.result.outcome === "accepted");
@@ -595,7 +579,7 @@ function report(o: RunOutput, n: number, seed: number, seedLabel: string): boole
   say(`Quorum bot harness — ${n} bots, seed ${seedLabel}`);
   say(`  ${state.title} · code ${state.joinCode} · sid ${state.sid}`);
   for (const a of state.activities) {
-    say(`  ${pad(a.id, 8)} ${pad(a.title, 24)} ${a.kind} · ${a.spotCap} spot awards`);
+    say(`  ${pad(a.id, 8)} ${pad(a.title, 24)} ${a.kind}`);
   }
   say(`  tiebreak order: ${state.tiebreakOrder.join(" → ")}`);
 
@@ -673,16 +657,16 @@ function report(o: RunOutput, n: number, seed: number, seedLabel: string): boole
   say(
     `  ${pad("#", 3)} ${pad("participant", nameCol)} ` +
       state.activities.map((a) => pad(a.id, cellCol)).join(" ") +
-      ` ${padStart("spot", 6)} ${padStart("total", 6)}`,
+      ` ${padStart("total", 6)}`,
   );
   for (const s of five) {
     say(
       `  ${pad(String(s.rank), 3)} ${pad(s.nickname, nameCol)} ` +
         state.activities.map((a) => pad(cell(s.perActivity[a.id]), cellCol)).join(" ") +
-        ` ${padStart(s.spotCount > 0 ? `${s.spotPoints}` : "—", 6)} ${padStart(String(s.total), 6)}`,
+        ` ${padStart(String(s.total), 6)}`,
     );
   }
-  say("  points (raw) per activity · \"N bench\" is Bench Credit · \"—\" is unset");
+  say("  points (raw) per activity · \"—\" is unset, and worth nothing");
 
   /* first place */
   const tie = breakTie(state, standings);
@@ -701,32 +685,28 @@ function report(o: RunOutput, n: number, seed: number, seedLabel: string): boole
     );
   }
 
-  /* bench credit */
+  /* who sat one out, and what it cost them */
   say();
-  say(`Bench credit  ${benched.length} credited`);
-  for (const b of benched) {
+  say(`Unscored activities  ${unscored.length}`);
+  say("  Bench Credit used to fill these in with the mean of what they scored");
+  say("  elsewhere. Nothing does now: the cell is unset and the total is short.");
+  for (const b of unscored) {
     const s = standings.find((x) => x.pid === b.pid);
-    const p = s?.perActivity[b.activityId];
-    const base = s
+    const elsewhere = s
       ? state.activities
           .filter((a) => s.perActivity[a.id]?.source === "normalised")
           .map((a) => `${a.title} ${s.perActivity[a.id]?.points ?? 0}`)
           .join(", ")
       : "";
-    const credited = p?.points === null || p?.points === undefined ? "— (played nothing yet)" : String(p.points);
     const activity = state.activities.find((a) => a.id === b.activityId);
-    say(`  ${pad(nameOf(b.pid), 24)} ${pad(activity?.title ?? b.activityId, 22)} credited ${padStart(credited, 4)}   mean of ${base}`);
-    say(`  ${pad("", 24)} ${b.why}`);
-  }
-
-  /* spot awards */
-  say();
-  say(`Spot awards  ${state.spots.length} granted`);
-  for (const s of state.spots) {
-    const activity = state.activities.find((a) => a.id === s.activityId);
-    const row = standings.find((x) => x.pid === s.pid);
-    const where = row ? `rank ${row.rank}, ${row.total} pts` : "not in the standings";
-    say(`  ${pad(activity?.title ?? s.activityId, 22)} ${pad(nameOf(s.pid), 20)} ${pad(where, 20)} ${quote(s.reason)}`);
+    const would = s
+      ? state.activities.filter((a) => s.perActivity[a.id]?.source === "normalised").length
+      : 0;
+    say(
+      `  ${pad(nameOf(b.pid), 24)} ${pad(activity?.title ?? b.activityId, 22)} ` +
+        `worth 0  (scored ${would} of ${state.activities.length})`,
+    );
+    say(`  ${pad("", 24)} ${b.why}${elsewhere === "" ? "" : ` · elsewhere: ${elsewhere}`}`);
   }
 
   /* connections */
@@ -768,8 +748,8 @@ function report(o: RunOutput, n: number, seed: number, seedLabel: string): boole
   }
   const ceiling = state.activities.length * 100;
   checks.push({
-    ok: standings.every((s) => s.total <= ceiling + s.spotPoints),
-    what: `no total above ${ceiling} + spot awards`,
+    ok: standings.every((s) => s.total <= ceiling),
+    what: `no total above ${ceiling}`,
   });
   checks.push({
     ok: Object.values(state.participants).every((p) => p.playerNumber >= 1) &&

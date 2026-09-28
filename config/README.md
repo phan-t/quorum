@@ -40,7 +40,7 @@ service *does* read, by being staged or uploaded to it.
 
 `session.json` is what `make stage` reads. Besides the title and the console's
 setup it carries `activities`, the list of things this event scores — a
-leaderboard column each, and a Spot Award budget each. Leave it out and the
+leaderboard column each, and a term each in the tiebreak. Leave it out and the
 session gets the default set, trivia and the arcade; write it to score
 something else, including a `manual` activity for one judged off-platform. The
 server validates the list when the session is created and refuses the whole

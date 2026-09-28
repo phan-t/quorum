@@ -98,8 +98,8 @@ function must<T>(x: T | undefined | null, what = "value"): T {
 /* Fixtures                                                            */
 /* ------------------------------------------------------------------ */
 
-function act(id: string, spotCap = 2): Activity {
-  return { id, title: id, kind: id === "trivia" ? "trivia" : "manual", spotCap };
+function act(id: string): Activity {
+  return { id, title: id, kind: id === "trivia" ? "trivia" : "manual" };
 }
 
 const ACTIVITIES = [act("trivia"), act("arcade")];
@@ -362,7 +362,7 @@ describe("loadTrivia", () => {
   test("a second trivia activity's set replaces the first's — the slot is single", () => {
     const two: readonly Activity[] = [
       act("trivia"),
-      { id: "trivia-2", title: "trivia-2", kind: "trivia", spotCap: 2 },
+      { id: "trivia-2", title: "trivia-2", kind: "trivia" },
     ];
     const s = accept(
       newSession({ sid: "s", title: "t", joinCode: "RAFT", activities: two }),
@@ -664,21 +664,6 @@ describe("closeQuestion", () => {
     );
     assert.equal(standing.perActivity["trivia"]?.points, 100);
     assert.equal(standing.perActivity["trivia"]?.raw, 875);
-  });
-
-  test("a benched participant is not scored back onto the board", () => {
-    const base = accept(loaded(), [
-      { type: "setStatus", activityId: "trivia", pid: "p2", status: "bench" },
-    ]);
-    const s = playQuestion(base, {
-      p1: { choice: 2, ms: 0 },
-      p2: { choice: 2, ms: 0 },
-    });
-    assert.equal(s.scores["trivia"]?.["p2"]?.status, "bench");
-    assert.equal(s.scores["trivia"]?.["p2"]?.raw, 0);
-    // The trivia's own total still counts their answer — it is the scoreboard
-    // that treats them as absent, not the game.
-    assert.equal(totalOf(s, "p2"), 1000);
   });
 
   test("refused when no question is open", () => {

@@ -331,26 +331,6 @@ body {
      after chroma subsampling has blurred the boundary. */
   box-shadow: inset -1px 0 0 var(--ground);
 }
-/* Bench Credit: hatched as well as dimmer. Never colour alone, and a credited
-   block is not the same claim as a played one.
-
-   This did nothing for as long as it has existed. The segment's hue is set
-   inline with the `background` *shorthand*, which resets `background-image`
-   to none, and an inline style beats a stylesheet — so the hatch below was
-   overwritten on every block it was meant to mark, and Bench Credit was
-   distinguished by opacity alone. The hue is set with `background-color` now.
-   Found while adding the same bar to the host console. */
-.s-seg-bench {
-  opacity: 0.75;
-  background-image: repeating-linear-gradient(
-    -45deg,
-    rgba(10, 10, 15, 0.55) 0,
-    rgba(10, 10, 15, 0.55) 4px,
-    transparent 4px,
-    transparent 9px
-  );
-}
-
 /* Which hue is which activity, in words — the bar is only honest if the key
    is on the same screen. */
 .s-legend {
@@ -440,21 +420,6 @@ body {
   font-weight: 600;
 }
 
-/* ------------------------------------------------------------ toasts -- */
-
-.s-toast {
-  flex: none;
-  display: flex;
-  align-items: baseline;
-  gap: 1.2em;
-  padding: 2.2vh 5vw;
-  background: var(--panel);
-  border-top: 4px solid var(--line);
-}
-.s-toast[hidden] {
-  display: none;
-}
-
 /* Practice, on the surface the whole room is looking at. Bigger than the
    phone's because it is read from across a video call, and at the top because
    the bottom of this screen is where the scores live and this is a statement
@@ -472,16 +437,6 @@ body {
 }
 .s-practice[hidden] {
   display: none;
-}
-.s-toast[data-kind="spot"] {
-  border-top-color: var(--spot);
-}
-.s-toast-kind {
-  font-size: clamp(20px, 1.6vw, 32px);
-  color: var(--spot);
-}
-.s-toast-text {
-  font-size: clamp(32px, 2.6vw, 56px);
 }
 
 /* -------------------------------------------------------------- gate -- */

@@ -48,7 +48,7 @@ import type { ArcadeGganbuView, RenderState } from "../protocol.ts";
 /* ------------------------------------------------------------------ */
 
 const ACTIVITIES: readonly Activity[] = [
-  { id: "arcade", title: "Hashi Arcade", kind: "arcade", spotCap: 2 },
+  { id: "arcade", title: "Hashi Arcade", kind: "arcade" },
 ];
 
 /**

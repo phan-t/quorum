@@ -44,8 +44,8 @@ function refused(state: SessionState, event: Event, code: RejectCode, now = 1000
 }
 
 const ACT: Activity[] = [
-  { id: "trivia", title: "trivia", kind: "trivia", spotCap: 2 },
-  { id: "arcade", title: "arcade", kind: "manual", spotCap: 2 },
+  { id: "trivia", title: "trivia", kind: "trivia" },
+  { id: "arcade", title: "arcade", kind: "manual" },
 ];
 
 const QUESTIONS = [

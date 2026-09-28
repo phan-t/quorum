@@ -953,7 +953,6 @@ describe("seal", () => {
     const p2 = priya.conn.mark();
     applyEvent(s, { type: "setScore", activityId: "arcade", pid: kenji.pid, raw: 12 });
     applyEvent(s, { type: "setScore", activityId: "arcade", pid: priya.pid, raw: 99 });
-    applyEvent(s, { type: "grantSpot", pid: priya.pid, activityId: "arcade", reason: "best recovery" });
     await sleep(150);
     assert.ok(kenji.conn.since(k2).length > 0, "score changes should produce frames");
     assertNoSealLeak(kenji.conn.since(k2), "Kenji (scores under seal)");
@@ -2039,12 +2038,6 @@ describe("restart and reopen over the wire", () => {
     const priya = await join(s.joinCode, "Priya");
     applyEvent(s, { type: "setScore", activityId: "trivia", pid: kenji.pid, raw: 18400 });
     applyEvent(s, { type: "setScore", activityId: "trivia", pid: priya.pid, raw: 14720 });
-    applyEvent(s, {
-      type: "grantSpot",
-      pid: priya.pid,
-      activityId: "trivia",
-      reason: "best recovery",
-    });
     applyEvent(s, { type: "enterArcade", activityId: "arcade" });
     return { s, host, kenji, priya };
   }
@@ -2071,7 +2064,7 @@ describe("restart and reopen over the wire", () => {
     assert.ok(!priya.conn.isClosed);
     assert.equal(after.msg.state.roster.length, 2, "the room is still here");
 
-    assert.equal(s.runtime.state.spots.length, 0);
+    assert.deepEqual(s.runtime.state.scores["trivia"], {}, "not a score left");
     assert.equal(s.runtime.state.arcade, null);
     assert.equal(Object.keys(s.runtime.state.participants).length, 2);
     assert.equal(s.runtime.state.joinCode, s.joinCode, "the join code did not change");
@@ -2097,7 +2090,7 @@ describe("restart and reopen over the wire", () => {
       assert.ok(r.msg.message.length > 0, "a refusal says something");
     }
     assert.ok(s.runtime.state.scores["trivia"]?.[kenji.pid], "nothing was wiped");
-    assert.equal(s.runtime.state.spots.length, 1);
+    assert.ok(s.runtime.state.scores["trivia"]?.[priya.pid], "nor the other row");
 
     await host.close();
     await kenji.conn.close();
@@ -2136,7 +2129,6 @@ describe("restart and reopen over the wire", () => {
     );
     assert.ok(back);
     assert.deepEqual(s.runtime.state.scores, before, "not a point moved");
-    assert.equal(s.runtime.state.spots.length, 1);
 
     // And the console can drive it again, which a closed session refuses.
     await ackOk(host, { name: "segment", kind: "holding" });

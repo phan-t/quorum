@@ -38,7 +38,7 @@ import { renderStateFor } from "./views.ts";
 import type { ArcadeTugView, RenderState } from "../protocol.ts";
 
 const ACTIVITIES: readonly Activity[] = [
-  { id: "arcade", title: "Hashi Arcade", kind: "arcade", spotCap: 2 },
+  { id: "arcade", title: "Hashi Arcade", kind: "arcade" },
 ];
 
 const T0 = 1_700_000_000_000;

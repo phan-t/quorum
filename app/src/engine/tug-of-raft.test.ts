@@ -92,7 +92,6 @@ const ARCADE: Activity = {
   id: "arcade",
   title: "Hashi Arcade",
   kind: "arcade",
-  spotCap: 2,
 };
 
 const T0 = 1000;

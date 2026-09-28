@@ -2431,9 +2431,6 @@ const HUE_CYCLE: readonly string[] = [
   "--ibm-blue",
 ];
 
-/** Spot Awards are gold on every surface, and never an activity's hue. */
-export const SPOT_HUE = "var(--spot)";
-
 export function activityHue(
   activity: { readonly id: string; readonly kind: string },
   index = 0,
@@ -2492,13 +2489,18 @@ export function pointsStripCells(
 /* ------------------------------------------------------------------ */
 
 export interface BarSegment {
-  /** An activity id, or `spot`. */
+  /**
+   * An activity id.
+   *
+   * It could also be the literal `spot`, for the gold Spot Awards segment that
+   * sat on the end of every bar. Spot Awards are gone, so every segment is an
+   * activity and the `bench` flag that drew a credited one hatched is gone with
+   * them.
+   */
   readonly key: string;
   readonly label: string;
   readonly points: number;
   readonly hue: string;
-  /** This activity was credited, not played. Drawn hatched as well as dimmed. */
-  readonly bench: boolean;
   /** Width as a percentage of the widest row, so rows compare to each other. */
   readonly percent: number;
 }
@@ -2507,20 +2509,16 @@ export interface BarSegment {
 const MIN_VISIBLE_PERCENT = 1;
 
 /**
- * One standings row as contributions in activity hues, plus the Spot Awards
- * in gold. `scale` is the top total on the board, so the leader's bar fills
- * the width and everyone else reads against it.
+ * One standings row as contributions in activity hues. `scale` is the top total
+ * on the board, so the leader's bar fills the width and everyone else reads
+ * against it.
  *
  * Only what arrived is drawn. There is no inference here about activities the
  * server did not send, and no total is recomputed from the parts — the server
  * does the arithmetic and `total` is what it said.
  */
 export function stackedBar(
-  row: {
-    readonly perActivity: Readonly<Record<string, number | null>>;
-    readonly bench: readonly string[];
-    readonly spot: number;
-  },
+  row: { readonly perActivity: Readonly<Record<string, number | null>> },
   activities: readonly ActivitySummary[],
   scale: number,
 ): BarSegment[] {
@@ -2537,20 +2535,9 @@ export function stackedBar(
       label: a.title,
       points,
       hue: activityHue(a, i),
-      bench: row.bench.includes(a.id),
       percent: pct(points),
     });
   });
-  if (row.spot > 0) {
-    out.push({
-      key: "spot",
-      label: "Spot Awards",
-      points: row.spot,
-      hue: SPOT_HUE,
-      bench: false,
-      percent: pct(row.spot),
-    });
-  }
   return out;
 }
 
