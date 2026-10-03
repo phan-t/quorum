@@ -40,12 +40,13 @@
  * the omission looks like a theming bug rather than a missing token. All five
  * component groups are emitted here for that reason.
  *
- * TYPE AND LAYOUT TOKENS. Not emitted. `--cds-body-compact-01-font-size` and
- * `--cds-layout-size-height-sm` live in `@carbon/type` and `@carbon/layout`,
- * not in a theme, and their compiled fallbacks (14px, 32px) are the values
- * Carbon intends. Issue #28 step 5 is where the console decides whether to
- * push its own 13/11 through them; until it does, naming them here would be
- * deciding it by accident.
+ * TYPE TOKENS, since #28 step 5. The console took Carbon's type scale whole,
+ * so the productive tokens it maps onto are emitted from `@carbon/type`, at
+ * Carbon's own values, in one `:root` block at the end — see `TYPE_TOKENS`.
+ *
+ * LAYOUT TOKENS. Not emitted. `--cds-layout-size-height-sm` lives in
+ * `@carbon/layout`, not in a theme, and its compiled fallback (32px) is the
+ * value Carbon intends.
  *
  * NO `[data-surface="screen"]` BLOCK. `tokens.css` pins every token under
  * that selector because the big screen must not follow the theme switch. This
@@ -60,9 +61,11 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import * as themes from "@carbon/themes";
+import * as type from "@carbon/type";
 
 const require = createRequire(import.meta.url);
 const THEMES_VERSION = require("@carbon/themes/package.json").version;
+const TYPE_VERSION = require("@carbon/type/package.json").version;
 const WC_VERSION = require("@carbon/web-components/package.json").version;
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -149,7 +152,8 @@ const HEADER = `/*
  *
  *   node scripts/gen-carbon-tokens.mjs
  *
- * from @carbon/themes ${THEMES_VERSION}, for @carbon/web-components ${WC_VERSION}.
+ * from @carbon/themes ${THEMES_VERSION} and @carbon/type ${TYPE_VERSION},
+ * for @carbon/web-components ${WC_VERSION}.
  * See that script's header for what is in here and what is deliberately not.
  *
  * Loaded by \`host/index.html\` alone, after \`shared/tokens.css\`. The
@@ -345,8 +349,9 @@ const BRIDGE = `/* ---- the bridge ---------------------------------------------
  *    stacked label and the helper text. Every field and the one picker is
  *    built with \`hide-label\` and no helper text, so both colours land in
  *    elements that are \`visually-hidden\` or \`hidden\`. The label decision is
- *    what takes them off the list; if #28 step 5 adopts Carbon's stacked
- *    label, they go back on it. Step 4's table cells read
+ *    what takes them off the list. #28 step 5 took Carbon's type scale and
+ *    kept \`hide-label\` — the console's own label, now in \`label-01\`, still
+ *    sits beside each field — so they stay off it. Step 4's table cells read
  *    \`--cds-text-secondary\` too, as their text colour, and \`host.css\` sets
  *    them back to inheriting the console's ink rather than bridging it.
  *
@@ -386,6 +391,52 @@ const BRIDGE = `/* ---- the bridge ---------------------------------------------
   --cds-text-placeholder: var(--muted);
 }`;
 
+/**
+ * Carbon's type tokens, for #28 step 5: the console takes Carbon's type scale
+ * whole, so `host.css` sizes its own text from these rather than from numbers
+ * of its own.
+ *
+ * The productive set the console maps onto, and nothing else. Each is emitted
+ * as the four properties Carbon's components read —
+ * `var(--cds-body-compact-01-font-size, .875rem)` and its siblings — with
+ * Carbon's own values, so declaring them changes nothing inside any component;
+ * the point is that `host.css` and the components now read one source.
+ *
+ * Not themed, so one `:root` block. `fontFamily` is deliberately not emitted:
+ * `code-01` names IBM Plex Mono, which this console does not load (see #28 —
+ * Plex is opt-in), and the console's own `--mono` and `--body` stay the faces.
+ */
+const TYPE_TOKENS = [
+  "label01",
+  "bodyCompact01",
+  "bodyCompact02",
+  "headingCompact01",
+  "headingCompact02",
+  "heading03",
+  "heading07",
+];
+
+function typeBlock() {
+  const lines = [];
+  for (const name of TYPE_TOKENS) {
+    const t = type[name];
+    if (t === undefined) throw new Error(`@carbon/type has no ${name}`);
+    const base = prop(name);
+    lines.push(`  ${base}-font-size: ${t.fontSize};`);
+    lines.push(`  ${base}-font-weight: ${t.fontWeight ?? 400};`);
+    lines.push(`  ${base}-line-height: ${t.lineHeight};`);
+    lines.push(`  ${base}-letter-spacing: ${t.letterSpacing === 0 ? "0" : t.letterSpacing};`);
+  }
+  return [
+    "/* ---- type, from @carbon/type " + TYPE_VERSION + " ----------------------------------",
+    " * The console's text is sized from these (#28 step 5). Carbon's own values,",
+    " * so no component renders differently for their being declared here. */",
+    ":root {",
+    ...lines,
+    "}",
+  ].join("\n");
+}
+
 const css = [
   HEADER,
   "",
@@ -400,6 +451,8 @@ const css = [
   block(':root[data-theme="dark"]', "g100", 0),
   "",
   BRIDGE,
+  "",
+  typeBlock(),
   "",
 ].join("\n");
 

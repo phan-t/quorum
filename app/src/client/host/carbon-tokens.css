@@ -3,7 +3,8 @@
  *
  *   node scripts/gen-carbon-tokens.mjs
  *
- * from @carbon/themes 11.82.0, for @carbon/web-components 2.64.0.
+ * from @carbon/themes 11.82.0 and @carbon/type 11.68.0,
+ * for @carbon/web-components 2.64.0.
  * See that script's header for what is in here and what is deliberately not.
  *
  * Loaded by `host/index.html` alone, after `shared/tokens.css`. The
@@ -1437,8 +1438,9 @@
  *    stacked label and the helper text. Every field and the one picker is
  *    built with `hide-label` and no helper text, so both colours land in
  *    elements that are `visually-hidden` or `hidden`. The label decision is
- *    what takes them off the list; if #28 step 5 adopts Carbon's stacked
- *    label, they go back on it. Step 4's table cells read
+ *    what takes them off the list. #28 step 5 took Carbon's type scale and
+ *    kept `hide-label` — the console's own label, now in `label-01`, still
+ *    sits beside each field — so they stay off it. Step 4's table cells read
  *    `--cds-text-secondary` too, as their text colour, and `host.css` sets
  *    them back to inheriting the console's ink rather than bridging it.
  *
@@ -1476,4 +1478,38 @@
   --cds-border-subtle: var(--line);
   --cds-text-primary: var(--ink);
   --cds-text-placeholder: var(--muted);
+}
+
+/* ---- type, from @carbon/type 11.68.0 ----------------------------------
+ * The console's text is sized from these (#28 step 5). Carbon's own values,
+ * so no component renders differently for their being declared here. */
+:root {
+  --cds-label-01-font-size: 0.75rem;
+  --cds-label-01-font-weight: 400;
+  --cds-label-01-line-height: 1.33333;
+  --cds-label-01-letter-spacing: 0.32px;
+  --cds-body-compact-01-font-size: 0.875rem;
+  --cds-body-compact-01-font-weight: 400;
+  --cds-body-compact-01-line-height: 1.28572;
+  --cds-body-compact-01-letter-spacing: 0.16px;
+  --cds-body-compact-02-font-size: 1rem;
+  --cds-body-compact-02-font-weight: 400;
+  --cds-body-compact-02-line-height: 1.375;
+  --cds-body-compact-02-letter-spacing: 0;
+  --cds-heading-compact-01-font-size: 0.875rem;
+  --cds-heading-compact-01-font-weight: 600;
+  --cds-heading-compact-01-line-height: 1.28572;
+  --cds-heading-compact-01-letter-spacing: 0.16px;
+  --cds-heading-compact-02-font-size: 1rem;
+  --cds-heading-compact-02-font-weight: 600;
+  --cds-heading-compact-02-line-height: 1.375;
+  --cds-heading-compact-02-letter-spacing: 0;
+  --cds-heading-03-font-size: 1.25rem;
+  --cds-heading-03-font-weight: 400;
+  --cds-heading-03-line-height: 1.4;
+  --cds-heading-03-letter-spacing: 0;
+  --cds-heading-07-font-size: 3.375rem;
+  --cds-heading-07-font-weight: 300;
+  --cds-heading-07-line-height: 1.199;
+  --cds-heading-07-letter-spacing: 0;
 }

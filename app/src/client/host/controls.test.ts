@@ -1622,3 +1622,93 @@ describe("the scoring grid is Carbon's table", () => {
     );
   });
 });
+
+/*
+ * ------------------------------------------------------------------
+ * Step 5: the console's type is Carbon's
+ * ------------------------------------------------------------------
+ *
+ * `host.css` sizes its text from Carbon's type tokens, which
+ * `gen-carbon-tokens.mjs` emits from `@carbon/type` into `carbon-tokens.css`.
+ * Three things a reader cannot see at a glance and nothing else checks:
+ * that no rule has gone back to a number, that every token a rule names is
+ * one the file declares — a `var()` with no fallback and no declaration is
+ * the initial value, `medium`, 16px, silently — and that the declared values
+ * are still Carbon's.
+ */
+describe("the console's type is Carbon's", () => {
+  const blank = (src: string): string =>
+    src.replace(/\/\*[\s\S]*?\*\//g, (c) => c.replace(/[^\n]/g, " "));
+  const hostCss = blank(
+    readFileSync(join(import.meta.dirname, "host.css"), "utf8"),
+  );
+  const tokensCss = readFileSync(
+    join(import.meta.dirname, "carbon-tokens.css"),
+    "utf8",
+  );
+
+  test("every size in host.css is a Carbon token, but the preview's", () => {
+    const raw: string[] = [];
+    for (const rule of hostCss.matchAll(/([^{}]+)\{([^{}]*)\}/g)) {
+      const sel = (rule[1] ?? "").trim().replace(/\s+/g, " ");
+      for (const fs of (rule[2] ?? "").matchAll(/font-size:\s*([^;]+);/g)) {
+        const v = (fs[1] ?? "").trim();
+        if (/^var\(--cds-[a-z0-9-]+-font-size\)$/.test(v) || v === "inherit") {
+          continue;
+        }
+        // The one exemption, argued at the rule: the phone preview keeps the
+        // 13px it inherited before step 5, because it is the phone's look.
+        if (sel === ".preview-frame" && v === "13px") continue;
+        raw.push(`${sel} { font-size: ${v} }`);
+      }
+    }
+    assert.deepEqual(
+      raw,
+      [],
+      "host.css sizes text with a number again. Pick the Carbon token; the " +
+        "mapping is at the head of host.css.",
+    );
+  });
+
+  test("and every token a rule names is one carbon-tokens.css declares", () => {
+    const used = new Set(
+      [...hostCss.matchAll(/var\((--cds-[a-z0-9-]+-(?:font-size|font-weight|line-height|letter-spacing))\)/g)]
+        .map((m) => m[1] as string),
+    );
+    assert.ok(used.size >= 20, `found only ${used.size} type tokens in use`);
+    for (const name of used) {
+      assert.ok(
+        tokensCss.includes(`${name}:`),
+        `${name} is read in host.css and declared nowhere, so it resolves to ` +
+          "the initial value — 16px medium, for a font-size — with no error.",
+      );
+    }
+  });
+
+  test("and the declared values are @carbon/type's own", async () => {
+    const type = (await import("@carbon/type")) as unknown as Record<
+      string,
+      { fontSize: string; fontWeight?: number; lineHeight: number; letterSpacing: string | number }
+    >;
+    const declared = [
+      ...tokensCss.matchAll(/(--cds-([a-z0-9-]+)-font-size):\s*([^;]+);/g),
+    ];
+    assert.ok(declared.length >= 7);
+    for (const [, , token, size] of declared) {
+      const key = (token as string).replace(/-([a-z0-9])/g, (_, c: string) =>
+        c.toUpperCase(),
+      );
+      const t = type[key];
+      assert.ok(t, `@carbon/type has no ${key}`);
+      assert.equal(size, t.fontSize, `${token} font-size`);
+      for (const [prop, want] of [
+        ["font-weight", String(t.fontWeight ?? 400)],
+        ["line-height", String(t.lineHeight)],
+        ["letter-spacing", t.letterSpacing === 0 ? "0" : String(t.letterSpacing)],
+      ] as const) {
+        const m = new RegExp(`--cds-${token}-${prop}:\\s*([^;]+);`).exec(tokensCss);
+        assert.equal(m?.[1], want, `${token} ${prop}`);
+      }
+    }
+  });
+});

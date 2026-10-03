@@ -135,8 +135,10 @@ export function createScoringPanel(opts: Opts): ScoringPanel {
   /* Chrome                                                            */
   /* ---------------------------------------------------------------- */
 
+  // Sans, as Carbon sets helper text, since #28 step 5. In the console's mono
+  // at Carbon's 12px this line wrapped "Esc undo" onto a second line at 1280.
   const hint = h("span", {
-    class: "mono sc-hint",
+    class: "sc-hint",
     text: "G jumps here · Tab along the row · Enter saves and drops a row · Alt+U clear · Esc undo",
   });
   const head = h("div", { class: "sc-head" }, [

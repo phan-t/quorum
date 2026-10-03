@@ -261,10 +261,21 @@ const elScoreboard = carbonTag({
  * "can they see the scores right now", and only one of these three words
  * answers that on its own.
  */
+/**
+ * A word as Carbon sets a label: sentence case. The console's chrome used to
+ * be uppercased by CSS, so its words were written in whatever case was to
+ * hand — "running", "LOCKED" — and the stylesheet made them one. #28 step 5
+ * took Carbon's type, which has no caps style, so the case is the text's own
+ * job now and these are written the way they read.
+ */
+function sentenceCase(word: string): string {
+  return word.charAt(0).toUpperCase() + word.slice(1);
+}
+
 const SCOREBOARD_STATE: Readonly<Record<Seal, string>> = {
-  live: "● SCOREBOARD LIVE",
-  sealed: "■ SCOREBOARD HIDDEN",
-  revealed: "● WINNERS REVEALED",
+  live: "● Scoreboard live",
+  sealed: "■ Scoreboard hidden",
+  revealed: "● Winners revealed",
 };
 
 const elConn = h("span", { class: "sb-conn mono", attrs: { hidden: true } });
@@ -1613,7 +1624,7 @@ function renderRail(): void {
     // A step pointing at a card that is not there says so here as well as in
     // setup: the rail is where the host looks while the room is waiting.
     const missing = entry.kind === "holding" && cardForEntry(entry) === null;
-    const tag = missing ? "no card" : entry.included ? "" : "out";
+    const tag = missing ? "No card" : entry.included ? "" : "Out";
     row.tag.hidden = tag === "";
     row.tag.classList.toggle("is-missing", missing);
     setText(row.tag, tag);
@@ -1853,7 +1864,7 @@ function preflightRow(extra?: HTMLElement): PreflightRow {
       setText(mark, state === "ready" ? "✓" : state === "not" ? "✗" : "?");
       setText(
         word,
-        state === "ready" ? "ready" : state === "not" ? "not ready" : "by eye",
+        state === "ready" ? "Ready" : state === "not" ? "Not ready" : "By eye",
       );
       setText(text, body);
     },
@@ -2652,7 +2663,7 @@ function renderHoldingPanel(): void {
       });
       const word = h("span", {
         class: "mono hc-onair",
-        text: "on screen",
+        text: "On screen",
         attrs: { hidden: true },
       });
       holdingMarks.set(card.id, { mark, word });
@@ -4979,13 +4990,13 @@ function render(s: RenderState): void {
   //
   // The phase, not the word "live": "live" is the seal's vocabulary and two
   // meanings in one status bar is one too many.
-  setText(panelSub, s.phase === "draft" ? "not open yet" : s.phase);
+  setText(panelSub, sentenceCase(s.phase === "draft" ? "not open yet" : s.phase));
 
   if (body === bodyLobby) {
     setText(bodyLobbyCode, code);
     setText(bodyLobbyUrl, `${location.origin}/j/${code}`);
     setText(bodyLobbyCount, String(s.roster.length));
-    setText(bodyLobbyLock, s.joinsLocked ? "LOCKED" : "OPEN");
+    setText(bodyLobbyLock, s.joinsLocked ? "Locked" : "Open");
     setAttr(bodyLobbyLock, "data-locked", s.joinsLocked ? "yes" : "no");
   }
 
@@ -5690,7 +5701,7 @@ client = new QuorumClient({
   onStatus(status) {
     const bad = status !== "live";
     elConn.hidden = !bad;
-    setText(elConn, status === "reconnecting" ? "RECONNECTING" : status.toUpperCase());
+    setText(elConn, sentenceCase(status));
     setAttr(elConn, "data-status", status);
     preview.setBanner(status === "reconnecting" ? "reconnecting…" : null);
   },

@@ -5,43 +5,37 @@
  * 13–14px, tabular. Everything is sized so that a host glancing at it for two
  * seconds knows the phase, the seal, the headcount and what space will do.
  *
- * ---- The type scale --------------------------------------------------
+ * ---- The type scale: Carbon's, since #28 step 5 -------------------
  *
- * Dense is not the same as flat, and Helios is not a licence to flatten it.
- * The hierarchy this console was given is unchanged in shape — the same steps
- * doing the same jobs — but every step from 13px up now lands on a number the
- * Helios scale publishes, because the type tokens are now the Helios system
- * stacks and 15px, 17px, 22px and 34px are not sizes that scale has:
+ * The console's own scale — Helios' steps, 11px mono caps for chrome, 13px
+ * for the body — is gone. Issue #28 step 5 put the console's text on Carbon's
+ * productive type tokens, emitted from `@carbon/type` into
+ * `carbon-tokens.css` and read here as `var(--cds-…)`, so the console and its
+ * Carbon components read one source. Every rule that sets a size uses one of:
  *
- *   display 30 / 24 / 18 / 16 / 13 · body 16 / 14 / 13 · code 16 / 14 / 13
- *   weights 400 regular · 500 medium · 600 semibold · 700 bold, body 14
+ *   label-01            12px  labels, hints, meta, numerals in the grid,
+ *                             keycaps — what was 11px and 12px
+ *   body-compact-01     14px  the body, and every control — what was 13/14px
+ *   heading-compact-01  14px  600, where a 13px line was bold
+ *   body-compact-02     16px  what was 16px
+ *   heading-compact-02  16px  600, the panel head, the session title
+ *   heading-03          20px  what was 24px: the question, the gate
+ *   heading-07          54px  driving mode's count, read from arm's length
  *
- *   10px  mono, tracked   column heads, keycaps, per-cell buttons — chrome
- *                         the eye skips until it is looking for it
- *   11px  mono, tracked   SECTION LABELS and hints. Quiet on purpose: a
- *                         label names a region, it is not the content
- *   12px                  the scoring grid's own cells, and the dense meta
- *                         lines that sit beside them
- *   13px                  notes, descriptions, secondary buttons
- *   14px                  the body. Roster, run of show, answers, the join
- *                         code and the join link
- *   16px  (was 15)        the panel head, the session title, the round card
- *   18px  (was 17)        the line the host acts on: what the round is,
- *                         which round is next, the primary button
- *   24px  (was 22)        the one thing in front of the room: the question
- *   30px  (was 40)        the gate, the only full-page heading here
+ * Each sets size, line height and tracking together, and the weight where the
+ * token has one. The mapping was mechanical — nearest token, the heading
+ * variant where the old rule was bold, and 24px down to 20 rather than up to
+ * 28, to keep the panels inside 1280×800. Uppercase and em tracking went with
+ * the old chrome idiom: Carbon has no caps style. `code-01` is not listed
+ * because its metrics are `label-01`'s exactly — 12px, 1.33333, 0.32px — and
+ * the face stays the console's own `--mono` wherever a rule or a `.mono`
+ * class asks for it; Carbon's Plex Mono is not loaded.
  *
- * 10, 11 and 12 sit below Helios' 13px floor and stay there deliberately.
- * They are not prose: they are a terminal's chrome — tracked mono keycaps,
- * column heads, and a 22px scoring row that thirty people have to fit into
- * above the fold. Lifting those to 13 is a scoring grid that no longer fits a
- * 1280px window, which is a worse failure at 2:45pm than a small column head.
- * Everything a host reads as a sentence is 13px or larger.
- *
- * Two sizes are outside the scale on purpose, and tokens.css already states
- * the exception: driving mode's count is 56px because it is read from arm's
- * length with nothing else on the screen, and the arcade keeps its own
- * display sizes.
+ * Measured against step 4 at 1280×800 over a three-minute scripted session,
+ * and again with the tray dragged to 560px: nothing new is clipped,
+ * ellipsised or pushed off the page. The scoring grid keeps its 25px rows; its
+ * header grows from 49.5px to 70.5px, because the activity titles wrap to
+ * three lines at Carbon's 14px semibold table header.
  *
  * The join code has come off this list entirely. It was 34px with 0.26em of
  * tracking because it was once a four-letter word read aloud to a room; it is
@@ -133,7 +127,9 @@
  */
 
 body {
-  font-size: 13px;
+  font-size: var(--cds-body-compact-01-font-size);
+  letter-spacing: var(--cds-body-compact-01-letter-spacing);
+  line-height: var(--cds-body-compact-01-line-height);
   overflow: hidden;
 }
 
@@ -155,7 +151,17 @@ body {
 .panel .label,
 .tray-preview > .label,
 .cp .label {
-  font-size: 11px;
+  /* #28 step 5: Carbon's `label-01`, whole. `tokens.css` gives `.label` the
+     console's mono caps — mono, 600, uppercase, 0.18em — and that idiom goes
+     with the console's own scale. The face, weight and case come back to
+     Carbon's here, in the console's regions only, so the phone's labels in the
+     preview keep theirs. */
+  font-family: var(--body);
+  font-weight: var(--cds-label-01-font-weight);
+  text-transform: none;
+  font-size: var(--cds-label-01-font-size);
+  letter-spacing: var(--cds-label-01-letter-spacing);
+  line-height: var(--cds-label-01-line-height);
 }
 
 #app {
@@ -165,19 +171,8 @@ body {
 }
 
 /* ---------------------------------------------------------------------
-   Type scale. Five sizes, and every rule below uses one of them:
-
-     11px  labels, eyebrows, meta — uppercase and letter-spaced
-     13px  body, and every control
-     16px  panel and section headings
-     24px  numbers meant to be read across the room
-     56px  the one display number
-
-   There were eleven sizes before this, which is not a scale but an accretion:
-   10, 12, 14, 15 and 18 had each arrived once to solve one row and then been
-   copied. Differences that small are not read as hierarchy, they are read as
-   carelessness, and they make every new rule a guess about which neighbour to
-   match. Add a sixth only with a reason.
+   Type: Carbon's tokens, and nothing else. See the head of this file for
+   the mapping. A new rule picks a token; it does not pick a number.
    --------------------------------------------------------------------- */
 
 /* ----------------------------------------------------------- status -- */
@@ -191,7 +186,9 @@ body {
   height: 40px;
   background: var(--panel);
   border-bottom: 1px solid var(--line);
-  font-size: 13px;
+  font-size: var(--cds-body-compact-01-font-size);
+  letter-spacing: var(--cds-body-compact-01-letter-spacing);
+  line-height: var(--cds-body-compact-01-line-height);
   white-space: nowrap;
 }
 
@@ -202,13 +199,14 @@ body {
    session it is. 16px, Helios display 16, up from a 15 that is not on the
    scale; --ink on --panel is 16.80:1 dark and 18.72:1 light. */
 .sb-title {
-  font-size: 16px;
-  font-weight: 600;
+  font-size: var(--cds-heading-compact-02-font-size);
+  letter-spacing: var(--cds-heading-compact-02-letter-spacing);
+  line-height: var(--cds-heading-compact-02-line-height);
+  font-weight: var(--cds-heading-compact-02-font-weight);
 }
 .sb-counts,
 .sb-phase {
   color: var(--muted);
-  letter-spacing: 0.1em;
 }
 /*
  * The one badge on the console, and a `cds-tag size="sm"` since #28 step 3.
@@ -261,7 +259,6 @@ body {
  */
 .sb-seal {
   margin-left: auto;
-  letter-spacing: 0.18em;
   font-weight: 600;
   --cds-tag-background-gray: transparent;
   --cds-tag-color-gray: var(--ink);
@@ -286,7 +283,6 @@ body {
 
 .sb-conn {
   color: var(--sealed);
-  letter-spacing: 0.16em;
   font-weight: 600;
 }
 .sb-conn[hidden] {
@@ -314,7 +310,9 @@ body {
   padding: 8px 14px;
   background: var(--panel);
   border-bottom: 2px solid var(--warning);
-  font-size: 13px;
+  font-size: var(--cds-body-compact-01-font-size);
+  letter-spacing: var(--cds-body-compact-01-letter-spacing);
+  line-height: var(--cds-body-compact-01-line-height);
   color: var(--ink);
 }
 .sb-stale[hidden] {
@@ -463,7 +461,9 @@ body {
   border-radius: 0;
   text-align: left;
   color: var(--muted);
-  font-size: 13px;
+  font-size: var(--cds-body-compact-01-font-size);
+  letter-spacing: var(--cds-body-compact-01-letter-spacing);
+  line-height: var(--cds-body-compact-01-line-height);
 }
 .seg:hover:not(:disabled) {
   background: var(--panel-2);
@@ -478,20 +478,22 @@ body {
   opacity: 0.45;
 }
 .seg-mark {
-  font-size: 11px;
+  font-size: var(--cds-label-01-font-size);
+  letter-spacing: var(--cds-label-01-letter-spacing);
+  line-height: var(--cds-label-01-line-height);
 }
 .seg.current .seg-mark {
   color: var(--nomad-ink);
 }
 .seg-phase {
   margin-left: auto;
-  font-size: 11px;
-  letter-spacing: 0.1em;
+  font-size: var(--cds-label-01-font-size);
+  line-height: var(--cds-label-01-line-height);
+  letter-spacing: var(--cds-label-01-letter-spacing);
   color: var(--muted);
   border: 1px solid var(--line);
   border-radius: 0;
   padding: 0 4px;
-  text-transform: uppercase;
 }
 /* Out of the runbook: not on the space bar, still one click away. Said twice
    and neither time in colour — a dashed edge and the word "out" — because
@@ -525,7 +527,9 @@ body {
   padding: 2px 4px;
   border-radius: 3px;
   height: 22px;
-  font-size: 13px;
+  font-size: var(--cds-body-compact-01-font-size);
+  letter-spacing: var(--cds-body-compact-01-letter-spacing);
+  line-height: var(--cds-body-compact-01-line-height);
 }
 .r-row:hover,
 .r-row:focus-within {
@@ -542,7 +546,9 @@ body {
 .r-num {
   margin-left: auto;
   color: var(--dim);
-  font-size: 11px;
+  font-size: var(--cds-label-01-font-size);
+  letter-spacing: var(--cds-label-01-letter-spacing);
+  line-height: var(--cds-label-01-line-height);
 }
 /* The two controls float over the right of the row rather than sitting in
    it. The roster is a 132px grid and these labels say what they do, which
@@ -591,9 +597,9 @@ body {
    --muted on --ground is 5.84:1 dark and 5.38:1 light. */
 .panel-sub {
   color: var(--muted);
-  font-size: 11px;
-  letter-spacing: 0.14em;
-  text-transform: uppercase;
+  font-size: var(--cds-label-01-font-size);
+  line-height: var(--cds-label-01-line-height);
+  letter-spacing: var(--cds-label-01-letter-spacing);
 }
 
 /*
@@ -672,7 +678,8 @@ body {
 .pb-note {
   margin: 0;
   color: var(--muted);
-  font-size: 13px;
+  font-size: var(--cds-body-compact-01-font-size);
+  letter-spacing: var(--cds-body-compact-01-letter-spacing);
   line-height: 1.4;
 }
 .pb-warn {
@@ -687,7 +694,9 @@ body {
 .kv .label {
   width: 90px;
   flex: none;
-  font-size: 11px;
+  font-size: var(--cds-label-01-font-size);
+  letter-spacing: var(--cds-label-01-letter-spacing);
+  line-height: var(--cds-label-01-line-height);
 }
 /*
  * The join code and the join link, at one size, both copyable.
@@ -711,7 +720,9 @@ body {
  */
 .join-code,
 .join-url {
-  font-size: 13px;
+  font-size: var(--cds-body-compact-01-font-size);
+  letter-spacing: var(--cds-body-compact-01-letter-spacing);
+  line-height: var(--cds-body-compact-01-line-height);
   min-width: 0;
   overflow-wrap: anywhere;
   user-select: all;
@@ -748,8 +759,9 @@ body {
   border-radius: 0;
   padding: 3px 8px;
   font-family: var(--mono);
-  font-size: 11px;
-  letter-spacing: 0.08em;
+  font-size: var(--cds-label-01-font-size);
+  line-height: var(--cds-label-01-line-height);
+  letter-spacing: var(--cds-label-01-letter-spacing);
   color: var(--ink);
   white-space: nowrap;
 }
@@ -761,11 +773,12 @@ body {
   border-color: var(--hit);
 }
 .big-num {
-  font-size: 24px;
-  font-weight: 600;
+  font-size: var(--cds-heading-03-font-size);
+  letter-spacing: var(--cds-heading-03-letter-spacing);
+  line-height: var(--cds-heading-03-line-height);
+  font-weight: var(--cds-heading-03-font-weight);
 }
 .lock-state {
-  letter-spacing: 0.18em;
   font-weight: 600;
 }
 .lock-state[data-locked="yes"] {
@@ -783,7 +796,9 @@ body {
 .field-row .label {
   width: 90px;
   flex: none;
-  font-size: 11px;
+  font-size: var(--cds-label-01-font-size);
+  letter-spacing: var(--cds-label-01-letter-spacing);
+  line-height: var(--cds-label-01-line-height);
 }
 /*
  * A field, in both of the two things one is on this surface.
@@ -821,7 +836,9 @@ body {
   border: 0;
   border-bottom: 1px solid var(--muted);
   border-radius: 0;
-  font-size: 13px;
+  font-size: var(--cds-body-compact-01-font-size);
+  letter-spacing: var(--cds-body-compact-01-letter-spacing);
+  line-height: var(--cds-body-compact-01-line-height);
 }
 /*
  * A Carbon field is 32px from `--cds-layout-size-height-sm` and sets its own
@@ -910,7 +927,9 @@ cds-number-input.field {
 }
 .h-rank {
   color: var(--muted);
-  font-size: 11px;
+  font-size: var(--cds-label-01-font-size);
+  letter-spacing: var(--cds-label-01-letter-spacing);
+  line-height: var(--cds-label-01-line-height);
 }
 .h-name {
   overflow: hidden;
@@ -993,9 +1012,10 @@ cds-number-input.field {
   gap: 12px;
 }
 .sc-hint {
-  font-size: 11px;
+  font-size: var(--cds-label-01-font-size);
+  line-height: var(--cds-label-01-line-height);
   color: var(--dim);
-  letter-spacing: 0.04em;
+  letter-spacing: var(--cds-label-01-letter-spacing);
 }
 
 /* Sized to its rows rather than capped at 46vh, and the only part of the
@@ -1044,30 +1064,24 @@ cds-number-input.field {
   display: table;
   width: 100%;
   border-collapse: collapse;
-  font-size: 13px;
+  font-size: var(--cds-body-compact-01-font-size);
+  letter-spacing: var(--cds-body-compact-01-letter-spacing);
+  line-height: var(--cds-body-compact-01-line-height);
 }
 
 /*
- * Carbon's table, on the console's own type (#28 step 4).
+ * Carbon's table, on Carbon's own type (#28 step 5).
  *
- * `cds-table` gives its head and body their own type through `::slotted` —
- * 14px, Carbon's line heights, 0.16px of letter-spacing, 600 on the head — and
- * paints the head `--cds-layer-accent` and the body `--cds-layer`. A document
- * rule on the slotted element beats a `::slotted` one, so these put both back
- * to inheriting from `.sc-grid`, which is what a native `<thead>` and `<tbody>`
- * did. Measured with them taken out, at 1280×800: the rows stay 25px — the
- * 22px field is what sets a row — but every name goes to 14px, Name gives up
- * a pixel, and the header grows from 49.5px to 57.6px, because the two-line
- * activity titles take Carbon's 1.43 line height. The type question itself is
- * step 5's; this keeps the grid where it was until that is decided.
+ * Step 4 put the head and body back on the grid's 13px; step 5 takes Carbon's
+ * scale whole, so they keep what `cds-table` gives them through `::slotted`:
+ * `heading-01` on the head (14px, 600) and `body-short-01` on the body (14px).
+ * What is still overridden is colour and ground. Carbon paints the head
+ * `--cds-layer-accent` and the body `--cds-layer`; the grid sits on the
+ * panel, so both stay transparent and every cell inherits the console's ink.
  */
 .sc-thead,
 .sc-tbody {
   color: inherit;
-  font-size: inherit;
-  font-weight: inherit;
-  line-height: inherit;
-  letter-spacing: inherit;
   background-color: transparent;
 }
 
@@ -1129,12 +1143,6 @@ cds-number-input.field {
   border-bottom: 1px solid var(--line);
   text-align: left;
   padding: 5px 8px;
-  font-family: var(--mono);
-  font-size: 11px;
-  font-weight: 600;
-  letter-spacing: 0.16em;
-  text-transform: uppercase;
-  color: var(--muted);
   white-space: nowrap;
 }
 /* The column that absorbs whatever the frame has spare — see `.sc-grid`. The
@@ -1204,7 +1212,9 @@ cds-number-input.field {
 }
 .sc-num {
   color: var(--dim);
-  font-size: 11px;
+  font-size: var(--cds-label-01-font-size);
+  letter-spacing: var(--cds-label-01-letter-spacing);
+  line-height: var(--cds-label-01-line-height);
 }
 .sc-name {
   display: block;
@@ -1228,7 +1238,9 @@ cds-number-input.field {
   border-radius: 3px;
   font-family: var(--mono);
   font-variant-numeric: tabular-nums;
-  font-size: 11px;
+  font-size: var(--cds-label-01-font-size);
+  letter-spacing: var(--cds-label-01-letter-spacing);
+  line-height: var(--cds-label-01-line-height);
   text-align: right;
 }
 .sc-raw:focus {
@@ -1247,7 +1259,9 @@ cds-number-input.field {
   display: inline-block;
   min-width: 26px;
   margin-left: 6px;
-  font-size: 11px;
+  font-size: var(--cds-label-01-font-size);
+  letter-spacing: var(--cds-label-01-letter-spacing);
+  line-height: var(--cds-label-01-line-height);
   color: var(--muted);
   text-align: right;
 }
@@ -1272,7 +1286,8 @@ cds-number-input.field {
   border-radius: 0;
   color: var(--muted);
   font-family: var(--mono);
-  font-size: 11px;
+  font-size: var(--cds-label-01-font-size);
+  letter-spacing: var(--cds-label-01-letter-spacing);
   line-height: 1;
   padding: 2px 4px;
 }
@@ -1292,7 +1307,9 @@ cds-number-input.field {
   border: 1px solid var(--danger);
   border-radius: 3px;
   color: var(--danger);
-  font-size: 11px;
+  font-size: var(--cds-label-01-font-size);
+  letter-spacing: var(--cds-label-01-letter-spacing);
+  line-height: var(--cds-label-01-line-height);
   white-space: nowrap;
 }
 .sc-flash[hidden] {
@@ -1336,7 +1353,9 @@ cds-number-input.field {
 }
 .sc-rank {
   color: var(--muted);
-  font-size: 11px;
+  font-size: var(--cds-label-01-font-size);
+  letter-spacing: var(--cds-label-01-letter-spacing);
+  line-height: var(--cds-label-01-line-height);
 }
 
 /* --------------------------------------------------------- the foot -- */
@@ -1432,9 +1451,8 @@ cds-number-input.field {
  *       `--cds-button-tertiary` paints a tertiary's border *and* its label
  *       from one property, which is why a tertiary cannot be filled from out
  *       here and why "on" is a different kind rather than a different colour.
- *   13px                                     Carbon's `body-compact-01`, 14px.
- *       #28 step 5 is where the console decides whether to push its own 13/11
- *       through `--cds-body-compact-01-font-size`; nothing here pre-empts it.
+ *   13px                                     Carbon's `body-compact-01`, 14px —
+ *       and since #28 step 5 the rest of the console is on Carbon's scale too.
  *   4px corners                              square. Not reachable from
  *       outside a shadow root — measured, with both `border-radius` and
  *       `--cds-border-radius` set on the host — and the most visible thing
@@ -1558,17 +1576,14 @@ cds-button {
  * `size="sm"` is 18px with a 12px `label-01` label. The console's VERIFY chip
  * was 14.5px with a 10px label, and the seal badge 21px with a 13px one.
  *
- * Carbon's scale is kept and the console's is not pushed through
- * `--cds-label-01-font-size`, for the reason step 2 left `.ctl-row`
- * hand-built: going off a component's own scale in two tokens at once — the
- * height and the type — is where the system starts fighting, and #28 step 5 is
- * the branch that owns the type question for the whole surface. Nothing here
- * pre-empts it.
+ * Carbon's scale is kept, and since #28 step 5 it is the console's scale
+ * too: the answer beside VERIFY is `label-01` as well, so the two are one
+ * size again and the hierarchy step 3 inverted is level.
  *
- * The cost of that is real and is stated rather than hidden: VERIFY is 12px
- * beside an 11px answer, so the flag is now fractionally the largest thing on
- * a gganbu recap row, where the note above `.a-gganbu-answer` says the answer
- * is what should read first. A/B'd in place at 1280px against the `<span>` it
+ * What step 3 recorded, kept for the measurement: VERIFY was 12px beside an
+ * 11px answer, so the flag was fractionally the largest thing on a gganbu
+ * recap row, where the note above `.a-gganbu-answer` says the answer is what
+ * should read first. A/B'd in place at 1280px against the `<span>` it
  * replaced, with the recap's six rows all flagged:
  *
  *                    main          Carbon
@@ -1576,8 +1591,7 @@ cds-button {
  *   one row          17.84         19.00
  *   all six rows    107.06        114.00
  *
- * Seven pixels across the recap, in a panel with room. If #28 step 5 chooses
- * the console's 13/11, the hierarchy inverts back for free.
+ * Seven pixels across the recap, in a panel with room.
  *
  * ---- 3. Carbon's grey is not available, for step 2's reason -----------
  *
@@ -1666,8 +1680,8 @@ cds-button {
  * A number field's inline padding is not that token at all: the component's
  * sheet writes `padding-inline: 1rem 6rem` as a literal, and `hide-steppers`
  * takes the second half to 0. So the twelve are 16px of lead-in where the
- * other three are 8px, and that is a Carbon decision this file cannot reach
- * and #28 step 5 can argue about with the rest of the type and spacing.
+ * other three are 8px. That is Carbon's own literal, and #28 step 5 — which
+ * took Carbon's scale whole — leaves it as Carbon wrote it.
  *
  * `inline-size: 100%` is on `:host(cds-text-input)`, `:host(cds-select)` and
  * `:host(cds-number-input)`, so a field fills its `.field-row` the way
@@ -1888,9 +1902,10 @@ cds-number-input {
    --sealed on --ground is 13.36:1 dark and 4.90:1 light. */
 .ctl-question {
   font-family: var(--mono);
-  font-size: 11px;
+  font-size: var(--cds-label-01-font-size);
+  line-height: var(--cds-label-01-line-height);
   color: var(--sealed);
-  letter-spacing: 0.06em;
+  letter-spacing: var(--cds-label-01-letter-spacing);
 }
 /*
  * The ink on the Yes's fill, which is the one place the bridged red needs one.
@@ -1969,7 +1984,9 @@ cds-number-input {
  */
 .ctl-flash {
   font-family: var(--mono);
-  font-size: 11px;
+  font-size: var(--cds-label-01-font-size);
+  letter-spacing: var(--cds-label-01-letter-spacing);
+  line-height: var(--cds-label-01-line-height);
   padding: 6px 10px;
   border-radius: 0;
   border: 1px solid var(--danger);
@@ -2017,8 +2034,9 @@ cds-number-input {
  * is absolutely positioned and translated and wears a gradient: the overflow
  * had to be papered over the names above and below.
  *
- * 17px is the correction and it is kept. It is 13px of 11px mono line box plus
- * 2 × 1px of padding plus 2 × 1px of border, and it is stated as a floor below
+ * 17px is the correction and it is kept as the floor. Since #28 step 5 the
+ * label is Carbon's `label-01`, a 16px line box, so the button is 20px — 16
+ * plus 2 × 1px of padding plus 2 × 1px of border — and it is stated as a floor below
  * rather than left to arithmetic, so a label that ever wraps grows the box
  * instead of being clipped and two buttons side by side are one height.
  * Centred in 22px it leaves 2.5px top and bottom, and for the first time the
@@ -2039,12 +2057,14 @@ cds-number-input {
   border: 1px solid var(--line);
   border-radius: 0;
   padding: 1px 5px;
-  /* 13px line box + 2px padding + 2px border = 17px, in a 22px row. See the
-     height note above: `main` was 31px here, and that was the bug. */
+  /* 16px `label-01` line box + 2px padding + 2px border = 20px, in a 22px
+     row; 17px is the floor. See the height note above: `main` was 31px here,
+     and that was the bug. */
   min-height: 17px;
-  font-size: 11px;
+  font-size: var(--cds-label-01-font-size);
+  line-height: var(--cds-label-01-line-height);
   font-family: var(--mono);
-  letter-spacing: 0.08em;
+  letter-spacing: var(--cds-label-01-letter-spacing);
   color: var(--ink);
   /* A two-word label on a 22px row must not become two lines. */
   white-space: nowrap;
@@ -2073,7 +2093,9 @@ cds-number-input {
   color: var(--danger);
 }
 .ctl-row .ctl-question {
-  font-size: 11px;
+  font-size: var(--cds-label-01-font-size);
+  letter-spacing: var(--cds-label-01-letter-spacing);
+  line-height: var(--cds-label-01-line-height);
 }
 
 /* --------------------------------------------------------------- tray -- */
@@ -2115,6 +2137,14 @@ cds-number-input {
   --pv-scale: 0.175;
 }
 .preview-frame {
+  /* What the preview inherited before #28 step 5 put the console's own text
+     on Carbon's scale: 13px, with the browser's line height and no tracking.
+     The preview is the phone's look, not the console's, so the console's type
+     stops at this frame. Whether it should be the phone's 16px is a separate
+     question; this keeps it exactly as it was. */
+  font-size: 13px;
+  line-height: normal;
+  letter-spacing: normal;
   width: 100%;
   aspect-ratio: 1280 / 800;
   overflow: hidden;
@@ -2161,7 +2191,10 @@ cds-number-input {
 /* Helios display 30. The gate is a full page with one sentence on it; 40px
    was off the scale and bought nothing a 30 does not. */
 .gate h1 {
-  font-size: 24px;
+  font-size: var(--cds-heading-03-font-size);
+  font-weight: var(--cds-heading-03-font-weight);
+  letter-spacing: var(--cds-heading-03-letter-spacing);
+  line-height: var(--cds-heading-03-line-height);
   margin: 8px 0 12px;
 }
 .gate-note {
@@ -2190,8 +2223,9 @@ cds-number-input {
 
 .t-head-line {
   margin: 0;
-  font-size: 13px;
-  letter-spacing: 0.14em;
+  font-size: var(--cds-body-compact-01-font-size);
+  line-height: var(--cds-body-compact-01-line-height);
+  letter-spacing: var(--cds-body-compact-01-letter-spacing);
   color: var(--muted);
 }
 
@@ -2200,20 +2234,24 @@ cds-number-input {
 .t-round-card {
   margin: 0;
   align-self: flex-start;
-  font-size: 13px;
+  font-size: var(--cds-body-compact-01-font-size);
+  letter-spacing: var(--cds-body-compact-01-letter-spacing);
+  line-height: var(--cds-body-compact-01-line-height);
   color: var(--muted);
 }
 .t-round-card[hidden] {
   display: none;
 }
 .t-round-card.is-card {
-  font-size: 16px;
+  font-size: var(--cds-heading-compact-02-font-size);
+  letter-spacing: var(--cds-heading-compact-02-letter-spacing);
+  line-height: var(--cds-heading-compact-02-line-height);
   padding: 7px 12px;
   border-radius: 6px;
   border-left: 3px solid var(--trivia);
   background: var(--panel-2);
   color: var(--ink);
-  font-weight: 600;
+  font-weight: var(--cds-heading-compact-02-font-weight);
 }
 
 /* The one thing in front of the room, and the one thing the host says out
@@ -2221,7 +2259,9 @@ cds-number-input {
    the scale. --ink: 16.80:1 dark, 18.72:1 light. */
 .t-q {
   margin: 0;
-  font-size: 24px;
+  font-size: var(--cds-heading-03-font-size);
+  font-weight: var(--cds-heading-03-font-weight);
+  letter-spacing: var(--cds-heading-03-letter-spacing);
   line-height: 1.25;
 }
 
@@ -2246,7 +2286,9 @@ cds-number-input {
   padding: 4px 8px;
   border-radius: 5px;
   background: var(--panel-2);
-  font-size: 13px;
+  font-size: var(--cds-body-compact-01-font-size);
+  letter-spacing: var(--cds-body-compact-01-letter-spacing);
+  line-height: var(--cds-body-compact-01-line-height);
   overflow: hidden;
 }
 .t-answer-bar {
@@ -2300,8 +2342,10 @@ cds-number-input {
    found. */
 .t-counts {
   margin: 0;
-  font-size: 16px;
-  font-weight: 600;
+  font-size: var(--cds-heading-compact-02-font-size);
+  letter-spacing: var(--cds-heading-compact-02-letter-spacing);
+  line-height: var(--cds-heading-compact-02-line-height);
+  font-weight: var(--cds-heading-compact-02-font-weight);
 }
 .t-counts.all-in {
   color: var(--hit);
@@ -2311,7 +2355,9 @@ cds-number-input {
    whether to wait or close, which makes it a sentence rather than chrome. */
 .t-waiting {
   margin: 0;
-  font-size: 13px;
+  font-size: var(--cds-body-compact-01-font-size);
+  letter-spacing: var(--cds-body-compact-01-letter-spacing);
+  line-height: var(--cds-body-compact-01-line-height);
   color: var(--dim);
 }
 .t-waiting[hidden],
@@ -2414,8 +2460,9 @@ cds-number-input {
 }
 
 .so-where {
-  font-size: 13px;
-  letter-spacing: 0.14em;
+  font-size: var(--cds-body-compact-01-font-size);
+  line-height: var(--cds-body-compact-01-line-height);
+  letter-spacing: var(--cds-body-compact-01-letter-spacing);
   color: var(--muted);
 }
 
@@ -2440,13 +2487,17 @@ cds-number-input {
 }
 
 .so-next-label {
-  font-size: 11px;
+  font-size: var(--cds-label-01-font-size);
+  letter-spacing: var(--cds-label-01-letter-spacing);
+  line-height: var(--cds-label-01-line-height);
 }
 
 .so-next-from {
   margin: 0;
-  font-size: 13px;
-  font-weight: 600;
+  font-size: var(--cds-heading-compact-01-font-size);
+  letter-spacing: var(--cds-heading-compact-01-letter-spacing);
+  line-height: var(--cds-heading-compact-01-line-height);
+  font-weight: var(--cds-heading-compact-01-font-weight);
   color: var(--ink);
 }
 .so-next-from[hidden] {
@@ -2493,11 +2544,14 @@ cds-number-input {
 }
 
 .so-next.is-long .so-next-text {
-  font-size: 13px;
+  font-size: var(--cds-body-compact-01-font-size);
+  letter-spacing: var(--cds-body-compact-01-letter-spacing);
+  line-height: var(--cds-body-compact-01-line-height);
 }
 .so-next-text {
   margin: 0;
-  font-size: 16px;
+  font-size: var(--cds-body-compact-02-font-size);
+  letter-spacing: var(--cds-body-compact-02-letter-spacing);
   line-height: 1.45;
   color: var(--ink);
   /* The measure a paragraph is read at, not the width of the panel. */
@@ -2549,7 +2603,9 @@ cds-number-input {
   border-radius: 0;
   background: var(--panel-2);
   color: var(--ink);
-  font-size: 13px;
+  font-size: var(--cds-body-compact-01-font-size);
+  letter-spacing: var(--cds-body-compact-01-letter-spacing);
+  line-height: var(--cds-body-compact-01-line-height);
   text-align: left;
 }
 .a-pick-name {
@@ -2558,10 +2614,11 @@ cds-number-input {
 /* --muted is the readable muted; --dim never carries text that has to be
    read, and this line has to be read. */
 .a-pick-what {
-  font-size: 13px;
+  font-size: var(--cds-body-compact-01-font-size);
+  letter-spacing: var(--cds-body-compact-01-letter-spacing);
   line-height: 1.35;
   color: var(--muted);
-  font-weight: 400;
+  font-weight: var(--cds-body-compact-01-font-weight);
 }
 /* On the filled pill the line takes the fill's own ink, not a grey that was
    measured against the panel. */
@@ -2593,8 +2650,9 @@ cds-number-input {
   color: var(--muted);
 }
 .a-pick-todo {
-  font-size: 11px;
-  letter-spacing: 0.06em;
+  font-size: var(--cds-label-01-font-size);
+  line-height: var(--cds-label-01-line-height);
+  letter-spacing: var(--cds-label-01-letter-spacing);
   color: var(--muted);
 }
 
@@ -2632,7 +2690,8 @@ cds-number-input {
    were the --panel pair. */
 .a-item {
   margin: 0;
-  font-size: 16px;
+  font-size: var(--cds-body-compact-02-font-size);
+  letter-spacing: var(--cds-body-compact-02-letter-spacing);
   line-height: 1.35;
 }
 .a-note {
@@ -2664,7 +2723,9 @@ cds-number-input {
 .a-bridge-broken,
 .a-bridge-across {
   margin: 0;
-  font-size: 11px;
+  font-size: var(--cds-label-01-font-size);
+  letter-spacing: var(--cds-label-01-letter-spacing);
+  line-height: var(--cds-label-01-line-height);
   color: var(--muted);
 }
 .a-bridge-answer {
@@ -2672,13 +2733,15 @@ cds-number-input {
   display: grid;
   grid-template-columns: 3.2rem 1fr;
   gap: 0 0.5rem;
-  font-size: 13px;
+  font-size: var(--cds-body-compact-01-font-size);
+  letter-spacing: var(--cds-body-compact-01-letter-spacing);
   line-height: 1.35;
 }
 .a-bridge-mark {
   grid-row: span 2;
-  font-size: 11px;
-  letter-spacing: 0.1em;
+  font-size: var(--cds-label-01-font-size);
+  line-height: var(--cds-label-01-line-height);
+  letter-spacing: var(--cds-label-01-letter-spacing);
   color: var(--muted);
 }
 .a-bridge-answer[data-real="yes"] .a-bridge-mark {
@@ -2724,7 +2787,8 @@ cds-number-input {
   gap: 0 0.5rem;
   padding-left: 0.3rem;
   border-left: 2px solid transparent;
-  font-size: 13px;
+  font-size: var(--cds-body-compact-01-font-size);
+  letter-spacing: var(--cds-body-compact-01-letter-spacing);
   line-height: 1.35;
 }
 /* The prompt the room is on. A rule, not a fill: the list has to stay a list. */
@@ -2732,7 +2796,9 @@ cds-number-input {
   border-left-color: var(--arc-players);
 }
 .a-gganbu-n {
-  font-size: 11px;
+  font-size: var(--cds-label-01-font-size);
+  letter-spacing: var(--cds-label-01-letter-spacing);
+  line-height: var(--cds-label-01-line-height);
   color: var(--muted);
 }
 /* Scoped to the console's own recap, because the class name is not this
@@ -2760,32 +2826,33 @@ cds-number-input {
 /* The answer is the thing the host reads out, so it is the thing that reads
    first: everything else on the row is muted around it. */
 .a-gganbu-answer {
-  font-size: 11px;
-  letter-spacing: 0.1em;
-  font-weight: 600;
+  font-size: var(--cds-label-01-font-size);
+  line-height: var(--cds-label-01-line-height);
+  letter-spacing: var(--cds-label-01-letter-spacing);
+  font-weight: var(--cds-label-01-font-weight);
   color: var(--arc-players);
 }
 /* The flag: which of the six notes to re-check before saying anything. A
    `cds-tag size="sm"` since #28 step 3 — a static chip with a word in it is
    what `cds-tag` is — so the box, the 18px height and the 12px label are
    Carbon's and the palette is the console's, from the `cds-tag` block above.
-   What is left here is the tracking, which is the console's and not Carbon's:
-   0.1em, the same as the answer beside it, because the two are read together.
-   Measured at 68.56 × 18, clear of Carbon's own 32px `min-inline-size`.
+   The 0.1em tracking it carried to match the answer went with the console's
+   type in #28 step 5: both are Carbon's `label-01` now, tracked 0.32px, and
+   still read together.
    --ink on --panel-2 is 15.31:1 dark and 17.44:1 light. */
-.a-gganbu-verify {
-  letter-spacing: 0.1em;
-}
 /* The one sentence that says which notes to check, above the counts. Not
    muted: it is an instruction, and the only one on this panel. */
 .a-gganbu-check {
   margin: 0;
-  font-size: 12px;
+  font-size: var(--cds-label-01-font-size);
+  letter-spacing: var(--cds-label-01-letter-spacing);
   line-height: 1.35;
 }
 .a-gganbu-line {
   margin: 0;
-  font-size: 11px;
+  font-size: var(--cds-label-01-font-size);
+  letter-spacing: var(--cds-label-01-letter-spacing);
+  line-height: var(--cds-label-01-line-height);
   color: var(--muted);
 }
 
@@ -2820,12 +2887,16 @@ cds-number-input {
 .a-split-text {
   margin: 0.3rem 0 0;
   color: var(--muted);
-  font-size: 11px;
+  font-size: var(--cds-label-01-font-size);
+  letter-spacing: var(--cds-label-01-letter-spacing);
+  line-height: var(--cds-label-01-line-height);
 }
 .a-floor-list {
   margin: 0;
   color: var(--arc-lounge);
-  font-size: 11px;
+  font-size: var(--cds-label-01-font-size);
+  letter-spacing: var(--cds-label-01-letter-spacing);
+  line-height: var(--cds-label-01-line-height);
   word-break: break-all;
 }
 .a-backing {
@@ -2842,7 +2913,9 @@ cds-number-input {
   display: flex;
   align-items: baseline;
   gap: 0.45rem;
-  font-size: 11px;
+  font-size: var(--cds-label-01-font-size);
+  letter-spacing: var(--cds-label-01-letter-spacing);
+  line-height: var(--cds-label-01-line-height);
 }
 .a-backing-name {
   color: var(--muted);
@@ -2861,9 +2934,9 @@ cds-number-input {
 .rail-keys {
   margin: 0;
   flex: none;
-  font-size: 11px;
+  font-size: var(--cds-label-01-font-size);
   line-height: 1.6;
-  letter-spacing: 0.08em;
+  letter-spacing: var(--cds-label-01-letter-spacing);
   color: var(--muted);
 }
 
@@ -2907,20 +2980,23 @@ cds-number-input {
   grid-template-columns: 1.2em 5.5em minmax(0, 1fr) auto;
   align-items: baseline;
   gap: 10px;
-  font-size: 13px;
+  font-size: var(--cds-body-compact-01-font-size);
+  letter-spacing: var(--cds-body-compact-01-letter-spacing);
   line-height: 1.4;
 }
 
 .pf-mark {
-  font-size: 13px;
-  font-weight: 600;
+  font-size: var(--cds-heading-compact-01-font-size);
+  letter-spacing: var(--cds-heading-compact-01-letter-spacing);
+  line-height: var(--cds-heading-compact-01-line-height);
+  font-weight: var(--cds-heading-compact-01-font-weight);
   text-align: center;
 }
 .pf-word {
-  font-size: 11px;
-  font-weight: 600;
-  letter-spacing: 0.16em;
-  text-transform: uppercase;
+  font-size: var(--cds-label-01-font-size);
+  line-height: var(--cds-label-01-line-height);
+  font-weight: var(--cds-label-01-font-weight);
+  letter-spacing: var(--cds-label-01-letter-spacing);
 }
 .pf-text {
   color: var(--ink);
@@ -2945,7 +3021,9 @@ cds-number-input {
   border: 1px solid var(--line);
   border-radius: 4px;
   padding: 3px 8px;
-  font-size: 11px;
+  font-size: var(--cds-label-01-font-size);
+  letter-spacing: var(--cds-label-01-letter-spacing);
+  line-height: var(--cds-label-01-line-height);
   font-family: var(--mono);
   color: var(--ink);
   white-space: nowrap;
@@ -3003,7 +3081,9 @@ cds-number-input {
    a row and not a warning — the confirmation is that the list is right there
    and nothing has gone to the room. */
 .rb-drop {
-  font-size: 16px;
+  font-size: var(--cds-body-compact-02-font-size);
+  letter-spacing: var(--cds-body-compact-02-letter-spacing);
+  line-height: var(--cds-body-compact-02-line-height);
 }
 .rb-drop:hover:not(:disabled) {
   border-color: var(--danger);
@@ -3032,7 +3112,9 @@ cds-number-input {
   flex: 1;
   min-width: 0;
   max-width: 260px;
-  font-size: 13px;
+  font-size: var(--cds-body-compact-01-font-size);
+  letter-spacing: var(--cds-body-compact-01-letter-spacing);
+  line-height: var(--cds-body-compact-01-line-height);
 }
 .rb-card:focus {
   border-color: var(--ibm-blue);
@@ -3097,23 +3179,29 @@ cds-number-input {
   gap: 6px;
 }
 .hc-title {
-  font-weight: 600;
-  font-size: 13px;
+  font-weight: var(--cds-heading-compact-01-font-weight);
+  font-size: var(--cds-heading-compact-01-font-size);
+  letter-spacing: var(--cds-heading-compact-01-letter-spacing);
+  line-height: var(--cds-heading-compact-01-line-height);
 }
 /* On screen now, said twice: a dot in the live green and the word beside it.
    --live is --nomad-ink, 8.30:1 dark and 4.53:1 light on --panel-2. */
 .hc-now {
   color: var(--live);
-  font-size: 11px;
+  font-size: var(--cds-label-01-font-size);
+  letter-spacing: var(--cds-label-01-letter-spacing);
+  line-height: var(--cds-label-01-line-height);
 }
 .hc-onair {
   color: var(--live);
-  font-size: 11px;
-  letter-spacing: 0.12em;
-  text-transform: uppercase;
+  font-size: var(--cds-label-01-font-size);
+  line-height: var(--cds-label-01-line-height);
+  letter-spacing: var(--cds-label-01-letter-spacing);
 }
 .hc-line {
-  font-size: 13px;
+  font-size: var(--cds-body-compact-01-font-size);
+  letter-spacing: var(--cds-body-compact-01-letter-spacing);
+  line-height: var(--cds-body-compact-01-line-height);
   color: var(--muted);
 }
 .a-setup {
@@ -3156,8 +3244,10 @@ cds-number-input {
 }
 
 .a-setup-pos {
-  font-size: 16px;
-  font-weight: 600;
+  font-size: var(--cds-heading-compact-02-font-size);
+  letter-spacing: var(--cds-heading-compact-02-letter-spacing);
+  line-height: var(--cds-heading-compact-02-line-height);
+  font-weight: var(--cds-heading-compact-02-font-weight);
   color: var(--ink);
   text-align: center;
 }
@@ -3172,11 +3262,14 @@ cds-number-input {
   min-width: 0;
 }
 .a-setup-name {
-  font-weight: 600;
-  font-size: 13px;
+  font-weight: var(--cds-heading-compact-01-font-weight);
+  font-size: var(--cds-heading-compact-01-font-size);
+  letter-spacing: var(--cds-heading-compact-01-letter-spacing);
+  line-height: var(--cds-heading-compact-01-line-height);
 }
 .a-setup-what {
-  font-size: 13px;
+  font-size: var(--cds-body-compact-01-font-size);
+  letter-spacing: var(--cds-body-compact-01-letter-spacing);
   line-height: 1.35;
   color: var(--muted);
 }
@@ -3203,7 +3296,8 @@ cds-number-input {
   border: 1px solid var(--line);
   border-radius: 0;
   color: var(--ink);
-  font-size: 13px;
+  font-size: var(--cds-body-compact-01-font-size);
+  letter-spacing: var(--cds-body-compact-01-letter-spacing);
   line-height: 1;
   padding: 5px 8px;
 }
@@ -3256,8 +3350,9 @@ cds-number-input {
   border-radius: 0;
   color: var(--ink);
   font-family: var(--mono);
-  font-size: 11px;
-  letter-spacing: 0.1em;
+  font-size: var(--cds-label-01-font-size);
+  line-height: var(--cds-label-01-line-height);
+  letter-spacing: var(--cds-label-01-letter-spacing);
   padding: 5px 8px;
   white-space: nowrap;
 }
@@ -3288,7 +3383,8 @@ cds-number-input {
    --panel-2 #1d1d28 is 4.94:1 dark, #656a76 on #f1f2f3 5.06:1 light. */
 .rb-grip {
   color: var(--muted);
-  font-size: 13px;
+  font-size: var(--cds-body-compact-01-font-size);
+  letter-spacing: var(--cds-body-compact-01-letter-spacing);
   line-height: 1;
   cursor: grab;
   text-align: center;
@@ -3310,7 +3406,9 @@ cds-number-input {
    agree with the button. --ink: 16.80:1 dark, 18.72:1 light. */
 .a-upnext {
   margin: 0;
-  font-size: 16px;
+  font-size: var(--cds-body-compact-02-font-size);
+  letter-spacing: var(--cds-body-compact-02-letter-spacing);
+  line-height: var(--cds-body-compact-02-line-height);
   color: var(--ink);
 }
 .a-upnext[hidden] {
@@ -3343,8 +3441,8 @@ cds-number-input {
  * saying the same thing — `--cds-focus` is bridged to `--action`.
  *
  * It gives up the 11px mono caps, which was the console's chrome idiom for a
- * quiet control; the quiet is the grey and the absent box. #28 step 5 is where
- * the type question is settled for the whole surface.
+ * quiet control; the quiet is the grey and the absent box. #28 step 5 retired
+ * that idiom across the whole surface.
  * --muted on --ground is 5.84:1 dark and 5.38:1 light.
  */
 .a-alt-toggle {
@@ -3355,9 +3453,9 @@ cds-number-input {
   border: 1px solid transparent;
   border-radius: 0;
   color: var(--muted);
-  font-size: 14px;
+  font-size: var(--cds-body-compact-01-font-size);
   line-height: 18px;
-  letter-spacing: 0.16px;
+  letter-spacing: var(--cds-body-compact-01-letter-spacing);
   text-align: start;
   white-space: normal;
   cursor: pointer;
@@ -3412,32 +3510,39 @@ body.driving .cols {
 }
 
 .dv-label {
-  font-size: 11px;
+  font-size: var(--cds-label-01-font-size);
+  letter-spacing: var(--cds-label-01-letter-spacing);
+  line-height: var(--cds-label-01-line-height);
 }
 .dv-context {
   margin: 0;
-  font-size: 16px;
-  letter-spacing: 0.16em;
+  font-size: var(--cds-body-compact-02-font-size);
+  line-height: var(--cds-body-compact-02-line-height);
+  letter-spacing: var(--cds-body-compact-02-letter-spacing);
   color: var(--muted);
 }
 .dv-big {
   margin: 0;
   font-family: var(--display);
-  font-weight: 700;
-  font-size: 56px;
+  font-weight: var(--cds-heading-07-font-weight);
+  font-size: var(--cds-heading-07-font-size);
   line-height: 1;
-  letter-spacing: -0.02em;
+  letter-spacing: var(--cds-heading-07-letter-spacing);
   color: var(--ink);
 }
 .dv-sub {
   margin: 0;
-  font-size: 16px;
+  font-size: var(--cds-body-compact-02-font-size);
+  letter-spacing: var(--cds-body-compact-02-letter-spacing);
+  line-height: var(--cds-body-compact-02-line-height);
   color: var(--muted);
 }
 .dv-waiting {
   margin: 0;
   max-width: 60ch;
-  font-size: 13px;
+  font-size: var(--cds-body-compact-01-font-size);
+  letter-spacing: var(--cds-body-compact-01-letter-spacing);
+  line-height: var(--cds-body-compact-01-line-height);
   color: var(--muted);
 }
 .dv-waiting[hidden] {
@@ -3463,7 +3568,9 @@ body.driving .cols {
    empty screen; it is the one place on the console with the width to spare,
    and at 24px the condensed 7px start padding is visibly tight. */
 .driving-view .ctl-primary .ctl-button {
-  --cds-body-compact-01-font-size: 24px;
+  /* Carbon's `heading-03`, 20px, since #28 step 5 — the step on Carbon's
+     scale nearest the 24px this was, and the larger of the two that fit. */
+  --cds-body-compact-01-font-size: var(--cds-heading-03-font-size);
   --cds-layout-size-height-lg: 4rem;
   --cds-layout-density-padding-inline: var(
     --cds-layout-density-padding-inline-normal
@@ -3471,8 +3578,9 @@ body.driving .cols {
 }
 .dv-keys {
   margin: 0;
-  font-size: 11px;
-  letter-spacing: 0.1em;
+  font-size: var(--cds-label-01-font-size);
+  line-height: var(--cds-label-01-line-height);
+  letter-spacing: var(--cds-label-01-letter-spacing);
   color: var(--muted);
 }
 
@@ -3548,9 +3656,9 @@ body.driving .cols {
   border: 1px solid var(--danger);
   border-radius: 0;
   color: var(--danger);
-  font-size: 14px;
+  font-size: var(--cds-body-compact-01-font-size);
   line-height: 18px;
-  letter-spacing: 0.16px;
+  letter-spacing: var(--cds-body-compact-01-letter-spacing);
   text-align: start;
   white-space: normal;
   cursor: pointer;
@@ -3588,7 +3696,8 @@ body.driving .cols {
 .rs-loses {
   margin: 0;
   color: var(--ink);
-  font-size: 13px;
+  font-size: var(--cds-body-compact-01-font-size);
+  letter-spacing: var(--cds-body-compact-01-letter-spacing);
   line-height: 1.4;
   max-width: 70ch;
 }
@@ -3602,12 +3711,13 @@ body.driving .cols {
   flex-wrap: wrap;
 }
 .rs-ask {
-  font-size: 13px;
+  font-size: var(--cds-body-compact-01-font-size);
+  letter-spacing: var(--cds-body-compact-01-letter-spacing);
+  line-height: var(--cds-body-compact-01-line-height);
   color: var(--ink);
 }
 .rs-word {
   font-weight: 600;
-  letter-spacing: 0.08em;
 }
 /* --panel would be invisible against the panel this sits on, so the field
    takes --ground — which for a Carbon field is `--cds-field` rather than a
@@ -3851,7 +3961,8 @@ cds-text-input.rs-field {
   border-radius: 0;
   padding: 6px 10px;
   color: var(--ink);
-  font-size: 13px;
+  font-size: var(--cds-body-compact-01-font-size);
+  letter-spacing: var(--cds-body-compact-01-letter-spacing);
   text-align: left;
   line-height: 1.3;
 }
@@ -3869,8 +3980,9 @@ cds-text-input.rs-field {
 }
 .cp-key-cap {
   flex: none;
-  font-size: 11px;
-  letter-spacing: 0.1em;
+  font-size: var(--cds-label-01-font-size);
+  line-height: var(--cds-label-01-line-height);
+  letter-spacing: var(--cds-label-01-letter-spacing);
   color: var(--muted);
   border: 1px solid var(--line);
   border-radius: 0;
