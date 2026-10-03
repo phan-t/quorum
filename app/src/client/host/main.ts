@@ -44,7 +44,6 @@ import {
 } from "../../engine/trivia.ts";
 import {
   h,
-  hx,
   isDisabled,
   keyedList,
   qs,
@@ -74,6 +73,7 @@ import {
   remainingMs,
   stackedBar,
 } from "../shared/view.ts";
+import { carbonButton } from "./carbon.ts";
 import {
   bindEscape,
   bindSpace,
@@ -248,11 +248,11 @@ const elStaleGo = handsBackSpace(
   // this button used to carry is 3.99:1 on the bar it sits in and has never
   // been a text colour; `host.css` has the measurement and the reason it
   // could not stay on the edge alone.
-  hx("cds-button", {
+  carbonButton({
     class: "sb-stale-go",
-    type: "button",
     text: "Reload the console",
-    attrs: { kind: "tertiary", size: "sm" },
+    kind: "tertiary",
+    size: "sm",
     on: {
       click: () => {
         staleRetry?.();
@@ -813,24 +813,32 @@ const RESTART_WORD = "restart";
 const RESTART_DISARM_MS = 30_000;
 
 /**
- * The wipe's three buttons are Carbon, and the arm button is the reason the
- * CANNOT BE UNDONE box reads right now.
+ * The arm button is a hand-built `<button>`, and the reason is the one thing
+ * Carbon's button cannot be told.
  *
- * It sits directly beside Close session, which is a `danger-tertiary`, so it
- * is one too — two danger buttons of different builds in one 8px row is the
- * seam this step exists to close. The armed state is a background on the
- * *host*: a Carbon tertiary's own background is transparent, so the host's
- * paint is what shows through, and it is the one state Carbon's kinds have no
- * word for.
+ * It is a disclosure: it opens `#restart-panel` and it says so with
+ * `aria-expanded` and `aria-controls`. A `<cds-button>` forwards exactly
+ * `aria-label` — from its `tooltip-text` — `aria-pressed` and its own
+ * `aria-describedby` onto the `<button>` in its shadow root, and that inner
+ * `<button>` is the element a reader sees; an `aria-expanded` set on the host
+ * stays on the host and is announced by nothing. Measured with an
+ * accessibility snapshot: as a Carbon host this read `button "Restart
+ * session"` with no expanded state and no controls relation, where on `main`
+ * it had been a real `<button aria-expanded>`. `carbon.ts` has the template
+ * reading.
+ *
+ * So it is a `<button>`, and `host.css` draws it to the measured metrics of
+ * the Carbon `danger-tertiary` it sits directly under — Close session, eight
+ * pixels away — because two danger buttons of different *shapes* in one row is
+ * the seam step 2 closed and this must not reopen it. A control whose state
+ * cannot be announced is not an improvement on one whose can.
  */
 const restartArm = handsBackSpace(
-  hx("cds-button", {
+  h("button", {
     class: "rs-arm",
     type: "button",
     text: "Restart session",
     attrs: {
-      kind: "danger-tertiary",
-      size: "sm",
       "aria-expanded": "false",
       "aria-controls": "restart-panel",
     },
@@ -852,20 +860,20 @@ const restartField = h("input", {
   },
 }) as HTMLInputElement;
 
-const restartGo = hx("cds-button", {
+const restartGo = carbonButton({
   class: "rs-go",
-  type: "button",
   text: "Wipe",
   disabled: true,
-  attrs: { kind: "danger-tertiary", size: "sm" },
+  kind: "danger-tertiary",
+  size: "sm",
 });
 
 const restartCancel = handsBackSpace(
-  hx("cds-button", {
+  carbonButton({
     class: "rs-cancel",
-    type: "button",
     text: "Cancel",
-    attrs: { kind: "tertiary", size: "sm" },
+    kind: "tertiary",
+    size: "sm",
   }),
 );
 
@@ -1849,16 +1857,20 @@ const runbookNote = h("p", { class: "pb-note a-setup-note", attrs: { hidden: tru
  * that had rearranged itself under them.
  */
 const runbookAdd = handsBackSpace(
-  hx("cds-button", {
+  carbonButton({
     class: "a-setup-add",
-    type: "button",
     text: "+ Add a holding step",
-    attrs: {
-      kind: "ghost",
-      size: "sm",
-      "aria-label": "Add another holding step to the runbook",
-      title: "A second place in the afternoon that shows a holding card",
-    },
+    kind: "ghost",
+    size: "sm",
+    // `tooltipText`, not `aria-label`: Carbon's button forwards the one and
+    // not the other, so the label set on the host here was announced by
+    // nothing and a reader got the slotted "+ Add a holding step" instead.
+    // See `carbon.ts`. It draws Carbon's own tooltip as well, which is why
+    // the native `title` this carried has gone: the sentence it held — a
+    // second place in the afternoon that shows a holding card — is the last
+    // `.pb-note` in this section, three lines below the button, and two
+    // tooltips on one control is worse than one.
+    tooltipText: "Add another holding step to the runbook",
   }),
 );
 
@@ -2224,15 +2236,14 @@ const cardsRows = h("div", { class: "a-setup-rows" });
 const cardsNote = h("p", { class: "pb-note a-setup-note", attrs: { hidden: true } });
 
 const cardsAdd = handsBackSpace(
-  hx("cds-button", {
+  carbonButton({
     class: "a-setup-add",
-    type: "button",
     text: "+ Add a card",
-    attrs: {
-      kind: "ghost",
-      size: "sm",
-      "aria-label": "Add another holding card",
-    },
+    kind: "ghost",
+    size: "sm",
+    // `tooltipText` is the only route to an accessible name on a Carbon
+    // button. See `carbon.ts`, and `runbookAdd` above.
+    tooltipText: "Add another holding card",
   }),
 );
 
@@ -3653,12 +3664,19 @@ function renderArcadeSetup(): void {
 /** The line that says which round the button is about to announce. */
 const arcadeUpNext = h("p", { class: "a-upnext" });
 
+/*
+ * The second disclosure, and hand-built for the same reason as the wipe's arm:
+ * `aria-expanded` set on a `<cds-button>` host never reaches the `<button>` in
+ * its shadow root, which is the element a reader sees. `carbon.ts` has the
+ * template reading; `host.css` draws this one to the measured metrics of
+ * Carbon's `ghost` so the arcade panel keeps one shape.
+ */
 const arcadeAltToggle = handsBackSpace(
-  hx("cds-button", {
+  h("button", {
     class: "a-alt-toggle",
     type: "button",
     text: "Run a different round",
-    attrs: { kind: "ghost", size: "sm", "aria-expanded": "false" },
+    attrs: { "aria-expanded": "false" },
   }),
 );
 const arcadeAlt = h("div", { class: "a-alt", attrs: { hidden: true } }, [

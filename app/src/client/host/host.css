@@ -1267,9 +1267,22 @@ cds-button {
  * --danger on --ground is 5.34:1 dark and 5.06:1 light; the hover fill takes
  * --ink on it, 3.63:1 dark — non-text UI at hover, and the label is still the
  * thing being read.
+ *
+ * `.ctl-yes` is in the list, and it was the one Carbon `danger-tertiary` on
+ * the console that was not. Measured on the running console: its border and
+ * its label resolved to Carbon's own #fa4d56, and `--cds-button-danger-primary`
+ * is what a focused `danger-tertiary` *fills* with, so the Yes took #da1e28
+ * under the cursor. That is the moment a host is answering "Really close?" —
+ * the button under their finger was a different red from the one they had just
+ * pressed and from `.rs-arm` an inch away. `.ctl-danger .ctl-button` does not
+ * reach it: the Yes stands in for that button, it does not nest inside it.
+ *
+ * `.rs-arm` has left the list because it is a hand-built `<button>` again —
+ * a disclosure whose `aria-expanded` a Carbon host cannot forward, see
+ * `main.ts` — and it draws its own red further down this file.
  */
 .ctl-danger .ctl-button,
-.rs-arm,
+.ctl-yes,
 .rs-go {
   --cds-button-danger-secondary: var(--danger);
   --cds-button-danger-primary: var(--danger);
@@ -1367,6 +1380,33 @@ cds-button {
   color: var(--sealed);
   letter-spacing: 0.06em;
 }
+/*
+ * The ink on the Yes's fill, which is the one place the bridged red needs one.
+ *
+ * Carbon fills a `danger-tertiary` on focus from `--cds-button-danger-primary`
+ * and labels it from `--cds-text-on-color`, which is #ffffff. That is a pair
+ * Carbon chose for its own #da1e28, where white is 5.05:1. The console's
+ * --danger is lighter — #f83b39 dark, #dc121f light — and white on it is
+ * **3.70:1** dark, under the 4.5:1 floor.
+ *
+ * It matters here and not on Close session or Wipe, which take the same fill
+ * from the same block, because the Yes is *focused on purpose and stays that
+ * way*: `controls.ts` focuses it as it renders, so the filled state is the
+ * only state a host ever reads it in. Close session is focused for the
+ * moment before it fires and then blurred — see `releaseFocus` — and its
+ * other filled state is hover, where white is 5.54:1 on the darker hover mix
+ * and --ground would be 3.57:1. One token drives both fills, so there is no
+ * value that is right for both buttons; the Yes gets the one that is right
+ * for the state it lives in.
+ *
+ * --ground on --danger is 5.30:1 dark and 5.11:1 light, and it inverts with
+ * the theme as the fill does — the same trade `.ctl-seal` and `.ctl.on` make
+ * two blocks up.
+ */
+.ctl-yes {
+  --cds-text-on-color: var(--ground);
+}
+
 /* Yes and No are Carbon too, and for one reason: they stand in for the button
    that was just pressed, in the place it was, so they have to be the same box.
    A 31px rounded Yes replacing a 32px square control makes the row jump at the
@@ -1413,6 +1453,38 @@ cds-button {
  * class, and these are the rules that draw it. Square, like everything else.
  * --ink on --panel-2 is 15.31:1 dark and 17.44:1 light; the disabled label
  * takes --dim, which never carries text that has to be read.
+ *
+ * ---- the height, which did move ---------------------------------------
+ *
+ * Step 2 said these buttons "still look right", which read as unchanged. They
+ * are not unchanged. Measured in the running console at 1280px, `kick` and
+ * `free` both:
+ *
+ *                 main        step 2      and here
+ *   kick          42 × 31     42 × 17     42 × 17
+ *   the row it is in          22 × 133.5 in all three
+ *
+ * `main`'s 31px came from the generic `.ctl-button { min-height: 31px }`
+ * leaking in — the rule that bought one height per label for every control on
+ * the console, written for the 32px row and not for this one. It made a button
+ * nine pixels taller than the 22px row around it, which is why `.r-actions`
+ * is absolutely positioned and translated and wears a gradient: the overflow
+ * had to be papered over the names above and below.
+ *
+ * 17px is the correction and it is kept. It is 13px of 11px mono line box plus
+ * 2 × 1px of padding plus 2 × 1px of border, and it is stated as a floor below
+ * rather than left to arithmetic, so a label that ever wraps grows the box
+ * instead of being clipped and two buttons side by side are one height.
+ * Centred in 22px it leaves 2.5px top and bottom, and for the first time the
+ * pair sits inside its own row.
+ *
+ * The target-size figure, since it is the one thing 17px is worse at: 42 × 17
+ * is under WCAG 2.5.8's 24 × 24 and `main`'s 42 × 31 was not. It passes on
+ * spacing instead — the two are 44px apart centre to centre horizontally, and
+ * vertically they have no neighbour at all, because `.r-actions` is
+ * `display: none` on every row but the one under the cursor. A 24px row would
+ * be the real fix and it is a roster of sixty on one screen; that is DESIGN.md's
+ * trade and not this file's.
  */
 .ctl-row .ctl-button,
 .ctl-row .ctl-yes,
@@ -1421,6 +1493,9 @@ cds-button {
   border: 1px solid var(--line);
   border-radius: 0;
   padding: 1px 5px;
+  /* 13px line box + 2px padding + 2px border = 17px, in a 22px row. See the
+     height note above: `main` was 31px here, and that was the bug. */
+  min-height: 17px;
   font-size: 11px;
   font-family: var(--mono);
   letter-spacing: 0.08em;
@@ -2640,16 +2715,58 @@ cds-button {
   display: none;
 }
 
-/* The way off the running order: present, and not the default path. */
-/* Carbon `kind="ghost"`, for the same reason `.a-setup-add` is: this is the
-   way off the running order and it is meant to be present rather than
-   inviting. It gives up the 11px mono caps, which was the console's chrome
-   idiom for a quiet control; the quiet is now the kind. #28 step 5 is where
-   the type question is settled for the whole surface. */
+/*
+ * The way off the running order: present, and not the default path.
+ *
+ * A hand-built `<button>` drawn to the measured metrics of Carbon's `ghost` at
+ * `size="sm"`, and the reason it is not the component is `aria-expanded`. This
+ * is a disclosure — it opens `.a-alt` and says so — and a `<cds-button>`
+ * forwards only `aria-label`, `aria-pressed` and its own `aria-describedby`
+ * onto the `<button>` in its shadow root, which is the element a reader sees.
+ * As a Carbon host its expanded state was announced by nothing. `carbon.ts`
+ * has the template reading.
+ *
+ * The numbers are Carbon's own, read off the running console at `condensed`
+ * density, so the arcade panel keeps one shape: 32px box, 14px/18px label at
+ * 0.16px of tracking, 6px/7px of padding, a 1px transparent edge holding the
+ * box the same width as a bordered kind, square corners. Ghost is the one kind
+ * whose trailing padding equals its leading padding — no icon gutter — which
+ * is why there is no 39px here and why the width did not move.
+ *
+ * Hover and active are Carbon's ghost states, which are a wash of grey rather
+ * than a fill: `--cds-background-hover` is `hsla(0, 0%, 55.3%, 0.12)` and
+ * `--cds-background-active` `hsla(0, 0%, 55.3%, 0.5)`, both theme-independent
+ * by construction. Focus is the console's own 2px `--ibm-blue` ring from
+ * `tokens.css` rather than Carbon's inset pair, which is the same colour
+ * saying the same thing — `--cds-focus` is bridged to `--action`.
+ *
+ * It gives up the 11px mono caps, which was the console's chrome idiom for a
+ * quiet control; the quiet is the grey and the absent box. #28 step 5 is where
+ * the type question is settled for the whole surface.
+ * --muted on --ground is 5.84:1 dark and 5.38:1 light.
+ */
 .a-alt-toggle {
   align-self: flex-start;
-  --cds-link-primary: var(--muted);
-  --cds-link-primary-hover: var(--ink);
+  min-height: 32px;
+  padding: 6px 7px;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 0;
+  color: var(--muted);
+  font-size: 14px;
+  line-height: 18px;
+  letter-spacing: 0.16px;
+  text-align: start;
+  white-space: normal;
+  cursor: pointer;
+}
+.a-alt-toggle:hover {
+  background: hsla(0, 0%, 55.3%, 0.12);
+  color: var(--ink);
+}
+.a-alt-toggle:active {
+  background: hsla(0, 0%, 55.3%, 0.5);
+  color: var(--ink);
 }
 .a-alt-toggle[hidden] {
   display: none;
@@ -2781,16 +2898,70 @@ body.driving .cols {
  */
 
 /*
- * The arm button is a Carbon `danger-tertiary`, like Close session an inch
- * away from it, and its red comes from the block above that gives both of
- * them the console's --danger.
+ * The arm button is a hand-built `<button>`, drawn to the measured metrics of
+ * the Carbon `danger-tertiary` it sits eight pixels under.
  *
- * `.is-armed` is the one state Carbon's kinds have no word for, and it is the
- * one thing here that is not a token: a tertiary's own background is
- * transparent, so a paint on the *host* is what shows through. That is the
- * general shape of every rule in this file that reaches a Carbon control —
- * the host's box, or a property Carbon reads.
+ * Why it is not the component: it is a disclosure. It opens `#restart-panel`
+ * and it says so with `aria-expanded` and `aria-controls`, and a
+ * `<cds-button>` forwards only `aria-label` — from `tooltip-text` —
+ * `aria-pressed` and its own `aria-describedby` onto the `<button>` in its
+ * shadow root. That inner `<button>` is the element a reader sees, so as a
+ * Carbon host this read `button "Restart session"` with no expanded state and
+ * no controls relation: the one control on the console that destroys an
+ * afternoon, announcing less than it had on `main`. `carbon.ts` has the
+ * template reading and `main.ts` the decision.
+ *
+ * So the box is Carbon's, by the numbers, read off the running console at
+ * `condensed` density — because Close session directly above it is the real
+ * thing and two danger buttons of different shapes in one row is the seam
+ * step 2 closed:
+ *
+ *   block size      32px, Carbon's `sm`, as a floor so a wrapped label grows
+ *   padding         6px 39px 6px 7px — the start is `calc(-1px + D)` and the
+ *                   end `calc(15px + 3 * D)` at D = 0.5rem, which is the icon
+ *                   gutter every non-ghost Carbon button reserves. It is kept,
+ *                   asymmetry and all, because the button beside it has it.
+ *   type            14px/18px, 0.16px of tracking — `body-compact-01`
+ *   edge            1px solid --danger, square
+ *   fill            transparent, which is what lets `.is-armed` show through
+ *   hover           --danger mixed 80% with black, label #fff on it: the same
+ *                   two lines `--cds-button-danger-hover` and
+ *                   `--cds-text-on-color` give Close session.
+ *   disabled        --line on the edge and --muted on the label, which is what
+ *                   `--cds-button-disabled` and `--cds-text-disabled` are set
+ *                   to for `cds-button` further up this file. 4.94:1 dark and
+ *                   4.83:1 light on --panel-2.
+ *
+ * Focus is the console's own 2px `--ibm-blue` ring from `tokens.css` rather
+ * than Carbon's inset pair plus fill. Same colour, said once: `--cds-focus` is
+ * bridged to `--action`, which is where `--ibm-blue` points.
+ *
+ * `.is-armed` is the one state Carbon's kinds have no word for, and it was the
+ * one thing here that was never a token.
  */
+.rs-arm {
+  min-height: 32px;
+  padding: 6px 39px 6px 7px;
+  background: transparent;
+  border: 1px solid var(--danger);
+  border-radius: 0;
+  color: var(--danger);
+  font-size: 14px;
+  line-height: 18px;
+  letter-spacing: 0.16px;
+  text-align: start;
+  white-space: normal;
+  cursor: pointer;
+}
+.rs-arm:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--danger) 80%, black);
+  color: #ffffff;
+}
+.rs-arm:disabled {
+  border-color: var(--line);
+  color: var(--muted);
+  cursor: not-allowed;
+}
 .rs-arm.is-armed {
   background: color-mix(in srgb, var(--danger) 16%, var(--panel-2));
 }
@@ -2934,7 +3105,10 @@ body.driving .cols {
 /* A control takes half the row when two fit and the whole row when they do
    not. 9rem is the width below which two of these stop being readable side by
    side, which at 13px is the point the labels start wrapping anyway.
-   `cds-button` is in the list for `.rs-arm`, which is one. */
+   Three selectors because this row holds all three shapes: a `.ctl` wrapper
+   round a Carbon control, a hand-built `<button>` — `.rs-arm` is one — and a
+   bare `cds-button` host, which nothing in `.cp-row` is today and step 3 may
+   put back. */
 .cp-row > .ctl,
 .cp-row > button,
 .cp-row > cds-button {
@@ -2978,6 +3152,11 @@ body.driving .cols {
  *
  * Carbon's own `max-inline-size: 20rem` is the only width it decides for
  * itself, and nothing on this console is near it.
+ *
+ * `.rs-arm` is in the list because it sits directly under Close session and
+ * two danger buttons of different widths read as two different kinds of
+ * thing. It is a hand-built `<button>` now — see the disclosure note above —
+ * so for it this rule is only the width, with none of the above behind it.
  */
 .cp .ctl-button,
 .cp .rs-arm {

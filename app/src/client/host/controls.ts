@@ -13,7 +13,8 @@
  *   button they pressed, not at a notification area.
  */
 
-import { h, hx, isDisabled, replace } from "../shared/dom.ts";
+import { h, isDisabled, replace } from "../shared/dom.ts";
+import { carbonButton, type CarbonKind } from "./carbon.ts";
 
 /**
  * The armed controls are Carbon buttons. Issue #28 steps 1 and 2.
@@ -39,26 +40,18 @@ import { h, hx, isDisabled, replace } from "../shared/dom.ts";
  * what moves it, because a class toggled on the wrapper is not something this
  * file can see.
  *
- * The kind strings are Carbon's own spelling and `controls.test.ts` checks
- * them against `BUTTON_KIND` in the installed package. That test exists
- * because step 1 shipped `danger--tertiary` — the CSS class's spelling, not
- * the attribute's — and Carbon answered by rendering a bare unstyled
- * `<button>`: no console warning, no fallback kind, nothing in any log. On a
- * dark page that is a grey filled block, which is how the one enabled button
- * in the panel headed CANNOT BE UNDONE came to be the loudest thing in it.
+ * The kinds are {@link CarbonKind} values and every Carbon button on the
+ * console is built by {@link carbonButton}, so a kind Carbon does not have is
+ * a compile error rather than a bare unstyled `<button>` in front of a room.
+ * `carbon.ts` has the whole of why that matters; the short version is that
+ * step 1 shipped `danger--tertiary` — the CSS class's spelling, not the
+ * attribute's — and Carbon said nothing in any log on either side.
  */
-const CARBON_BUTTON = "cds-button";
 
 /** Carbon's kinds, spelled the way `BUTTON_KIND` spells them. */
-export const KIND_DEFAULT = "tertiary";
-export const KIND_DANGER = "danger-tertiary";
-export const KIND_PRIMARY = "primary";
-/** Every kind this console asks Carbon for. `controls.test.ts` reads it. */
-export const KINDS_USED: readonly string[] = [
-  KIND_DEFAULT,
-  KIND_DANGER,
-  KIND_PRIMARY,
-];
+export const KIND_DEFAULT: CarbonKind = "tertiary";
+export const KIND_DANGER: CarbonKind = "danger-tertiary";
+export const KIND_PRIMARY: CarbonKind = "primary";
 
 /**
  * The micro-buttons the migration stops at, and the measurement that decided
@@ -378,7 +371,7 @@ export function control(opts: Opts): Control {
   function button(
     className: string,
     text: string,
-    kind: string,
+    kind: CarbonKind,
     extra?: { readonly disabled?: boolean; readonly title?: string },
   ): HTMLElement {
     const common = {
@@ -390,7 +383,7 @@ export function control(opts: Opts): Control {
     };
     return plain
       ? h("button", common)
-      : hx(CARBON_BUTTON, { ...common, attrs: { kind, size } });
+      : carbonButton({ ...common, kind, size });
   }
 
   function render(): void {

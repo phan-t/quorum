@@ -16,15 +16,22 @@
  * asserted here are the ones that could plausibly land on the wipe.
  */
 
-import { readFileSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 
 import { describe, test } from "node:test";
 import assert from "node:assert/strict";
 
-import { BUTTON_KIND } from "@carbon/web-components/es/components/button/defs.js";
+import {
+  BUTTON_KIND,
+  BUTTON_SIZE,
+} from "@carbon/web-components/es/components/button/defs.js";
 
-import { KINDS_USED, spaceVerdict, type SpaceKey } from "./controls.ts";
+import {
+  CARBON_BUTTON_KINDS,
+  CARBON_BUTTON_SIZES,
+} from "./carbon.ts";
+import { spaceVerdict, type SpaceKey } from "./controls.ts";
 
 /** A keydown, with everything defaulted to the boring case. */
 function key(over: Partial<SpaceKey> = {}): SpaceKey {
@@ -86,6 +93,9 @@ describe("the space bar advances the run of show", () => {
       ["BUTTON", "a-pick"],
       ["BUTTON", "a-setup-move"],
       ["BUTTON", "pf-tick"],
+      // A disclosure, hand-built so its `aria-expanded` reaches the element
+      // that takes focus. See `carbon.ts`.
+      ["BUTTON", "a-alt-toggle"],
     ] as const) {
       assert.equal(spaceVerdict(key({ target: on(tag, cls) })), "handBackAndFire", cls);
     }
@@ -120,10 +130,16 @@ describe("the space bar advances the run of show", () => {
  */
 
 describe("the space bar cannot start or fire a restart", () => {
+  // The tag each one actually reports, which is the whole of what the decision
+  // looks at. The arm button is a hand-built `<button>` because it is a
+  // disclosure and a Carbon host cannot announce `aria-expanded` — see
+  // `carbon.ts` — and Wipe and Cancel are Carbon hosts. Writing all three as
+  // "BUTTON" would have left this green while two of them reported something
+  // the decision had never been asked about.
   const WIPE_WIDGETS: readonly (readonly [string, string, string])[] = [
     ["the arm button", "BUTTON", "rs-arm"],
-    ["the fire button", "BUTTON", "rs-go"],
-    ["the cancel button", "BUTTON", "rs-cancel"],
+    ["the fire button", "CDS-BUTTON", "rs-go"],
+    ["the cancel button", "CDS-BUTTON", "rs-cancel"],
   ];
 
   for (const [what, tag, cls] of WIPE_WIDGETS) {
@@ -206,10 +222,8 @@ describe("the confirmation word", () => {
 
 /*
  * ------------------------------------------------------------------
- * The kinds the console asks Carbon for
+ * The kinds and sizes the console asks Carbon for
  * ------------------------------------------------------------------
- *
- * This is the test that step 1 needed and did not have.
  *
  * Step 1 shipped `kind="danger--tertiary"`, which is the spelling of Carbon's
  * *CSS class* — `.cds--btn--danger--tertiary` — and not of its attribute,
@@ -218,33 +232,104 @@ describe("the confirmation word", () => {
  * all: no console warning, no fallback kind, nothing in any log on either
  * side. On a dark page an unstyled `<button>` is the UA's own grey fill, so
  * every `.ctl-danger` control on the console — Close session among them —
- * rendered as a filled grey block. Step 1 read that as "a disabled Carbon
- * button is louder than an enabled one" and recorded it as a finding about
- * Carbon's disabled treatment. It was an enabled button with a typo in it.
+ * rendered as a filled grey block.
  *
- * So the kinds are a list rather than three literals at three call sites, and
- * this reads the list against the enum in the installed package. It is a
- * devDependency and it is already what the console compiles against; the file
- * is a plain object of strings with no DOM in it.
+ * Step 2 answered that with a hand-maintained array of the three kinds
+ * `controls.ts` names, read against the enum. It covered three of seven call
+ * sites: `main.ts` spelled the other four itself, `size` was checked nowhere,
+ * and changing one `kind: "ghost"` in `main.ts` to `"ghost--x"` left typecheck
+ * and the whole suite green. A guard that passes while the mistake it is named
+ * for is in the tree is worse than no guard, because it is also an argument
+ * against looking.
  *
- * The second test is the one that makes the first mean something. "Every kind
- * is in the enum" passes trivially against an enum that has everything in it,
- * and it would have passed against a *checker* that accepted anything. The
- * mistake that shipped has to be a mistake this file can tell.
+ * So the attributes are not spelled at call sites at all: `carbon.ts` is the
+ * only place in `src/client` that names the tag, and its `kind` and `size` are
+ * unions, so `"ghost--x"` is a compile error at the line that writes it. The
+ * three tests below are what a type cannot say:
+ *
+ *   1. the unions hold exactly the values Carbon's enums hold, both
+ *      directions, so neither a missing kind nor one Carbon has dropped is
+ *      silent across a version bump;
+ *   2. `carbon.ts` is still the only door, and nothing smuggles `kind` or
+ *      `size` through the `attrs` escape hatch;
+ *   3. every kind and size *literal* written at a call site is a value Carbon
+ *      has — read back out of the source, because the factory is a convention
+ *      until something checks that it is used.
  */
 const CARBON_KINDS: readonly string[] = Object.values(BUTTON_KIND);
+const CARBON_SIZES: readonly string[] = Object.values(BUTTON_SIZE);
 
-describe("the kinds the console asks Carbon for", () => {
-  test("are kinds Carbon has", () => {
-    assert.ok(KINDS_USED.length > 0, "controls.ts should name its kinds");
-    for (const kind of KINDS_USED) {
-      assert.ok(
-        CARBON_KINDS.includes(kind),
-        `controls.ts asks for kind="${kind}", which is not one of Carbon's ` +
-          `${CARBON_KINDS.join(", ")}. Carbon renders an unrecognised kind as ` +
-          `a bare <button> and says nothing anywhere.`,
-      );
+/** The console's own files that are allowed to build a Carbon button. */
+const CARBON_DOOR = "carbon.ts";
+
+/** Every `src/client/host/*.ts` source, by name, test files excluded. */
+function hostSources(): readonly (readonly [string, string])[] {
+  const dir = import.meta.dirname;
+  return readdirSync(dir)
+    .filter((f) => f.endsWith(".ts") && !f.endsWith(".test.ts"))
+    .sort()
+    .map((f) => [f, readFileSync(join(dir, f), "utf8")] as const);
+}
+
+/**
+ * The text of every `carbonButton(` call in a source, by paren balance.
+ *
+ * Not a regex over the whole call: the options object holds arrow functions
+ * with their own parens, and a lazy match would stop at the first one and read
+ * half a call site. String bodies are skipped so a `")"` inside a label cannot
+ * close the call.
+ *
+ * `open` ends at the opening paren — `"h("`, `"carbonButton("` — and every
+ * occurrence is scanned, so a nested call is returned as well as the one
+ * around it. Callers narrow by what the call starts with.
+ */
+function callsTo(src: string, open: string): readonly string[] {
+  const calls: string[] = [];
+  if (!open.endsWith("(")) throw new Error(`open must end at "(": ${open}`);
+  for (let at = src.indexOf(open); at !== -1; at = src.indexOf(open, at + 1)) {
+    let depth = 0;
+    let quote: string | null = null;
+    let i = at + open.length - 1;
+    for (; i < src.length; i++) {
+      const c = src[i];
+      if (quote !== null) {
+        if (c === "\\") i++;
+        else if (c === quote) quote = null;
+        continue;
+      }
+      if (c === '"' || c === "'" || c === "`") quote = c;
+      else if (c === "(") depth++;
+      else if (c === ")" && --depth === 0) break;
     }
+    calls.push(src.slice(at, i + 1));
+  }
+  return calls;
+}
+
+const carbonButtonCalls = (src: string): readonly string[] =>
+  callsTo(src, "carbonButton(");
+
+/** Every `name: "literal"` in a call, for the one key asked about. */
+function literals(call: string, key: string): readonly string[] {
+  return [...call.matchAll(new RegExp(`\\b${key}:\\s*"([^"]*)"`, "g"))].map(
+    (m) => m[1] as string,
+  );
+}
+
+describe("the kinds and sizes the console asks Carbon for", () => {
+  test("are exactly Carbon's own, in both directions", () => {
+    assert.deepEqual(
+      [...CARBON_BUTTON_KINDS].sort(),
+      [...CARBON_KINDS].sort(),
+      "carbon.ts's kinds and BUTTON_KIND have drifted apart. A value missing " +
+        "from carbon.ts is a kind the console cannot ask for; a value Carbon " +
+        "has dropped is a bare <button> waiting for a version bump.",
+    );
+    assert.deepEqual(
+      [...CARBON_BUTTON_SIZES].sort(),
+      [...CARBON_SIZES].sort(),
+      "carbon.ts's sizes and BUTTON_SIZE have drifted apart.",
+    );
   });
 
   test("and the CSS-class spelling of one is not, which is the mistake", () => {
@@ -253,8 +338,143 @@ describe("the kinds the console asks Carbon for", () => {
     // and the test above has stopped being able to catch anything.
     assert.ok(!CARBON_KINDS.includes("danger--tertiary"));
     assert.ok(CARBON_KINDS.includes("danger-tertiary"));
-    assert.ok(KINDS_USED.includes("danger-tertiary"));
+    assert.ok((CARBON_BUTTON_KINDS as readonly string[]).includes("danger-tertiary"));
   });
+
+  test("through one factory, which is the only file that names the tag", () => {
+    const named = hostSources()
+      .filter(([, src]) => src.includes('"cds-button"'))
+      .map(([name]) => name);
+    assert.deepEqual(
+      named,
+      [CARBON_DOOR],
+      `"cds-button" is spelled in ${named.join(", ")}. It belongs in ` +
+        `${CARBON_DOOR} alone, where kind and size are typed — a second site ` +
+        "is a site where a kind Carbon does not have compiles.",
+    );
+  });
+
+  test("and not smuggled through the attrs escape hatch", () => {
+    // `attrs` is `Record<string, …>`, so `attrs: { kind: "ghost--x" }` would
+    // type-check. Nothing does it and nothing may start.
+    for (const [name, src] of hostSources()) {
+      const bypass = /attrs:\s*\{[^}]*\b(?:kind|size):/.exec(src);
+      assert.equal(
+        bypass,
+        null,
+        `${name} sets kind or size inside attrs, which is the one spelling ` +
+          "the unions in carbon.ts cannot see.",
+      );
+    }
+  });
+
+  test("and every kind and size written at a call site is one Carbon has", () => {
+    // This is the test the `ghost--x` mutation has to turn red. The unions
+    // make it a compile error as well; this is the half that does not need a
+    // compiler to have been run.
+    const seen: { kinds: string[]; sizes: string[] } = { kinds: [], sizes: [] };
+    for (const [name, src] of hostSources()) {
+      for (const call of carbonButtonCalls(src)) {
+        const where = `${name}: ${call.slice(0, 70).replace(/\s+/g, " ")}…`;
+        for (const kind of literals(call, "kind")) {
+          seen.kinds.push(kind);
+          assert.ok(
+            CARBON_KINDS.includes(kind),
+            `kind="${kind}" at ${where} is not one of Carbon's ` +
+              `${CARBON_KINDS.join(", ")}. Carbon renders an unrecognised ` +
+              "kind as a bare <button> and says nothing anywhere.",
+          );
+        }
+        for (const size of literals(call, "size")) {
+          seen.sizes.push(size);
+          assert.ok(
+            CARBON_SIZES.includes(size),
+            `size="${size}" at ${where} is not one of Carbon's ` +
+              `${CARBON_SIZES.join(", ")}.`,
+          );
+        }
+      }
+    }
+    // The assertions above pass trivially against a scanner that found
+    // nothing, which is exactly how the array this replaced came to cover
+    // three sites of seven. Five Carbon buttons are built outside
+    // `controls.ts`, which passes its kind and size as variables.
+    assert.ok(
+      seen.kinds.length >= 5,
+      `the scan found ${seen.kinds.length} kind literals at call sites, ` +
+        "which is fewer than the console has. The scanner, not the console, " +
+        "is what to look at.",
+    );
+    assert.ok(
+      seen.sizes.length >= 5,
+      `the scan found ${seen.sizes.length} size literals at call sites.`,
+    );
+  });
+});
+
+/*
+ * ------------------------------------------------------------------
+ * The two disclosures
+ * ------------------------------------------------------------------
+ *
+ * A `<cds-button>` renders its `<button>` into a shadow root opened with
+ * `delegatesFocus: true`, and that inner `<button>` is the element assistive
+ * technology sees. Carbon's template binds exactly three of its ARIA
+ * attributes — `aria-label` from `tooltip-text`, `aria-pressed`, and its own
+ * `aria-describedby`. An `aria-expanded` or an `aria-controls` set on the host
+ * never crosses.
+ *
+ * Step 2 put both of the console's disclosure buttons on Carbon hosts with
+ * `aria-expanded` on the host, so both silently stopped announcing their
+ * state: an accessibility snapshot of the wipe's arm button read
+ * `button "Restart session"` with no expanded state, where on `main` it had
+ * been a real `<button aria-expanded>`. On the one control that destroys an
+ * afternoon.
+ *
+ * They are hand-built `<button>`s again, drawn to Carbon's measured metrics in
+ * `host.css`. This is the test that keeps them there, because the conversion
+ * that broke it was a one-line change that nothing could see — and the next
+ * step of #28 is twelve more buttons.
+ */
+describe("the two disclosures announce their state", () => {
+  const DISCLOSURES: readonly (readonly [string, string])[] = [
+    ["the wipe's arm button", "rs-arm"],
+    ["the arcade's way off the running order", "a-alt-toggle"],
+  ];
+
+  const main = readFileSync(join(import.meta.dirname, "main.ts"), "utf8");
+
+  for (const [what, cls] of DISCLOSURES) {
+    test(`${what} is a <button>, not a Carbon host`, () => {
+      const mine = (open: string, starts: string): readonly string[] =>
+        callsTo(main, open).filter(
+          (c) => c.startsWith(starts) && c.includes(`class: "${cls}"`),
+        );
+      const plain = mine("h(", 'h("button"');
+      const carbon = mine("carbonButton(", "carbonButton(");
+      assert.equal(
+        carbon.length,
+        0,
+        `.${cls} is built by carbonButton(). It is a disclosure, and a ` +
+          "<cds-button> forwards only aria-label, aria-pressed and its own " +
+          "aria-describedby onto the <button> in its shadow root — so its " +
+          "aria-expanded would be announced by nothing. Keep it hand-built; " +
+          "host.css draws it to Carbon's own metrics.",
+      );
+      assert.equal(
+        plain.length,
+        1,
+        `expected exactly one h("button") building .${cls}, found ` +
+          `${plain.length}.`,
+      );
+      assert.match(
+        plain[0] as string,
+        /"aria-expanded"/,
+        `.${cls} opens a panel and must say so on the element that takes ` +
+          "focus.",
+      );
+    });
+  }
 });
 
 /*
