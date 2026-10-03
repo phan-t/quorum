@@ -16,10 +16,15 @@
  * asserted here are the ones that could plausibly land on the wipe.
  */
 
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
+
 import { describe, test } from "node:test";
 import assert from "node:assert/strict";
 
-import { spaceVerdict, type SpaceKey } from "./controls.ts";
+import { BUTTON_KIND } from "@carbon/web-components/es/components/button/defs.js";
+
+import { KINDS_USED, spaceVerdict, type SpaceKey } from "./controls.ts";
 
 /** A keydown, with everything defaulted to the boring case. */
 function key(over: Partial<SpaceKey> = {}): SpaceKey {
@@ -195,5 +200,128 @@ describe("the confirmation word", () => {
 
   test("a field full of spaces is not the word, however many are pressed", () => {
     assert.ok(!matches(" ".repeat(40)));
+  });
+});
+
+
+/*
+ * ------------------------------------------------------------------
+ * The kinds the console asks Carbon for
+ * ------------------------------------------------------------------
+ *
+ * This is the test that step 1 needed and did not have.
+ *
+ * Step 1 shipped `kind="danger--tertiary"`, which is the spelling of Carbon's
+ * *CSS class* — `.cds--btn--danger--tertiary` — and not of its attribute,
+ * which is `danger-tertiary` with one hyphen. Carbon's answer to a kind it
+ * does not recognise is to render the inner `<button>` with no kind class at
+ * all: no console warning, no fallback kind, nothing in any log on either
+ * side. On a dark page an unstyled `<button>` is the UA's own grey fill, so
+ * every `.ctl-danger` control on the console — Close session among them —
+ * rendered as a filled grey block. Step 1 read that as "a disabled Carbon
+ * button is louder than an enabled one" and recorded it as a finding about
+ * Carbon's disabled treatment. It was an enabled button with a typo in it.
+ *
+ * So the kinds are a list rather than three literals at three call sites, and
+ * this reads the list against the enum in the installed package. It is a
+ * devDependency and it is already what the console compiles against; the file
+ * is a plain object of strings with no DOM in it.
+ *
+ * The second test is the one that makes the first mean something. "Every kind
+ * is in the enum" passes trivially against an enum that has everything in it,
+ * and it would have passed against a *checker* that accepted anything. The
+ * mistake that shipped has to be a mistake this file can tell.
+ */
+const CARBON_KINDS: readonly string[] = Object.values(BUTTON_KIND);
+
+describe("the kinds the console asks Carbon for", () => {
+  test("are kinds Carbon has", () => {
+    assert.ok(KINDS_USED.length > 0, "controls.ts should name its kinds");
+    for (const kind of KINDS_USED) {
+      assert.ok(
+        CARBON_KINDS.includes(kind),
+        `controls.ts asks for kind="${kind}", which is not one of Carbon's ` +
+          `${CARBON_KINDS.join(", ")}. Carbon renders an unrecognised kind as ` +
+          `a bare <button> and says nothing anywhere.`,
+      );
+    }
+  });
+
+  test("and the CSS-class spelling of one is not, which is the mistake", () => {
+    // `.cds--btn--danger--tertiary` is the class; `danger-tertiary` is the
+    // attribute. If this ever starts failing, Carbon has begun accepting both
+    // and the test above has stopped being able to catch anything.
+    assert.ok(!CARBON_KINDS.includes("danger--tertiary"));
+    assert.ok(CARBON_KINDS.includes("danger-tertiary"));
+    assert.ok(KINDS_USED.includes("danger-tertiary"));
+  });
+});
+
+/*
+ * ------------------------------------------------------------------
+ * The bridge, and the specificity race it is written to avoid
+ * ------------------------------------------------------------------
+ *
+ * `carbon-tokens.css` is generated. Four tokens cross between the two
+ * palettes and all four are declared once under `:root`, which only works
+ * because the generator leaves them out of the four theme blocks it writes.
+ * `:root[data-theme="dark"]` is (0,2,0) and `:root` is (0,1,0), so one
+ * generated `--cds-background: #161616` under the explicit-dark selector would
+ * beat the bridge — and only after the host had pressed the theme toggle
+ * twice, which is not a thing anybody does while reviewing a diff.
+ *
+ * Reading the committed file rather than running the generator, because the
+ * committed file is what the browser loads and a generator that is correct
+ * over a file that is stale is still a console with two grounds.
+ */
+describe("the Carbon token bridge", () => {
+  const css = readFileSync(
+    join(import.meta.dirname, "carbon-tokens.css"),
+    "utf8",
+  ).replace(/\/\*[\s\S]*?\*\//g, "");
+
+  const BRIDGED = [
+    "--cds-focus",
+    "--cds-background",
+    "--cds-layer-01",
+    "--cds-layer-02",
+  ];
+
+  test("declares each bridged token exactly once, so nothing can outrank it", () => {
+    for (const token of BRIDGED) {
+      const hits = css.match(new RegExp(`${token}\\s*:`, "g")) ?? [];
+      assert.equal(
+        hits.length,
+        1,
+        `${token} is declared ${hits.length} times in carbon-tokens.css. The ` +
+          "bridge owns it, so the generated theme blocks must not name it.",
+      );
+    }
+  });
+
+  test("points them at the console's tokens and not at Carbon's values", () => {
+    // The direction is the whole of step 2's first decision: Carbon is told
+    // what the console's surfaces are, rather than handing the console its
+    // own. A hex here means the bridge has been turned back around.
+    for (const [token, expected] of [
+      ["--cds-background", "var(--ground)"],
+      ["--cds-layer-01", "var(--panel)"],
+      ["--cds-layer-02", "var(--panel-2)"],
+    ] as const) {
+      assert.match(css, new RegExp(`${token}:\\s*${expected.replace(/[()\-]/g, "\\$&")};`));
+    }
+  });
+
+  test("and still reads as four blocks of theme plus a bridge", () => {
+    // The assertion above passes trivially against an empty read.
+    assert.ok(css.length > 20_000, `carbon-tokens.css read as ${css.length} bytes`);
+    for (const sel of [
+      ":root {",
+      ':root:not([data-theme="dark"]) {',
+      ':root[data-theme="light"] {',
+      ':root[data-theme="dark"] {',
+    ]) {
+      assert.ok(css.includes(sel), sel);
+    }
   });
 });

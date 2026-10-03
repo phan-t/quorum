@@ -42,7 +42,17 @@ import {
   MAX_BEAT_SECONDS,
   MIN_BEAT_SECONDS,
 } from "../../engine/trivia.ts";
-import { h, keyedList, qs, replace, setAttr, setText } from "../shared/dom.ts";
+import {
+  h,
+  hx,
+  isDisabled,
+  keyedList,
+  qs,
+  replace,
+  setAttr,
+  setDisabled,
+  setText,
+} from "../shared/dom.ts";
 import { QuorumClient } from "../shared/net.ts";
 import { checkProtocol } from "../shared/protocol-guard.ts";
 import { mockBadge, mockTransport, readMockConfig } from "../shared/mock.ts";
@@ -234,10 +244,15 @@ const statusBar = h("header", { class: "statusbar" }, [
 const elStaleText = h("span", { class: "sb-stale-text" });
 let staleRetry: (() => void) | null = null;
 const elStaleGo = handsBackSpace(
-  h("button", {
+  // Carbon, `kind="tertiary"`, in the console's ordinary colour. The amber
+  // this button used to carry is 3.99:1 on the bar it sits in and has never
+  // been a text colour; `host.css` has the measurement and the reason it
+  // could not stay on the edge alone.
+  hx("cds-button", {
     class: "sb-stale-go",
     type: "button",
     text: "Reload the console",
+    attrs: { kind: "tertiary", size: "sm" },
     on: {
       click: () => {
         staleRetry?.();
@@ -797,14 +812,30 @@ const RESTART_WORD = "restart";
 /** Long enough to type seven letters, short enough not to sit armed. */
 const RESTART_DISARM_MS = 30_000;
 
+/**
+ * The wipe's three buttons are Carbon, and the arm button is the reason the
+ * CANNOT BE UNDONE box reads right now.
+ *
+ * It sits directly beside Close session, which is a `danger-tertiary`, so it
+ * is one too — two danger buttons of different builds in one 8px row is the
+ * seam this step exists to close. The armed state is a background on the
+ * *host*: a Carbon tertiary's own background is transparent, so the host's
+ * paint is what shows through, and it is the one state Carbon's kinds have no
+ * word for.
+ */
 const restartArm = handsBackSpace(
-  h("button", {
+  hx("cds-button", {
     class: "rs-arm",
     type: "button",
     text: "Restart session",
-    attrs: { "aria-expanded": "false", "aria-controls": "restart-panel" },
+    attrs: {
+      kind: "danger-tertiary",
+      size: "sm",
+      "aria-expanded": "false",
+      "aria-controls": "restart-panel",
+    },
   }),
-) as HTMLButtonElement;
+);
 
 const restartKeeps = h("p", { class: "pb-note rs-keeps" });
 
@@ -821,16 +852,22 @@ const restartField = h("input", {
   },
 }) as HTMLInputElement;
 
-const restartGo = h("button", {
+const restartGo = hx("cds-button", {
   class: "rs-go",
   type: "button",
   text: "Wipe",
   disabled: true,
-}) as HTMLButtonElement;
+  attrs: { kind: "danger-tertiary", size: "sm" },
+});
 
 const restartCancel = handsBackSpace(
-  h("button", { class: "rs-cancel", type: "button", text: "Cancel" }),
-) as HTMLButtonElement;
+  hx("cds-button", {
+    class: "rs-cancel",
+    type: "button",
+    text: "Cancel",
+    attrs: { kind: "tertiary", size: "sm" },
+  }),
+);
 
 const restartPanel = h(
   "section",
@@ -865,8 +902,10 @@ function restartTyped(): boolean {
 
 function syncRestartGo(): void {
   const s = lastState;
-  restartGo.disabled =
-    !restartTyped() || s === null || s.phase === "draft";
+  // `setDisabled`, not `.disabled`: `restartGo` is a custom element and the
+  // IDL property is not the bit Carbon reads. `dom.ts` says why the attribute
+  // is the authoritative one.
+  setDisabled(restartGo, !restartTyped() || s === null || s.phase === "draft");
 }
 
 function setRestartArmed(on: boolean): void {
@@ -908,7 +947,7 @@ function fireRestart(): void {
   // host typed; the join code is the session the command is for, and a console
   // that has not been told which session it is attached to has no business
   // wiping one.
-  if (restartGo.disabled) return;
+  if (isDisabled(restartGo)) return;
   const code = lastState?.hostExtras?.joinCode ?? "";
   if (code === "") {
     primary.flash("not connected, nothing was changed");
@@ -1810,16 +1849,18 @@ const runbookNote = h("p", { class: "pb-note a-setup-note", attrs: { hidden: tru
  * that had rearranged itself under them.
  */
 const runbookAdd = handsBackSpace(
-  h("button", {
+  hx("cds-button", {
     class: "a-setup-add",
     type: "button",
     text: "+ Add a holding step",
     attrs: {
+      kind: "ghost",
+      size: "sm",
       "aria-label": "Add another holding step to the runbook",
       title: "A second place in the afternoon that shows a holding card",
     },
   }),
-) as HTMLButtonElement;
+);
 
 runbookAdd.addEventListener("click", () => {
   const first = deck[0];
@@ -1890,13 +1931,6 @@ function focusRunbookRow(want: RunbookFocus): void {
     (b) => b instanceof HTMLElement && !isDisabled(b),
   );
   if (any instanceof HTMLElement) any.focus();
-}
-
-function isDisabled(el: HTMLElement): boolean {
-  return (
-    (el instanceof HTMLButtonElement || el instanceof HTMLSelectElement) &&
-    el.disabled
-  );
 }
 
 function changeRunbook(
@@ -2133,7 +2167,7 @@ function renderRunbookSetup(): void {
       return row;
     }),
   );
-  runbookAdd.disabled = holdingSteps(runbook).length >= HOLDING_STEPS_MAX;
+  setDisabled(runbookAdd, holdingSteps(runbook).length >= HOLDING_STEPS_MAX);
 }
 
 /** Where the arcade running order sits while the session has not started. */
@@ -2190,13 +2224,17 @@ const cardsRows = h("div", { class: "a-setup-rows" });
 const cardsNote = h("p", { class: "pb-note a-setup-note", attrs: { hidden: true } });
 
 const cardsAdd = handsBackSpace(
-  h("button", {
+  hx("cds-button", {
     class: "a-setup-add",
     type: "button",
     text: "+ Add a card",
-    attrs: { "aria-label": "Add another holding card" },
+    attrs: {
+      kind: "ghost",
+      size: "sm",
+      "aria-label": "Add another holding card",
+    },
   }),
-) as HTMLButtonElement;
+);
 
 const cardsSetup = h("section", { class: "a-setup" }, [
   h("p", { class: "label", text: "Holding cards" }),
@@ -2405,7 +2443,7 @@ function renderCardsSetup(): void {
       );
     }),
   );
-  cardsAdd.disabled = deck.length >= CARD_MAX;
+  setDisabled(cardsAdd, deck.length >= CARD_MAX);
 }
 
 cardsAdd.addEventListener("click", () => {
@@ -2771,7 +2809,7 @@ const suddenDeath = control({
   onFire: (c) => {
     suddenDeathArmed = !suddenDeathArmed;
     c.setLabel(`Sudden death: ${suddenDeathArmed ? "on" : "off"}`);
-    c.el.classList.toggle("on", suddenDeathArmed);
+    c.setOn(suddenDeathArmed);
     if (lastState) render(lastState);
   },
 });
@@ -3616,11 +3654,11 @@ function renderArcadeSetup(): void {
 const arcadeUpNext = h("p", { class: "a-upnext" });
 
 const arcadeAltToggle = handsBackSpace(
-  h("button", {
+  hx("cds-button", {
     class: "a-alt-toggle",
     type: "button",
     text: "Run a different round",
-    attrs: { "aria-expanded": "false" },
+    attrs: { kind: "ghost", size: "sm", "aria-expanded": "false" },
   }),
 );
 const arcadeAlt = h("div", { class: "a-alt", attrs: { hidden: true } }, [
@@ -4582,10 +4620,10 @@ function render(s: RenderState): void {
 
   /* always-there controls */
   lockControl.setLabel(s.joinsLocked ? "Unlock joining" : "Lock joining");
-  lockControl.el.classList.toggle("on", s.joinsLocked);
+  lockControl.setOn(s.joinsLocked);
   for (const c of practiceControls) {
     c.setLabel(`Practice: ${s.practice ? "on" : "off"}`);
-    c.el.classList.toggle("on", s.practice);
+    c.setOn(s.practice);
     // The engine refuses to change it under a live question or a running
     // round, so the button says so by being unpressable rather than by being
     // refused. The round card is not live: it is the briefing, and it is the
@@ -4609,7 +4647,7 @@ function render(s: RenderState): void {
 
   /* starting over — armable in every phase the session has actually run in,
      including closed, which is the phase a host most often wants it from */
-  restartArm.disabled = s.phase === "draft";
+  setDisabled(restartArm, s.phase === "draft");
   if (s.phase === "draft" && restartArmed) setRestartArmed(false);
   syncRestartGo();
   // What it does, and nothing about what it spares. The long version listed

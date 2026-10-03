@@ -13,36 +13,74 @@
  *   button they pressed, not at a notification area.
  */
 
-import { h, hx, replace } from "../shared/dom.ts";
+import { h, hx, isDisabled, replace } from "../shared/dom.ts";
 
 /**
- * The armed controls are Carbon buttons. Issue #28 step 1.
+ * The armed controls are Carbon buttons. Issue #28 steps 1 and 2.
  *
- * One factory, one tag name, so the console's whole secondary-button
- * vocabulary moves together or not at all. The element is defined by the
- * `@carbon/web-components` import at the top of `host/main.ts`, which is the
- * console's entry point and runs before anything here builds a control; the
- * module is vendored into `dist/vendor` and resolved through the import map in
- * `host/index.html`.
+ * One factory, and the class the wrapper already carried decides everything
+ * Carbon needs to know: which `kind`, which `size`, and whether the control is
+ * one of the two that Carbon cannot build at all.
  *
- * `size="sm"` is 32px, fixed: Carbon pins a button's min and max block size to
- * the same token per size, which is the property the hand-built button spent a
- * `min-height: 31px` and a `white-space: nowrap` buying. 31px is not reachable
- * at `sm` and 32 is near enough to it that nothing in the console's layout
- * moved. `kind` is the only thing that varies, and it varies by the one class
- * the wrapper already carried.
+ *   `.ctl-primary`  `kind="primary"`, `size="lg"` — 48px, Carbon's own default
+ *                   size, against everything else's 32px. See `host.css`.
+ *   `.ctl-danger`   `kind="danger-tertiary"`.
+ *   `.ctl-row`      not Carbon. A 22px roster row, 11px mono — see below.
+ *   anything else   `kind="tertiary"`, `size="sm"` — 32px, fixed: Carbon pins
+ *                   a button's min and max block size to the same token per
+ *                   size, which is the property the hand-built button spent a
+ *                   `min-height: 31px` and a `white-space: nowrap` buying.
  *
- * The inline confirm's Yes and No are deliberately NOT Carbon. They are the
- * two buttons the space bar is allowed to reach, `spaceVerdict` decides that
- * by their class names, and `host.css` sizes them to stand in for exactly the
- * box they replace. Moving them is a change to the one keyboard-safety
- * property this file exists to hold, and it is not what step 1 is for.
+ * The "on" state is the fifth: `kind="primary"` as well, because a filled
+ * button is how Carbon says a thing is on and a tertiary cannot be filled from
+ * outside — Carbon paints a tertiary's border and its label from one token, so
+ * a fill drawn on the host leaves the label the colour of the fill. `host.css`
+ * recolours the primary to the console's gold for it. {@link Control.setOn} is
+ * what moves it, because a class toggled on the wrapper is not something this
+ * file can see.
+ *
+ * The kind strings are Carbon's own spelling and `controls.test.ts` checks
+ * them against `BUTTON_KIND` in the installed package. That test exists
+ * because step 1 shipped `danger--tertiary` — the CSS class's spelling, not
+ * the attribute's — and Carbon answered by rendering a bare unstyled
+ * `<button>`: no console warning, no fallback kind, nothing in any log. On a
+ * dark page that is a grey filled block, which is how the one enabled button
+ * in the panel headed CANNOT BE UNDONE came to be the loudest thing in it.
  */
 const CARBON_BUTTON = "cds-button";
 
-/** Carbon's kinds, by the class the console already used to mean the same. */
-const KIND_DEFAULT = "tertiary";
-const KIND_DANGER = "danger--tertiary";
+/** Carbon's kinds, spelled the way `BUTTON_KIND` spells them. */
+export const KIND_DEFAULT = "tertiary";
+export const KIND_DANGER = "danger-tertiary";
+export const KIND_PRIMARY = "primary";
+/** Every kind this console asks Carbon for. `controls.test.ts` reads it. */
+export const KINDS_USED: readonly string[] = [
+  KIND_DEFAULT,
+  KIND_DANGER,
+  KIND_PRIMARY,
+];
+
+/**
+ * The micro-buttons the migration stops at, and the measurement that decided
+ * it rather than a preference.
+ *
+ * `free` and `kick` live in an opened roster row: 22px tall, 11px mono, two of
+ * them side by side in a column that holds sixty people without scrolling.
+ * Carbon reaches 22px — `--cds-layout-size-height-xs` is declared on
+ * `:host(cds-button)` and a document rule on a host beats a `:host` rule, so
+ * `cds-button { --cds-layout-size-height-xs: 22px }` lands, measured. It is
+ * still the wrong trade: `xs` is 24px on Carbon's scale and 11px is off
+ * `body-compact-01` as well, so two tokens come off the system at once, and
+ * the gutter is the third. Even at Carbon's condensed density a button
+ * reserves 46px of chrome around its label, so `kick` goes from 35px wide to
+ * roughly 65px — in a 22px row, in a two-column roster. #28 called this where
+ * the system starts fighting and the number agrees.
+ *
+ * So `.ctl-row` builds a real `<button class="ctl-button">` and `host.css`
+ * still has the rules that draw it. It is the one branch in this file and it
+ * is a class test, like the kind is.
+ */
+const PLAIN_CLASS = "ctl-row";
 
 /**
  * The console's own buttons, as a tag test.
@@ -81,6 +119,15 @@ export interface Control {
   flash(message: string, kind?: "error" | "ok"): void;
   setLabel(label: string): void;
   setDisabled(disabled: boolean): void;
+  /**
+   * Say whether the state this control names is on.
+   *
+   * Carries the `.on` class, which is what `host.css` has always keyed the
+   * gold fill off, *and* re-renders — because "on" is now a different Carbon
+   * `kind` and not only a different colour. A caller that toggles the class by
+   * hand gets the class and not the kind, which is why this exists at all.
+   */
+  setOn(on: boolean): void;
   /** Drop out of a half-pressed confirm, e.g. when the state changed under it. */
   disarm(): void;
 }
@@ -144,21 +191,6 @@ export function handsBackSpace<T extends HTMLElement>(button: T): T {
 
 function isConfirmButton(el: HTMLElement): boolean {
   return classesOwnSpace(classesOf(el));
-}
-
-/**
- * Whether a button the space bar is about to click would refuse it anyway.
- *
- * A native button has the IDL property. A Carbon one has the attribute, and
- * the attribute is the right thing to read for the same reason `dom.ts` writes
- * it: it is true before the upgrade as well as after. `.click()` on a custom
- * element dispatches the event whatever the element thinks of it, so without
- * this the space bar would fire a control the console has disabled.
- */
-function isButtonDisabled(el: HTMLElement): boolean {
-  return el instanceof HTMLButtonElement
-    ? el.disabled
-    : el.hasAttribute("disabled");
 }
 
 /**
@@ -243,13 +275,19 @@ export function control(opts: Opts): Control {
   const el = h("span", {
     class: `ctl${opts.className ? ` ${opts.className}` : ""}`,
   });
-  // The kind is a function of the wrapper's class, decided once: `.ctl-danger`
-  // is the console's existing word for "this is the destructive one", so the
-  // mapping to Carbon's kind needs no second vocabulary.
-  const danger = classesOf(el).includes("ctl-danger");
+  // Everything Carbon needs is a function of the wrapper's class, decided
+  // once: `.ctl-danger` is the console's existing word for "this is the
+  // destructive one" and `.ctl-primary` for "this is the one", so the mapping
+  // to Carbon's kinds needs no second vocabulary.
+  const classes = classesOf(el);
+  const danger = classes.includes("ctl-danger");
+  const primary = classes.includes("ctl-primary");
+  const plain = classes.includes(PLAIN_CLASS);
+  const size = primary ? "lg" : "sm";
   let label = opts.label;
   let disabled = false;
   let armed = false;
+  let on = false;
   let flashTimer: ReturnType<typeof setTimeout> | null = null;
   let armTimer: ReturnType<typeof setTimeout> | null = null;
 
@@ -273,6 +311,12 @@ export function control(opts: Opts): Control {
       if (next === disabled) return;
       disabled = next;
       if (next) armed = false;
+      if (flashTimer === null) render();
+    },
+    setOn(next) {
+      if (next === on) return;
+      on = next;
+      el.classList.toggle("on", next);
       if (flashTimer === null) render();
     },
     disarm() {
@@ -314,11 +358,46 @@ export function control(opts: Opts): Control {
     ]);
   }
 
+  /**
+   * One button, in whichever of the two shapes this control is.
+   *
+   * The confirm's Yes and No come through here too, and that is the point.
+   * They stand in for the button that was just pressed, in the place it was,
+   * and `host.css` has always sized them to be exactly it — so when the
+   * control is Carbon they have to be Carbon, or the row jumps by the
+   * difference between a 31px rounded box and a 32px square one at the moment
+   * the host is answering a question about something irreversible.
+   *
+   * What that does *not* move is the keyboard. `spaceVerdict` decides by tag
+   * and by class name, `classesOwnSpace` reads `className`, and a Carbon host
+   * carries the class exactly as a `<button>` does. `delegatesFocus` means
+   * `yes.focus()` focuses the real `<button>` in the shadow root, and the
+   * space bar activates that natively — which is the behaviour `spaceVerdict`
+   * returns "ignore" in order to leave alone.
+   */
+  function button(
+    className: string,
+    text: string,
+    kind: string,
+    extra?: { readonly disabled?: boolean; readonly title?: string },
+  ): HTMLElement {
+    const common = {
+      class: className,
+      type: "button",
+      text,
+      ...(extra?.disabled === undefined ? {} : { disabled: extra.disabled }),
+      ...(extra?.title === undefined ? {} : { title: extra.title }),
+    };
+    return plain
+      ? h("button", common)
+      : hx(CARBON_BUTTON, { ...common, attrs: { kind, size } });
+  }
+
   function render(): void {
     const asked = armed ? question() : null;
     if (asked !== null) {
-      const yes = h("button", { class: "ctl-yes", type: "button", text: "Yes" });
-      const no = h("button", { class: "ctl-no", type: "button", text: "No" });
+      const yes = button("ctl-yes", "Yes", KIND_DANGER);
+      const no = button("ctl-no", "No", KIND_DEFAULT);
       yes.addEventListener("click", fire);
       no.addEventListener("click", () => api.disarm());
       replace(el, [
@@ -326,23 +405,45 @@ export function control(opts: Opts): Control {
         yes,
         no,
       ]);
+      // Focus twice, and the second one is the one that does it.
+      //
+      // Lit renders a component's shadow root in a microtask *after* the
+      // element is connected, so at this line a Carbon button's shadow root is
+      // still empty — measured — and `delegatesFocus` has nothing to delegate
+      // to: `focus()` returns having done nothing and `document.activeElement`
+      // is the body. Which would quietly undo the property this file exists to
+      // hold. With nothing focused, the next space bar is `spaceVerdict`'s
+      // "fire" and presses the primary instead of answering the question the
+      // host is looking at — on a control whose question is "Really close?".
+      //
+      // The synchronous call is for `.ctl-row`'s plain `<button>`, where it
+      // works and a frame of delay would be a frame with nothing focused. The
+      // deferred one is for Carbon's, and it asks twice whether the question is
+      // still up, because a frame is long enough for Escape or for the state
+      // to change under it.
       yes.focus();
+      if (document.activeElement !== yes) {
+        requestAnimationFrame(() => {
+          if (armed && yes.isConnected) yes.focus();
+        });
+      }
       return;
     }
-    const button = hx(CARBON_BUTTON, {
-      class: "ctl-button",
-      type: "button",
-      text: label,
+    // "On" outranks everything but the primary, which is already it: a filled
+    // button is Carbon's way of saying a state is on, and a tertiary cannot be
+    // filled from outside its shadow root.
+    const kind =
+      on || primary ? KIND_PRIMARY : danger ? KIND_DANGER : KIND_DEFAULT;
+    const control = button("ctl-button", label, kind, {
       disabled,
-      attrs: { kind: danger ? KIND_DANGER : KIND_DEFAULT, size: "sm" },
       ...(opts.title === undefined ? {} : { title: opts.title }),
     });
     // Carbon's own host listener calls `stopPropagation()` on a click when the
     // button is disabled, which does not stop a second listener on the same
     // element — `fire()`'s own `if (disabled) return` is what does, and it is
     // load-bearing rather than defensive.
-    button.addEventListener("click", fire);
-    replace(el, [button]);
+    control.addEventListener("click", fire);
+    replace(el, [control]);
   }
 
   render();
@@ -410,8 +511,12 @@ export function bindSpace(target: Control): () => void {
     // the `<button>` is inside a shadow root, which `querySelector` does not
     // enter, so this returned null and the space bar did nothing at all —
     // silently, since there is no button to fail to click.
+    // `isDisabled`, not `.disabled`: a Carbon button has the attribute and not
+    // the IDL property, and `.click()` on a custom element dispatches the
+    // event whatever the element thinks of it — so without this the space bar
+    // would fire a control the console has disabled.
     const button = target.el.querySelector<HTMLElement>("button, cds-button");
-    if (button !== null && !isButtonDisabled(button)) button.click();
+    if (button !== null && !isDisabled(button)) button.click();
   };
   document.addEventListener("keydown", handler);
   return () => document.removeEventListener("keydown", handler);

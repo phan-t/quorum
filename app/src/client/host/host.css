@@ -51,64 +51,38 @@
  * Nothing here changes a colour. Every pair below was re-measured against
  * the tokens as they stand, and the figures are recorded beside the rule.
  *
- * ---- The console's ground moved to #161616 ---------------------------
+ * ---- Carbon sits on the console's ground, not the other way round ----
  *
- * Issue #28 step 1. The Carbon controls sit on Carbon's own `background`
- * token rather than on the console's #0a0a0f, so `host/carbon-tokens.css`
- * bridges `--ground` to `var(--cds-background)` — #161616 in the dark theme,
- * and #ffffff in the light theme, which is what `--ground` already was.
+ * Issue #28, steps 1 and 2. Step 1 bridged `--ground` to Carbon's
+ * `--cds-background` and moved the console's dark page from #0a0a0f to
+ * #161616. Step 2 turns that bridge around: `--cds-background` takes
+ * `--ground`, and `--cds-layer-01` and `--cds-layer-02` take `--panel` and
+ * `--panel-2`. The console's surfaces are the product's again, every figure
+ * below is back to the one it was measured at, and Carbon is told what it is
+ * standing on.
  *
- * `shared/tokens.css` does not change and must not: it is the product palette,
- * all three surfaces read it, and the participant and Desktop surfaces still
- * ground at #0a0a0f. The bridge is loaded by `host/index.html` alone.
+ * The reason is a measurement rather than a preference, and it is in
+ * `carbon-tokens.css` beside the bridge. Briefly: #161616 left `--panel`
+ * #14141d at 1.01:1 against the page and `--panel-2` #1d1d28 at 1.08:1 — the
+ * panels gone, `--panel` fractionally the darker of the pair, the elevation
+ * model inverted. The repair that looks obvious is Carbon's own layers,
+ * #262626 and #393939. Four of this console's dark inks were derived by
+ * walking a hue up in OKLCH until they cleared 4.5:1 on `--panel-2`, so they
+ * sit at the floor there and have nowhere to go: `--muted` 4.94 → 3.42,
+ * `--danger` 4.51 → 3.12, `--consul-ink` 4.52 → 3.13, `--terraform-ink`
+ * 4.53 → 3.13 on #393939, and 4.48 / 4.09 / 4.10 / 4.11 on #262626. Eight
+ * pairings under AA, in four tokens that live in `shared/tokens.css`, which
+ * two surfaces that are not being migrated also read.
  *
- * But every dark-theme figure in this file that named `--ground` was measured
- * against #0a0a0f, and `tokens.css` says in as many words what happens when a
- * derivation is assumed rather than re-measured: collapsing the
- * brand/foreground/surface distinction produced a readable-text bug three
- * separate times. So every one of them has been recomputed. #161616 is
- * lighter than #0a0a0f — relative luminance 0.00802 against 0.00316 — so every
- * ratio against it is *smaller*, by 8 to 9 per cent:
+ * So the elevation model is restored by leaving it alone. `--ground` #0a0a0f,
+ * `--panel` #14141d at 1.08:1 on it, `--panel-2` #1d1d28 at 1.18:1, exactly
+ * as `main` has them, and `--dim` is back to 3.07:1 on the page rather than
+ * the 2.82:1 step 1 reported as a failure.
  *
- *   token                      on #0a0a0f  on #161616   text 4.5:1 · UI 3:1
- *   --ink      #f6f5f3            18.13       16.61     holds
- *   --muted    #8b8a9c             5.84        5.35     holds
- *   --dim      #5e5d6e             3.07        2.82     FAILS the 3:1 UI floor
- *   --nomad-ink / --hit / --live    9.82        9.00     holds
- *   --vault-ink / --sealed         13.36       12.24     holds
- *   --consul-ink / --trivia         5.36        4.91     holds
- *   --terraform-ink / --ttx         5.36        4.91     holds
- *   --miss / --danger  #f83b39      5.34        4.89     holds
- *   --ibm-blue (= --action)         3.89        3.57     holds (non-text)
- *   --line     #2c2c3a              1.44        1.32     non-text, see below
- *
- * The light column does not move at all, because `--cds-background` is
- * #ffffff there and `--ground` already was.
- *
- * Three results worth stating rather than burying:
- *
- * 1. `--dim` on the page is now 2.82:1, under the 3:1 floor for non-text UI.
- *    It is only ever carried by things exempt from it — a disabled control's
- *    label, and `.dot`'s default fill, which is a connection state that is
- *    also stated in words by the live region and in shape by the other two
- *    states. `tokens.css` already says "--dim never carries text that has to
- *    be read". But 3.07 was headroom and 2.82 is not, and the next thing to
- *    reach for `--dim` on this surface has none.
- *
- * 2. No text token crossed 4.5:1. The three that were closest — the Consul,
- *    Terraform and critical inks, all derived by walking a hue up in OKLCH
- *    until it cleared 4.5:1 on #1d1d28 — land at 4.91, 4.91 and 4.89. They
- *    hold because they were tuned against `--panel-2`, which did not move,
- *    and #161616 is darker than #1d1d28.
- *
- * 3. The panels have lost their separation from the page. `--panel` #14141d
- *    against #161616 is 1.01:1 and `--panel-2` #1d1d28 is 1.08:1, where they
- *    were 1.08:1 and 1.18:1 against #0a0a0f — and `--panel` is now very
- *    slightly the *darker* of the pair, so the console's elevation model is
- *    inverted. Carbon's `layer-01` #262626 and `layer-02` #393939 are the
- *    obvious answer and would move eleven more figures in this file. Step 1
- *    reports the number and changes nothing: it is a decision about the whole
- *    surface, not about one button.
+ * Two corrections step 1 found while recomputing are kept, because they were
+ * wrong before it as well: `.t-counts` and `.a-item` carried `--panel` and
+ * `--panel-2` figures for text that has always sat on `--ground`, since
+ * `.panel` draws no background of its own.
  *
  * Every figure here is WCAG 2.x sRGB relative luminance, computed rather than
  * eyeballed, as the rest of this file's are.
@@ -130,7 +104,7 @@ body {
  * *inside* the preview, and a preview that does not match the room is worse
  * than no preview.
  *
- * --muted, unchanged: #8b8a9c on --ground #161616 is 5.35:1 dark, #656a76 on
+ * --muted, unchanged: #8b8a9c on --ground #0a0a0f is 5.84:1 dark, #656a76 on
  * #ffffff 5.38:1 light; on --panel 5.41:1 / 5.19:1. AA at any size.
  */
 .rail .label,
@@ -197,7 +171,7 @@ body {
   letter-spacing: 0.18em;
   font-weight: 600;
   padding: 3px 10px;
-  border-radius: 4px;
+  border-radius: 0;
   border: 1px solid var(--line);
 }
 .sb-seal[data-seal="live"] {
@@ -233,8 +207,13 @@ body {
    RECONNECTING this does not clear itself: it stays until the host reloads,
    and it carries the control that does the reloading. Full width and under the
    status bar so it is on screen in driving mode too, which hides everything
-   else. --warning on --panel is 4.6:1 dark and 5.1:1 light; the text is --ink
-   so the sentence itself is never the thing carrying the contrast. */
+   else. The text is --ink, 16.80:1 dark and 18.72:1 light on --panel, so the
+   sentence itself is never the thing carrying the contrast — which is as well,
+   because --warning #bb5a00 on --panel measures 3.99:1 dark and 4.40:1 light.
+   This comment said 4.6 and 5.1 and had done since the bar was written; both
+   were wrong, and recomputing them is what stopped the reload button beside
+   this rule taking --warning as its label. As a 2px rule the colour is
+   non-text UI at a 3:1 floor and it clears. */
 .sb-stale {
   flex: none;
   display: flex;
@@ -253,17 +232,25 @@ body {
   flex: 1;
   min-width: 0;
 }
+/*
+ * Carbon, `kind="tertiary"`, and in the console's ordinary colour rather than
+ * the amber the hand-built button carried — which is a measurement and worth
+ * the four lines.
+ *
+ * Carbon paints a tertiary's border *and* its label from `--cds-button-tertiary`,
+ * so the amber could not stay on the edge alone the way it did here; it would
+ * have become the label. And --warning #bb5a00 on --panel is 3.99:1 dark and
+ * 4.40:1 light, under the 4.5:1 floor for text in both themes. It was derived
+ * as a 2px rule, where 3:1 applies and it clears, and it has never carried a
+ * word on this console. It does not start here.
+ *
+ * So the warning is said by the bar — the amber edge above, and the sentence —
+ * and the button is the action. Carbon's own tertiary is #ffffff on --panel
+ * 18.30:1 dark and #0f62fe 4.79:1 light, and it is what every other control on
+ * the console is.
+ */
 .sb-stale-go {
   flex: none;
-  background: var(--panel-2);
-  border: 1px solid color-mix(in srgb, var(--warning) 45%, var(--line));
-  border-radius: 4px;
-  padding: 6px 12px;
-  min-height: 31px;
-  font: inherit;
-  color: var(--warning);
-  cursor: pointer;
-  white-space: nowrap;
 }
 .sb-stale-go[hidden] {
   display: none;
@@ -381,7 +368,7 @@ body {
   padding: 6px 8px;
   background: none;
   border: 0;
-  border-radius: 4px;
+  border-radius: 0;
   text-align: left;
   color: var(--muted);
   font-size: 13px;
@@ -410,14 +397,14 @@ body {
   letter-spacing: 0.1em;
   color: var(--muted);
   border: 1px solid var(--line);
-  border-radius: 3px;
+  border-radius: 0;
   padding: 0 4px;
   text-transform: uppercase;
 }
 /* Out of the runbook: not on the space bar, still one click away. Said twice
    and neither time in colour — a dashed edge and the word "out" — because
    nothing on this console is carried by colour alone. --muted on --ground is
-   5.35:1 dark and 5.38:1 light. */
+   5.84:1 dark and 5.38:1 light. */
 .seg.is-out {
   border: 1px dashed var(--line);
   color: var(--muted);
@@ -509,7 +496,7 @@ body {
    on screen twice in every segment; and once a holding step is called by the
    card it shows, the two copies could not even agree on the word. What is
    left is the half nothing else says: the phase.
-   --muted on --ground is 5.35:1 dark and 5.38:1 light. */
+   --muted on --ground is 5.84:1 dark and 5.38:1 light. */
 .panel-sub {
   color: var(--muted);
   font-size: 11px;
@@ -622,9 +609,8 @@ body {
  * tracking, and a copy button on each, which is the thing a host actually
  * wanted from this row.
  *
- * --ink on --ground is 16.61:1 dark, 19.54:1 light; --muted 5.35:1 and
- * 5.38:1. The dark column is against the console's new #161616 ground; only
- * the size moved here, and at 14px both clear the
+ * --ink on --ground is 18.13:1 dark, 19.54:1 light; --muted 5.84:1 and
+ * 5.38:1. Both unchanged — only the size moved, and at 14px both clear the
  * 4.5:1 floor comfortably. 600 on the code keeps it the heavier of the pair
  * without making it a different size from the link.
  *
@@ -667,7 +653,7 @@ body {
   text-align: center;
   background: var(--panel-2);
   border: 1px solid var(--line);
-  border-radius: 4px;
+  border-radius: 0;
   padding: 3px 8px;
   font-family: var(--mono);
   font-size: 11px;
@@ -1042,7 +1028,7 @@ body {
 .sc-mini {
   background: transparent;
   border: 1px solid var(--line);
-  border-radius: 3px;
+  border-radius: 0;
   color: var(--muted);
   font-family: var(--mono);
   font-size: 11px;
@@ -1132,17 +1118,18 @@ body {
   padding-top: 10px;
   border-top: 1px solid var(--line);
 }
+/* No `width: 100%` any more, and no `flex: 1`. See the primary's own note:
+   Carbon's button is `max-content` wide and giving its host a width makes it
+   wrap rather than stretch, so a full-width green bar is not on offer. What is
+   on offer is a 48px filled button alone in a 694px foot, which is a thing to
+   press rather than a region. */
 .panel-foot .ctl-primary {
-  flex: 1;
   margin-left: 0;
-}
-.panel-foot .ctl-primary button.ctl-button {
-  width: 100%;
 }
 /* Before the session starts the primary button is borrowed by the control
    panel's Session group, and this line stands in its place: where it went,
    and what the space bar is about to press, by name. The panel draws no
-   background of its own, so this is --muted on --ground: 5.35:1 dark,
+   background of its own, so this is --muted on --ground: 5.84:1 dark,
    5.42:1 light. */
 .panel-foot .foot-note {
   flex: 1;
@@ -1151,51 +1138,83 @@ body {
   display: none;
 }
 
+/* ---- one corner ------------------------------------------------------
+ *
+ * Carbon's `border-radius: 0` cannot be overridden from outside a shadow root
+ * — measured in #28's spike, with both the property and `--cds-border-radius`
+ * set on the host — so every Carbon control on this console is square. The
+ * hand-built controls that are left have been squared to match: the phase
+ * rail's segments, the copy buttons, the roster and setup micro-buttons, the
+ * shortcut keys and their caps, the round picker's tiles, the seal chip and
+ * the grid's clear button. Ten rules.
+ *
+ * What keeps its radius is everything that is not a control: the phone frame,
+ * the four proportional bars, the panels and the cards. #28 leaves those
+ * bespoke, and a square phone is not a design system, it is a mistake.
+ */
+
 /* ---------------------------------------------------------- controls -- */
 
 /*
- * Issue #28 step 1: every armed control is a `<cds-button class="ctl-button">`.
- * `host/controls.ts` has one factory behind all of them, and that factory now
- * builds Carbon's element instead of a `<button>`.
+ * Every control on this console is a Carbon button. Issue #28 step 2.
  *
- * Which is why every rule below that draws the box is now written
- * `button.ctl-button` rather than `.ctl-button`. The class is still on the
- * element Carbon renders — it is on the *host*, and the host's box sits
- * outside the shadow root where Carbon draws its own border, background and
- * padding. A rule that reaches the host therefore does not restyle Carbon's
- * button; it draws a second box around it. One `button` on the front of each
- * selector is the whole of the fix, and it keeps the properties, the comments
- * and the derivations below legible side by side with what replaced them.
+ * `host/controls.ts` has one factory behind all of them and the class the
+ * wrapper already carried picks the kind: `.ctl-danger` → `danger-tertiary`,
+ * `.ctl-primary` → `primary` at `size="lg"`, everything else → `tertiary` at
+ * `size="sm"`. The one exception is `.ctl-row`, the 22px roster micro-buttons,
+ * which are still a real `<button>` — see the end of this section.
  *
- * So those fifteen rules now match nothing: after this change there is no
- * `<button class="ctl-button">` on the console. They are kept for one step on
- * purpose. Step 1 exists to be rejected on sight if Carbon does not belong
- * here, and the cheapest possible revert is the point of it; step 2 is the
- * branch that moves the other 21 `h("button")` sites and takes these with it.
+ * The fifteen rules that drew the hand-built box have gone. What they bought,
+ * and where each of those properties lives now:
  *
- * What the swap gives up, measured rather than assumed — none of it restyleable
- * from outside a shadow root, all of it listed in #28's "what cannot be
- * restyled":
+ *   one height per size, whatever the label  Carbon pins a button's min and
+ *       max block size to the same token per size. 32px at `sm`, 48px at `lg`.
+ *       `min-height: 31px` and `white-space: nowrap` were buying this by hand.
+ *   the box                                  Carbon's, inside the shadow root:
+ *       `--cds-button-tertiary` paints a tertiary's border *and* its label
+ *       from one property, which is why a tertiary cannot be filled from out
+ *       here and why "on" is a different kind rather than a different colour.
+ *   13px                                     Carbon's `body-compact-01`, 14px.
+ *       #28 step 5 is where the console decides whether to push its own 13/11
+ *       through `--cds-body-compact-01-font-size`; nothing here pre-empts it.
+ *   4px corners                              square. Not reachable from
+ *       outside a shadow root — measured, with both `border-radius` and
+ *       `--cds-border-radius` set on the host — and the most visible thing
+ *       Carbon brings. The hand-built controls left on this surface have been
+ *       squared to match, so the console has one corner.
  *
- *   `.ctl-primary`   the green fill, 16px label and 260px floor. Carbon's
- *                    `kind="primary"` is #0f62fe and is step 2's decision, so
- *                    for now the one button bound to the space bar renders as
- *                    a 32px tertiary like every other control.
- *   `.ctl.on`        the gold fill that says a state is on. Carbon has no
- *                    "on" kind; `--cds-button-tertiary` would carry it, which
- *                    is a token the bridge deliberately does not cross yet.
- *   `.ctl-seal`      Vault yellow. #28 records that Carbon ships no kind for
- *                    it either.
- *   `.ctl-row`       22px and 11px mono. Carbon's `xs` is 24px and reaching 22
- *                    forces two layout tokens off Carbon's own scale, which is
- *                    #28 step 2's reason for leaving these hand-built. At
- *                    `sm` they render 32px tall inside a 22px roster row.
+ * ---- what the console tells Carbon, and why it is all tokens ----------
  *
- * `[hidden]` still hides them: `tokens.css` sets `display: none !important` on
- * the attribute, which lands on the host, and a document rule on a host beats
- * the `:host` rule a Lit component sets its own display with. That is the same
- * property the 25-row grid spike turned on and it is why the rule is written
- * once for every element rather than eleven times by hand.
+ * Nothing below reaches into a shadow root, because nothing can. Every rule
+ * here either sits on the host's own box — layout, margins, the host's
+ * background showing through a transparent kind — or sets an inheritable
+ * custom property that Carbon's own CSS reads inside the shadow root. A
+ * document rule on a host beats the `:host()` rule the component sets the same
+ * property with, which is how `--cds-layout-density-padding-inline` lands at
+ * all: Carbon declares its clamp bounds on `:host(cds-button)`.
+ *
+ * That is also the answer to the three colours #28 said Carbon has no kind
+ * for. It does not need one. A kind is parameterised by inheritable
+ * properties, so the Vault gold, the "on" gold and the stale banner's amber
+ * drive Carbon's kinds instead of replacing them.
+ *
+ * ---- the gutter ------------------------------------------------------
+ *
+ * Carbon reserves an icon gutter on every non-ghost button:
+ *
+ *   padding-inline: calc(-1px + D)  calc(15px + 3 * D)
+ *
+ * where D is `--cds-layout-density-padding-inline`, clamped between
+ * `-min` 0px and `-max` 999999999px. At Carbon's `normal` 1rem that is
+ * 15px / 63px — 80px of chrome around a label that has no icon in it, against
+ * the hand-built button's 26px. Measured at 1280px, it put the arcade's seven
+ * controls on three lines where they had been on two.
+ *
+ * This console runs at Carbon's `condensed`, which is Carbon's own named
+ * density and not a number invented here: 0.5rem, so 7px / 39px, 48px of
+ * chrome. The arcade row is back to two lines and every control panel button
+ * fits the splitter's narrowest column. The asymmetry stays and is visible —
+ * it is what the gutter is, and a console with no icons pays for it.
  */
 
 .ctl {
@@ -1206,117 +1225,159 @@ body {
 .ctl[hidden] {
   display: none;
 }
-button.ctl-button {
-  background: var(--panel-2);
-  border: 1px solid var(--line);
-  border-radius: 4px;
-  padding: 6px 12px;
-  font-size: 13px;
-  /* Explicit, so a Yes standing in for a button is exactly its height
-     whatever the two words happen to be. */
-  min-height: 31px;
-  color: var(--ink);
-  /* One line, always. Without this a label wraps inside its own button when
-     the row runs out of width, and since the labels are different lengths
-     they wrap at different points: the arcade's row was measured at 31, 44
-     and 59 pixels tall in one strip, which reads as three sizes of button
-     rather than one control that happens to have a long name. The row wraps
-     between buttons instead — see `.field-actions`. */
-  white-space: nowrap;
-}
-button.ctl-button:hover:not(:disabled) {
-  border-color: var(--muted);
-}
-button.ctl-button:disabled {
-  color: var(--dim);
-  cursor: default;
-}
-.ctl-danger button.ctl-button {
-  color: var(--danger);
-  border-color: color-mix(in srgb, var(--danger) 45%, var(--line));
-}
-.ctl-seal button.ctl-button {
-  color: var(--sealed);
-  border-color: color-mix(in srgb, var(--sealed) 45%, var(--line));
-}
-/* A disabled control has to look disabled. `.ctl-button:disabled` above is
-   the same specificity as these two and loses on source order, so Close
-   session stayed red while the session was already closed and Reveal the
-   winners stayed gold after they had been revealed — a button the host reads
-   as pressable, presses, and gets nothing from. Said twice, colour and
-   cursor, and --muted rather than --dim because the label is still a
-   sentence: 4.94:1 dark and 4.83:1 light on --panel-2. */
-.ctl-danger button.ctl-button:disabled,
-.ctl-seal button.ctl-button:disabled {
-  color: var(--muted);
-  border-color: var(--line);
-  cursor: default;
-}
-/* On: the gold fill, and the theme's own ground as the ink on it.
-   #2a2205 was a near-black chosen against dark's --sealed #ffcf25, where it is
-   10.68:1. Light's --sealed is #926700, a dark amber, and a near-black on it is
-   3.13:1 — a label the host has to lean in to read on the one button whose
-   whole job is to say a state is on. --ground inverts with the theme exactly as
-   the fill does: 12.24:1 dark on the console's #161616 ground, 5.05:1
-   light. (This rule is one of the fifteen the Carbon swap left matching
-   nothing — Carbon has no "on" kind. See the section comment above.) */
-.ctl.on button.ctl-button {
-  background: var(--sealed);
-  color: var(--ground);
-  border-color: var(--sealed);
+
+/*
+ * Everything Carbon reads, set once on the element it has to be set on.
+ *
+ * `cds-button` and not `#app`, because these are component tokens: scoping
+ * them to the page would also hand them to a `cds-tag` or a `cds-text-input`
+ * in step 3, which have their own disabled and density rules and should get
+ * their own decision rather than this one by inheritance.
+ *
+ *   density    see the gutter note above.
+ *   disabled   `--cds-button-disabled` is the border of a disabled tertiary
+ *              and the *fill* of a disabled primary; `--cds-text-disabled` is
+ *              the label on a disabled tertiary and `--cds-text-on-color-
+ *              disabled` the label on a filled one. The hand-built rule said
+ *              the disabled state twice, in colour and in cursor, because
+ *              getting it wrong shipped once: Close session stayed red while
+ *              the session was already closed. The colour half is these three
+ *              lines. The cursor half is inside the shadow root and is
+ *              Carbon's `not-allowed` rather than the console's `default`,
+ *              which is the same statement in a stronger word — it is said
+ *              twice either way.
+ *              --muted on --panel-2 is 4.94:1 dark and 4.83:1 light, which is
+ *              the figure the hand-built rule carried: a disabled control is
+ *              exempt from the 4.5:1 floor and this label is still a sentence.
+ */
+cds-button {
+  --cds-layout-density-padding-inline: var(
+    --cds-layout-density-padding-inline-condensed
+  );
+  --cds-button-disabled: var(--line);
+  --cds-text-disabled: var(--muted);
+  --cds-text-on-color-disabled: var(--muted);
 }
 
-/* The one primary button: same place, same key, says what it will do. */
+/*
+ * The destructive ones keep the console's red rather than Carbon's #da1e28.
+ * `--danger` is the product's, it is what `.rs-panel`'s edge and
+ * `.cp-danger`'s box are drawn in, and two reds eight pixels apart in the box
+ * headed CANNOT BE UNDONE is exactly the seam this step is closing.
+ * --danger on --ground is 5.34:1 dark and 5.06:1 light; the hover fill takes
+ * --ink on it, 3.63:1 dark — non-text UI at hover, and the label is still the
+ * thing being read.
+ */
+.ctl-danger .ctl-button,
+.rs-arm,
+.rs-go {
+  --cds-button-danger-secondary: var(--danger);
+  --cds-button-danger-primary: var(--danger);
+  --cds-button-danger-hover: color-mix(in srgb, var(--danger) 80%, black);
+  --cds-button-danger-active: color-mix(in srgb, var(--danger) 60%, black);
+}
+
+/*
+ * The seal. #28 recorded that Carbon ships no kind for Vault gold, which is
+ * true and turns out not to matter: `--cds-button-tertiary` is what a tertiary
+ * draws its border and its label from, and it inherits.
+ * --sealed on --ground is 13.36:1 dark and 4.90:1 light.
+ */
+.ctl-seal .ctl-button {
+  --cds-button-tertiary: var(--sealed);
+  --cds-button-tertiary-hover: color-mix(in srgb, var(--sealed) 86%, black);
+  --cds-button-tertiary-active: color-mix(in srgb, var(--sealed) 68%, black);
+  /* Carbon fills a tertiary on hover and on focus and takes the label from
+     --cds-text-inverse, so this is the ink *on* the gold and not the gold.
+     Left at Carbon's own #161616 it would be a dark label on gold, which is
+     almost right; --ground is the token the rest of this file uses for ink on
+     a --sealed fill and it inverts with the theme as the fill does. */
+  --cds-text-inverse: var(--ground);
+}
+
+/*
+ * On: the gold fill, and the theme's own ground as the ink on it.
+ *
+ * `kind="primary"`, switched by `Control.setOn`, because a filled button is
+ * how Carbon says a state is on and a tertiary cannot be filled from out here
+ * — `--cds-button-tertiary` is both the border and the label, so a fill drawn
+ * on the host leaves the label the colour of the fill.
+ *
+ * #2a2205 was a near-black chosen against dark's --sealed #ffcf25, where it is
+ * 10.68:1. Light's --sealed is #926700, a dark amber, and a near-black on it is
+ * 3.13:1 — a label the host has to lean in to read on the one button whose
+ * whole job is to say a state is on. --ground inverts with the theme exactly as
+ * the fill does: 13.36:1 dark, 5.05:1 light.
+ */
+.ctl.on .ctl-button {
+  --cds-button-primary: var(--sealed);
+  --cds-button-primary-hover: color-mix(in srgb, var(--sealed) 82%, black);
+  --cds-button-primary-active: color-mix(in srgb, var(--sealed) 64%, black);
+  --cds-text-on-color: var(--ground);
+}
+
+/*
+ * The one primary button: same place, same key, says what it will do.
+ *
+ * Green, not Carbon blue, and that is a decision rather than an omission.
+ * DESIGN.md gives --nomad one job on this console — the room is about to see
+ * something — and it is the job this button has; the arcade's PLAN light and
+ * the participant's own go button are the same green saying the same thing,
+ * and a blue bar in the foot would be the only place on the product where that
+ * signal is a different colour. Carbon blue is also already spoken for here:
+ * `--cds-focus` is bridged to the console's --action #1060ff, so a focused
+ * `kind="primary"` in Carbon's own palette would be a blue ring one pixel
+ * outside a blue fill.
+ *
+ * So `kind="primary"` with the fill repointed. The *kind* is Carbon's — the
+ * filled, highest-emphasis, one-per-view button — and the colour is the
+ * product's, which is the same trade the seal and the "on" state make above.
+ *
+ * `size="lg"` is 48px against everything else's 32px. Carbon's own default
+ * size, and the whole of what restores the prominence step 1 lost: the button
+ * bound to the space bar is the only 48px thing on the surface, it is filled
+ * where everything else is an outline, and it is alone in the foot.
+ *
+ * It is no longer a full-width bar. `inline-size: max-content` is set on
+ * Carbon's inner button and there is no token for it, so a Carbon button is as
+ * wide as its label unless its host is given a width — which is exactly what
+ * the control panel does below, and what the foot deliberately does not: a
+ * 300px filled green button with air beside it reads as one thing to press,
+ * where a 694px bar read as a region.
+ *
+ * #062a20 on --nomad #06d092 is 7.68:1, theme-independent — --nomad is a brand
+ * fill and does not move between light and dark.
+ */
 .ctl-primary {
   margin-left: auto;
 }
-/* 18px — Helios display 18, up from a 17 that is not on the scale — against
-   the secondary buttons' 13px, so the one button that matters is the one
-   button that reads as bigger rather than merely greener. It now takes the
-   whole foot; min-width 260px is what is left of the old bargain and is the
-   floor for driving mode's copy, which does not stretch.
-   #062a20 on --nomad #06d092 is 7.68:1, theme-independent — --nomad is a
-   brand fill and does not move between light and dark. */
-.ctl-primary button.ctl-button {
-  background: var(--nomad);
-  border-color: var(--nomad);
-  color: #062a20;
-  font-weight: 600;
-  font-size: 16px;
-  padding: 12px 22px;
-  min-width: 260px;
-  justify-content: center;
-}
-.ctl-primary button.ctl-button:disabled {
-  background: var(--panel-2);
-  border-color: var(--line);
-  color: var(--dim);
+.ctl-primary .ctl-button {
+  --cds-button-primary: var(--nomad);
+  --cds-button-primary-hover: var(--nomad-edge);
+  --cds-button-primary-active: var(--nomad-edge);
+  --cds-text-on-color: #062a20;
 }
 
 /* Inline confirm. Never a modal: a modal that steals focus during a live
-   question is how a host presses the wrong thing. */
+   question is how a host presses the wrong thing.
+   --sealed on --ground is 13.36:1 dark and 4.90:1 light. */
 .ctl-question {
   font-family: var(--mono);
   font-size: 11px;
   color: var(--sealed);
   letter-spacing: 0.06em;
 }
-/* The same box as `.ctl-button`, because they stand in for one.
-   A confirm replaces the button that was just pressed, in the place it was,
-   and a Yes two pixels shorter than the thing it replaced makes the row jump
-   and reads as a different class of control than the one it is answering. */
+/* Yes and No are Carbon too, and for one reason: they stand in for the button
+   that was just pressed, in the place it was, so they have to be the same box.
+   A 31px rounded Yes replacing a 32px square control makes the row jump at the
+   moment the host is answering a question about something irreversible. Yes is
+   the danger kind, which is what the hand-built pair said with a red edge.
+   They are the only two buttons the space bar hands itself to — see
+   `spaceVerdict` — and that decision reads `className` and the tag name, both
+   of which a Carbon host carries exactly as a `<button>` does. */
 .ctl-yes,
 .ctl-no {
-  background: var(--panel-2);
-  border: 1px solid var(--line);
-  border-radius: 4px;
-  padding: 6px 12px;
-  font-size: 13px;
-  min-height: 31px;
-}
-.ctl-yes {
-  border-color: var(--danger);
-  color: var(--danger);
+  flex: none;
 }
 
 /* Refusals live in the button that caused them, for three seconds. */
@@ -1324,7 +1385,7 @@ button.ctl-button:disabled {
   font-family: var(--mono);
   font-size: 11px;
   padding: 6px 10px;
-  border-radius: 4px;
+  border-radius: 0;
   border: 1px solid var(--danger);
   color: var(--danger);
   max-width: 340px;
@@ -1334,21 +1395,63 @@ button.ctl-button:disabled {
   color: var(--nomad-ink);
 }
 
-.ctl-row button.ctl-button {
+/*
+ * `.ctl-row` — the 22px roster micro-buttons, and the one place the migration
+ * stops.
+ *
+ * `free` and `kick` live in an opened roster row: 22px tall, 11px mono, two of
+ * them side by side in a column that holds sixty people without scrolling.
+ * Carbon reaches 22px — `--cds-layout-size-height-xs` is declared on
+ * `:host(cds-button)` and a document rule on a host beats a `:host` rule, so
+ * `cds-button { --cds-layout-size-height-xs: 22px }` lands, measured — and it
+ * is still the wrong trade. `xs` is 24px on Carbon's scale and 11px is off
+ * `body-compact-01`, so two tokens come off the system at once; and the gutter
+ * is the third, because even at condensed a button carries 46px of chrome, so
+ * `kick` goes from 35px wide to about 65px. In a 22px row. In two columns.
+ *
+ * So `controls.ts` builds a real `<button class="ctl-button">` for this one
+ * class, and these are the rules that draw it. Square, like everything else.
+ * --ink on --panel-2 is 15.31:1 dark and 17.44:1 light; the disabled label
+ * takes --dim, which never carries text that has to be read.
+ */
+.ctl-row .ctl-button,
+.ctl-row .ctl-yes,
+.ctl-row .ctl-no {
+  background: var(--panel-2);
+  border: 1px solid var(--line);
+  border-radius: 0;
   padding: 1px 5px;
   font-size: 11px;
   font-family: var(--mono);
   letter-spacing: 0.08em;
-  background: transparent;
+  color: var(--ink);
   /* A two-word label on a 22px row must not become two lines. */
   white-space: nowrap;
 }
-.ctl-row .ctl-question {
-  font-size: 11px;
+.ctl-row .ctl-button {
+  background: transparent;
 }
-.ctl-row .ctl-yes,
-.ctl-row .ctl-no {
-  padding: 1px 5px;
+.ctl-row .ctl-button:hover:not(:disabled) {
+  border-color: var(--muted);
+}
+.ctl-row .ctl-button:disabled {
+  color: var(--dim);
+  cursor: default;
+}
+.ctl-row.ctl-danger .ctl-button {
+  color: var(--danger);
+  border-color: color-mix(in srgb, var(--danger) 45%, var(--line));
+}
+.ctl-row.ctl-danger .ctl-button:disabled {
+  color: var(--muted);
+  border-color: var(--line);
+  cursor: default;
+}
+.ctl-row .ctl-yes {
+  border-color: var(--danger);
+  color: var(--danger);
+}
+.ctl-row .ctl-question {
   font-size: 11px;
 }
 
@@ -1569,10 +1672,11 @@ button.ctl-button:disabled {
 }
 
 /* The number the host's next decision turns on — wait, or close. 18px.
-   On --ground, which is what `.panel` leaves it on: --ink 16.61:1 dark /
-   19.54:1 light, and .all-in's --hit 9.00:1 / 5.08:1. The dark figures were
-   16.80 and 9.82 — the first of those was --ink on --panel-2 and had always
-   named the wrong surface, which recomputing the ground is what found. */
+   On --ground, which is what `.panel` leaves it on: --ink 18.13:1 dark /
+   19.54:1 light, and .all-in's --hit 9.82:1 / 5.08:1. The dark figures used
+   to read 16.80 and 9.82 — the first of those was --ink on --panel-2 and had
+   always named the wrong surface, which recomputing the ground is what
+   found. */
 .t-counts {
   margin: 0;
   font-size: 16px;
@@ -1821,7 +1925,7 @@ button.ctl-button:disabled {
   max-width: 21rem;
   padding: 0.5rem 0.7rem;
   border: 1px solid var(--line);
-  border-radius: 6px;
+  border-radius: 0;
   background: var(--panel-2);
   color: var(--ink);
   font-size: 13px;
@@ -1887,8 +1991,8 @@ button.ctl-button:disabled {
 }
 
 /* What the round is doing right now, read off the console mid-sentence.
-   Inherits --ink: 16.61:1 dark, 19.54:1 light on --ground. `.panel` draws no
-   background, so --ground is the surface; the 16.80/18.72 these said before
+   Inherits --ink: 18.13:1 dark, 19.54:1 light on --ground. `.panel` draws no
+   background, so --ground is the surface; the 16.80/18.72 this said before
    were the --panel pair. */
 .a-item {
   margin: 0;
@@ -2112,7 +2216,7 @@ button.ctl-button:disabled {
    driving mode, where the rail is not on screen. --muted, not --dim: --dim
    never carries text that has to be read. Measured 5.41:1 dark (#8b8a9c on
    #14141d) and 5.19:1 light (#656a76 on HDS surface-faint #fafafa); on the
-   rail's own background, --ground, it is 5.35:1 dark and 5.38:1 light. 11px,
+   rail's own background, --ground, it is 5.84:1 dark and 5.38:1 light. 11px,
    up from 10px: this is the list the host reads when they have forgotten
    which key does what, so it is the last thing that should be hard to read. */
 .rail-keys {
@@ -2244,21 +2348,15 @@ button.ctl-button:disabled {
 .a-setup-addrow {
   display: flex;
 }
+/* Carbon `kind="ghost"`, which is Carbon's own quiet one: no box, no gutter —
+   ghost is the one kind whose trailing padding equals its leading padding —
+   and a label that reads as an action rather than as a control. The dashed
+   edge has gone with the box; what said "this adds a row" is the + and the
+   sentence, both of which are still there.
+   `--cds-link-primary` is where a ghost takes its label colour. */
 .a-setup-add {
-  background: var(--panel);
-  border: 1px dashed var(--line);
-  border-radius: 4px;
-  color: var(--muted);
-  font-size: 13px;
-  padding: 6px 10px;
-}
-.a-setup-add:hover:not(:disabled) {
-  border-color: var(--muted);
-  color: var(--ink);
-}
-.a-setup-add:disabled {
-  color: var(--dim);
-  cursor: default;
+  --cds-link-primary: var(--muted);
+  --cds-link-primary-hover: var(--ink);
 }
 
 /* Delete a card, or a holding step the host added. The same size and shape as
@@ -2462,7 +2560,7 @@ button.ctl-button:disabled {
 .a-setup-move {
   background: var(--panel);
   border: 1px solid var(--line);
-  border-radius: 4px;
+  border-radius: 0;
   color: var(--ink);
   font-size: 13px;
   line-height: 1;
@@ -2478,7 +2576,7 @@ button.ctl-button:disabled {
 .a-setup-in {
   background: var(--panel);
   border: 1px solid var(--line);
-  border-radius: 4px;
+  border-radius: 0;
   color: var(--ink);
   font-family: var(--mono);
   font-size: 11px;
@@ -2543,21 +2641,15 @@ button.ctl-button:disabled {
 }
 
 /* The way off the running order: present, and not the default path. */
+/* Carbon `kind="ghost"`, for the same reason `.a-setup-add` is: this is the
+   way off the running order and it is meant to be present rather than
+   inviting. It gives up the 11px mono caps, which was the console's chrome
+   idiom for a quiet control; the quiet is now the kind. #28 step 5 is where
+   the type question is settled for the whole surface. */
 .a-alt-toggle {
   align-self: flex-start;
-  background: none;
-  border: 1px solid var(--line);
-  border-radius: 4px;
-  color: var(--muted);
-  font-family: var(--mono);
-  font-size: 11px;
-  letter-spacing: 0.1em;
-  text-transform: uppercase;
-  padding: 4px 10px;
-}
-.a-alt-toggle:hover {
-  color: var(--ink);
-  border-color: var(--muted);
+  --cds-link-primary: var(--muted);
+  --cds-link-primary-hover: var(--ink);
 }
 .a-alt-toggle[hidden] {
   display: none;
@@ -2581,8 +2673,8 @@ button.ctl-button:disabled {
  * back exactly where they were.
  *
  * Measured on --ground, both themes:
- *   --ink   #f6f5f3 on #161616  16.61:1   #0c0c0e on #ffffff  19.54:1
- *   --muted #8b8a9c on #161616   5.35:1   #656a76 on #ffffff   5.38:1
+ *   --ink   #f6f5f3 on #0a0a0f  18.13:1   #0c0c0e on #ffffff  19.54:1
+ *   --muted #8b8a9c on #0a0a0f   5.84:1   #656a76 on #ffffff   5.38:1
  */
 body.driving .cols {
   display: none;
@@ -2641,10 +2733,22 @@ body.driving .cols {
 .driving-view .ctl-primary {
   margin-left: 0;
 }
-.driving-view .ctl-primary button.ctl-button {
-  font-size: 24px;
-  padding: 16px 32px;
-  min-width: 420px;
+/* 24px through Carbon's own type token, because font-size does not inherit
+   into the button — `.cds--btn` sets it from `--cds-body-compact-01-font-size`
+   and that property does. The height follows: Carbon's padding-block is
+   `min(…, .5 * (size - 1lh))`, so a 24px label inside a 48px `lg` fills it
+   rather than overflowing, and the `--cds-layout-size-height-lg` override puts
+   the box back to the 64px this reads from arm's length — Carbon's own `xl`
+   step, which is what makes it a legal value to hand it.
+   The gutter goes back to `normal` here. This is one button on an otherwise
+   empty screen; it is the one place on the console with the width to spare,
+   and at 24px the condensed 7px start padding is visibly tight. */
+.driving-view .ctl-primary .ctl-button {
+  --cds-body-compact-01-font-size: 24px;
+  --cds-layout-size-height-lg: 4rem;
+  --cds-layout-density-padding-inline: var(
+    --cds-layout-density-padding-inline-normal
+  );
 }
 .dv-keys {
   margin: 0;
@@ -2664,10 +2768,10 @@ body.driving .cols {
  *
  *   --danger text on --panel-2  (.rs-arm, .rs-go)        4.51  4.52
  *   --danger border on --panel  (the panel's own edge)   4.95  4.85  (non-text, 3:1)
- *   --danger border on --ground (.rs-arm's edge)         4.89  5.06  (non-text, 3:1)
+ *   --danger border on --ground (.rs-arm's edge)         5.34  5.06  (non-text, 3:1)
  *   --ink on --panel            (.rs-loses)             16.80 18.72
  *   --muted on --panel          (.rs-keeps, .rs-label)   5.41  5.19
- *   --ink on --ground           (.rs-field's text)      16.61 19.54
+ *   --ink on --ground           (.rs-field's text)      18.13 19.54
  *   --muted on --panel-2        (.rs-go while disabled)  4.94  4.83
  *   --ink on --panel-2          (.rs-cancel)            15.31 17.44
  *
@@ -2676,24 +2780,17 @@ body.driving .cols {
  * is still the sentence explaining what has not happened yet.
  */
 
-.rs-arm {
-  background: var(--panel-2);
-  border: 1px solid var(--danger);
-  border-radius: 4px;
-  padding: 6px 12px;
-  font-size: 13px;
-  color: var(--danger);
-  white-space: nowrap;
-}
-.rs-arm:hover:not(:disabled) {
-  background: color-mix(in srgb, var(--danger) 12%, var(--panel-2));
-}
-.rs-arm:disabled {
-  color: var(--muted);
-  border-color: var(--line);
-  background: var(--panel-2);
-  cursor: default;
-}
+/*
+ * The arm button is a Carbon `danger-tertiary`, like Close session an inch
+ * away from it, and its red comes from the block above that gives both of
+ * them the console's --danger.
+ *
+ * `.is-armed` is the one state Carbon's kinds have no word for, and it is the
+ * one thing here that is not a token: a tertiary's own background is
+ * transparent, so a paint on the *host* is what shows through. That is the
+ * general shape of every rule in this file that reaches a Carbon control —
+ * the host's box, or a property Carbon reads.
+ */
 .rs-arm.is-armed {
   background: color-mix(in srgb, var(--danger) 16%, var(--panel-2));
 }
@@ -2739,45 +2836,19 @@ body.driving .cols {
   font-weight: 600;
   letter-spacing: 0.08em;
 }
-/* --panel would be invisible against the panel this sits on. --ground is now
-   #161616 and --panel-2 is #1d1d28, so this field is 1.08:1 against the panel
-   around it where it was 1.18:1 — present, but less so. Same for `.sc-raw`
-   and the refusal bubble, which use --ground for the same reason. */
+/* --panel would be invisible against the panel this sits on. */
 .rs-field {
   flex: none;
   width: 160px;
   background: var(--ground);
 }
-.rs-go {
-  background: var(--panel-2);
-  border: 1px solid var(--danger);
-  border-radius: 4px;
-  padding: 6px 14px;
-  font-size: 13px;
-  font-weight: 600;
-  color: var(--danger);
-}
-.rs-go:hover:not(:disabled) {
-  background: color-mix(in srgb, var(--danger) 12%, var(--panel-2));
-}
-/* Off until the word is typed, and it says so in grey rather than by
-   disappearing: a host has to be able to see what they are working towards. */
-.rs-go:disabled {
-  color: var(--muted);
-  border-color: var(--line);
-  cursor: default;
-}
-.rs-cancel {
-  background: var(--panel-2);
-  border: 1px solid var(--line);
-  border-radius: 4px;
-  padding: 6px 12px;
-  font-size: 13px;
-  color: var(--ink);
-}
-.rs-cancel:hover {
-  border-color: var(--muted);
-}
+/* Wipe and Cancel are Carbon `danger-tertiary` and `tertiary`. Off until the
+   word is typed, and it says so in grey rather than by disappearing — a host
+   has to be able to see what they are working towards — which is now
+   `--cds-button-disabled` and `--cds-text-disabled` on `cds-button` above:
+   --line on the edge, --muted on the label, 4.94:1 dark and 4.83:1 light on
+   --panel-2. The cursor half of that statement is Carbon's `not-allowed`,
+   inside the shadow root. */
 
 /* ------------------------------------------------- the control panel -- */
 
@@ -2799,13 +2870,13 @@ body.driving .cols {
  *
  * Contrast, measured on the surfaces these actually sit on, dark then light:
  *
- *   --muted  on --ground   the group labels                 5.35  5.38
- *   --ink    on --panel-2  button.ctl-button, .cp-key      15.31 17.44
+ *   --muted  on --ground   the group labels                 5.84  5.38
+ *   --ink    on --panel-2  .cp-key, `.ctl-row`'s pair      15.31 17.44
  *   --muted  on --panel-2  .cp-key-cap, the keycap          4.94  4.83
- *   --danger on --ground   .cp-danger-label, its own edge   4.89  5.06
+ *   --danger on --ground   .cp-danger-label, its own edge   5.34  5.06
  *   --danger on --panel-2  Close session, .rs-arm           4.51  4.52
  *   --sealed on --panel-2  .ctl-seal's label               11.29  4.50
- *   --sealed on --ground   .ctl-question while armed       12.24  4.90
+ *   --sealed on --ground   .ctl-question while armed       13.36  4.90
  *   #062a20  on --nomad    the borrowed primary button       7.68  7.68
  *
  * The last one does not move between themes: --nomad is a brand fill.
@@ -2853,11 +2924,6 @@ body.driving .cols {
   margin-left: 0;
   min-width: 0;
 }
-.cp-lifecycle .ctl-primary button.ctl-button {
-  min-width: 0;
-  font-size: 16px;
-  padding: 10px 12px;
-}
 
 .cp-row {
   display: flex;
@@ -2867,9 +2933,11 @@ body.driving .cols {
 
 /* A control takes half the row when two fit and the whole row when they do
    not. 9rem is the width below which two of these stop being readable side by
-   side, which at 13px is the point the labels start wrapping anyway. */
+   side, which at 13px is the point the labels start wrapping anyway.
+   `cds-button` is in the list for `.rs-arm`, which is one. */
 .cp-row > .ctl,
-.cp-row > button {
+.cp-row > button,
+.cp-row > cds-button {
   flex: 1 1 9rem;
   min-width: 0;
 }
@@ -2892,15 +2960,28 @@ body.driving .cols {
   flex: 1 1 4rem;
 }
 
-.cp button.ctl-button {
-  display: flex;
-  align-items: center;
-  justify-content: center;
+/*
+ * The width line, and the one that step 1 reported as a wall.
+ *
+ * Step 1 measured two control-panel buttons at 248px and 260px inside a 223px
+ * column and recorded that Carbon buttons are `nowrap` and cannot wrap their
+ * labels. The first half was the symptom of this rule having been renamed to
+ * `button.ctl-button`, where it matched nothing; the second half is not true.
+ *
+ * Carbon's inner button is `inline-size: max-content` with `white-space`
+ * inherited, and `:host(cds-button)` is `display: flex`. Give the host a width
+ * and the inner takes it and the label wraps, exactly as the hand-built button
+ * did. Measured at the splitter's narrowest, 216px of tray and 191px of
+ * content: every control fits, and `Open the lobby   (space)` — the longest
+ * label the console has, 166px of Carbon-rendered text — takes two lines and
+ * 50px, which is what this rule has always asked for.
+ *
+ * Carbon's own `max-inline-size: 20rem` is the only width it decides for
+ * itself, and nothing on this console is near it.
+ */
+.cp .ctl-button,
+.cp .rs-arm {
   width: 100%;
-  text-align: center;
-  /* Two lines of button beats a button with its last word cut off. */
-  white-space: normal;
-  line-height: 1.3;
 }
 
 /* Refusals are inline and three seconds long, and in this column they wrap
@@ -2937,19 +3018,9 @@ body.driving .cols {
 .cp-danger-label {
   color: var(--danger);
 }
-/* Sized exactly like `.cp .ctl-button`, because it sits directly under Close
-   session and two danger buttons of different widths read as two different
-   kinds of thing. `.rs-arm` is not a `.ctl-button` — it carries the arming
-   state — so it has to be told the same geometry rather than inheriting it. */
-.cp-danger .rs-arm {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 100%;
-  text-align: center;
-  white-space: normal;
-  line-height: 1.3;
-}
+/* `.rs-arm` takes its width from `.cp .ctl-button, .cp .rs-arm` above,
+   because it sits directly under Close session and two danger buttons of
+   different widths read as two different kinds of thing. */
 /* The wipe's panel opens inside the block that already warned about it, so it
    does not need a second red box drawn around the first. */
 .cp-danger .rs-panel {
@@ -2967,8 +3038,6 @@ body.driving .cols {
 .cp-danger .rs-go,
 .cp-danger .rs-cancel {
   flex: 1 1 8rem;
-  white-space: normal;
-  line-height: 1.3;
 }
 
 /*
@@ -2987,7 +3056,7 @@ body.driving .cols {
   gap: 8px;
   background: var(--panel-2);
   border: 1px solid var(--line);
-  border-radius: 4px;
+  border-radius: 0;
   padding: 6px 10px;
   color: var(--ink);
   font-size: 13px;
@@ -3012,6 +3081,6 @@ body.driving .cols {
   letter-spacing: 0.1em;
   color: var(--muted);
   border: 1px solid var(--line);
-  border-radius: 3px;
+  border-radius: 0;
   padding: 1px 4px;
 }

@@ -45,7 +45,6 @@
   --cds-ai-popover-shadow-outer-02: rgba(0, 0, 0, 0.08);
   --cds-ai-skeleton-background: rgba(120, 169, 255, 0.5);
   --cds-ai-skeleton-element-background: rgba(120, 169, 255, 0.3);
-  --cds-background: #161616;
   --cds-background-active: rgba(141, 141, 141, 0.4);
   --cds-background-brand: #0f62fe;
   --cds-background-hover: rgba(141, 141, 141, 0.16);
@@ -125,8 +124,6 @@
   --cds-icon-primary: #f4f4f4;
   --cds-icon-secondary: #c6c6c6;
   --cds-interactive: #4589ff;
-  --cds-layer-01: #262626;
-  --cds-layer-02: #393939;
   --cds-layer-03: #525252;
   --cds-layer-accent-01: #393939;
   --cds-layer-accent-02: #525252;
@@ -360,7 +357,6 @@
     --cds-ai-popover-shadow-outer-02: rgba(0, 0, 0, 0.04);
     --cds-ai-skeleton-background: #d0e2ff;
     --cds-ai-skeleton-element-background: #4589ff;
-    --cds-background: #ffffff;
     --cds-background-active: rgba(141, 141, 141, 0.5);
     --cds-background-brand: #0f62fe;
     --cds-background-hover: rgba(141, 141, 141, 0.12);
@@ -440,8 +436,6 @@
     --cds-icon-primary: #161616;
     --cds-icon-secondary: #525252;
     --cds-interactive: #0f62fe;
-    --cds-layer-01: #f4f4f4;
-    --cds-layer-02: #ffffff;
     --cds-layer-03: #f4f4f4;
     --cds-layer-accent-01: #e0e0e0;
     --cds-layer-accent-02: #e0e0e0;
@@ -675,7 +669,6 @@
   --cds-ai-popover-shadow-outer-02: rgba(0, 0, 0, 0.04);
   --cds-ai-skeleton-background: #d0e2ff;
   --cds-ai-skeleton-element-background: #4589ff;
-  --cds-background: #ffffff;
   --cds-background-active: rgba(141, 141, 141, 0.5);
   --cds-background-brand: #0f62fe;
   --cds-background-hover: rgba(141, 141, 141, 0.12);
@@ -755,8 +748,6 @@
   --cds-icon-primary: #161616;
   --cds-icon-secondary: #525252;
   --cds-interactive: #0f62fe;
-  --cds-layer-01: #f4f4f4;
-  --cds-layer-02: #ffffff;
   --cds-layer-03: #f4f4f4;
   --cds-layer-accent-01: #e0e0e0;
   --cds-layer-accent-02: #e0e0e0;
@@ -989,7 +980,6 @@
   --cds-ai-popover-shadow-outer-02: rgba(0, 0, 0, 0.08);
   --cds-ai-skeleton-background: rgba(120, 169, 255, 0.5);
   --cds-ai-skeleton-element-background: rgba(120, 169, 255, 0.3);
-  --cds-background: #161616;
   --cds-background-active: rgba(141, 141, 141, 0.4);
   --cds-background-brand: #0f62fe;
   --cds-background-hover: rgba(141, 141, 141, 0.16);
@@ -1069,8 +1059,6 @@
   --cds-icon-primary: #f4f4f4;
   --cds-icon-secondary: #c6c6c6;
   --cds-interactive: #4589ff;
-  --cds-layer-01: #262626;
-  --cds-layer-02: #393939;
   --cds-layer-03: #525252;
   --cds-layer-accent-01: #393939;
   --cds-layer-accent-02: #525252;
@@ -1283,8 +1271,38 @@
 
 /* ---- the bridge ---------------------------------------------------------
  *
- * Two tokens cross between the two systems. Everything else on either side is
+ * Four tokens cross between the two systems. Everything else on either side is
  * left alone, because a bridge that grows is a second design system.
+ *
+ * Three of the four cross in the direction step 1 did not take: Carbon's token
+ * takes the console's value, not the other way round. Step 1 bridged
+ * `--ground` to `var(--cds-background)` and moved the console's dark page from
+ * #0a0a0f to #161616, and the measurement that decided step 2 is what that
+ * cost. The console's panels stayed at #14141d and #1d1d28, so they landed
+ * 1.01:1 and 1.08:1 against the new page — `--panel` fractionally the *darker*
+ * of the pair, the elevation model inverted, the panels gone.
+ *
+ * The obvious repair is Carbon's own layers, `layer-01` #262626 and
+ * `layer-02` #393939. It is not available, and the reason is a number rather
+ * than a preference. Four of the console's dark inks were derived by walking a
+ * hue up in OKLCH until it cleared 4.5:1 on `--panel-2` #1d1d28, which means
+ * they sit *at* the floor there and have nowhere to go:
+ *
+ *   ink                      on #1d1d28   on #393939   on #262626
+ *   --muted         #8b8a9c     4.94         3.42         4.48
+ *   --danger/--miss #f83b39     4.51         3.12         4.09
+ *   --consul-ink    #ec447e     4.52         3.13         4.10
+ *   --terraform-ink #a06ae6     4.53         3.13         4.11
+ *
+ * Eight pairings under AA, and the four inks live in `shared/tokens.css`,
+ * which the participant and Desktop surfaces also read and which #28 step 6
+ * keeps as it is. So Carbon's layers cannot be adopted here without retuning
+ * the product palette for two surfaces that are not being migrated.
+ *
+ * The console's surfaces therefore stay exactly as the product defines them,
+ * and Carbon is told what they are. That is the right direction for an overlay
+ * anyway: a design system is given the product's ground, it does not hand the
+ * product one.
  *
  * 1. `--cds-focus` takes the console's `--action`.
  *
@@ -1296,58 +1314,39 @@
  *    console draws a white ring on its Carbon controls and a blue one on its
  *    own, two inches apart, on one surface.
  *
- *    Non-text UI, 3:1 floor. #1060ff measures 3.57:1 on #161616 and 5.07:1 on
- *    #ffffff. It clears, with less headroom than the 3.89:1 it had on #0a0a0f.
+ *    Non-text UI, 3:1 floor. #1060ff measures 3.89:1 on #0a0a0f and 5.07:1 on
+ *    #ffffff. It clears.
  *
- *    Declared once under `:root` and omitted from the four generated blocks
- *    above, so there is no specificity race with the explicit-theme selectors.
- *    `--action` is an HDS constant and does not move between themes, so one
- *    declaration is correct in all four states.
+ * 2. `--cds-background` takes the console's `--ground`.
  *
- * 2. `--ground` takes Carbon's `background`.
+ *    #0a0a0f dark, #ffffff light. Carbon reads it for one thing on this
+ *    surface — the outer ring of a button's two-ring focus halo, which is
+ *    drawn in the page colour so the inner ring reads against it — and will
+ *    read it for more as steps 3 and 4 land fields, tags and the grid.
  *
- *    This is the decision that makes step 1 wider than issue #28 describes:
- *    the Carbon controls sit on Carbon's own #161616 rather than on the
- *    console's #0a0a0f. It goes in this direction — the console's token taking
- *    Carbon's value — because `shared/tokens.css` is loaded by all three
- *    surfaces and must not change, and this file is loaded by the console
- *    alone. Same selectors as `tokens.css`, same specificity, later in the
- *    document: the cascade picks these by source order.
+ * 3 & 4. `--cds-layer-01` and `--cds-layer-02` take `--panel` and `--panel-2`.
  *
- *    In the light theme Carbon's `background` is #ffffff, which is already
- *    what `tokens.css` sets `--ground` to, so the light theme does not move
- *    at all. Only the dark theme does, from #0a0a0f to #161616.
+ *    #14141d and #1d1d28 dark, #fafafa and #f1f2f3 light. The console's two
+ *    elevations, in Carbon's words for them, so that a Carbon component
+ *    dropped onto a panel in a later step computes against the surface it is
+ *    actually on. Nothing in `cds-button` reads a layer; these are here
+ *    because the three are one idea and splitting them across two steps is how
+ *    a bridge ends up with a token that disagrees with its neighbours.
  *
- *    Every dark-theme contrast figure in `host.css` that named `--ground` was
- *    measured against #0a0a0f and has been recomputed; `host.css`'s header
- *    carries the table. `tokens.css` keeps its own figures, which are still
- *    correct for the two surfaces that still ground at #0a0a0f.
- *
- *    `--panel` #14141d and `--panel-2` #1d1d28 are NOT bridged, and that is a
- *    measurement and not an oversight: #14141d against #161616 is 1.01:1 and
- *    #1d1d28 against #161616 is 1.08:1, so the console's panels now sit within
- *    a hair of the page behind them and `--panel` is very slightly the darker
- *    of the two. Mapping them to Carbon's `layer-01` #262626 and `layer-02`
- *    #393939 would restore the step, and would also move eleven `host.css`
- *    figures that were measured on #14141d and #1d1d28. That is a decision
- *    about the console's whole surface rather than about one button, so step 1
- *    reports the number and changes nothing.
+ * All four are declared once under `:root` and omitted from the four generated
+ * blocks above, so there is no specificity race with the explicit-theme
+ * selectors — `:root[data-theme="dark"]` is (0,2,0) and `:root` is (0,1,0), so
+ * a generated `--cds-background: #161616` under the explicit-dark selector
+ * would beat a bridge declaration written afterwards under `:root`, and the
+ * page would change colour the moment someone pressed the theme toggle twice.
+ * Leaving the token out of the generated blocks removes the race rather than
+ * winning it. One declaration is correct in all four states because the
+ * right-hand side is itself a `tokens.css` token that already moves with the
+ * theme.
  */
 :root {
   --cds-focus: var(--action);
-  --ground: var(--cds-background);
-}
-
-@media (prefers-color-scheme: light) {
-  :root:not([data-theme="dark"]) {
-    --ground: var(--cds-background);
-  }
-}
-
-:root[data-theme="light"] {
-  --ground: var(--cds-background);
-}
-
-:root[data-theme="dark"] {
-  --ground: var(--cds-background);
+  --cds-background: var(--ground);
+  --cds-layer-01: var(--panel);
+  --cds-layer-02: var(--panel-2);
 }

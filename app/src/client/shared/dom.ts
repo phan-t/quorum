@@ -121,13 +121,27 @@ function applyOptions(el: HTMLElement, o: ElemOptions): void {
  * The test is the hyphen, because a custom element name is required to contain
  * one and no built-in tag name does.
  */
-function setDisabled(el: HTMLElement, disabled: boolean): void {
+export function setDisabled(el: HTMLElement, disabled: boolean): void {
   if (el.tagName.includes("-")) {
     if (disabled) el.setAttribute("disabled", "");
     else el.removeAttribute("disabled");
     return;
   }
   (el as HTMLButtonElement).disabled = disabled;
+}
+
+/**
+ * The same question, read back.
+ *
+ * Exported alongside {@link setDisabled} because a caller that writes with one
+ * and reads with `.disabled` gets `undefined` on a custom element — which is
+ * falsy, so the console would decide a disabled control is pressable and say
+ * nothing about it. `host/main.ts` reads this on the wipe's own button.
+ */
+export function isDisabled(el: HTMLElement): boolean {
+  return el instanceof HTMLButtonElement
+    ? el.disabled
+    : el.hasAttribute("disabled");
 }
 
 export function append(parent: Node, children: readonly Child[]): void {
