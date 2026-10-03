@@ -2,9 +2,10 @@
  * The one door onto Carbon's elements, and the things Carbon will not tell
  * you about.
  *
- * Six tags come through here: `cds-button` (steps 1 and 2), and `cds-tag`,
+ * Thirteen tags come through here: `cds-button` (steps 1 and 2); `cds-tag`,
  * `cds-text-input`, `cds-select` with its `cds-select-item` and
- * `cds-number-input` (step 3). Every enumerated attribute is a union, so a
+ * `cds-number-input` (step 3); and the seven `cds-table*` elements the scoring
+ * grid is built from (step 4). Every enumerated attribute is a union, so a
  * value Carbon does not have is a compile error at the line that writes it
  * rather than something a host finds in front of a room — see the
  * `danger--tertiary` story below, which is why this file exists at all, and
@@ -950,4 +951,173 @@ export function carbonNumberInput(
   );
   prepareNumberInput(el, size, hideSteppers);
   return el;
+}
+
+/* ====================================================================== */
+/* Step 4: the scoring grid                                               */
+/* ====================================================================== */
+
+/**
+ * The seven table tags. Named once each, here; `controls.test.ts` checks that.
+ *
+ * What these elements are, read against
+ * `@carbon/web-components@2.64.0/es/components/data-table/`, because it is not
+ * what the name suggests. None of them renders a `<table>`. Each is a light-DOM
+ * host given a CSS table `display` by its *parent's* shadow sheet —
+ * `::slotted(cds-table-body){display:table-row-group}`,
+ * `::slotted(cds-table-cell){display:table-cell}` — and an ARIA role in its
+ * own `connectedCallback`: `table`, `rowgroup`, `row`, `columnheader`, `cell`.
+ * A cell's template is a bare `<slot>`, so everything the console puts in a
+ * cell stays in the light DOM: the raw `<input>`, its points, its clear button
+ * and its refusal bubble are the console's own elements, styled by `host.css`
+ * and found by `querySelector` exactly as before.
+ *
+ * `cds-table` itself is the one that renders structure, and it is two
+ * wrapper boxes deep — see {@link CARBON_TABLE_WRAPPER_PARTS}.
+ */
+const CARBON_TABLE_TAG = "cds-table";
+const CARBON_TABLE_HEAD_TAG = "cds-table-head";
+const CARBON_TABLE_HEADER_ROW_TAG = "cds-table-header-row";
+const CARBON_TABLE_HEADER_CELL_TAG = "cds-table-header-cell";
+const CARBON_TABLE_BODY_TAG = "cds-table-body";
+const CARBON_TABLE_ROW_TAG = "cds-table-row";
+const CARBON_TABLE_CELL_TAG = "cds-table-cell";
+
+/**
+ * Carbon's table sizes, spelled the way `TABLE_SIZE` spells them.
+ *
+ * Row heights of 24, 32, 40, 48 and 64px, as `block-size` on
+ * `::slotted(cds-table-row[size=…])`. The console asks for `xs`, and its own
+ * 22px field plus a pixel of padding either side and a hairline is what
+ * actually sets the row: 25px, the height the hand-built grid has always been.
+ */
+export const CARBON_TABLE_SIZES = ["xs", "sm", "md", "lg", "xl"] as const;
+
+export type CarbonTableSize = (typeof CARBON_TABLE_SIZES)[number];
+
+/**
+ * The two wrapper boxes in `cds-table`'s shadow tree, which `host.css` takes
+ * out of the box tree.
+ *
+ * `cds-table` renders its slot two boxes deep:
+ *
+ *     <div part="inner-container" class="cds--data-table_inner-container">
+ *       <div part="content" class="cds--data-table-content">
+ *         <slot>
+ *
+ * The inner box is `overflow-x: auto`; the content box is `display: table`
+ * with no role. Left alone, the first takes the sticky header — it becomes
+ * the header's scroll container, and it never scrolls — and the second puts a `LayoutTable` node between the grid's
+ * `table` and its rows. `host.css` sets `display: contents` on both, argued
+ * there with the measurements.
+ *
+ * Neither box is reachable from a document selector, but both are parts. They
+ * are named here so `controls.test.ts` can hold them against the installed
+ * template: the day Carbon renames a part, the rule in `host.css` stops
+ * matching anything, and a test going red is the only way that is not found
+ * by a header scrolling away mid-session.
+ */
+export const CARBON_TABLE_WRAPPER_PARTS = [
+  "inner-container",
+  "content",
+] as const;
+
+export interface CarbonTableOpts extends ElemOptions {
+  readonly size: CarbonTableSize;
+}
+
+export interface CarbonTableRowOpts extends ElemOptions {
+  /**
+   * Required on every row, and not inherited from the table.
+   *
+   * `cds-table` stamps its `size` onto its rows in `updated()`, and only when
+   * its own `size` changes — `querySelectorAll(selectorAllRows)` at that
+   * moment, and never again. The grid's rows arrive afterwards, one per person
+   * as they join, so a row that relied on the table would carry no `size` at
+   * all and get none of the `[size=xs]` rules. Each row says it itself.
+   */
+  readonly size: CarbonTableSize;
+}
+
+/**
+ * A Carbon table. Its children are one {@link carbonTableHead} and one
+ * {@link carbonTableBody}.
+ *
+ * **The header row has to be in it before it is connected.** `cds-table`'s
+ * `firstUpdated` caches `querySelector("cds-table-header-row,cds-table-row")`,
+ * and its `updated()` and its body-change handler both dereference that cache
+ * without a null check — a table connected with no rows throws on its first
+ * update and again on every row that arrives. The scoring grid builds its
+ * header row up front and refills its cells in place, so the row the table
+ * cached is the row it keeps.
+ *
+ * A third thing it does on every body change, recorded so nobody goes
+ * looking: `updateExpandable()` runs `headerCount += expandable ? 1 : -1`, so
+ * with no expandable rows the count falls by one per row that arrives — -15
+ * after a fifteen-person session. It is read only to set `colspan` on
+ * expanded rows, which this grid has none of, so it is wrong and harmless.
+ */
+export function carbonTable(
+  opts: CarbonTableOpts,
+  children?: readonly Child[],
+): HTMLElement {
+  const { size, attrs, ...rest } = opts;
+  return hx(CARBON_TABLE_TAG, { ...rest, attrs: { ...attrs, size } }, children);
+}
+
+export function carbonTableHead(
+  opts: ElemOptions,
+  children?: readonly Child[],
+): HTMLElement {
+  return hx(CARBON_TABLE_HEAD_TAG, opts, children);
+}
+
+export function carbonTableHeaderRow(
+  opts: CarbonTableRowOpts,
+  children?: readonly Child[],
+): HTMLElement {
+  const { size, attrs, ...rest } = opts;
+  return hx(
+    CARBON_TABLE_HEADER_ROW_TAG,
+    { ...rest, attrs: { ...attrs, size } },
+    children,
+  );
+}
+
+/**
+ * A column header. Never sortable here: `is-sortable` turns the cell's label
+ * into a `<button part="sort-button">`, which would put a focusable element in
+ * a header the grid's tab order is built to skip.
+ */
+export function carbonTableHeaderCell(
+  opts: ElemOptions,
+  children?: readonly Child[],
+): HTMLElement {
+  return hx(CARBON_TABLE_HEADER_CELL_TAG, opts, children);
+}
+
+export function carbonTableBody(
+  opts: ElemOptions,
+  children?: readonly Child[],
+): HTMLElement {
+  return hx(CARBON_TABLE_BODY_TAG, opts, children);
+}
+
+export function carbonTableRow(
+  opts: CarbonTableRowOpts,
+  children?: readonly Child[],
+): HTMLElement {
+  const { size, attrs, ...rest } = opts;
+  return hx(
+    CARBON_TABLE_ROW_TAG,
+    { ...rest, attrs: { ...attrs, size } },
+    children,
+  );
+}
+
+export function carbonTableCell(
+  opts: ElemOptions,
+  children?: readonly Child[],
+): HTMLElement {
+  return hx(CARBON_TABLE_CELL_TAG, opts, children);
 }

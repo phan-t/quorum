@@ -46,7 +46,25 @@ import {
   type KeyedList,
 } from "../shared/dom.ts";
 import { activityHue, stackedBar } from "../shared/view.ts";
+import {
+  carbonTable,
+  carbonTableBody,
+  carbonTableCell,
+  carbonTableHead,
+  carbonTableHeaderCell,
+  carbonTableHeaderRow,
+  carbonTableRow,
+  type CarbonTableSize,
+} from "./carbon.ts";
 import { control, type Control } from "./controls.ts";
+
+/**
+ * Carbon's densest row, and still not what sets the height: the 22px field
+ * inside it does, at 25px a row — see `host.css`. Every row carries it itself,
+ * because `cds-table` hands its size only to the rows it can see when the size
+ * is set, and none of these exist yet then.
+ */
+const GRID_SIZE: CarbonTableSize = "xs";
 
 const FLASH_MS = 3_000;
 
@@ -63,7 +81,7 @@ interface Opts {
 }
 
 interface CellRefs {
-  td: HTMLTableCellElement;
+  td: HTMLElement;
   input: HTMLInputElement;
   points: HTMLElement;
   flash: HTMLElement;
@@ -72,7 +90,7 @@ interface CellRefs {
 }
 
 interface RowRefs {
-  tr: HTMLTableRowElement;
+  tr: HTMLElement;
   num: HTMLElement;
   name: HTMLElement;
   cells: Map<string, CellRefs>;
@@ -126,10 +144,15 @@ export function createScoringPanel(opts: Opts): ScoringPanel {
     hint,
   ]);
 
-  const headRow = h("tr");
-  const thead = h("thead", {}, [headRow]);
-  const tbody = h("tbody");
-  const table = h("table", { class: "sc-grid" }, [thead, tbody]);
+  // Carbon's table, from #28 step 4. The header row exists before the table
+  // is connected and is refilled in place rather than replaced — `cds-table`
+  // caches it on first render and dereferences that cache unchecked; see
+  // `carbonTable`. The cells' contents are the console's own light-DOM
+  // elements, so everything below that queries for them is unchanged.
+  const headRow = carbonTableHeaderRow({ class: "sc-head-row", size: GRID_SIZE });
+  const thead = carbonTableHead({ class: "sc-thead" }, [headRow]);
+  const tbody = carbonTableBody({ class: "sc-tbody" });
+  const table = carbonTable({ class: "sc-grid", size: GRID_SIZE }, [thead, tbody]);
   const gridWrap = h("div", { class: "sc-grid-wrap" }, [table]);
   const gridEmpty = h("p", {
     class: "pb-note",
@@ -154,10 +177,10 @@ export function createScoringPanel(opts: Opts): ScoringPanel {
 
   function buildHeader(): void {
     replace(headRow, [
-      h("th", { class: "sc-th sc-th-num", text: "#" }),
-      h("th", { class: "sc-th sc-th-name", text: "Name" }),
+      carbonTableHeaderCell({ class: "sc-th sc-th-num", text: "#" }),
+      carbonTableHeaderCell({ class: "sc-th sc-th-name", text: "Name" }),
       ...activities.map((a, i) =>
-        h("th", { class: "sc-th sc-th-activity" }, [
+        carbonTableHeaderCell({ class: "sc-th sc-th-activity" }, [
           h("span", {
             class: "sc-th-swatch",
             attrs: { style: `background:${activityHue(a, i)}`, "aria-hidden": "true" },
@@ -165,9 +188,9 @@ export function createScoringPanel(opts: Opts): ScoringPanel {
           h("span", { class: "sc-th-title", text: a.title }),
         ]),
       ),
-      h("th", { class: "sc-th sc-th-mix", text: "Mix" }),
-      h("th", { class: "sc-th sc-th-total", text: "Total" }),
-      h("th", { class: "sc-th sc-th-rank", text: "Rank" }),
+      carbonTableHeaderCell({ class: "sc-th sc-th-mix", text: "Mix" }),
+      carbonTableHeaderCell({ class: "sc-th sc-th-total", text: "Total" }),
+      carbonTableHeaderCell({ class: "sc-th sc-th-rank", text: "Rank" }),
     ]);
   }
 
@@ -222,6 +245,10 @@ export function createScoringPanel(opts: Opts): ScoringPanel {
     });
     const points = h("span", { class: "sc-pts mono" });
     const flash = h("span", { class: "sc-flash mono", attrs: { hidden: true, role: "status" } });
+    // Native, deliberately, like the console's other sub-22px controls: a
+    // Carbon button's `title` never reaches the `<button>` inside it, its
+    // smallest size is taller than the field beside it, and this one's whole
+    // job is to stay out of the tab order with `tabindex="-1"`.
     const clearButton = h("button", {
       class: "sc-mini",
       type: "button",
@@ -229,7 +256,7 @@ export function createScoringPanel(opts: Opts): ScoringPanel {
       title: "Clear this cell back to empty, with no score entered (Alt+U)",
       attrs: { tabindex: "-1" },
     });
-    const td = h("td", { class: "sc-cell" }, [
+    const td = carbonTableCell({ class: "sc-cell" }, [
       input,
       points,
       h("span", { class: "sc-acts" }, [clearButton]),
@@ -316,9 +343,9 @@ export function createScoringPanel(opts: Opts): ScoringPanel {
       const mix = h("div", { class: "sc-bar" });
       const total = h("span", { class: "mono sc-total" });
       const rank = h("span", { class: "mono sc-rank" });
-      const tr = h("tr", { class: "sc-row" }, [
-        h("td", { class: "sc-cell-num" }, [num]),
-        h("td", { class: "sc-cell-name" }, [name]),
+      const tr = carbonTableRow({ class: "sc-row", size: GRID_SIZE }, [
+        carbonTableCell({ class: "sc-cell-num" }, [num]),
+        carbonTableCell({ class: "sc-cell-name" }, [name]),
         ...activities.map((a) => {
           const cell = makeCell(r, a);
           cells.set(a.id, cell);
@@ -326,9 +353,9 @@ export function createScoringPanel(opts: Opts): ScoringPanel {
         }),
         // Not focusable, so the tab order along the row is still exactly the
         // editable cells and nothing else.
-        h("td", { class: "sc-cell-mix" }, [mix]),
-        h("td", { class: "sc-cell-total" }, [total]),
-        h("td", { class: "sc-cell-rank" }, [rank]),
+        carbonTableCell({ class: "sc-cell-mix" }, [mix]),
+        carbonTableCell({ class: "sc-cell-total" }, [total]),
+        carbonTableCell({ class: "sc-cell-rank" }, [rank]),
       ]);
       const refs: RowRefs = { tr, num, name, cells, mix, total, rank };
       refsFor.set(tr, refs);

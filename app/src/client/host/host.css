@@ -1039,15 +1039,89 @@ cds-number-input.field {
  * the grid that gets truncated on a real roster, and a nickname is how the
  * host finds the row they were asked about.
  */
+/* `table`, because `cds-table` is the table now — see the two parts below. */
 .sc-grid {
+  display: table;
   width: 100%;
   border-collapse: collapse;
   font-size: 13px;
 }
 
+/*
+ * Carbon's table, on the console's own type (#28 step 4).
+ *
+ * `cds-table` gives its head and body their own type through `::slotted` —
+ * 14px, Carbon's line heights, 0.16px of letter-spacing, 600 on the head — and
+ * paints the head `--cds-layer-accent` and the body `--cds-layer`. A document
+ * rule on the slotted element beats a `::slotted` one, so these put both back
+ * to inheriting from `.sc-grid`, which is what a native `<thead>` and `<tbody>`
+ * did. Measured with them taken out, at 1280×800: the rows stay 25px — the
+ * 22px field is what sets a row — but every name goes to 14px, Name gives up
+ * a pixel, and the header grows from 49.5px to 57.6px, because the two-line
+ * activity titles take Carbon's 1.43 line height. The type question itself is
+ * step 5's; this keeps the grid where it was until that is decided.
+ */
+.sc-thead,
+.sc-tbody {
+  color: inherit;
+  font-size: inherit;
+  font-weight: inherit;
+  line-height: inherit;
+  letter-spacing: inherit;
+  background-color: transparent;
+}
+
+/*
+ * `cds-table`'s two wrapper boxes, taken out of the box tree.
+ *
+ * It renders its rows two boxes deep — `part="inner-container"`, then
+ * `part="content"`, which is the one with `display: table` — and each one, left
+ * alone, costs the grid something it has today:
+ *
+ *   - **The sticky header.** The inner box is `overflow-x: auto`, which makes
+ *     it a scroll container on both axes, so the header cells stuck to it — a
+ *     box exactly as tall as the table, which never scrolls — instead of to
+ *     `.sc-grid-wrap`. Measured with this rule taken out: the wrap scrolled
+ *     60px and the header went with it.
+ *   - **One table, to a screen reader.** The content box is a layout table
+ *     with no role, and Chrome put it in the accessibility tree as a
+ *     `LayoutTable` between the `table` and its row groups — a node no native
+ *     grid has, between a table and the rows it is supposed to own.
+ *
+ * The inner box also paints `--cds-layer-accent`. That is one of the
+ * unsuffixed layer aliases this page never defines — the bridge's "tokens that
+ * are not tokens" — so it paints nothing today, and with this rule it has no
+ * box to paint should a token file ever start defining it.
+ *
+ * `display: contents` answers both at once: neither box exists, so neither
+ * can scroll or sit in the tree, and the host — `display:
+ * table` above, carrying the `table` role Carbon gives it — is the table, as
+ * the `<table>` was. Measured against the native grid at 1280×800: the same
+ * total height to the half pixel, the same column widths, and an
+ * accessibility tree that differs only in naming the body's row group, which
+ * Carbon gives an explicit `rowgroup` role. The first row sits half a pixel
+ * lower and is half a pixel shorter. The cause is a third shadow box this rule
+ * cannot reach: `div.cds--data-table-header-container`, which holds Carbon's
+ * hidden title and empty toolbar slot and is not a part. Inside a `display:
+ * table` host it becomes a 0px anonymous row between the header and the body,
+ * and it takes half the collapsed border that row 0 used to take. Hiding it
+ * in-page restores 49.5 / 25 exactly; half a pixel is not worth reaching into
+ * the shadow root for.
+ *
+ * Both are parts, so this reaches them. `carbon.ts` names the two and
+ * `controls.test.ts` holds them against the template, because a renamed part
+ * is a header that scrolls away with nothing reporting anything.
+ */
+.sc-grid::part(inner-container),
+.sc-grid::part(content) {
+  display: contents;
+}
+
 /* The header stays put: thirty rows scroll under it and the host has to know
    which column they are typing into. */
 .sc-th {
+  display: table-cell;
+  vertical-align: middle;
   position: sticky;
   top: 0;
   z-index: 1;
@@ -1111,8 +1185,19 @@ cds-number-input.field {
 }
 
 /* 5px, not 6. The three or four pixels a column gives up here are what keep
-   the whole table inside a 1280px window — see `.sc-th-title`. */
-.sc-grid td {
+   the whole table inside a 1280px window — see `.sc-th-title`.
+   Every cell, by the row it is in: Carbon's cells are `cds-table-cell`, and
+   these beat its `::slotted` padding — 2px by 16px at `xs`, which the
+   first-of-type and last-of-type rules restate — its `--cds-border-subtle`
+   hairline, the `--cds-text-secondary` it gives every cell, which took the
+   names from the console's ink to Carbon's grey (#c6c6c6 dark, #525252
+   light), and the hover wash it paints on every cell of a hovered row
+   (`--cds-background-hover`, 16% grey dark, 12% light) over the row's own
+   `--panel-2`. Only on a pointer that hovers, which is why a headless
+   measurement without hover emulation reported the cells transparent. */
+.sc-row > * {
+  color: inherit;
+  background-color: transparent;
   padding: 1px 5px;
   border-bottom: 1px solid color-mix(in srgb, var(--line) 50%, transparent);
   vertical-align: middle;
@@ -1224,9 +1309,14 @@ cds-number-input.field {
 /* Where the total came from, per row, for everybody — not just the five the
    standings panel shows. The numbers are already along the row; this is what
    makes two rows comparable without reading either of them. */
+/* No `padding-left` here. There was one — 10px, to line the bar up under the
+   Mix header — and it never applied: `.sc-grid td` out-specified it, so the
+   bar has always sat 5px in, 33px wide. Step 4's `.sc-row > *` is a class
+   weaker, which would have switched the dead rule on and moved the bar. It
+   comes out rather than coming alive; aligning the bar is a design change,
+   not part of moving the grid onto Carbon. */
 .sc-cell-mix {
   width: 84px;
-  padding-left: 10px;
 }
 .sc-th-mix {
   padding-left: 10px;

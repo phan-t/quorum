@@ -346,7 +346,9 @@ const BRIDGE = `/* ---- the bridge ---------------------------------------------
  *    built with \`hide-label\` and no helper text, so both colours land in
  *    elements that are \`visually-hidden\` or \`hidden\`. The label decision is
  *    what takes them off the list; if #28 step 5 adopts Carbon's stacked
- *    label, they go back on it.
+ *    label, they go back on it. Step 4's table cells read
+ *    \`--cds-text-secondary\` too, as their text colour, and \`host.css\` sets
+ *    them back to inheriting the console's ink rather than bridging it.
  *
  *    \`--cds-tag-background-gray\` and \`--cds-tag-color-gray\` are component
  *    tokens rather than palette, so they are set in \`host.css\` on \`cds-tag\`

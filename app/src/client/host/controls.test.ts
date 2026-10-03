@@ -34,6 +34,7 @@ import {
   INPUT_SIZE,
   INPUT_TYPE,
 } from "@carbon/web-components/es/components/text-input/defs.js";
+import { TABLE_SIZE } from "@carbon/web-components/es/components/data-table/defs.js";
 
 import {
   CARBON_BUTTON_KINDS,
@@ -44,6 +45,8 @@ import {
   CARBON_NUMBER_INPUT_SIZES,
   CARBON_NUMBER_INPUT_SM_GUTTER,
   CARBON_NUMBER_INPUT_TYPES,
+  CARBON_TABLE_SIZES,
+  CARBON_TABLE_WRAPPER_PARTS,
   CARBON_TAG_SIZES,
   CARBON_TAG_TYPES,
 } from "./carbon.ts";
@@ -546,6 +549,13 @@ describe("the kinds and sizes the console asks Carbon for", () => {
       "cds-select",
       "cds-select-item",
       "cds-number-input",
+      "cds-table",
+      "cds-table-head",
+      "cds-table-header-row",
+      "cds-table-header-cell",
+      "cds-table-body",
+      "cds-table-row",
+      "cds-table-cell",
     ]) {
       // `hostSources()` has the comments blanked out, so a tag named in prose
       // — and `main.ts` names three of them, explaining what Carbon does with
@@ -1494,5 +1504,121 @@ describe("the Carbon token bridge", () => {
     ]) {
       assert.ok(css.includes(sel), sel);
     }
+  });
+});
+
+/*
+ * ------------------------------------------------------------------
+ * Step 4: the scoring grid
+ * ------------------------------------------------------------------
+ *
+ * The grid is seven `cds-table*` elements around the console's own cells.
+ * What these hold is what the measurements in `host.css` and `carbon.ts`
+ * rest on, read against the installed package, so that a Carbon release
+ * which changes any of it turns something red here rather than in front of
+ * a room.
+ */
+describe("the scoring grid is Carbon's table", () => {
+  const DIR = join(
+    import.meta.dirname,
+    "..",
+    "..",
+    "..",
+    "node_modules",
+    "@carbon",
+    "web-components",
+    "es",
+    "components",
+    "data-table",
+  );
+  const read = (f: string): string =>
+    readFileSync(join(DIR, f), "utf8").replace(/\s+/g, " ");
+
+  test("asks only for sizes Carbon's table has, in both directions", () => {
+    assert.deepEqual(
+      [...CARBON_TABLE_SIZES].sort(),
+      Object.values(TABLE_SIZE).sort(),
+      "carbon.ts's table sizes and Carbon's TABLE_SIZE have drifted apart.",
+    );
+  });
+
+  /*
+   * A cell is a bare slot. That is why the raw `<input>`, its points, its
+   * clear button and its refusal bubble are still light-DOM elements that
+   * `host.css` styles and `scoring.ts` finds with `querySelector` — Enter
+   * walking down a column is `tbody.querySelectorAll("input.sc-raw")`. A cell
+   * that started rendering its own markup around the slot would not break
+   * that, but it would put Carbon's styling between the console and its own
+   * field, and the measurements would need taking again.
+   */
+  test("whose cells render nothing but their slot", () => {
+    assert.match(
+      read("table-cell.js"),
+      /render\(\) \{ return html`<slot><\/slot>`; \}/,
+      "cds-table-cell renders more than a bare <slot> now. The grid's cells " +
+        "hold the console's own field; re-measure the row and check the field " +
+        "is still the element that takes focus.",
+    );
+  });
+
+  /*
+   * The two wrapper parts `host.css` takes out of the box tree, and the
+   * reason it has to. If a part is renamed, `.sc-grid::part(…)` matches
+   * nothing, the inner box is a scroll container again, and the sticky header
+   * scrolls away with the rows — measured, with the rule removed: 60px of
+   * scroll moved the header 60px.
+   */
+  test("whose two wrapper boxes are the parts host.css names", () => {
+    const table = read("table.js");
+    for (const part of CARBON_TABLE_WRAPPER_PARTS) {
+      assert.ok(
+        table.includes(`part="${part}"`),
+        `cds-table no longer renders part="${part}". host.css takes it out ` +
+          "of the box tree to keep the scoring grid's header sticky; find " +
+          "what replaced it.",
+      );
+    }
+    const css = readFileSync(join(import.meta.dirname, "host.css"), "utf8")
+      .replace(/\/\*[\s\S]*?\*\//g, "")
+      .replace(/\s+/g, " ");
+    // Each part on its own, so the rule can be written as one list or as two
+    // rules and either still counts.
+    for (const part of CARBON_TABLE_WRAPPER_PARTS) {
+      assert.match(
+        css,
+        new RegExp(`\\.sc-grid::part\\(${part}\\)[^{]*\\{[^}]*display: contents;`),
+        `host.css no longer takes cds-table's ${part} part out of the box tree.`,
+      );
+    }
+    // And the reason, still there: the inner box scrolls.
+    assert.match(
+      read("data-table.scss.js"),
+      /\.cds--data-table_inner-container\{[^}]*overflow-x:auto/,
+      "cds-table's inner box is no longer overflow-x: auto. The display: " +
+        "contents rule in host.css may be repairing nothing now; re-measure " +
+        "the sticky header without it.",
+    );
+  });
+
+  /*
+   * `cds-table` caches its header row once and dereferences the cache with no
+   * null check, and it hands its `size` only to the rows that exist when the
+   * size is set. These two are why `scoring.ts` builds the header row before
+   * the table and why every row carries `size` itself. If either goes red,
+   * Carbon has fixed it, and the comment on `carbonTable` or
+   * `CarbonTableRowOpts` is describing a trap that is no longer there.
+   */
+  test("which caches its header row, and sizes only the rows it can see", () => {
+    const table = read("table.js");
+    assert.ok(
+      table.includes("this.headerCount = this._tableHeaderRow.children.length;"),
+      "cds-table no longer dereferences its cached header row unchecked in " +
+        "firstUpdated.",
+    );
+    assert.match(
+      table,
+      /if \(changedProperties\.has\("size"\)\) \{ forEach\(this\.querySelectorAll\(this\.constructor\.selectorAllRows\), \(elem\) => \{ elem\.setAttribute\("size", this\.size\);/,
+      "cds-table has changed how it hands its size to rows.",
+    );
   });
 });

@@ -50,6 +50,19 @@ import "@carbon/web-components/es/components/select/select-item.js";
 // learned that package and `@internationalized/number` behind it; the message
 // and the measurements are in `copy-client-assets.mjs`.
 import "@carbon/web-components/es/components/number-input/number-input.js";
+// Step 4's seven, for the scoring grid. One module per element for the same
+// reason as above — `data-table/index.js` would bring the toolbar, its search,
+// batch actions, the expandable rows and the skeletons. `table-row.js` is the
+// expensive one and nothing can be done about it from here: it statically
+// imports `checkbox/index.js` and `radio-button/index.js` for selectable rows
+// this grid never asks for. `table-header-row.js` extends it, so it is paid once.
+import "@carbon/web-components/es/components/data-table/table.js";
+import "@carbon/web-components/es/components/data-table/table-head.js";
+import "@carbon/web-components/es/components/data-table/table-header-row.js";
+import "@carbon/web-components/es/components/data-table/table-header-cell.js";
+import "@carbon/web-components/es/components/data-table/table-body.js";
+import "@carbon/web-components/es/components/data-table/table-row.js";
+import "@carbon/web-components/es/components/data-table/table-cell.js";
 
 import type {
   ArcadePlanApplyView,

@@ -99,6 +99,13 @@ const ENTRY_POINTS = [
   "@carbon/web-components/es/components/select/select.js",
   "@carbon/web-components/es/components/select/select-item.js",
   "@carbon/web-components/es/components/number-input/number-input.js",
+  "@carbon/web-components/es/components/data-table/table.js",
+  "@carbon/web-components/es/components/data-table/table-head.js",
+  "@carbon/web-components/es/components/data-table/table-header-row.js",
+  "@carbon/web-components/es/components/data-table/table-header-cell.js",
+  "@carbon/web-components/es/components/data-table/table-body.js",
+  "@carbon/web-components/es/components/data-table/table-row.js",
+  "@carbon/web-components/es/components/data-table/table-cell.js",
 ];
 
 /**
