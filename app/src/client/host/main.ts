@@ -9,6 +9,20 @@
  * space; refusals inline in the button that caused them.
  */
 
+// Carbon's button, for the armed controls `host/controls.ts` builds. Issue #28
+// step 1. A side-effect import because what it does is `customElements.define`;
+// there is nothing to name.
+//
+// It lives here, in the console's entry point, and not in `controls.ts`, which
+// is where it is used. `controls.ts` is imported by `controls.test.ts`, and
+// this repo's tests run under `node:test` with no DOM at all — one
+// `customElements.define` in that import graph takes the keyboard-safety suite
+// out with a ReferenceError before it asserts anything. The console is the only
+// surface that mounts Carbon, `main.ts` is the only module it loads, and a
+// module's imports are evaluated before its body, so the element is defined
+// before the first control is built.
+import "@carbon/web-components/es/components/button/button.js";
+
 import type {
   ArcadePlanApplyView,
   ArcadeRecruitmentView,

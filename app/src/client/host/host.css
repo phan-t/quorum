@@ -50,6 +50,68 @@
  *
  * Nothing here changes a colour. Every pair below was re-measured against
  * the tokens as they stand, and the figures are recorded beside the rule.
+ *
+ * ---- The console's ground moved to #161616 ---------------------------
+ *
+ * Issue #28 step 1. The Carbon controls sit on Carbon's own `background`
+ * token rather than on the console's #0a0a0f, so `host/carbon-tokens.css`
+ * bridges `--ground` to `var(--cds-background)` — #161616 in the dark theme,
+ * and #ffffff in the light theme, which is what `--ground` already was.
+ *
+ * `shared/tokens.css` does not change and must not: it is the product palette,
+ * all three surfaces read it, and the participant and Desktop surfaces still
+ * ground at #0a0a0f. The bridge is loaded by `host/index.html` alone.
+ *
+ * But every dark-theme figure in this file that named `--ground` was measured
+ * against #0a0a0f, and `tokens.css` says in as many words what happens when a
+ * derivation is assumed rather than re-measured: collapsing the
+ * brand/foreground/surface distinction produced a readable-text bug three
+ * separate times. So every one of them has been recomputed. #161616 is
+ * lighter than #0a0a0f — relative luminance 0.00802 against 0.00316 — so every
+ * ratio against it is *smaller*, by 8 to 9 per cent:
+ *
+ *   token                      on #0a0a0f  on #161616   text 4.5:1 · UI 3:1
+ *   --ink      #f6f5f3            18.13       16.61     holds
+ *   --muted    #8b8a9c             5.84        5.35     holds
+ *   --dim      #5e5d6e             3.07        2.82     FAILS the 3:1 UI floor
+ *   --nomad-ink / --hit / --live    9.82        9.00     holds
+ *   --vault-ink / --sealed         13.36       12.24     holds
+ *   --consul-ink / --trivia         5.36        4.91     holds
+ *   --terraform-ink / --ttx         5.36        4.91     holds
+ *   --miss / --danger  #f83b39      5.34        4.89     holds
+ *   --ibm-blue (= --action)         3.89        3.57     holds (non-text)
+ *   --line     #2c2c3a              1.44        1.32     non-text, see below
+ *
+ * The light column does not move at all, because `--cds-background` is
+ * #ffffff there and `--ground` already was.
+ *
+ * Three results worth stating rather than burying:
+ *
+ * 1. `--dim` on the page is now 2.82:1, under the 3:1 floor for non-text UI.
+ *    It is only ever carried by things exempt from it — a disabled control's
+ *    label, and `.dot`'s default fill, which is a connection state that is
+ *    also stated in words by the live region and in shape by the other two
+ *    states. `tokens.css` already says "--dim never carries text that has to
+ *    be read". But 3.07 was headroom and 2.82 is not, and the next thing to
+ *    reach for `--dim` on this surface has none.
+ *
+ * 2. No text token crossed 4.5:1. The three that were closest — the Consul,
+ *    Terraform and critical inks, all derived by walking a hue up in OKLCH
+ *    until it cleared 4.5:1 on #1d1d28 — land at 4.91, 4.91 and 4.89. They
+ *    hold because they were tuned against `--panel-2`, which did not move,
+ *    and #161616 is darker than #1d1d28.
+ *
+ * 3. The panels have lost their separation from the page. `--panel` #14141d
+ *    against #161616 is 1.01:1 and `--panel-2` #1d1d28 is 1.08:1, where they
+ *    were 1.08:1 and 1.18:1 against #0a0a0f — and `--panel` is now very
+ *    slightly the *darker* of the pair, so the console's elevation model is
+ *    inverted. Carbon's `layer-01` #262626 and `layer-02` #393939 are the
+ *    obvious answer and would move eleven more figures in this file. Step 1
+ *    reports the number and changes nothing: it is a decision about the whole
+ *    surface, not about one button.
+ *
+ * Every figure here is WCAG 2.x sRGB relative luminance, computed rather than
+ * eyeballed, as the rest of this file's are.
  */
 
 body {
@@ -68,7 +130,7 @@ body {
  * *inside* the preview, and a preview that does not match the room is worse
  * than no preview.
  *
- * --muted, unchanged: #8b8a9c on --ground #0a0a0f is 5.84:1 dark, #656a76 on
+ * --muted, unchanged: #8b8a9c on --ground #161616 is 5.35:1 dark, #656a76 on
  * #ffffff 5.38:1 light; on --panel 5.41:1 / 5.19:1. AA at any size.
  */
 .rail .label,
@@ -355,7 +417,7 @@ body {
 /* Out of the runbook: not on the space bar, still one click away. Said twice
    and neither time in colour — a dashed edge and the word "out" — because
    nothing on this console is carried by colour alone. --muted on --ground is
-   5.84:1 dark and 5.38:1 light. */
+   5.35:1 dark and 5.38:1 light. */
 .seg.is-out {
   border: 1px dashed var(--line);
   color: var(--muted);
@@ -447,7 +509,7 @@ body {
    on screen twice in every segment; and once a holding step is called by the
    card it shows, the two copies could not even agree on the word. What is
    left is the half nothing else says: the phase.
-   --muted on --ground is 5.84:1 dark and 5.38:1 light. */
+   --muted on --ground is 5.35:1 dark and 5.38:1 light. */
 .panel-sub {
   color: var(--muted);
   font-size: 11px;
@@ -560,8 +622,9 @@ body {
  * tracking, and a copy button on each, which is the thing a host actually
  * wanted from this row.
  *
- * --ink on --ground is 18.13:1 dark, 19.54:1 light; --muted 5.84:1 and
- * 5.38:1. Both unchanged — only the size moved, and at 14px both clear the
+ * --ink on --ground is 16.61:1 dark, 19.54:1 light; --muted 5.35:1 and
+ * 5.38:1. The dark column is against the console's new #161616 ground; only
+ * the size moved here, and at 14px both clear the
  * 4.5:1 floor comfortably. 600 on the code keeps it the heavier of the pair
  * without making it a different size from the link.
  *
@@ -1073,13 +1136,13 @@ body {
   flex: 1;
   margin-left: 0;
 }
-.panel-foot .ctl-primary .ctl-button {
+.panel-foot .ctl-primary button.ctl-button {
   width: 100%;
 }
 /* Before the session starts the primary button is borrowed by the control
    panel's Session group, and this line stands in its place: where it went,
    and what the space bar is about to press, by name. The panel draws no
-   background of its own, so this is --muted on --ground: 5.84:1 dark,
+   background of its own, so this is --muted on --ground: 5.35:1 dark,
    5.42:1 light. */
 .panel-foot .foot-note {
   flex: 1;
@@ -1090,6 +1153,51 @@ body {
 
 /* ---------------------------------------------------------- controls -- */
 
+/*
+ * Issue #28 step 1: every armed control is a `<cds-button class="ctl-button">`.
+ * `host/controls.ts` has one factory behind all of them, and that factory now
+ * builds Carbon's element instead of a `<button>`.
+ *
+ * Which is why every rule below that draws the box is now written
+ * `button.ctl-button` rather than `.ctl-button`. The class is still on the
+ * element Carbon renders — it is on the *host*, and the host's box sits
+ * outside the shadow root where Carbon draws its own border, background and
+ * padding. A rule that reaches the host therefore does not restyle Carbon's
+ * button; it draws a second box around it. One `button` on the front of each
+ * selector is the whole of the fix, and it keeps the properties, the comments
+ * and the derivations below legible side by side with what replaced them.
+ *
+ * So those fifteen rules now match nothing: after this change there is no
+ * `<button class="ctl-button">` on the console. They are kept for one step on
+ * purpose. Step 1 exists to be rejected on sight if Carbon does not belong
+ * here, and the cheapest possible revert is the point of it; step 2 is the
+ * branch that moves the other 21 `h("button")` sites and takes these with it.
+ *
+ * What the swap gives up, measured rather than assumed — none of it restyleable
+ * from outside a shadow root, all of it listed in #28's "what cannot be
+ * restyled":
+ *
+ *   `.ctl-primary`   the green fill, 16px label and 260px floor. Carbon's
+ *                    `kind="primary"` is #0f62fe and is step 2's decision, so
+ *                    for now the one button bound to the space bar renders as
+ *                    a 32px tertiary like every other control.
+ *   `.ctl.on`        the gold fill that says a state is on. Carbon has no
+ *                    "on" kind; `--cds-button-tertiary` would carry it, which
+ *                    is a token the bridge deliberately does not cross yet.
+ *   `.ctl-seal`      Vault yellow. #28 records that Carbon ships no kind for
+ *                    it either.
+ *   `.ctl-row`       22px and 11px mono. Carbon's `xs` is 24px and reaching 22
+ *                    forces two layout tokens off Carbon's own scale, which is
+ *                    #28 step 2's reason for leaving these hand-built. At
+ *                    `sm` they render 32px tall inside a 22px roster row.
+ *
+ * `[hidden]` still hides them: `tokens.css` sets `display: none !important` on
+ * the attribute, which lands on the host, and a document rule on a host beats
+ * the `:host` rule a Lit component sets its own display with. That is the same
+ * property the 25-row grid spike turned on and it is why the rule is written
+ * once for every element rather than eleven times by hand.
+ */
+
 .ctl {
   display: inline-flex;
   align-items: center;
@@ -1098,7 +1206,7 @@ body {
 .ctl[hidden] {
   display: none;
 }
-.ctl-button {
+button.ctl-button {
   background: var(--panel-2);
   border: 1px solid var(--line);
   border-radius: 4px;
@@ -1116,18 +1224,18 @@ body {
      between buttons instead — see `.field-actions`. */
   white-space: nowrap;
 }
-.ctl-button:hover:not(:disabled) {
+button.ctl-button:hover:not(:disabled) {
   border-color: var(--muted);
 }
-.ctl-button:disabled {
+button.ctl-button:disabled {
   color: var(--dim);
   cursor: default;
 }
-.ctl-danger .ctl-button {
+.ctl-danger button.ctl-button {
   color: var(--danger);
   border-color: color-mix(in srgb, var(--danger) 45%, var(--line));
 }
-.ctl-seal .ctl-button {
+.ctl-seal button.ctl-button {
   color: var(--sealed);
   border-color: color-mix(in srgb, var(--sealed) 45%, var(--line));
 }
@@ -1138,8 +1246,8 @@ body {
    as pressable, presses, and gets nothing from. Said twice, colour and
    cursor, and --muted rather than --dim because the label is still a
    sentence: 4.94:1 dark and 4.83:1 light on --panel-2. */
-.ctl-danger .ctl-button:disabled,
-.ctl-seal .ctl-button:disabled {
+.ctl-danger button.ctl-button:disabled,
+.ctl-seal button.ctl-button:disabled {
   color: var(--muted);
   border-color: var(--line);
   cursor: default;
@@ -1149,8 +1257,10 @@ body {
    10.68:1. Light's --sealed is #926700, a dark amber, and a near-black on it is
    3.13:1 — a label the host has to lean in to read on the one button whose
    whole job is to say a state is on. --ground inverts with the theme exactly as
-   the fill does: 13.36:1 dark, 5.05:1 light. */
-.ctl.on .ctl-button {
+   the fill does: 12.24:1 dark on the console's #161616 ground, 5.05:1
+   light. (This rule is one of the fifteen the Carbon swap left matching
+   nothing — Carbon has no "on" kind. See the section comment above.) */
+.ctl.on button.ctl-button {
   background: var(--sealed);
   color: var(--ground);
   border-color: var(--sealed);
@@ -1167,7 +1277,7 @@ body {
    floor for driving mode's copy, which does not stretch.
    #062a20 on --nomad #06d092 is 7.68:1, theme-independent — --nomad is a
    brand fill and does not move between light and dark. */
-.ctl-primary .ctl-button {
+.ctl-primary button.ctl-button {
   background: var(--nomad);
   border-color: var(--nomad);
   color: #062a20;
@@ -1177,7 +1287,7 @@ body {
   min-width: 260px;
   justify-content: center;
 }
-.ctl-primary .ctl-button:disabled {
+.ctl-primary button.ctl-button:disabled {
   background: var(--panel-2);
   border-color: var(--line);
   color: var(--dim);
@@ -1224,7 +1334,7 @@ body {
   color: var(--nomad-ink);
 }
 
-.ctl-row .ctl-button {
+.ctl-row button.ctl-button {
   padding: 1px 5px;
   font-size: 11px;
   font-family: var(--mono);
@@ -1459,8 +1569,10 @@ body {
 }
 
 /* The number the host's next decision turns on — wait, or close. 18px.
-   --ink 16.80:1 / 18.72:1; .all-in takes --hit, 9.82:1 dark / 5.08:1 light
-   on --ground. */
+   On --ground, which is what `.panel` leaves it on: --ink 16.61:1 dark /
+   19.54:1 light, and .all-in's --hit 9.00:1 / 5.08:1. The dark figures were
+   16.80 and 9.82 — the first of those was --ink on --panel-2 and had always
+   named the wrong surface, which recomputing the ground is what found. */
 .t-counts {
   margin: 0;
   font-size: 16px;
@@ -1775,7 +1887,9 @@ body {
 }
 
 /* What the round is doing right now, read off the console mid-sentence.
-   Inherits --ink: 16.80:1 dark, 18.72:1 light on --ground. */
+   Inherits --ink: 16.61:1 dark, 19.54:1 light on --ground. `.panel` draws no
+   background, so --ground is the surface; the 16.80/18.72 these said before
+   were the --panel pair. */
 .a-item {
   margin: 0;
   font-size: 16px;
@@ -1998,7 +2112,7 @@ body {
    driving mode, where the rail is not on screen. --muted, not --dim: --dim
    never carries text that has to be read. Measured 5.41:1 dark (#8b8a9c on
    #14141d) and 5.19:1 light (#656a76 on HDS surface-faint #fafafa); on the
-   rail's own background, --ground, it is 5.84:1 dark and 5.38:1 light. 11px,
+   rail's own background, --ground, it is 5.35:1 dark and 5.38:1 light. 11px,
    up from 10px: this is the list the host reads when they have forgotten
    which key does what, so it is the last thing that should be hard to read. */
 .rail-keys {
@@ -2467,8 +2581,8 @@ body {
  * back exactly where they were.
  *
  * Measured on --ground, both themes:
- *   --ink   #f6f5f3 on #0a0a0f  18.13:1   #0c0c0e on #ffffff  19.54:1
- *   --muted #8b8a9c on #0a0a0f   5.84:1   #656a76 on #ffffff   5.38:1
+ *   --ink   #f6f5f3 on #161616  16.61:1   #0c0c0e on #ffffff  19.54:1
+ *   --muted #8b8a9c on #161616   5.35:1   #656a76 on #ffffff   5.38:1
  */
 body.driving .cols {
   display: none;
@@ -2527,7 +2641,7 @@ body.driving .cols {
 .driving-view .ctl-primary {
   margin-left: 0;
 }
-.driving-view .ctl-primary .ctl-button {
+.driving-view .ctl-primary button.ctl-button {
   font-size: 24px;
   padding: 16px 32px;
   min-width: 420px;
@@ -2550,10 +2664,10 @@ body.driving .cols {
  *
  *   --danger text on --panel-2  (.rs-arm, .rs-go)        4.51  4.52
  *   --danger border on --panel  (the panel's own edge)   4.95  4.85  (non-text, 3:1)
- *   --danger border on --ground (.rs-arm's edge)         5.34  5.06  (non-text, 3:1)
+ *   --danger border on --ground (.rs-arm's edge)         4.89  5.06  (non-text, 3:1)
  *   --ink on --panel            (.rs-loses)             16.80 18.72
  *   --muted on --panel          (.rs-keeps, .rs-label)   5.41  5.19
- *   --ink on --ground           (.rs-field's text)      18.13 19.54
+ *   --ink on --ground           (.rs-field's text)      16.61 19.54
  *   --muted on --panel-2        (.rs-go while disabled)  4.94  4.83
  *   --ink on --panel-2          (.rs-cancel)            15.31 17.44
  *
@@ -2625,7 +2739,10 @@ body.driving .cols {
   font-weight: 600;
   letter-spacing: 0.08em;
 }
-/* --panel would be invisible against the panel this sits on. */
+/* --panel would be invisible against the panel this sits on. --ground is now
+   #161616 and --panel-2 is #1d1d28, so this field is 1.08:1 against the panel
+   around it where it was 1.18:1 — present, but less so. Same for `.sc-raw`
+   and the refusal bubble, which use --ground for the same reason. */
 .rs-field {
   flex: none;
   width: 160px;
@@ -2682,13 +2799,13 @@ body.driving .cols {
  *
  * Contrast, measured on the surfaces these actually sit on, dark then light:
  *
- *   --muted  on --ground   the group labels                 5.84  5.38
- *   --ink    on --panel-2  .ctl-button, .cp-key            15.31 17.44
+ *   --muted  on --ground   the group labels                 5.35  5.38
+ *   --ink    on --panel-2  button.ctl-button, .cp-key      15.31 17.44
  *   --muted  on --panel-2  .cp-key-cap, the keycap          4.94  4.83
- *   --danger on --ground   .cp-danger-label, its own edge   5.34  5.06
+ *   --danger on --ground   .cp-danger-label, its own edge   4.89  5.06
  *   --danger on --panel-2  Close session, .rs-arm           4.51  4.52
  *   --sealed on --panel-2  .ctl-seal's label               11.29  4.50
- *   --sealed on --ground   .ctl-question while armed       13.36  4.90
+ *   --sealed on --ground   .ctl-question while armed       12.24  4.90
  *   #062a20  on --nomad    the borrowed primary button       7.68  7.68
  *
  * The last one does not move between themes: --nomad is a brand fill.
@@ -2736,7 +2853,7 @@ body.driving .cols {
   margin-left: 0;
   min-width: 0;
 }
-.cp-lifecycle .ctl-primary .ctl-button {
+.cp-lifecycle .ctl-primary button.ctl-button {
   min-width: 0;
   font-size: 16px;
   padding: 10px 12px;
@@ -2775,7 +2892,7 @@ body.driving .cols {
   flex: 1 1 4rem;
 }
 
-.cp .ctl-button {
+.cp button.ctl-button {
   display: flex;
   align-items: center;
   justify-content: center;

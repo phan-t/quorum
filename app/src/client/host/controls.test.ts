@@ -65,16 +65,24 @@ describe("the space bar advances the run of show", () => {
   });
 
   test("a focused button hands the key back rather than pressing itself", () => {
-    // Every button on the console except an inline confirm's Yes and No.
-    for (const cls of [
-      "ctl-button",
-      "theme-toggle",
-      "seg",
-      "a-pick",
-      "a-setup-move",
-      "pf-tick",
-    ]) {
-      assert.equal(spaceVerdict(key({ target: on("BUTTON", cls) })), "handBackAndFire", cls);
+    // Every button on the console except an inline confirm's Yes and No, with
+    // the tag each one actually reports.
+    //
+    // `.ctl-button` is a `<cds-button>` since issue #28 step 1, and the tag is
+    // the whole of what this decision looks at. A Carbon button holds the space
+    // bar exactly as hard as a native one — its shadow root delegates focus, so
+    // a document-level listener's `event.target` is the host and never the
+    // `<button>` inside — and asserting it as "BUTTON" here would have left the
+    // suite green while the console handed the space bar back to nothing.
+    for (const [tag, cls] of [
+      ["CDS-BUTTON", "ctl-button"],
+      ["BUTTON", "theme-toggle"],
+      ["BUTTON", "seg"],
+      ["BUTTON", "a-pick"],
+      ["BUTTON", "a-setup-move"],
+      ["BUTTON", "pf-tick"],
+    ] as const) {
+      assert.equal(spaceVerdict(key({ target: on(tag, cls) })), "handBackAndFire", cls);
     }
   });
 

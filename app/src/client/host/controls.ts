@@ -13,7 +13,67 @@
  *   button they pressed, not at a notification area.
  */
 
-import { h, replace } from "../shared/dom.ts";
+import { h, hx, replace } from "../shared/dom.ts";
+
+/**
+ * The armed controls are Carbon buttons. Issue #28 step 1.
+ *
+ * One factory, one tag name, so the console's whole secondary-button
+ * vocabulary moves together or not at all. The element is defined by the
+ * `@carbon/web-components` import at the top of `host/main.ts`, which is the
+ * console's entry point and runs before anything here builds a control; the
+ * module is vendored into `dist/vendor` and resolved through the import map in
+ * `host/index.html`.
+ *
+ * `size="sm"` is 32px, fixed: Carbon pins a button's min and max block size to
+ * the same token per size, which is the property the hand-built button spent a
+ * `min-height: 31px` and a `white-space: nowrap` buying. 31px is not reachable
+ * at `sm` and 32 is near enough to it that nothing in the console's layout
+ * moved. `kind` is the only thing that varies, and it varies by the one class
+ * the wrapper already carried.
+ *
+ * The inline confirm's Yes and No are deliberately NOT Carbon. They are the
+ * two buttons the space bar is allowed to reach, `spaceVerdict` decides that
+ * by their class names, and `host.css` sizes them to stand in for exactly the
+ * box they replace. Moving them is a change to the one keyboard-safety
+ * property this file exists to hold, and it is not what step 1 is for.
+ */
+const CARBON_BUTTON = "cds-button";
+
+/** Carbon's kinds, by the class the console already used to mean the same. */
+const KIND_DEFAULT = "tertiary";
+const KIND_DANGER = "danger--tertiary";
+
+/**
+ * The console's own buttons, as a tag test.
+ *
+ * `releaseFocus` and `spaceVerdict` both used to ask `tagName === "BUTTON"`,
+ * and a Carbon button is never that. The element that takes focus is the
+ * `<cds-button>` host — its shadow root is opened with `delegatesFocus: true`,
+ * so `document.activeElement` and a document-level listener's `event.target`
+ * are both retargeted to the host, and neither ever sees the `<button>` inside.
+ *
+ * What a wrong answer here actually costs, measured rather than assumed,
+ * because the two callers are not the same:
+ *
+ *   `spaceVerdict` would return "fire" instead of "handBackAndFire". Both
+ *   verdicts end in `preventDefault()` and a click on the primary, so the
+ *   console does not *visibly* misbehave today — the difference is only the
+ *   blur. That is exactly why `controls.test.ts` asserts the verdict rather
+ *   than an outcome: the verdict is the stated safety property, and the day a
+ *   verdict grows a third consequence is the day asserting the outcome would
+ *   have been asserting nothing. Mutating this line back to `"BUTTON"` turns
+ *   that test red and changes nothing you can see in a browser.
+ *
+ *   `releaseFocus` would decline to blur a focused Carbon host. That branch is
+ *   belt to `bindSpace`'s braces for now, because `control()` re-renders its
+ *   button on every fire and the focused element is destroyed anyway. It is
+ *   written for `handsBackSpace`, whose buttons do not re-render and which
+ *   issue #28 step 2 points at the other 21 sites.
+ */
+function isButtonTag(tagName: string): boolean {
+  return tagName === "BUTTON" || tagName === "CDS-BUTTON";
+}
 
 export interface Control {
   readonly el: HTMLElement;
@@ -56,10 +116,21 @@ const ARM_TIMEOUT_MS = 6_000;
 export function releaseFocus(within?: HTMLElement): void {
   const active = document.activeElement;
   if (!(active instanceof HTMLElement)) return;
-  if (active.tagName !== "BUTTON") return;
+  if (!isButtonTag(active.tagName)) return;
   if (isConfirmButton(active)) return;
+  // `within.contains()` is asked about the host and not about what is focused
+  // inside it, which is the only form that works for both: a shadow root's
+  // contents are not `contains`ed by anything in the document.
   if (within !== undefined && !within.contains(active)) return;
   active.blur();
+  // And again, inside. `delegatesFocus` makes the host answer for the focus
+  // that is really on the `<button>` in its shadow root, and whether
+  // `host.blur()` alone unfocuses that button is a detail of how a browser
+  // implements focus delegation rather than something the spec pins down. The
+  // console cannot afford to find out per browser, and blurring an element
+  // that is already blurred is free.
+  const inner = active.shadowRoot?.activeElement;
+  if (inner instanceof HTMLElement) inner.blur();
 }
 
 /**
@@ -73,6 +144,21 @@ export function handsBackSpace<T extends HTMLElement>(button: T): T {
 
 function isConfirmButton(el: HTMLElement): boolean {
   return classesOwnSpace(classesOf(el));
+}
+
+/**
+ * Whether a button the space bar is about to click would refuse it anyway.
+ *
+ * A native button has the IDL property. A Carbon one has the attribute, and
+ * the attribute is the right thing to read for the same reason `dom.ts` writes
+ * it: it is true before the upgrade as well as after. `.click()` on a custom
+ * element dispatches the event whatever the element thinks of it, so without
+ * this the space bar would fire a control the console has disabled.
+ */
+function isButtonDisabled(el: HTMLElement): boolean {
+  return el instanceof HTMLButtonElement
+    ? el.disabled
+    : el.hasAttribute("disabled");
 }
 
 /**
@@ -143,7 +229,7 @@ export function spaceVerdict(ev: SpaceKey): SpaceVerdict {
   // confirmation word is a guard the space bar cannot help with.
   if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return "ignore";
   if (ev.target?.isContentEditable === true) return "ignore";
-  if (tag === "BUTTON") {
+  if (tag !== undefined && isButtonTag(tag)) {
     // Only the Yes and No of a half-pressed confirm, which took focus
     // deliberately and is being answered. Any other button has already done
     // its job and is holding the key hostage.
@@ -157,6 +243,10 @@ export function control(opts: Opts): Control {
   const el = h("span", {
     class: `ctl${opts.className ? ` ${opts.className}` : ""}`,
   });
+  // The kind is a function of the wrapper's class, decided once: `.ctl-danger`
+  // is the console's existing word for "this is the destructive one", so the
+  // mapping to Carbon's kind needs no second vocabulary.
+  const danger = classesOf(el).includes("ctl-danger");
   let label = opts.label;
   let disabled = false;
   let armed = false;
@@ -239,13 +329,18 @@ export function control(opts: Opts): Control {
       yes.focus();
       return;
     }
-    const button = h("button", {
+    const button = hx(CARBON_BUTTON, {
       class: "ctl-button",
       type: "button",
       text: label,
       disabled,
+      attrs: { kind: danger ? KIND_DANGER : KIND_DEFAULT, size: "sm" },
       ...(opts.title === undefined ? {} : { title: opts.title }),
     });
+    // Carbon's own host listener calls `stopPropagation()` on a click when the
+    // button is disabled, which does not stop a second listener on the same
+    // element — `fire()`'s own `if (disabled) return` is what does, and it is
+    // load-bearing rather than defensive.
     button.addEventListener("click", fire);
     replace(el, [button]);
   }
@@ -309,8 +404,14 @@ export function bindSpace(target: Control): () => void {
     const now = Date.now();
     if (now - lastFired < SPACE_DEBOUNCE_MS) return;
     lastFired = now;
-    const button = target.el.querySelector("button");
-    if (button instanceof HTMLButtonElement && !button.disabled) button.click();
+    // `button, cds-button`, because the control's own button is now the
+    // latter and the former is still what a `.ctl-yes` is. A plain
+    // `querySelector("button")` finds neither when the control is Carbon's:
+    // the `<button>` is inside a shadow root, which `querySelector` does not
+    // enter, so this returned null and the space bar did nothing at all —
+    // silently, since there is no button to fail to click.
+    const button = target.el.querySelector<HTMLElement>("button, cds-button");
+    if (button !== null && !isButtonDisabled(button)) button.click();
   };
   document.addEventListener("keydown", handler);
   return () => document.removeEventListener("keydown", handler);
