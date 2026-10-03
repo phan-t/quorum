@@ -12,6 +12,8 @@ import { copyFileSync, cpSync, mkdirSync, readFileSync, statSync } from "node:fs
 import { dirname, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 
+import { stripComments } from "./strip-comments.mjs";
+
 const here = dirname(fileURLToPath(import.meta.url));
 const src = resolve(here, "..", "src", "client");
 const out = resolve(here, "..", "dist", "client");
@@ -80,6 +82,15 @@ const vendorOut = resolve(here, "..", "dist", "vendor");
  * children and the console renders **nothing at all**. One line in the
  * browser's console and nothing on the server side. Loud rather than subtle,
  * which is the good case; the bad case would be noticing at 1:55pm.
+ *
+ * `number-input.js` is #28 step 3's twelve arcade setup fields, and it is the
+ * one entry whose cost is not mostly its own: it `import`s `text-input.js` —
+ * `CDSNumberInput extends CDSTextInput` — so the component itself is cheap,
+ * and then it reaches `@carbon/utilities` for a `NumberFormatter` and a
+ * `NumberParser` it only constructs when `type="text"`. The console asks for
+ * `type="number"`, where `_initializeFormatters` does nothing, but the import
+ * is static and a static import is paid whether or not the branch runs. That
+ * is the single largest line item in the step and the build log prints it.
  */
 const ENTRY_POINTS = [
   "@carbon/web-components/es/components/button/button.js",
@@ -87,6 +98,7 @@ const ENTRY_POINTS = [
   "@carbon/web-components/es/components/text-input/text-input.js",
   "@carbon/web-components/es/components/select/select.js",
   "@carbon/web-components/es/components/select/select-item.js",
+  "@carbon/web-components/es/components/number-input/number-input.js",
 ];
 
 /**
@@ -100,15 +112,43 @@ const ENTRY_POINTS = [
  * and lit's is conditional on `development`; resolving either properly means
  * implementing Node's algorithm, and implementing it slightly differently from
  * the browser is how a vendored tree comes to 404 one module in thirty-two.
- * Thirteen literal lines, checked against the filesystem on every build by
+ * Fifteen literal lines, checked against the filesystem on every build by
  * `checkTable`, is the cheaper correctness.
  *
  * The entries past `@lit/reactive-element` are not reached by step 1's single
  * button. They are listed because issue #28's later steps mount components
  * that do reach them — the tooltip pulls `@floating-ui/dom`, every icon-ful
  * component pulls `@carbon/icons/es/*` and `@carbon/icon-helpers` — and
- * because `checkTable` verifies all thirteen against the installed tree, so a
+ * because `checkTable` verifies all fifteen against the installed tree, so a
  * line that has gone stale fails this build rather than that one.
+ *
+ * ---- the last two, which `cds-number-input` reaches ---------------------
+ *
+ * `@carbon/utilities` is the dependency step 3 named as a reason the number
+ * fields were out of scope, and the build refused it exactly as advertised
+ * before this line existed — see the entry-point note above for the message.
+ * It resolves to `es/index.js` and not to anything narrower, because
+ * `number-input.js` writes the bare package name and nothing here rewrites a
+ * third-party specifier. That index is a barrel: `initCarousel`,
+ * `datePartsOrder`, `dateTimeFormat`, `documentLang`, `makeDraggable` and
+ * `createOverflowHandler` all come along, for two exports that are only
+ * touched on a code path the console does not take.
+ *
+ * `@internationalized/number` is where those two exports actually live —
+ * `@carbon/utilities`' index ends in `export * from "@internationalized/number"`
+ * and `NumberFormatter`/`NumberParser` are re-exports, not its own code. The
+ * crawl found it one step after `@carbon/utilities` was added and refused the
+ * build again, which is the table working twice for one component.
+ *
+ * It resolves to `dist/index.mjs` and **not** to `dist/index.js`, which is
+ * what that package's `module` field names. Both are ESM and only `index.mjs`
+ * is what its `exports` map serves to an `import`; the two are not the same
+ * file, and picking the one the field names rather than the one the condition
+ * names is how a vendored tree comes to ship a module the installed graph does
+ * not use. `temporal-polyfill` and `@swc/helpers` are dependencies of these
+ * two packages that no reachable `es/` or `dist/` module imports, so the crawl
+ * never asks for them and they are deliberately not here: an entry for a
+ * specifier nothing names is a line `checkTable` can only keep warm.
  */
 const SPECIFIER_TABLE = {
   "@carbon/web-components/": "@carbon/web-components/",
@@ -124,6 +164,8 @@ const SPECIFIER_TABLE = {
   "@floating-ui/dom": "@floating-ui/dom/dist/floating-ui.dom.esm.js",
   "@carbon/icon-helpers": "@carbon/icon-helpers/es/index.js",
   "@carbon/icons/": "@carbon/icons/",
+  "@carbon/utilities": "@carbon/utilities/es/index.js",
+  "@internationalized/number": "@internationalized/number/dist/index.mjs",
 };
 
 /** Where a vendored file is served from, given its path under `node_modules`. */
@@ -137,8 +179,21 @@ const VENDOR_URL = "/vendor/";
  * every form that answers it ends in a quoted string. It has to cope with
  * minified ESM — lit ships `export*from"lit-element/lit-element.js"` with no
  * space after `export` — so the anchor is `from` or `import` immediately
- * followed by the quote, rather than the keyword plus whitespace. A false
- * positive cannot pass silently: an unresolvable specifier throws below.
+ * followed by the quote, rather than the keyword plus whitespace.
+ *
+ * It is run over {@link stripComments} of the source and not over the source,
+ * which is a thing step 3's five entry points did not need and step 3's sixth
+ * does. `@carbon/utilities`' carousel chunk documents a callback in prose —
+ * "with the response from 'getCallbackResponse'" — and `from
+ * 'getCallbackResponse'` matches this pattern, so the build refused a tree
+ * that was in fact complete, naming a specifier no package has. The stripper
+ * carries the measurement and the reasoning; the short version is that the
+ * alternative repairs are a table entry for a module that does not exist and a
+ * looser regex, and a looser regex is one that lets a real uncovered specifier
+ * through.
+ *
+ * A false positive still cannot pass silently either way: an unresolvable
+ * specifier throws below.
  */
 const SPECIFIER_RE = /\bfrom\s*["']([^"']+)["']|\bimport\s*\(?\s*["']([^"']+)["']/g;
 
@@ -214,7 +269,7 @@ function vendor() {
     copyFileSync(abs, dest);
     bytes += Buffer.byteLength(source);
 
-    for (const match of source.matchAll(SPECIFIER_RE)) {
+    for (const match of stripComments(source).matchAll(SPECIFIER_RE)) {
       const spec = match[1] ?? match[2];
       if (spec === undefined) continue;
       // `.map` is skipped and so is anything that would only be reached

@@ -38,6 +38,18 @@ import "@carbon/web-components/es/components/tag/tag.js";
 import "@carbon/web-components/es/components/text-input/text-input.js";
 import "@carbon/web-components/es/components/select/select.js";
 import "@carbon/web-components/es/components/select/select-item.js";
+// And step 3's fifth, for the arcade's twelve setup fields. `number-input.js`
+// imports `text-input.js` itself — `CDSNumberInput extends CDSTextInput` — so
+// the line above is not what makes this one work and neither is redundant: the
+// text field is mounted on its own at three sites.
+//
+// This is the entry point that costs: the component reaches `@carbon/utilities`
+// for a `NumberFormatter` and a `NumberParser` it constructs only when
+// `type="text"`, which the console never asks for, and a static import is paid
+// whichever branch runs. The build's crawl refused it until `SPECIFIER_TABLE`
+// learned that package and `@internationalized/number` behind it; the message
+// and the measurements are in `copy-client-assets.mjs`.
+import "@carbon/web-components/es/components/number-input/number-input.js";
 
 import type {
   ArcadePlanApplyView,
@@ -90,9 +102,11 @@ import {
   stackedBar,
 } from "../shared/view.ts";
 import {
+  CARBON_NUMBER_INPUT_EVENT,
   CARBON_SELECT_EVENT,
   blurField,
   carbonButton,
+  carbonNumberInput,
   carbonSelect,
   carbonSelectItem,
   carbonTag,
@@ -3210,27 +3224,75 @@ for (const kind of ARCADE_ROUNDS) {
   arcadePicker.appendChild(button);
 }
 
-const arcadeSeconds = h("input", {
+/*
+ * The arcade's twelve setup fields, finishing #28 step 3.
+ *
+ * Each one was an `<input type="number">` with a `min`, a `max` and an
+ * `aria-label`, and each one is now a `cds-number-input` carrying the same two
+ * clamps on the same kind of element — `carbon.ts` has the template line that
+ * puts them there. The three things that moved, once, for all twelve:
+ *
+ *   the name       was an `aria-label` on the `<input>`; a Carbon host's stays
+ *                  on the host where nothing focusable reads it. It is
+ *                  `label`, hidden with `hideLabel`, which is the only name a
+ *                  Carbon field can have. The console's own `.label` span is
+ *                  still beside the box and still says the same words.
+ *
+ *   the wrapper    was a `<label>` round the pair, which associated the span
+ *                  with the `<input>` by containment. A host is not a
+ *                  labelable element, so that association is dead — the same
+ *                  finding as the wipe's `<label for>` and the card editor's
+ *                  two, and the same repair: the wrapper is demoted to the
+ *                  `<div>` it now is, so nothing claims what it has not got.
+ *                  The cost is the same too, and it is the reason this is
+ *                  worth writing down twelve times over: clicking the words
+ *                  "Seconds per item" no longer puts the caret in the field.
+ *
+ *   the steppers   off, at every one of the twelve. `host.css` has the
+ *                  measurements; the short version is that two 32px buttons
+ *                  per field would take 80px of a 112px field's inline size
+ *                  for the gutter alone.
+ *
+ * `step` is passed at none of them, because none of the twelve carried one:
+ * Carbon's default is `"1"` and so is a native number input's, so leaving it
+ * out is what they had rather than a value being dropped.
+ */
+const arcadeSeconds = carbonNumberInput({
   class: "field field-num",
-  type: "number",
+  size: "sm",
+  inputType: "number",
+  label: "Seconds per item",
+  hideLabel: true,
+  hideSteppers: true,
+  min: 5,
+  max: 60,
   value: "20",
-  attrs: { min: "5", max: "60", "aria-label": "Seconds per item" },
-}) as HTMLInputElement;
-const arcadeTarget = h("input", {
+});
+const arcadeTarget = carbonNumberInput({
   class: "field field-num",
-  type: "number",
+  size: "sm",
+  inputType: "number",
+  label: "Taps to finish",
+  hideLabel: true,
+  hideSteppers: true,
+  min: 10,
+  max: 999,
   value: "120",
-  attrs: { min: "10", max: "999", "aria-label": "Taps to finish" },
-}) as HTMLInputElement;
-const arcadeFloorSeconds = h("input", {
+});
+const arcadeFloorSeconds = carbonNumberInput({
   class: "field field-num",
-  type: "number",
+  size: "sm",
+  inputType: "number",
+  label: "Seconds of play",
+  hideLabel: true,
+  hideSteppers: true,
+  min: 15,
+  max: 300,
   value: "75",
-  attrs: { min: "15", max: "300", "aria-label": "Seconds of play" },
-}) as HTMLInputElement;
+});
 
 const arcadeRecruitCfg = h("div", { class: "a-cfg" }, [
-  h("label", { class: "field-row" }, [
+  h("div", { class: "field-row" }, [
     h("span", { class: "label", text: "Seconds per item" }),
     arcadeSeconds,
   ]),
@@ -3240,11 +3302,11 @@ const arcadeRecruitCfg = h("div", { class: "a-cfg" }, [
   }),
 ]);
 const arcadePlanCfg = h("div", { class: "a-cfg" }, [
-  h("label", { class: "field-row" }, [
+  h("div", { class: "field-row" }, [
     h("span", { class: "label", text: "Taps to finish" }),
     arcadeTarget,
   ]),
-  h("label", { class: "field-row" }, [
+  h("div", { class: "field-row" }, [
     h("span", { class: "label", text: "Seconds of play" }),
     arcadeFloorSeconds,
   ]),
@@ -3263,24 +3325,39 @@ const arcadePlanCfg = h("div", { class: "a-cfg" }, [
  * tunes the three waves to 12 / 9 / 6, which is the asymmetry the round is
  * built on — wave 1 goes blind and slowest, wave 3 goes last and fastest.
  */
-const arcadeWave1 = h("input", {
+const arcadeWave1 = carbonNumberInput({
   class: "field field-num",
-  type: "number",
+  size: "sm",
+  inputType: "number",
+  label: "Seconds a step, wave 1",
+  hideLabel: true,
+  hideSteppers: true,
+  min: 3,
+  max: 60,
   value: "12",
-  attrs: { min: "3", max: "60", "aria-label": "Seconds a step, wave 1" },
-}) as HTMLInputElement;
-const arcadeWave2 = h("input", {
+});
+const arcadeWave2 = carbonNumberInput({
   class: "field field-num",
-  type: "number",
+  size: "sm",
+  inputType: "number",
+  label: "Seconds a step, wave 2",
+  hideLabel: true,
+  hideSteppers: true,
+  min: 3,
+  max: 60,
   value: "9",
-  attrs: { min: "3", max: "60", "aria-label": "Seconds a step, wave 2" },
-}) as HTMLInputElement;
-const arcadeWave3 = h("input", {
+});
+const arcadeWave3 = carbonNumberInput({
   class: "field field-num",
-  type: "number",
+  size: "sm",
+  inputType: "number",
+  label: "Seconds a step, wave 3",
+  hideLabel: true,
+  hideSteppers: true,
+  min: 3,
+  max: 60,
   value: "6",
-  attrs: { min: "3", max: "60", "aria-label": "Seconds a step, wave 3" },
-}) as HTMLInputElement;
+});
 
 /**
  * Unseal's one setting: how long the Floor runs.
@@ -3290,15 +3367,20 @@ const arcadeWave3 = h("input", {
  * word and the reveal note, so a console that could choose them would be a
  * console the answer key travels through.
  */
-const arcadeUnsealSeconds = h("input", {
+const arcadeUnsealSeconds = carbonNumberInput({
   class: "field field-num",
-  type: "number",
+  size: "sm",
+  inputType: "number",
+  label: "Seconds of play",
+  hideLabel: true,
+  hideSteppers: true,
+  min: 15,
+  max: 300,
   value: "60",
-  attrs: { min: "15", max: "300", "aria-label": "Seconds of play" },
-}) as HTMLInputElement;
+});
 
 const arcadeUnsealCfg = h("div", { class: "a-cfg" }, [
-  h("label", { class: "field-row" }, [
+  h("div", { class: "field-row" }, [
     h("span", { class: "label", text: "Seconds of play" }),
     arcadeUnsealSeconds,
   ]),
@@ -3316,36 +3398,51 @@ const arcadeUnsealCfg = h("div", { class: "a-cfg" }, [
  * are: a seed a console could choose is a console that can deal itself the
  * sides.
  */
-const arcadeTugPulls = h("input", {
+const arcadeTugPulls = carbonNumberInput({
   class: "field field-num",
-  type: "number",
+  size: "sm",
+  inputType: "number",
+  label: "Number of pulls",
+  hideLabel: true,
+  hideSteppers: true,
+  min: 1,
+  max: 9,
   value: "3",
-  attrs: { min: "1", max: "9", "aria-label": "Number of pulls" },
-}) as HTMLInputElement;
-const arcadeTugSeconds = h("input", {
+});
+const arcadeTugSeconds = carbonNumberInput({
   class: "field field-num",
-  type: "number",
+  size: "sm",
+  inputType: "number",
+  label: "Seconds a pull",
+  hideLabel: true,
+  hideSteppers: true,
+  min: 5,
+  max: 120,
   value: "25",
-  attrs: { min: "5", max: "120", "aria-label": "Seconds a pull" },
-}) as HTMLInputElement;
-const arcadeTugBpm = h("input", {
+});
+const arcadeTugBpm = carbonNumberInput({
   class: "field field-num",
-  type: "number",
+  size: "sm",
+  inputType: "number",
+  label: "Heartbeat, beats per minute",
+  hideLabel: true,
+  hideSteppers: true,
+  min: 40,
+  max: 200,
   value: "100",
-  attrs: { min: "40", max: "200", "aria-label": "Heartbeat, beats per minute" },
-}) as HTMLInputElement;
+});
 
 const arcadeTugCfg = h("div", { class: "a-cfg" }, [
   h("div", { class: "a-cfg-row" }, [
-    h("label", { class: "a-cfg-cell" }, [
+    h("div", { class: "a-cfg-cell" }, [
       h("span", { class: "label", text: "Pulls" }),
       arcadeTugPulls,
     ]),
-    h("label", { class: "a-cfg-cell" }, [
+    h("div", { class: "a-cfg-cell" }, [
       h("span", { class: "label", text: "Seconds a pull" }),
       arcadeTugSeconds,
     ]),
-    h("label", { class: "a-cfg-cell" }, [
+    h("div", { class: "a-cfg-cell" }, [
       h("span", { class: "label", text: "Beats a minute" }),
       arcadeTugBpm,
     ]),
@@ -3375,26 +3472,36 @@ const arcadeTugCfg = h("div", { class: "a-cfg" }, [
  * first prompt — and a field that could type an instantly-refused round is a
  * refusal in front of the room instead of on the setup panel.
  */
-const arcadeGganbuSeconds = h("input", {
+const arcadeGganbuSeconds = carbonNumberInput({
   class: "field field-num",
-  type: "number",
+  size: "sm",
+  inputType: "number",
+  label: "Seconds a prompt",
+  hideLabel: true,
+  hideSteppers: true,
+  min: 5,
+  max: 120,
   value: "15",
-  attrs: { min: "5", max: "120", "aria-label": "Seconds a prompt" },
-}) as HTMLInputElement;
-const arcadeGganbuTokens = h("input", {
+});
+const arcadeGganbuTokens = carbonNumberInput({
   class: "field field-num",
-  type: "number",
+  size: "sm",
+  inputType: "number",
+  label: "Tokens each to start",
+  hideLabel: true,
+  hideSteppers: true,
+  min: 1,
+  max: 99,
   value: "10",
-  attrs: { min: "1", max: "99", "aria-label": "Tokens each to start" },
-}) as HTMLInputElement;
+});
 
 const arcadeGganbuCfg = h("div", { class: "a-cfg" }, [
   h("div", { class: "a-cfg-row" }, [
-    h("label", { class: "a-cfg-cell" }, [
+    h("div", { class: "a-cfg-cell" }, [
       h("span", { class: "label", text: "Seconds a prompt" }),
       arcadeGganbuSeconds,
     ]),
-    h("label", { class: "a-cfg-cell" }, [
+    h("div", { class: "a-cfg-cell" }, [
       h("span", { class: "label", text: "Tokens each" }),
       arcadeGganbuTokens,
     ]),
@@ -3410,15 +3517,15 @@ const arcadeGlassCfg = h("div", { class: "a-cfg" }, [
   // block spends is a row the round's own controls are pushed below the fold
   // by — which is a button the host cannot press while the bridge is running.
   h("div", { class: "a-cfg-row" }, [
-    h("label", { class: "a-cfg-cell" }, [
+    h("div", { class: "a-cfg-cell" }, [
       h("span", { class: "label", text: "Wave 1 · s" }),
       arcadeWave1,
     ]),
-    h("label", { class: "a-cfg-cell" }, [
+    h("div", { class: "a-cfg-cell" }, [
       h("span", { class: "label", text: "Wave 2 · s" }),
       arcadeWave2,
     ]),
-    h("label", { class: "a-cfg-cell" }, [
+    h("div", { class: "a-cfg-cell" }, [
       h("span", { class: "label", text: "Wave 3 · s" }),
       arcadeWave3,
     ]),
@@ -3450,7 +3557,15 @@ const ARCADE_CFG: Readonly<Record<ArcadePick, HTMLElement>> = {
  */
 const SETUP_KEY = "quorum.host.arcade.v1";
 
-const TIMING_FIELDS: readonly (readonly [HTMLInputElement, string])[] = [
+/**
+ * The twelve fields and the key each one is stored under.
+ *
+ * `HTMLElement` and not `HTMLInputElement` since the conversion, which is the
+ * type saying what it has: a Carbon host is not an `<input>` and the `<input>`
+ * it owns is in a shadow root that is not this file's to reach into. The three
+ * things that read a field below all go through `carbon.ts` for that reason.
+ */
+const TIMING_FIELDS: readonly (readonly [HTMLElement, string])[] = [
   [arcadeSeconds, "secondsPerItem"],
   [arcadeTarget, "target"],
   [arcadeFloorSeconds, "seconds"],
@@ -3468,7 +3583,7 @@ const TIMING_FIELDS: readonly (readonly [HTMLInputElement, string])[] = [
 function saveSetup(): void {
   const timings: Record<string, number> = {};
   for (const [field, key] of TIMING_FIELDS) {
-    const v = Number(field.value);
+    const v = Number(fieldValue(field));
     if (Number.isFinite(v) && v > 0) timings[key] = Math.round(v);
   }
   try {
@@ -3663,12 +3778,33 @@ function loadSetup(): void {
   arcadePlan = stored.plan;
   for (const [field, key] of TIMING_FIELDS) {
     const v = stored.timings[key];
-    if (v !== undefined) field.value = String(v);
+    if (v !== undefined) setFieldValue(field, String(v));
   }
 }
 
+/*
+ * What a changed field is reported by, and why it is not `change`.
+ *
+ * `cds-number-input` does not re-emit `change` as a composed event. It
+ * inherits `CDSTextInput`'s handler for doing so and then replaces the
+ * template that called it, so a native `change` from the inner `<input>` stops
+ * at the shadow boundary — `composed: false` — and a `change` listener on the
+ * host never fires at all. Written as `"change"` here, the conversion would
+ * have taken the arcade's running order and all twelve timings out of
+ * `localStorage` with nothing anywhere to say so, and the console reloaded at
+ * 2:45pm would have come back with the default order. `carbon.ts` has the
+ * reading.
+ *
+ * The replacement is Carbon's own event, and it is an *input* event rather
+ * than a commit: it fires per keystroke and on each stepper press, not on
+ * blur. So this writes `localStorage` more often than it used to — three
+ * writes to type `120` where there was one. That is a few hundred bytes of
+ * `setItem` on a panel the host touches before the session starts, against a
+ * `change` that does not arrive; it is the cheaper of the two and the only one
+ * of them that works.
+ */
 for (const [field] of TIMING_FIELDS) {
-  field.addEventListener("change", () => saveSetup());
+  field.addEventListener(CARBON_NUMBER_INPUT_EVENT, () => saveSetup());
 }
 
 const arcadeSetupRows = h("div", { class: "a-setup-rows" });
@@ -3925,8 +4061,26 @@ const bodyArcade = h("section", { class: "pb pb-arcade" }, [
 
 /** The round command the running order and its fields describe. */
 function arcadeRoundCommand(pick: ArcadePick): HostCommand {
-  const int = (el: HTMLInputElement, dflt: number): number => {
-    const v = Number(el.value);
+  /*
+   * What goes on the wire, and the one guard that decides it.
+   *
+   * `fieldValue`, not `el.value`: the twelve are Carbon hosts since the
+   * conversion and `carbon.ts` owns that read — see there for why the property
+   * and not the attribute, which trails it by a Lit update and would return
+   * the previous character mid-keystroke.
+   *
+   * Note what this does *not* do, which the clamps on the fields do not do
+   * either: it does not range-check. `min` and `max` on a number input clamp
+   * the arrow keys and the steppers and set `:out-of-range`; they do not refuse
+   * a typed value, and they never did — 999 typed into the `min="5" max="60"`
+   * seconds-per-item field was finite, an integer and greater than zero before
+   * this conversion and still is after it. The engine's own round builders are
+   * where a refused configuration would be refused; this guard is only here so
+   * an empty or half-typed field falls back to the default rather than sending
+   * `NaN`.
+   */
+  const int = (el: HTMLElement, dflt: number): number => {
+    const v = Number(fieldValue(el));
     return Number.isFinite(v) && Number.isInteger(v) && v > 0 ? v : dflt;
   };
   if (pick === "recruitment") {

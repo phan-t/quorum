@@ -36,6 +36,11 @@ if (!existsSync(root)) {
 const TYPES = {
   ".html": "text/html; charset=utf-8",
   ".js": "text/javascript; charset=utf-8",
+  // A vendored dependency's ESM build; the twin of this line, and the note on
+  // it, are in `server/main.ts`. `@internationalized/number` — which
+  // `cds-number-input` reaches through `@carbon/utilities` — is served as
+  // `dist/index.mjs`, and without this the console renders nothing.
+  ".mjs": "text/javascript; charset=utf-8",
   ".css": "text/css; charset=utf-8",
   ".map": "application/json; charset=utf-8",
   ".svg": "image/svg+xml",
@@ -60,7 +65,7 @@ function pageFor(pathname) {
   // the module graph failed, and every surface rendered blank with nothing in
   // the server log to show for it. Mirrors the production route in
   // `server/main.ts`.
-  if (/\.(js|css|map|svg|png|woff2|ico)$/.test(pathname)) {
+  if (/\.(js|mjs|css|map|svg|png|woff2|ico)$/.test(pathname)) {
     const rel = normalize(pathname.slice(1));
     if (rel.startsWith("..")) return null;
     return join(dist, rel);

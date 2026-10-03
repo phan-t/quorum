@@ -40,6 +40,10 @@ import {
   CARBON_BUTTON_SIZES,
   CARBON_INPUT_SIZES,
   CARBON_INPUT_TYPES,
+  CARBON_NUMBER_INPUT_FLOOR,
+  CARBON_NUMBER_INPUT_SIZES,
+  CARBON_NUMBER_INPUT_SM_GUTTER,
+  CARBON_NUMBER_INPUT_TYPES,
   CARBON_TAG_SIZES,
   CARBON_TAG_TYPES,
 } from "./carbon.ts";
@@ -153,6 +157,15 @@ describe("the space bar advances the run of show", () => {
       ["CDS-TEXT-INPUT", "field"],
       ["CDS-TEXT-INPUT", "field rs-field"],
       ["CDS-SELECT", "rb-card"],
+      // The arcade's twelve setup fields. A third tag rather than a case the
+      // two above already cover, which is why `isFieldTag` is a list of names:
+      // a `cds-number-input` retargets exactly as the other two do —
+      // `delegatesFocus`, the `<input>` in a shadow root, the host as
+      // `event.target` — and was none of the five names on the list until it
+      // was put there. Measured on the running console with the name removed:
+      // a space dispatched on the `<input>` inside the Pulls field pressed the
+      // primary once, `Open the lobby   (space)`, and swallowed the space.
+      ["CDS-NUMBER-INPUT", "field field-num"],
     ] as const) {
       assert.equal(
         spaceVerdict(key({ target: on(tag, ...cls.split(" ")) })),
@@ -166,10 +179,30 @@ describe("the space bar advances the run of show", () => {
     // The two wrong answers are different sizes of wrong and both are silent.
     // "fire" presses the primary; "handBackAndFire" blurs the field the host
     // is typing into *and* presses the primary. Neither is "ignore".
-    for (const tag of ["CDS-TEXT-INPUT", "CDS-SELECT"]) {
+    for (const tag of ["CDS-TEXT-INPUT", "CDS-SELECT", "CDS-NUMBER-INPUT"]) {
       const verdict = spaceVerdict(key({ target: on(tag, "field") }));
       assert.notEqual(verdict, "fire", tag);
       assert.notEqual(verdict, "handBackAndFire", tag);
+    }
+  });
+
+  /*
+   * And the arcade's own panel, said against the classes `main.ts` writes.
+   *
+   * The twelve are not one control repeated in one place: they are in a
+   * `.field-row` for the rounds with a single setting and in an `.a-cfg-cell`
+   * for the three that have two or three, and the one that matters most is the
+   * panel the primary button sits under. A space that fired the primary while
+   * the host was typing `25` into Tug of Raft's seconds-a-pull would announce
+   * the round from a setup panel, with the number half entered.
+   */
+  test("every arcade setup field keeps the key, in both of its layouts", () => {
+    for (const cls of ["field field-num", "field field-num a-cfg-num"]) {
+      assert.equal(
+        spaceVerdict(key({ target: on("CDS-NUMBER-INPUT", ...cls.split(" ")) })),
+        "ignore",
+        cls,
+      );
     }
   });
 });
@@ -512,6 +545,7 @@ describe("the kinds and sizes the console asks Carbon for", () => {
       "cds-text-input",
       "cds-select",
       "cds-select-item",
+      "cds-number-input",
     ]) {
       // `hostSources()` has the comments blanked out, so a tag named in prose
       // — and `main.ts` names three of them, explaining what Carbon does with
@@ -654,25 +688,31 @@ describe("the tag, field and select attributes the console asks Carbon for", () 
   });
 
   /*
-   * The scope boundary of step 3, as a test rather than as a paragraph.
+   * `number` is not a text field's type, which is why the arcade's twelve are
+   * a different element.
    *
-   * The console's fifteen arcade setup fields are `<input type="number">` with
-   * a `min` and a `max` on every one. `cds-text-input` supports textual types
-   * only and forwards neither clamp, so converting them would drop both
-   * silently. That is why they are still hand-built.
+   * This test was written as step 3's scope boundary — "which is why fifteen
+   * fields are not Carbon's" — and the half of it that was wrong was the
+   * count, not the constraint. There are **twelve** arcade setup fields, on
+   * `main` and in every commit that has ever built one; "fifteen" was the
+   * console's total field count, and it reached three source files and a
+   * commit message. The twelve are Carbon's now, on `cds-number-input`.
    *
-   * The assertion is written so it fails the day the constraint lifts: if
-   * Carbon adds `number` to `INPUT_TYPE`, this goes red and whoever is reading
-   * it finds out that the fifteen can now be converted. A comment cannot do
-   * that.
+   * What the assertion still holds is the reason they could not be
+   * `cds-text-input`: `INPUT_TYPE` has no `number`, so a `type="number"` with
+   * a `min` and a `max` is not something this component can carry. If Carbon
+   * ever adds one, this goes red and whoever reads it finds out that the two
+   * components have converged and that there may now be one field type here
+   * rather than two.
    */
-  test("and `number` is not among them, which is why fifteen fields are not Carbon's", () => {
+  test("and `number` is not among them, which is why twelve fields are a different element", () => {
     assert.ok(
       !CARBON_INPUT_TYPE_VALUES.includes("number"),
-      "Carbon's INPUT_TYPE now has `number`. The arcade's fifteen setup " +
-        "fields were left hand-built because cds-text-input could not carry " +
-        "a type=number with its min and max; check whether it forwards " +
-        "`min`/`max`/`step` too, and if it does, they can be converted.",
+      "Carbon's INPUT_TYPE now has `number`. The arcade's twelve setup " +
+        "fields are on cds-number-input because cds-text-input could not " +
+        "carry a type=number with its min and max; check whether it forwards " +
+        "`min`/`max`/`step` now, and whether the two components should still " +
+        "be two.",
     );
     assert.ok(CARBON_INPUT_TYPE_VALUES.includes("text"));
   });
@@ -683,6 +723,8 @@ describe("the tag, field and select attributes the console asks Carbon for", () 
       tagType: [],
       inputSize: [],
       inputType: [],
+      numberSize: [],
+      numberType: [],
     };
     const check = (ok: boolean, msg: string): void => assert.ok(ok, msg);
     for (const [name, src] of hostSources()) {
@@ -714,6 +756,14 @@ describe("the tag, field and select attributes the console asks Carbon for", () 
         ["inputType", CARBON_INPUT_TYPE_VALUES, "inputType"],
       ]);
       scan("carbonSelect(", [["size", CARBON_INPUT_SIZE_VALUES, "inputSize"]]);
+      // The number field's own two scales. **Not** `CARBON_INPUT_SIZE_VALUES`,
+      // which is the whole point of the suite below: `INPUT_SIZE` has `xs` and
+      // `xl`, this component's stylesheet implements neither, and a field
+      // asking for one renders at `md`'s 40px with nothing said anywhere.
+      scan("carbonNumberInput(", [
+        ["size", CARBON_NUMBER_INPUT_SIZES, "numberSize"],
+        ["inputType", CARBON_NUMBER_INPUT_TYPES, "numberType"],
+      ]);
     }
     // Against a scanner that found nothing every assertion above passes, which
     // is how the array this pattern replaced came to cover three sites of
@@ -725,6 +775,20 @@ describe("the tag, field and select attributes the console asks Carbon for", () 
       `input sizes found: ${seen["inputSize"]!.length} (three fields and a select)`,
     );
     assert.ok(seen["inputType"]!.length >= 3, `input types found: ${seen["inputType"]!.length}`);
+    // And the arcade's twelve, which is a count and not a floor: a thirteenth
+    // or an eleventh is a thing to look at rather than a thing to pass.
+    assert.equal(
+      seen["numberSize"]!.length,
+      12,
+      `number-field sizes found: ${seen["numberSize"]!.length}, expected the ` +
+        "arcade's twelve. A field built without one would not compile; a " +
+        "thirteenth means the panel grew and this number should say so.",
+    );
+    assert.equal(
+      seen["numberType"]!.length,
+      12,
+      `number-field types found: ${seen["numberType"]!.length}`,
+    );
   });
 
   /*
@@ -748,13 +812,21 @@ describe("the tag, field and select attributes the console asks Carbon for", () 
         "carbonTextInput(",
         "carbonSelect(",
         "carbonSelectItem(",
+        "carbonNumberInput(",
       ]) {
         for (const call of callsTo(src, open)) {
           if (!call.startsWith(open)) continue;
           calls += 1;
           assert.doesNotMatch(
             call.replace(/\s+/g, " "),
-            /attrs: \{[^}]*\b(?:kind|size|type|hide-label|label-text|max-count):/,
+            // `min`, `max`, `step` and `hide-steppers` join the list for the
+            // number fields. The first three are the reason that component is
+            // here at all, and written into `attrs` they would be strings
+            // nothing types rather than the required numbers — a call site
+            // that dropped one would compile and the field would stop being
+            // clamped. `hide-steppers` is the width decision, and it is a
+            // required boolean so that it is made once.
+            /attrs: \{[^}]*\b(?:kind|size|type|min|max|step|hide-label|hide-steppers|label-text|max-count):/,
             `${name} writes a Carbon attribute inside attrs at ${open}…, ` +
               "which is the one spelling the unions and the required fields " +
               "in carbon.ts cannot see.",
@@ -762,14 +834,18 @@ describe("the tag, field and select attributes the console asks Carbon for", () 
         }
       }
     }
-    assert.ok(calls >= 12, `the scan found ${calls} Carbon call sites`);
+    assert.ok(calls >= 24, `the scan found ${calls} Carbon call sites`);
   });
 
   test("and every field and picker hides Carbon's label, which is the decision", () => {
     let fields = 0;
     for (const [name, src] of hostSources()) {
       if (name === CARBON_DOOR) continue;
-      for (const open of ["carbonTextInput(", "carbonSelect("]) {
+      for (const open of [
+        "carbonTextInput(",
+        "carbonSelect(",
+        "carbonNumberInput(",
+      ]) {
         for (const call of callsTo(src, open)) {
           if (!call.startsWith(open)) continue;
           fields += 1;
@@ -783,7 +859,439 @@ describe("the tag, field and select attributes the console asks Carbon for", () 
         }
       }
     }
-    assert.ok(fields >= 4, `the scan found ${fields} Carbon fields at call sites`);
+    assert.equal(
+      fields,
+      16,
+      `the scan found ${fields} Carbon fields at call sites, expected 16 — ` +
+        "three text fields, the one picker and the arcade's twelve.",
+    );
+  });
+
+  /*
+   * And every number field is `type="number"` with its steppers off.
+   *
+   * This test exists because a mutation came back green. Changing one call
+   * site's `inputType: "number"` to `"text"` — a value the union allows, so it
+   * compiles — passed `npm run typecheck` and all 47 tests in this file, and
+   * on the running console the inner `<input>`'s `min`, `max` and `step` were
+   * all the empty string while the **host** still carried `min="1" max="9"`.
+   * A field that looks clamped from the outside and is clamped by nothing.
+   *
+   * The cause is one ternary in Carbon's template, which writes the three
+   * attributes in the `number` branch and `""` otherwise. The union cannot
+   * catch it, because `"text"` is a real value of a real property; what makes
+   * it wrong is that the arcade's twelve are the fields the clamps were the
+   * whole reason for.
+   *
+   * `hideSteppers` is held in the same test for the same shape of reason: it
+   * is a decision about this panel taken once — see `host.css` — and a field
+   * that drew its two 32px steppers would take 80px of its 112px box for the
+   * gutter. That one is at least visible; this one is not, which is why they
+   * are asserted together and the message says which is which.
+   */
+  test("and every number field is a number, with its steppers off", () => {
+    let seen = 0;
+    for (const [name, src] of hostSources()) {
+      if (name === CARBON_DOOR) continue;
+      for (const call of callsTo(src, "carbonNumberInput(")) {
+        if (!call.startsWith("carbonNumberInput(")) continue;
+        seen += 1;
+        const flat = call.replace(/\s+/g, " ");
+        assert.match(
+          flat,
+          /inputType: "number"/,
+          `${name} builds a Carbon number field with inputType other than ` +
+            '"number". Carbon writes min, max and step onto the inner ' +
+            "<input> in the number branch only, and the empty string " +
+            "otherwise — so the host keeps its min and max attributes, the " +
+            "field looks clamped, and nothing clamps it. Measured.",
+        );
+        assert.match(
+          flat,
+          /hideSteppers: true/,
+          `${name} builds a Carbon number field with Carbon's two stepper ` +
+            "buttons drawn. At sm that is a 64px control in an 80px gutter, " +
+            "in a 112px field, twelve times — see host.css.",
+        );
+        // And both clamps are written at the site, as numbers rather than
+        // through `attrs`. The factory makes them required, so this is the
+        // half that says they are not `min: Number(x)` of something empty.
+        assert.match(flat, /min: \d+/, `${name}: min is not a literal`);
+        assert.match(flat, /max: \d+/, `${name}: max is not a literal`);
+      }
+    }
+    assert.equal(seen, 12, `the scan found ${seen} number fields, expected 12`);
+  });
+
+  /*
+   * And the twelve are saved off Carbon's event, not off `change`.
+   *
+   * The second mutation that came back green. Writing the save listener as
+   * `field.addEventListener("change", …)` compiles, passes every test in this
+   * file, and on the running console takes the arcade's running order and all
+   * twelve timings out of `localStorage` completely: edited a field, waited,
+   * and `localStorage.getItem("quorum.host.arcade.v1")` was **null** where the
+   * unmutated build had written all twelve. A console reloaded at 2:45pm comes
+   * back with the default order and nothing anywhere says why.
+   *
+   * `cds-number-input` inherits `CDSTextInput`'s `change` re-emitter and
+   * replaces the template that called it, so a native `change` — `composed:
+   * false` — stops at the shadow boundary. Verified on the page: a `change`
+   * listener on the host fired 0 times while Carbon's own fired once.
+   *
+   * A source scan rather than a behaviour test, because the behaviour needs a
+   * DOM. It is the cheap half; the browser is the other half.
+   */
+  test("and their save listener is Carbon's event rather than `change`", () => {
+    const main = hostSources().find(([n]) => n === "main.ts")?.[1] ?? "";
+    assert.match(
+      main,
+      /addEventListener\(\s*CARBON_NUMBER_INPUT_EVENT\s*,/,
+      "main.ts no longer registers the arcade setup fields' save listener " +
+        "with CARBON_NUMBER_INPUT_EVENT.",
+    );
+    // And nothing listens for `change` on a TIMING_FIELDS entry. Scoped to the
+    // loop that walks them, because the three text fields legitimately do:
+    // `cds-text-input` re-emits `change` composed and `cds-number-input` does
+    // not, which is the whole distinction.
+    const loop = /for \(const \[field\] of TIMING_FIELDS\) \{[\s\S]*?\n\}/.exec(
+      main,
+    );
+    assert.notEqual(loop, null, "the TIMING_FIELDS listener loop has moved");
+    assert.doesNotMatch(
+      loop?.[0] ?? "",
+      /"change"/,
+      "the arcade's twelve setup fields are saved off a `change` event, " +
+        "which a cds-number-input never fires at its host. The order and " +
+        "every timing stop reaching localStorage, silently. Measured.",
+    );
+  });
+});
+
+/*
+ * ------------------------------------------------------------------
+ * The arcade's twelve, and the component that carries their clamps
+ * ------------------------------------------------------------------
+ *
+ * `cds-number-input` is the sixth tag and the only one so far whose own
+ * stylesheet had to be argued with. These tests are what hold the three claims
+ * `carbon.ts` makes about it, each against the installed package rather than
+ * against a comment, so a version bump that invalidates one of them says so.
+ *
+ * All three are read as **text**. The enum and the stylesheet both live in
+ * `number-input.js`, which calls `customElements.define` at import time — and
+ * this repo's tests run under `node:test` with no DOM at all, so importing it
+ * would take the whole file out with a ReferenceError before anything
+ * asserted. `defs.js` for this component exports a validation-status enum and
+ * nothing else, so unlike the button, the tag and the text field there is no
+ * side-effect-free module to read the values from. Text it is, and the last
+ * test in this block is the guard against a read that found nothing.
+ */
+describe("the arcade's twelve setup fields are Carbon's number input", () => {
+  const COMPONENT = join(
+    import.meta.dirname,
+    "..",
+    "..",
+    "..",
+    "node_modules",
+    "@carbon",
+    "web-components",
+    "es",
+    "components",
+    "number-input",
+    "number-input.js",
+  );
+  const js = readFileSync(COMPONENT, "utf8");
+  /** The compiled stylesheet, which the component imports as a JS module. */
+  const sheet = readFileSync(
+    COMPONENT.replace("number-input.js", "number-input.scss.js"),
+    "utf8",
+  );
+
+  /*
+   * The clamps reach the element that enforces them. This is the whole reason
+   * the twelve could convert at all, and it is one template line.
+   *
+   * `cds-text-input` forwards no `min`, no `max` and no `step`, which is why
+   * these fields were not that component. This one writes all three onto the
+   * `<input type="number">` in its shadow root — and only in the `number`
+   * branch, which is why `inputType` has a union and why `"text"` is the value
+   * that would take them back off.
+   */
+  test("forwards min, max and step onto the inner input", () => {
+    for (const attr of ["min", "max", "step"]) {
+      assert.match(
+        js.replace(/\s+/g, " "),
+        new RegExp(
+          `${attr}="\\$\\{this\\.type === "number" \\? if_non_empty_default\\(this\\.${attr}\\) : ""\\}"`,
+        ),
+        `cds-number-input no longer forwards ${attr} to its inner <input>. ` +
+          "That is the one property that made the arcade's twelve setup " +
+          "fields convertible: without it they are clamped by nothing.",
+      );
+    }
+  });
+
+  /*
+   * And it does not re-emit `change`, which is the trap.
+   *
+   * `CDSNumberInput extends CDSTextInput`, and `CDSTextInput` binds `@change`
+   * precisely so that a composed `change` reaches the host — a native one is
+   * `composed: false` and stops at the boundary. `CDSNumberInput` replaces
+   * `render()` and binds `@input`, `@focus`, `@blur` and `@keydown` and not
+   * `@change`, so the inherited handler is never called.
+   *
+   * Written as two assertions in opposite directions, because either one alone
+   * would pass for the wrong reason: the first says the trap is still there,
+   * the second says the parent still does the thing the child fails to
+   * inherit. If the first goes red, `main.ts` can listen for `change` again
+   * and the comment there should go.
+   */
+  test("and does not re-emit `change`, which is why the save listener is not one", () => {
+    assert.doesNotMatch(
+      js,
+      /@change=/,
+      "cds-number-input now binds @change. Its save listener in main.ts " +
+        "listens for CARBON_NUMBER_INPUT_EVENT because it did not — check " +
+        "whether a composed `change` now reaches the host.",
+    );
+    const parent = readFileSync(
+      COMPONENT.replace(
+        join("number-input", "number-input.js"),
+        join("text-input", "text-input.js"),
+      ),
+      "utf8",
+    );
+    assert.match(
+      parent,
+      /@change=/,
+      "cds-text-input has stopped binding @change too. The three text fields " +
+        "on this console listen for it.",
+    );
+    assert.match(js, /static get eventInput\(\)/);
+    assert.match(js, /return `cds-number-input`/);
+  });
+
+  /*
+   * The sizes are the three the stylesheet implements, in both directions.
+   *
+   * There is no enum to hold them against — `size` is a bare reflected string
+   * with no validation — so the sheet is the only honest source: a size
+   * Carbon does not implement produces a class that matches nothing and a
+   * control at `md`'s 40px, silently, which is the `danger--tertiary` failure
+   * in a second place.
+   */
+  test("asks only for the three sizes the stylesheet implements", () => {
+    for (const size of CARBON_NUMBER_INPUT_SIZES) {
+      if (size === "md") {
+        // `md` is the component's own default and the unmodified metrics: the
+        // sheet's only `.cds--number--md` is the skeleton's block-size, and
+        // the live control gets 2.5rem from the base declaration instead.
+        // That is what makes `md` the one size `--nosteppers` works at, so the
+        // override in `carbon.ts` names no class for it.
+        assert.match(
+          js,
+          /this\.size = "md"/,
+          "cds-number-input's default size is no longer md, which is the " +
+            "size the override in carbon.ts writes no class for.",
+        );
+        for (const rule of sheet
+          .split("}")
+          .filter((r) => r.includes(".cds--number--md"))) {
+          assert.match(
+            rule,
+            /cds--skeleton/,
+            "Carbon now has a non-skeleton .cds--number--md modifier, so md " +
+              "is no longer the unmodified default and the override's " +
+              "selector for it needs that class.",
+          );
+        }
+        continue;
+      }
+      assert.ok(
+        sheet.includes(`.cds--number--${size}`),
+        `.cds--number--${size} is not in the component's stylesheet, so ` +
+          `size: "${size}" would render at the default metrics.`,
+      );
+    }
+    // The other direction, which is the half that catches a union copied from
+    // the text field's. `INPUT_SIZE` has five values and this component
+    // implements three of them.
+    for (const absent of CARBON_INPUT_SIZE_VALUES.filter(
+      (s) => !(CARBON_NUMBER_INPUT_SIZES as readonly string[]).includes(s),
+    )) {
+      assert.ok(
+        !sheet.includes(`.cds--number--${absent}`),
+        `Carbon now implements .cds--number--${absent}. ` +
+          "CARBON_NUMBER_INPUT_SIZES should grow, and the note in carbon.ts " +
+          "about the two scales not being one scale should shrink.",
+      );
+    }
+    assert.deepEqual([...CARBON_NUMBER_INPUT_SIZES], ["sm", "md", "lg"]);
+  });
+
+  test("and only the two types its template branches on", () => {
+    // The enum, read as text for the reason at the top of this block.
+    const values = [
+      ...js.matchAll(/NUMBER_INPUT_TYPE\["[A-Z]+"\] = "([a-z]+)"/g),
+    ].map((m) => m[1] as string);
+    assert.deepEqual(
+      [...values].sort(),
+      [...CARBON_NUMBER_INPUT_TYPES].sort(),
+      "carbon.ts's number-input types and Carbon's NUMBER_INPUT_TYPE have " +
+        "drifted apart.",
+    );
+    assert.ok(values.length >= 2, `the enum read as ${values.length} values`);
+  });
+
+  /*
+   * And it puts a live-region role on the element a host types into.
+   *
+   * `role="alert"` and `aria-atomic="true"` are literals in this component's
+   * template, on the `<input>`, with nothing on the host asking for them.
+   * `cds-text-input` writes neither. An explicit role replaces an element's
+   * implicit one, so a number field stops being a field.
+   *
+   * Measured in the running browser on three light-DOM inputs differing only
+   * in those two attributes: `textbox "plain probe" (number)` against
+   * `alert "alert probe" (number)`, and back to `textbox` with them removed.
+   * The name survived in all three, which is why `hide-label` and the step 3
+   * naming decision needed no revisiting; the role did not.
+   *
+   * `carbon.ts` removes both. These two assertions are what stop that removal
+   * from quietly becoming a no-op: the first says Carbon still writes them, the
+   * second says the text field still does not, so a release that fixes it
+   * upstream or breaks the other one shows up here.
+   */
+  test("and a live-region role on the input, which the factory takes back off", () => {
+    const flat = js.replace(/\s+/g, " ");
+    assert.match(
+      flat,
+      /role="alert"/,
+      "cds-number-input no longer writes role=\"alert\" onto its inner " +
+        "<input>. The removal in carbon.ts removes nothing; delete it and " +
+        "the reading beside it.",
+    );
+    assert.match(flat, /aria-atomic="true"/);
+    const parent = readFileSync(
+      COMPONENT.replace(
+        join("number-input", "number-input.js"),
+        join("text-input", "text-input.js"),
+      ),
+      "utf8",
+    );
+    assert.doesNotMatch(
+      parent.replace(/\s+/g, " "),
+      /role="alert"/,
+      "cds-text-input has started writing role=\"alert\" too. The three text " +
+        "fields on this console would need the same removal.",
+    );
+    // And there is no `aria-label` binding on either, which is what makes the
+    // shadow `<label for="input">` the only name a Carbon field has. The
+    // removal above must not be read as having anything to do with naming.
+    assert.doesNotMatch(flat, /aria-label="\$\{this\.label/);
+    /*
+     * And `carbon.ts` still takes them off.
+     *
+     * The third mutation that came back green. Emptying `unmakeLiveRegion`
+     * compiles and passes every test here, and on the running console all
+     * twelve inner `<input>`s carry `role="alert"` again — a form control
+     * announced as an assertive live region instead of a number field. The two
+     * assertions above are about Carbon's template and stay green either way,
+     * which is exactly how a removal comes to be deleted later for looking
+     * like it does nothing.
+     */
+    const door = hostSources().find(([n]) => n === CARBON_DOOR)?.[1] ?? "";
+    assert.match(
+      door,
+      /removeAttribute\("role"\)/,
+      "carbon.ts no longer removes role from a number field's inner input. " +
+        "Measured in the browser: with it left on, an <input type=number> " +
+        'reads as `alert "…" (number)` where the same input without it reads ' +
+        'as `textbox "…" (number)`.',
+    );
+    assert.match(door, /removeAttribute\("aria-atomic"\)/);
+  });
+
+  /*
+   * ---- the two values `hide-steppers` is supposed to take off ----------
+   *
+   * `carbon.ts` adopts one stylesheet into each field's shadow root, and the
+   * whole of its argument is that both declarations below are Carbon's own
+   * `--nosteppers` values, re-asserted where Carbon's cascade drops them.
+   * These are what make that argument falsifiable: if Carbon fixes either
+   * upstream, the override becomes a disagreement rather than a repair, and it
+   * should be deleted rather than kept because nothing noticed.
+   */
+  test("whose `hide-steppers` leaves a gutter at every size but md", () => {
+    const flat = sheet.replace(/\s+/g, "");
+    // The size modifier, at two classes and an attribute.
+    assert.ok(
+      flat.includes(
+        `.cds--number--sm.cds--number input[type=number]`.replace(/\s+/g, ""),
+      ),
+      "the .cds--number--sm padding rule has moved; the override in " +
+        "carbon.ts is built to out-specify exactly that selector.",
+    );
+    assert.ok(
+      flat.includes(`padding-inline-end:${CARBON_NUMBER_INPUT_SM_GUTTER}`),
+      `the sm gutter is no longer ${CARBON_NUMBER_INPUT_SM_GUTTER}.`,
+    );
+    // And the repair, at one class and an attribute — a class short of the
+    // thing it has to beat, which is the bug.
+    assert.ok(
+      flat.includes(
+        `.cds--number--nosteppers input[type=number]`.replace(/\s+/g, ""),
+      ),
+      "the .cds--number--nosteppers padding rule has moved or has gained a " +
+        "class. If it now out-specifies the size modifiers, `hide-steppers` " +
+        "works on its own and the padding half of the override in carbon.ts " +
+        "should go.",
+    );
+    // Measured in the browser, which is the only place specificity is
+    // actually resolved: sm + hide-steppers computed 16px / 80px — the same
+    // two numbers as sm *with* steppers — and md + hide-steppers computed
+    // 16px / 0px.
+  });
+
+  test("and a floor sized for steppers it is not drawing", () => {
+    const flat = sheet.replace(/\s+/g, "");
+    assert.equal(
+      (flat.match(/min-inline-size:/g) ?? []).length,
+      1,
+      "the component's stylesheet now has more than one min-inline-size. " +
+        "The override in carbon.ts is written against the one in the base " +
+        "declaration and may no longer be reaching the right one.",
+    );
+    assert.ok(
+      flat.includes(`min-inline-size:${CARBON_NUMBER_INPUT_FLOOR}`),
+      `the floor is no longer ${CARBON_NUMBER_INPUT_FLOOR}.`,
+    );
+    // The point: `--nosteppers` touches the padding and not the floor, so a
+    // field drawing no steppers keeps 150px of room for them.
+    const nosteppers = sheet
+      .split("}")
+      .filter((r) => r.includes(".cds--number--nosteppers"));
+    assert.ok(nosteppers.length > 0, "no --nosteppers rules in the sheet");
+    for (const rule of nosteppers) {
+      assert.ok(
+        !rule.includes("min-inline-size"),
+        "Carbon's --nosteppers now resets min-inline-size. The floor half " +
+          "of the override in carbon.ts should go.",
+      );
+    }
+  });
+
+  test("and the sheet and the component read as themselves", () => {
+    // Every assertion above passes trivially against an empty read, which is
+    // the failure this whole file keeps finding.
+    assert.ok(js.length > 10_000, `number-input.js read as ${js.length} bytes`);
+    assert.ok(
+      sheet.length > 10_000,
+      `number-input.scss.js read as ${sheet.length} bytes`,
+    );
+    assert.ok(js.includes("cds-number-input"), "the tag is not in the module");
+    assert.ok(sheet.includes(".cds--number"), "no .cds--number in the sheet");
   });
 });
 

@@ -151,6 +151,19 @@ const ASSET_ROOT = resolve(
 const MIME: Record<string, string> = {
   ".html": "text/html; charset=utf-8",
   ".js": "text/javascript; charset=utf-8",
+  // A vendored dependency's ESM build, where the extension is how the package
+  // distinguishes it from its CommonJS one. `@internationalized/number` —
+  // reached by `cds-number-input` through `@carbon/utilities` — serves
+  // `dist/index.mjs` to an `import` and `dist/index.cjs` to a `require`, and
+  // the `.mjs` chain continues into `dist/private/*.mjs`.
+  //
+  // Without this line and its twin in the route below, the file was outside
+  // the allow-list, `serveFile` was never reached, and the request 404'd. A
+  // failed module import takes the whole entry module with it, so `#app` had
+  // no children and the console rendered **nothing at all** — the exact
+  // failure the paragraph above this table describes, found by looking at a
+  // blank page rather than by anything throwing on this side.
+  ".mjs": "text/javascript; charset=utf-8",
   ".css": "text/css; charset=utf-8",
   ".map": "application/json; charset=utf-8",
   ".svg": "image/svg+xml",
@@ -1159,7 +1172,7 @@ function handleHttp(req: IncomingMessage, res: ServerResponse): void {
     // Any emitted module, by its own path, not just `/client/*`. The
     // extension has to be one we deliberately serve: that is what stops this
     // from becoming "serve anything that happens to be under dist".
-    if (/\.(js|css|map|svg|png|woff2)$/.test(path)) {
+    if (/\.(js|mjs|css|map|svg|png|woff2)$/.test(path)) {
       void serveFile(res, path.slice(1)).then((ok) => {
         if (!ok) json(res, 404, { error: "not_found" });
       });

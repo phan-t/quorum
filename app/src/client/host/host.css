@@ -92,13 +92,27 @@
  * Issue #28 step 3 puts four more things on Carbon: the gganbu recap's VERIFY
  * chip and the status bar's seal badge on `cds-tag`, the wipe's confirmation
  * field and the card editor's two on `cds-text-input`, and the holding step's
- * card chooser on `cds-select`. The decisions are argued beside the rules; the
- * two that are about the whole surface are here.
+ * card chooser on `cds-select`. Then the arcade's twelve setup fields on
+ * `cds-number-input`, which the step first measured as out of scope and then
+ * came back to. The decisions are argued beside the rules; the three that are
+ * about the whole surface are here.
  *
  * **Fields keep the console's label.** `hide-label` at every call site, with
  * the console's own `.label` where it already was, because Carbon's stacked
  * 12px label is ~20px of header per field and this console's panels are built
- * on a 90px label column beside the box. One decision, applied everywhere.
+ * on a 90px label column beside the box. One decision, applied everywhere, and
+ * the twelve number fields take it too.
+ *
+ * **Number fields draw no steppers.** `hide-steppers` at all twelve, and it is
+ * a width decision rather than a taste one. Carbon's `sm` stepper pair is two
+ * 32px buttons in a 64px block with 80px of inline padding reserved for it, on
+ * a field that is 112px wide — the gutter alone would be 80px of a 112px box,
+ * leaving 16px of lead-in and 16px for the digits. The arcade's three-across
+ * rows are three such fields in a row that is 157px wide at the splitter's far
+ * end. Nothing about the twelve needs a mouse-only ±1: a number field steps
+ * with the arrow keys, which is what the host's hands are already on, and the
+ * clamps bound the stepping either way. `carbon.ts` carries the figures and
+ * the one consequence of switching them off that is not free.
  *
  * **The bridge is thirteen tokens, up from four.** That is the expected shape
  * of step 3 — `cds-button` reads almost nothing from a theme and a field reads
@@ -774,17 +788,25 @@ body {
 /*
  * A field, in both of the two things one is on this surface.
  *
- * Three of the console's eighteen are `cds-text-input` since #28 step 3 and
- * fifteen are still `<input type="number">`, so this rule has to describe one
- * control in two implementations. What it keeps is the geometry — 32px, which
- * is Carbon's `sm` exactly, and the place in the `.field-row` — and what it
- * drops is the box and the corner, because Carbon draws a field as a fill with
- * one rule under it and that shape is inside a shadow root. The tags/fields
- * note above argues it.
+ * Fifteen of the console's fifteen are Carbon since #28 step 3 finished —
+ * three `cds-text-input` and the arcade's twelve `cds-number-input` — and the
+ * hand-built `.field` block survives because the scoring grid's 135 `.sc-raw`
+ * cells are step 4's and because `.field` is still what the shape is described
+ * in. What it keeps is the geometry — 32px, which is Carbon's `sm` exactly,
+ * and the place in the `.field-row` — and what it drops is the box and the
+ * corner, because Carbon draws a field as a fill with one rule under it and
+ * that shape is inside a shadow root. The tags/fields note above argues it.
  *
- * `min-width: 0` rather than nothing: `:host(cds-text-input)` is
- * `inline-size: 100%`, and a 100%-wide flex item with an auto minimum pushes
- * the 90px label column out of a narrow row.
+ * (The count in this comment used to say "three of eighteen are Carbon and
+ * fifteen are still `<input type="number">`", which is eighteen fields and
+ * fifteen numbers. There are **twelve** numbers and fifteen fields in total,
+ * on `main` and in every commit that has ever named them. Three files and a
+ * commit message carried the wrong figure; it is corrected where it appears
+ * rather than argued with.)
+ *
+ * `min-width: 0` rather than nothing: `:host(cds-text-input)` and
+ * `:host(cds-number-input)` are both `inline-size: 100%`, and a 100%-wide flex
+ * item with an auto minimum pushes the 90px label column out of a narrow row.
  *
  * --ink on --panel is 16.80:1 dark and 18.72:1 light; the 1px bottom rule is
  * --muted at 5.41:1 and 5.19:1, which is the figure the bridge records for
@@ -801,10 +823,28 @@ body {
   border-radius: 0;
   font-size: 13px;
 }
-/* A Carbon field is 32px from `--cds-layout-size-height-sm` and sets its own
-   padding, fill and rule from the bridge's tokens, so the two halves of the
-   rule above would be drawn twice. The host keeps only the layout. */
-cds-text-input.field {
+/*
+ * A Carbon field is 32px from `--cds-layout-size-height-sm` and sets its own
+ * padding, fill and rule from the bridge's tokens, so the two halves of the
+ * rule above would be drawn twice. The host keeps only the layout.
+ *
+ * `cds-number-input` is in this list and not beside it. Its inner `<input>`
+ * carries the same `background-color: var(--cds-field)` and the same
+ * `border-block-end: 1px solid var(--cds-border-strong)` as the text field's —
+ * they are one declaration in Carbon's compiled sheet, shared by both — so one
+ * reset is correct for both and two would be two places to forget one.
+ *
+ * The `padding: 0` is what the twelve needed most and is the easiest to miss.
+ * Left at the hand-built 10px it is applied to the *host*, whose content box
+ * is then 20px narrower than the box the inner input is sized against — and
+ * the inner input is `inline-size: 100%` of that narrower box but floored, so
+ * the 10px on each side showed up as 9px of the inner box hanging past the
+ * host's right edge on every `.a-cfg-cell` field. Measured before and after:
+ * a 151px cell went from a 150px inner box spilling 9px to a 151px one
+ * spilling none.
+ */
+cds-text-input.field,
+cds-number-input.field {
   height: auto;
   padding: 0;
   background: none;
@@ -1509,17 +1549,23 @@ cds-button {
  * radius. That is inside the shadow root and is the component. The console's
  * `.field` was a full 1px box with a 4px radius.
  *
- * Carbon's shape is taken, and the three unconverted shapes are brought to it
- * rather than left beside it — `.field` keeps its height, its padding and its
- * fill and loses its box and its corner. Four declarations. It is the same
+ * Carbon's shape is taken, and the shapes that are not Carbon's are brought to
+ * it rather than left beside it — `.field` keeps its height, its padding and
+ * its fill and loses its box and its corner. Four declarations. It is the same
  * move step 2 made when it drew the hand-built `.rs-arm` to a `cds-button`'s
  * measured metrics, and for the same reason: two fields of different shapes in
- * one setup panel is the seam, and fifteen of the console's eighteen fields
- * are the arcade's `type="number"` inputs, which `cds-text-input` cannot carry
- * at all. `carbon.ts` has that reading; the short version is that Carbon's
- * `INPUT_TYPE` has no `number` and its template forwards no `min` or `max`, so
- * converting them would drop both clamps silently, and `cds-number-input` is a
- * different component with two stepper buttons and a dependency of its own.
+ * one setup panel is the seam.
+ *
+ * The twelve the arcade's setup panel is built on are now Carbon's too, on
+ * `cds-number-input` rather than `cds-text-input` — which is a different
+ * element and was step 3's scope boundary until it was not. Carbon's
+ * `INPUT_TYPE` still has no `number` and `cds-text-input` still forwards
+ * neither clamp, so that reading has not changed; what changed is that the
+ * component for the job turns out to carry `min`, `max` and `step` all the way
+ * onto the inner `<input type="number">`. `carbon.ts` has that template line,
+ * the clamps' exact strength, and the two things the conversion cost: the
+ * `change` event, which this component does not re-emit, and 150px of inline
+ * floor that the no-stepper case does not need.
  *
  * ---- 6. The density, and what Carbon decides for itself ---------------
  *
@@ -1527,11 +1573,17 @@ cds-button {
  * the buttons: 8px of inline padding against the console's 10px. A field has
  * no icon gutter, so this is symmetric and costs no width.
  *
- * `inline-size: 100%` is on `:host(cds-text-input)` and `:host(cds-select)`,
- * so a field fills its `.field-row` the way `flex: 1` used to. The rules below
- * keep the `flex` declarations anyway, because `.field-row` is a flex
- * container and a 100%-wide flex item still needs `min-width: 0` not to push
- * its label out.
+ * A number field's inline padding is not that token at all: the component's
+ * sheet writes `padding-inline: 1rem 6rem` as a literal, and `hide-steppers`
+ * takes the second half to 0. So the twelve are 16px of lead-in where the
+ * other three are 8px, and that is a Carbon decision this file cannot reach
+ * and #28 step 5 can argue about with the rest of the type and spacing.
+ *
+ * `inline-size: 100%` is on `:host(cds-text-input)`, `:host(cds-select)` and
+ * `:host(cds-number-input)`, so a field fills its `.field-row` the way
+ * `flex: 1` used to. The rules below keep the `flex` declarations anyway,
+ * because `.field-row` is a flex container and a 100%-wide flex item still
+ * needs `min-width: 0` not to push its label out.
  *
  * ---- 7. `cds-toggle` has no site on this console ----------------------
  *
@@ -1567,7 +1619,8 @@ cds-tag {
 }
 
 cds-text-input,
-cds-select {
+cds-select,
+cds-number-input {
   --cds-layout-density-padding-inline: var(
     --cds-layout-density-padding-inline-condensed
   );
@@ -1578,6 +1631,54 @@ cds-select {
      white, which is 1.8:1 on --panel. */
   --cds-button-disabled: var(--line);
   --cds-text-disabled: var(--muted);
+}
+
+/*
+ * What a number field reads that the other two do not, and what it does not
+ * need.
+ *
+ * The two invalid colours. `cds-number-input` is the only Carbon control on
+ * this console that can go invalid on its own: `_getInputValidity()` range-
+ * checks the value against `min` and `max` on every update, and an
+ * out-of-range value puts `data-invalid` on the wrapper and on the inner
+ * input and renders a warning glyph filled from `--cds-support-error`.
+ * Carbon's g100 value for it is #da1e28, which is the Carbon red the danger
+ * buttons were taken off in favour of `--danger` four blocks up — and this is
+ * the same seam: a field that goes red eight pixels from a button that goes a
+ * different red, on a panel the host is reading at a glance.
+ *
+ * Measured on the running console with 999 typed into the `max="60"`
+ * seconds-per-item field and the caret taken out: the glyph's computed `fill`
+ * is `rgb(248, 59, 57)`, which is `--danger` #f83b39. --danger on --panel is
+ * 4.86:1 dark and 4.93:1 light, over the 4.5 floor.
+ *
+ * What does **not** paint is Carbon's 2px error outline on the box, and it is
+ * recorded here rather than chased. The rule exists, it is `.cds--number[data-
+ * invalid] input[type=number]:not(:focus)` at a specificity that should beat
+ * the base `outline: 2px solid transparent`, the element matches it by
+ * `matches()`, `--cds-support-error` resolves to the product red — and the
+ * computed `outline-color` is `rgba(0, 0, 0, 0)` anyway. Tested by adopting a
+ * sheet with that exact selector and `outline-color: lime` last into the
+ * shadow root: still transparent, so the selector is not matching at paint
+ * time and this is Carbon's cascade rather than anything the bridge can reach.
+ * The glyph is the signal either way.
+ *
+ * All of this is new behaviour rather than a translation: the hand-built
+ * fields were `:invalid` and `:out-of-range` at exactly the same moments and
+ * nothing in this file styled either, so a 999 in the `max="60"` seconds field
+ * looked no different from a 20. It is Carbon's one clear improvement on the
+ * twelve and it is worth having in the product's red.
+ *
+ * `--cds-icon-primary` is NOT set here. It is the stepper glyphs' colour, and
+ * with `hide-steppers` at all twelve call sites there are no stepper glyphs —
+ * see `carbon.ts` for why they are off, which is a width argument. The select's
+ * chevron reads the same token and takes it from the generated block, where it
+ * is Carbon's #f4f4f4 dark and #161616 light; naming it here would recolour
+ * that chevron from a rule about number fields.
+ */
+cds-number-input {
+  --cds-support-error: var(--danger);
+  --cds-text-error: var(--danger);
 }
 
 /*
@@ -2416,6 +2517,21 @@ cds-select {
 .a-cfg[hidden] {
   display: none;
 }
+/*
+ * 7rem, kept across the conversion, which took measuring to keep.
+ *
+ * A `cds-number-input` declares `min-inline-size: 9.375rem` — 150px — on the
+ * `<input>` in its shadow root, in the same declaration as the 96px of
+ * stepper gutter the 150px exists to hold. `hide-steppers` removes the gutter
+ * and leaves the floor, so an unconverted 112px field became a 112px host with
+ * a 150px box inside it, hanging 38px past its own right edge. `carbon.ts`
+ * has the measurements, both halves of the override, and why the override is
+ * scoped to the no-stepper case.
+ *
+ * With the floor gone the box is the host again and this number means what it
+ * meant: a number field that stretches the width of the panel is a number
+ * field the eye has to travel across on a row it has already read.
+ */
 .field-num {
   width: 7rem;
 }

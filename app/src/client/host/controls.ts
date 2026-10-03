@@ -126,13 +126,25 @@ function isButtonTag(tagName: string): boolean {
  * that is missing a word.
  *
  * The console's own fields are safe because a native `<input>` *is* the event
- * target. #28 step 3 converted three of them, and step 4 converts the scoring
- * grid's hundred and thirty-five, so this is the line that has to be right
- * before that step rather than after it.
+ * target. #28 step 3 converted three of them and then the arcade's twelve, and
+ * step 4 converts the scoring grid's hundred and thirty-five, so this is the
+ * line that has to be right before that step rather than after it.
  *
  * `CDS-SELECT` is here for the same retargeting and a smaller consequence: a
  * space on a focused native `<select>` opens the list, and the console must not
  * take that key either.
+ *
+ * `CDS-NUMBER-INPUT` is the arcade's twelve setup fields, and it is a *third*
+ * tag rather than a case the first two already covered — which is the whole
+ * reason this is a list of tag names and not a check for a hyphen. A Carbon
+ * number field retargets identically: `delegatesFocus: true`, the `<input>` in
+ * a shadow root, `event.target` on a document listener is the host. Measured
+ * with the tag removed and the client rebuilt, below.
+ *
+ * Twelve number fields is twelve places a host types a two-digit number into a
+ * panel headed by the button that starts the round, and a space that pressed
+ * the primary instead of landing in the field would announce the round the
+ * host was still setting up.
  */
 function isFieldTag(tagName: string): boolean {
   return (
@@ -140,7 +152,8 @@ function isFieldTag(tagName: string): boolean {
     tagName === "TEXTAREA" ||
     tagName === "SELECT" ||
     tagName === "CDS-TEXT-INPUT" ||
-    tagName === "CDS-SELECT"
+    tagName === "CDS-SELECT" ||
+    tagName === "CDS-NUMBER-INPUT"
   );
 }
 
