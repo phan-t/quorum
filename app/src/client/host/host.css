@@ -86,6 +86,36 @@
  *
  * Every figure here is WCAG 2.x sRGB relative luminance, computed rather than
  * eyeballed, as the rest of this file's are.
+ *
+ * ---- Step 3: tags, fields, the one picker, and the bridge's growth ---
+ *
+ * Issue #28 step 3 puts four more things on Carbon: the gganbu recap's VERIFY
+ * chip and the status bar's seal badge on `cds-tag`, the wipe's confirmation
+ * field and the card editor's two on `cds-text-input`, and the holding step's
+ * card chooser on `cds-select`. The decisions are argued beside the rules; the
+ * two that are about the whole surface are here.
+ *
+ * **Fields keep the console's label.** `hide-label` at every call site, with
+ * the console's own `.label` where it already was, because Carbon's stacked
+ * 12px label is ~20px of header per field and this console's panels are built
+ * on a 90px label column beside the box. One decision, applied everywhere.
+ *
+ * **The bridge is thirteen tokens, up from four.** That is the expected shape
+ * of step 3 — `cds-button` reads almost nothing from a theme and a field reads
+ * a great deal — but seven of the nine new ones are not a colour decision at
+ * all. `--cds-field`, `--cds-border-strong`, `--cds-layer` and four relations
+ * of theirs are *layer-context aliases*, which Carbon declares in
+ * `@carbon/styles` under `.cds--layer-one, :root`. That rule is compiled into
+ * each component's shadow-root stylesheet, where `:root` matches nothing, and
+ * this console does not load `@carbon/styles`. So the aliases were undefined,
+ * `var()` with no fallback is invalid at computed-value time, and a
+ * `cds-text-input` rendered with `background-color: transparent` and
+ * `border-block-end-style: none` — text and a caret on the panel, no field.
+ * Measured in the browser. `carbon-tokens.css` has the whole reading and every
+ * figure.
+ *
+ * Nothing in this file's dark-theme table moved: the bridge still points
+ * Carbon at the console's surfaces and `tokens.css` is untouched.
  */
 
 body {
@@ -166,24 +196,72 @@ body {
   color: var(--muted);
   letter-spacing: 0.1em;
 }
+/*
+ * The one badge on the console, and a `cds-tag size="sm"` since #28 step 3.
+ *
+ * It is the right component for the same reason the VERIFY chip is: a word in
+ * a box, never pressed, with three states it says in colour *and* in shape —
+ * the ● and the ■ are in the text, so none of the three is colour alone.
+ * Carbon's tag has no `aria` of its own and needs none.
+ *
+ * The three states are the two tag tokens, which is what makes them one
+ * vocabulary rather than a `background` here and a `color` there: Carbon
+ * paints a tag's fill from `--cds-tag-background-gray` and its label from
+ * `--cds-tag-color-gray`, and both are inheritable, so a state is two
+ * declarations and the `border` follows the fill where the state is filled.
+ *
+ * Carbon's box, the console's type. 18px against the 21px this was, and a 12px
+ * label against 13px — both on the console's own scale, and 12px is the size
+ * the status bar's neighbours already use. The weight and the tracking are
+ * kept, because they are declared on `:host(cds-tag)` through the
+ * `--cds-label-01-*` family and a document rule on the host reaches them;
+ * `.mono` is on the host too, and `cds-tag` sets no `font-family`.
+ *
+ * The fill is `transparent` rather than `--panel-2`, so the label sits on the
+ * status bar's own `--panel`. Contrast, computed, dark then light:
+ *
+ *   live       --live on --panel             9.10   4.87   AA
+ *   revealed   --terraform-ink on --panel    4.97   6.51   AA
+ *   default    --ink on --panel             16.80  18.72   AA
+ *   sealed     --sealed fill on --panel     12.38   4.83   non-text, clears 3
+ *   sealed     #2a2205 label on --sealed    10.68   3.13   ** under 4.5 light
+ *   revealed   --terraform edge on --panel   2.92   6.01   ** under 3 dark
+ *   default    --line edge on --panel        1.33   1.25   ** under 3
+ *
+ * The three starred rows are **unchanged from `main`** — the same colours on
+ * the same surfaces, with the mechanism moved from a `color`/`background` pair
+ * to the two tag tokens — and they are stated rather than fixed because every
+ * one of them is a palette decision rather than a component one.
+ *
+ *   The sealed label at 3.13:1 light is the worst of the three and the only
+ *   one carrying a word. `--sealed` is `--vault-ink`, which light resolves to
+ *   #926700, and #2a2205 was chosen against the dark #ffcf25 where it is
+ *   10.68:1. The repair is a light-theme label colour, and `--sealed` is in
+ *   `shared/tokens.css` where two unmigrated surfaces read it, so it is #28
+ *   step 6's and DESIGN.md's rather than this file's.
+ *
+ *   The two edges are non-text at a 3:1 floor and neither is the only way the
+ *   state is said: all three states carry a shape glyph in the text and a
+ *   label that names them in words, which is what keeps none of this colour
+ *   alone.
+ */
 .sb-seal {
   margin-left: auto;
   letter-spacing: 0.18em;
   font-weight: 600;
-  padding: 3px 10px;
-  border-radius: 0;
-  border: 1px solid var(--line);
+  --cds-tag-background-gray: transparent;
+  --cds-tag-color-gray: var(--ink);
 }
 .sb-seal[data-seal="live"] {
-  color: var(--live);
+  --cds-tag-color-gray: var(--live);
 }
 .sb-seal[data-seal="sealed"] {
-  color: #2a2205;
-  background: var(--sealed);
+  --cds-tag-background-gray: var(--sealed);
+  --cds-tag-color-gray: #2a2205;
   border-color: var(--sealed);
 }
 .sb-seal[data-seal="revealed"] {
-  color: var(--terraform-ink);
+  --cds-tag-color-gray: var(--terraform-ink);
   border-color: var(--terraform);
 }
 /* Sealed is loud. */
@@ -693,17 +771,55 @@ body {
   flex: none;
   font-size: 11px;
 }
+/*
+ * A field, in both of the two things one is on this surface.
+ *
+ * Three of the console's eighteen are `cds-text-input` since #28 step 3 and
+ * fifteen are still `<input type="number">`, so this rule has to describe one
+ * control in two implementations. What it keeps is the geometry — 32px, which
+ * is Carbon's `sm` exactly, and the place in the `.field-row` — and what it
+ * drops is the box and the corner, because Carbon draws a field as a fill with
+ * one rule under it and that shape is inside a shadow root. The tags/fields
+ * note above argues it.
+ *
+ * `min-width: 0` rather than nothing: `:host(cds-text-input)` is
+ * `inline-size: 100%`, and a 100%-wide flex item with an auto minimum pushes
+ * the 90px label column out of a narrow row.
+ *
+ * --ink on --panel is 16.80:1 dark and 18.72:1 light; the 1px bottom rule is
+ * --muted at 5.41:1 and 5.19:1, which is the figure the bridge records for
+ * --cds-border-strong and the reason it is not --line.
+ */
 .field {
   flex: 1;
+  min-width: 0;
   height: 32px;
   padding: 0 10px;
   background: var(--panel);
-  border: 1px solid var(--line);
-  border-radius: 4px;
+  border: 0;
+  border-bottom: 1px solid var(--muted);
+  border-radius: 0;
   font-size: 13px;
 }
+/* A Carbon field is 32px from `--cds-layout-size-height-sm` and sets its own
+   padding, fill and rule from the bridge's tokens, so the two halves of the
+   rule above would be drawn twice. The host keeps only the layout. */
+cds-text-input.field {
+  height: auto;
+  padding: 0;
+  background: none;
+  border: 0;
+}
+/* The console's focus state was a border colour. Carbon's is a 2px inset
+   outline in `--cds-focus`, which the bridge points at `--action` — 3.61:1 on
+   --panel dark and 4.86:1 light, over the 3:1 floor — so a Carbon field and a
+   Carbon button are focused in one colour and one shape. The hand-built
+   fields keep the border form, because an outline inside a box that has no
+   box is nothing.
+   `:focus` on the host works: `delegatesFocus` makes the host match while
+   focus is inside it, so the hand-built rule needs no Carbon spelling. */
 .field:focus {
-  border-color: var(--ibm-blue);
+  border-bottom-color: var(--ibm-blue);
 }
 /* Flush with the panel, like everything else in it.
    It used to be indented 102px — the 90px label column plus its 12px gap — so
@@ -1140,13 +1256,25 @@ body {
 
 /* ---- one corner ------------------------------------------------------
  *
- * Carbon's `border-radius: 0` cannot be overridden from outside a shadow root
- * — measured in #28's spike, with both the property and `--cds-border-radius`
- * set on the host — so every Carbon control on this console is square. The
+ * A `cds-button`'s radius cannot be overridden from outside its shadow root —
+ * measured in #28's spike, with both the property and `--cds-border-radius`
+ * set on the host — so every Carbon button on this console is square. The
  * hand-built controls that are left have been squared to match: the phase
  * rail's segments, the copy buttons, the roster and setup micro-buttons, the
- * shortcut keys and their caps, the round picker's tiles, the seal chip and
- * the grid's clear button. Ten rules.
+ * shortcut keys and their caps, the round picker's tiles and the grid's clear
+ * button.
+ *
+ * Step 3 found that this is a fact about `cds-button` and not about Carbon,
+ * and the difference is where the box is drawn. A button's box is on the
+ * `<button>` inside the shadow root, which nothing in the document can reach.
+ * A `cds-tag`'s box is the **host** — its template is a label span with a slot
+ * in it and nothing else — so `border-radius: 1rem`, which is the 16px pill
+ * Carbon v11 tags are, is declared on `:host(cds-tag)` and a document rule on
+ * a host beats it. Measured on the running console: 16px with the console's
+ * declaration taken back out, 0px with it in. The chips are
+ * square by choice, and the tags/fields note below is where the choice is
+ * argued. A `cds-text-input` has no radius to argue about: Carbon draws a
+ * field as a fill with one rule along the bottom.
  *
  * What keeps its radius is everything that is not a control: the phone frame,
  * the four proportional bars, the panels and the cards. #28 leaves those
@@ -1230,9 +1358,12 @@ body {
  * Everything Carbon reads, set once on the element it has to be set on.
  *
  * `cds-button` and not `#app`, because these are component tokens: scoping
- * them to the page would also hand them to a `cds-tag` or a `cds-text-input`
- * in step 3, which have their own disabled and density rules and should get
- * their own decision rather than this one by inheritance.
+ * them to the page would also hand them to a `cds-tag` or a `cds-text-input`,
+ * which have their own disabled and density rules and should get their own
+ * decision rather than this one by inheritance. Step 3 landed all three and
+ * the rule held — the block below sets the same two disabled tokens again, on
+ * the two elements that read them, with the same figures and a different
+ * reason for being there.
  *
  *   density    see the gutter note above.
  *   disabled   `--cds-button-disabled` is the border of a disabled tertiary
@@ -1257,6 +1388,196 @@ cds-button {
   --cds-button-disabled: var(--line);
   --cds-text-disabled: var(--muted);
   --cds-text-on-color-disabled: var(--muted);
+}
+
+/* ---------------------------------------------- tags, fields, picker --
+ *
+ * Issue #28 step 3. Three more Carbon elements, and the two shape questions
+ * the issue said to decide once and apply everywhere rather than discover.
+ *
+ * ---- 1. The chip is square, and that *is* reachable ------------------
+ *
+ * The one-corner note above says Carbon's radius cannot be overridden from
+ * outside a shadow root. That was measured on `cds-button`, where it is true
+ * and where the radius is on the inner `<button>`. It is not a fact about
+ * Carbon.
+ *
+ * `cds-tag` has no inner box: its template is a `<span class="cds--tag__
+ * label">` with a slot in it, and the chip *is* the host. So `border-radius:
+ * 1rem` — a 16px pill, which is what Carbon v11 tags are — is declared on
+ * `:host(cds-dismissible-tag), :host(cds-tag)`, and a document rule on a host
+ * beats a `:host` rule. Measured on the running console by removing this one
+ * declaration through the CSSOM and reading the chip again: **16px** Carbon's
+ * way, 0px with the rule.
+ *
+ * So the decision is a decision rather than a constraint, and it goes the way
+ * step 2 went: square. Every control on this surface has one corner, ten
+ * hand-built ones were squared to get it, and a 16px pill eight pixels from a
+ * square 32px button is the seam this branch has spent two commits closing.
+ * What keeps its radius is still everything that is not a control.
+ *
+ * The same mechanism reaches the rest of the chip's box, because all of it is
+ * on the host: `min-block-size` through `--cds-layout-size-height-sm`,
+ * `padding-inline`, `min-inline-size`, `max-inline-size`, and the label's
+ * size, weight and tracking through the four `--cds-label-01-*` properties.
+ * Almost nothing about a `cds-tag` is out of reach, which is the opposite of
+ * `cds-button` and worth knowing before step 4.
+ *
+ * ---- 2. The size is Carbon's, and the type is a cost ------------------
+ *
+ * `size="sm"` is 18px with a 12px `label-01` label. The console's VERIFY chip
+ * was 14.5px with a 10px label, and the seal badge 21px with a 13px one.
+ *
+ * Carbon's scale is kept and the console's is not pushed through
+ * `--cds-label-01-font-size`, for the reason step 2 left `.ctl-row`
+ * hand-built: going off a component's own scale in two tokens at once — the
+ * height and the type — is where the system starts fighting, and #28 step 5 is
+ * the branch that owns the type question for the whole surface. Nothing here
+ * pre-empts it.
+ *
+ * The cost of that is real and is stated rather than hidden: VERIFY is 12px
+ * beside an 11px answer, so the flag is now fractionally the largest thing on
+ * a gganbu recap row, where the note above `.a-gganbu-answer` says the answer
+ * is what should read first. A/B'd in place at 1280px against the `<span>` it
+ * replaced, with the recap's six rows all flagged:
+ *
+ *                    main          Carbon
+ *   the chip         53.72 × 15.5  68.56 × 18
+ *   one row          17.84         19.00
+ *   all six rows    107.06        114.00
+ *
+ * Seven pixels across the recap, in a panel with room. If #28 step 5 chooses
+ * the console's 13/11, the hierarchy inverts back for free.
+ *
+ * ---- 3. Carbon's grey is not available, for step 2's reason -----------
+ *
+ * A `gray` tag — the default type — reads exactly two tokens, and both are
+ * inheritable, so they are set here rather than in the bridge: a component
+ * token on `:root` would be handed to every component that reads it, which is
+ * the rule the `cds-button` block above is written to.
+ *
+ * `--cds-tag-background-gray` is #525252 dark. That is not a surface this
+ * console has, and it is the same objection step 2 made to `--cds-layer-02`
+ * #393939 only further along: the four product inks derived at the 4.5:1 floor
+ * on `--panel-2` measure 2.4 to 2.7:1 on #525252, so a #525252 chip is an
+ * island nothing else on the console can sit beside. Carbon's own label on it
+ * is fine — #f4f4f4 on #525252 is 7.10:1 — but a chip whose *only* legible
+ * foreground is Carbon's own is a chip outside the palette.
+ *
+ * So the chip takes `--panel-2` and `--ink`, which is the elevation the
+ * console already has above a panel, and a 1px `--line` edge is drawn on the
+ * host because Carbon sets `border: 0` on a plain tag and `--panel-2` on
+ * `--ground` is 1.18:1 — a fill that cannot hold a chip on its own. That edge
+ * is the shape the VERIFY chip already had.
+ *
+ *   --ink on --panel-2       15.31:1 dark, 17.44:1 light   AA, text
+ *   --panel-2 on --ground     1.18:1 dark,  1.12:1 light   under 3:1
+ *   --line on --panel-2       1.21:1 dark,  1.17:1 light   under 3:1
+ *
+ * The last two are under the 3:1 non-text floor and are the figures the
+ * hand-built chip had — `.a-gganbu-verify` was a `--line` box on the panel on
+ * `main` and measures the same. A static chip is not a user interface
+ * component whose boundary conveys state; what it carries is a word, and the
+ * word clears 4.5:1 with room. Recorded rather than tuned, because tuning it
+ * is a palette decision for DESIGN.md and not one three chips get to take.
+ *
+ * ---- 4. Fields keep the console's label, and all of them do -----------
+ *
+ * `hide-label` everywhere, with the console's own `.label` where it already
+ * was. One decision, applied to all three converted fields and the picker,
+ * because half-and-half is what reads as bolted on.
+ *
+ * Carbon's own form is a 12px label stacked above the box with 8px under it:
+ * ~20px of header per field. The console's fields sit in a `.field-row` with a
+ * 90px label column beside them, which is what makes a panel of six settings
+ * six rows instead of twelve, and what keeps the control panel usable at the
+ * splitter's narrowest. The wipe's label is not a field label at all — it is
+ * the sentence "Type restart to switch the button on", which Carbon's 12px
+ * label cannot hold and which has to stay beside the field it is instructing.
+ *
+ * `hide-label` is Carbon's own property for "the label is provided elsewhere",
+ * not a workaround: the label still renders, into `.cds--visually-hidden`, and
+ * it is still the `<label for="input">` that gives the inner `<input>` its
+ * accessible name. That name is the *only* one a Carbon field can have — see
+ * `carbon.ts` — so hiding Carbon's label is what keeps the name and the
+ * console's layout at the same time.
+ *
+ * ---- 5. A field is Carbon's shape, and so is the hand-built one -------
+ *
+ * Carbon draws a field as a fill with one rule along the bottom:
+ * `border: none`, `border-block-end: 1px solid var(--cds-border-strong)`, no
+ * radius. That is inside the shadow root and is the component. The console's
+ * `.field` was a full 1px box with a 4px radius.
+ *
+ * Carbon's shape is taken, and the three unconverted shapes are brought to it
+ * rather than left beside it — `.field` keeps its height, its padding and its
+ * fill and loses its box and its corner. Four declarations. It is the same
+ * move step 2 made when it drew the hand-built `.rs-arm` to a `cds-button`'s
+ * measured metrics, and for the same reason: two fields of different shapes in
+ * one setup panel is the seam, and fifteen of the console's eighteen fields
+ * are the arcade's `type="number"` inputs, which `cds-text-input` cannot carry
+ * at all. `carbon.ts` has that reading; the short version is that Carbon's
+ * `INPUT_TYPE` has no `number` and its template forwards no `min` or `max`, so
+ * converting them would drop both clamps silently, and `cds-number-input` is a
+ * different component with two stepper buttons and a dependency of its own.
+ *
+ * ---- 6. The density, and what Carbon decides for itself ---------------
+ *
+ * `--cds-layout-density-padding-inline` at Carbon's named `condensed`, as on
+ * the buttons: 8px of inline padding against the console's 10px. A field has
+ * no icon gutter, so this is symmetric and costs no width.
+ *
+ * `inline-size: 100%` is on `:host(cds-text-input)` and `:host(cds-select)`,
+ * so a field fills its `.field-row` the way `flex: 1` used to. The rules below
+ * keep the `flex` declarations anyway, because `.field-row` is a flex
+ * container and a 100%-wide flex item still needs `min-width: 0` not to push
+ * its label out.
+ *
+ * ---- 7. `cds-toggle` has no site on this console ----------------------
+ *
+ * #28 step 3 says "`cds-select` / `cds-toggle` where the console has a
+ * `<select>` or a switch". There is one `<select>` and there is no switch.
+ * Searched: no `input[type=checkbox]`, no `role="switch"`, nothing in
+ * `src/client` that is a two-state form control.
+ *
+ * What the console has instead is three `aria-pressed` buttons — the In/Out
+ * chips, driving mode's shortcut key, and a `control()` whose `.on` state is
+ * Carbon's filled `primary` kind — and one three-state control, the theme
+ * toggle, which `cds-toggle` cannot express at all: it is a boolean, and
+ * `shared/theme.ts` says in its own words why "auto" is a real choice and a
+ * two-way switch cannot hold it. That file is also loaded by the participant
+ * and Desktop surfaces and is out of this migration's scope.
+ *
+ * A toggle built to replace an `aria-pressed` button would be the In/Out
+ * conversion's mistake in a different component: a switch announces on/off
+ * where a pressed button announces pressed, and "In the runbook" is a property
+ * of the row rather than a setting. Not converted, and the 5 modules and 11 KB
+ * gzipped it would cost are not spent.
+ */
+cds-tag {
+  /* Carbon's `gray`, in the console's palette. See 3 above. */
+  --cds-tag-background-gray: var(--panel-2);
+  --cds-tag-color-gray: var(--ink);
+  /* Square, and it lands because the chip is the host. See 1 above. */
+  border-radius: 0;
+  /* Carbon sets `border: 0` on a plain tag, and a 1.18:1 fill cannot hold a
+     chip on its own. */
+  border: 1px solid var(--line);
+  vertical-align: baseline;
+}
+
+cds-text-input,
+cds-select {
+  --cds-layout-density-padding-inline: var(
+    --cds-layout-density-padding-inline-condensed
+  );
+  /* A disabled field, said in colour as `cds-button` says it — the same two
+     tokens, the same figures: --line on the edge, --muted on the label, 4.94:1
+     dark and 4.83:1 light on --panel-2. Nothing on this console disables a
+     field today; the day something does, it must not be Carbon's 25%-alpha
+     white, which is 1.8:1 on --panel. */
+  --cds-button-disabled: var(--line);
+  --cds-text-disabled: var(--muted);
 }
 
 /*
@@ -1420,7 +1741,41 @@ cds-button {
   flex: none;
 }
 
-/* Refusals live in the button that caused them, for three seconds. */
+/*
+ * Refusals live in the button that caused them, for three seconds.
+ *
+ * `cds-inline-notification` was evaluated for this in #28 step 3 and is not
+ * it, and the reason is shape rather than taste. `.ctl-flash` measured in the
+ * running console, the notification read out of its own compiled stylesheet:
+ *
+ *                      .ctl-flash               cds-inline-notification
+ *   box                260 × 27 in the tray,    min-block-size 3rem = 48px,
+ *                      as wide as the words     min-inline-size 18rem = 288px,
+ *                      to a 340px cap           inline-size 100%
+ *   edge               1px all round, --danger  3px bar on the leading edge
+ *                                               only, --cds-support-error
+ *   fill               none                     --cds-background-inverse
+ *   dismiss            three seconds            a 48 × 48 close button
+ *   structure          one line of 11px mono    title + subtitle + an icon
+ *
+ * The console's rule is that a refusal appears *in the control that caused
+ * it*: `control()` replaces the button's own contents with the sentence and
+ * puts the button back three seconds later. Measured, that takes the control's
+ * row from 32px to 27px — it shrinks. A 48px box with a 288px floor cannot be
+ * in a 32px button at all, and in the tray's 191px of content it would be
+ * wider than the column it is in. In the arcade's seven-control strip it would
+ * move the other six while the host reads why one of them refused.
+ *
+ * And the close button is the wrong promise twice over: it offers to dismiss
+ * something that dismisses itself, and it puts a focusable control under the
+ * cursor at the moment the host is about to press the thing they just pressed.
+ *
+ * `role="status"` is already on the span, so the sentence is announced once
+ * and nothing steals focus — which is the half of the notification the console
+ * actually wanted and the half it already had. Kept hand-built, and the module
+ * is not vendored: crawled from the entry point, it is 9 more modules, 128 KB
+ * raw and 16 KB gzipped for a shape this surface has no place for.
+ */
 .ctl-flash {
   font-family: var(--mono);
   font-size: 11px;
@@ -2204,13 +2559,16 @@ cds-button {
   font-weight: 600;
   color: var(--arc-players);
 }
+/* The flag: which of the six notes to re-check before saying anything. A
+   `cds-tag size="sm"` since #28 step 3 — a static chip with a word in it is
+   what `cds-tag` is — so the box, the 18px height and the 12px label are
+   Carbon's and the palette is the console's, from the `cds-tag` block above.
+   What is left here is the tracking, which is the console's and not Carbon's:
+   0.1em, the same as the answer beside it, because the two are read together.
+   Measured at 68.56 × 18, clear of Carbon's own 32px `min-inline-size`.
+   --ink on --panel-2 is 15.31:1 dark and 17.44:1 light. */
 .a-gganbu-verify {
-  font-size: 10px;
   letter-spacing: 0.1em;
-  padding: 0 0.3rem;
-  border: 1px solid var(--line);
-  border-radius: 3px;
-  color: var(--ink);
 }
 /* The one sentence that says which notes to check, above the counts. Not
    muted: it is an instruction, and the only one on this panel. */
@@ -2446,9 +2804,17 @@ cds-button {
   color: var(--danger);
 }
 
-/* Which card a holding step shows. A native select, so it is keyboard
-   operable everywhere without this file reimplementing one. --ink on --panel
-   is 16.80:1 dark and 18.72:1 light. */
+/* Which card a holding step shows. A `cds-select` since #28 step 3, and still
+   a native `<select>` — Carbon renders one into its shadow root and clones
+   each `cds-select-item` into an `<option>` — so it is still the one widget on
+   this page that is keyboard-operable everywhere without this file
+   reimplementing it. The fill, the rule and the ink come from the bridge, as a
+   field's do; --ink on --panel is 16.80:1 dark and 18.72:1 light.
+   26px, which this was, is not on Carbon's input scale: the two sizes either
+   side are `sm` 32px and `xs` 24px. `sm` is taken, because the row this sits
+   in has a 32px field above it in the card editor and a 6px difference between
+   two controls doing the same job is the kind of thing #28 calls an accretion.
+   The row grows 6px per holding step, measured. */
 .rb-card-row {
   display: flex;
   align-items: center;
@@ -2460,12 +2826,6 @@ cds-button {
   flex: 1;
   min-width: 0;
   max-width: 260px;
-  height: 26px;
-  padding: 0 6px;
-  background: var(--panel);
-  border: 1px solid var(--line);
-  border-radius: 3px;
-  color: var(--ink);
   font-size: 13px;
 }
 .rb-card:focus {
@@ -2648,6 +3008,42 @@ cds-button {
   color: var(--dim);
   cursor: default;
 }
+/*
+ * In / Out, and the one conversion #28 step 3 named and did not make.
+ *
+ * Step 2's inventory of what was left hand-built called these "the In/Out
+ * chips (`cds-tag`, step 3)". They stay hand-built `<button aria-pressed>`s,
+ * and the reason is the reason the two disclosures came back in this branch's
+ * third commit: Carbon's template does not carry the state.
+ *
+ * A `cds-tag` is not interactive and has no pressed state at all. The two that
+ * are — `cds-selectable-tag` and `cds-operational-tag` — both bind it as
+ *
+ *     <cds-tag ?aria-pressed="${selected}" …>
+ *
+ * which is Lit's *boolean attribute* binding: when `selected` is false the
+ * attribute is removed outright rather than written `"false"`. For
+ * `aria-pressed` those are not the same thing — absent means "not a toggle at
+ * all" — so an Out chip would announce as a button with no state, which is
+ * exactly half of what this control is for. Read in
+ * `tag/selectable-tag.js@2.64.0` and `tag/operational-tag.js`.
+ *
+ * And the element that would take focus is not a button. Both wrappers set
+ * `role="button"` and a `tabIndex` on the inner `cds-tag` in `updated()`, so
+ * the focusable thing is a custom element standing in for a button, on a
+ * console whose accessibility accounting is "36 real buttons, zero divs with
+ * handlers".
+ *
+ * The payload says the same thing from the other side: crawled from the entry
+ * point, `selectable-tag.js` is 16 more modules and 36 KB gzipped — it pulls
+ * `cds-tooltip` and therefore `@floating-ui/dom` — and two of its specifiers,
+ * `@floating-ui/core` and `@floating-ui/utils`, are not in
+ * `copy-client-assets.mjs`'s table, so the build refuses it rather than
+ * shipping a chip that 404s.
+ *
+ * So: 11px mono, square, `--panel` on `--line`, `--nomad` on the edge when in.
+ * --ink on --panel is 16.80:1 dark and 18.72:1 light.
+ */
 .a-setup-in {
   background: var(--panel);
   border: 1px solid var(--line);
@@ -3007,11 +3403,21 @@ body.driving .cols {
   font-weight: 600;
   letter-spacing: 0.08em;
 }
-/* --panel would be invisible against the panel this sits on. */
+/* --panel would be invisible against the panel this sits on, so the field
+   takes --ground — which for a Carbon field is `--cds-field` rather than a
+   `background`, because the fill is painted on the `<input>` inside the shadow
+   root and a background on the host sits behind it. The edge moves with it:
+   --muted on --ground is 5.84:1 dark and 5.42:1 light.
+   `width` on the host, because `:host(cds-text-input)` is `inline-size: 100%`
+   and this is the one field on the console with a fixed width. */
 .rs-field {
   flex: none;
   width: 160px;
+  --cds-field: var(--ground);
   background: var(--ground);
+}
+cds-text-input.rs-field {
+  background: none;
 }
 /* Wipe and Cancel are Carbon `danger-tertiary` and `tertiary`. Off until the
    word is typed, and it says so in grey rather than by disappearing — a host
@@ -3107,8 +3513,9 @@ body.driving .cols {
    side, which at 13px is the point the labels start wrapping anyway.
    Three selectors because this row holds all three shapes: a `.ctl` wrapper
    round a Carbon control, a hand-built `<button>` — `.rs-arm` is one — and a
-   bare `cds-button` host, which nothing in `.cp-row` is today and step 3 may
-   put back. */
+   bare `cds-button` host, which nothing in `.cp-row` is today. Step 3 did not
+   put one back: the one Carbon element it added to this column is the wipe's
+   field, inside `.rs-panel`, which `.cp-danger .rs-field` sizes. */
 .cp-row > .ctl,
 .cp-row > button,
 .cp-row > cds-button {

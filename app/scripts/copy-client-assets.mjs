@@ -64,9 +64,30 @@ const vendorOut = resolve(here, "..", "dist", "vendor");
  *
  * `button.js` and not `components/button/index.js`: the index also pulls in
  * `button-set` and `button-skeleton`, which are eleven more modules for two
- * elements nothing renders.
+ * elements nothing renders. The same rule for the rest — `tag/index.js` would
+ * bring the skeleton and all three interactive tags, and `select/index.js` the
+ * skeleton, so each element is named by its own module.
+ *
+ * `select-item.js` is listed separately because `select.js` does not import
+ * it — read its imports: `cds-select` finds its options with
+ * `item.matches("cds-select-item")` and `getAttribute`, which work on an
+ * element the browser has never upgraded, so nothing in the graph reaches the
+ * second `customElements.define`.
+ *
+ * Measured by removing the line and rebuilding from clean: `main.js` imports
+ * the module directly, the file is not in `dist/vendor`, the request 404s, and
+ * a failed import takes the whole entry module with it — `#app` has no
+ * children and the console renders **nothing at all**. One line in the
+ * browser's console and nothing on the server side. Loud rather than subtle,
+ * which is the good case; the bad case would be noticing at 1:55pm.
  */
-const ENTRY_POINTS = ["@carbon/web-components/es/components/button/button.js"];
+const ENTRY_POINTS = [
+  "@carbon/web-components/es/components/button/button.js",
+  "@carbon/web-components/es/components/tag/tag.js",
+  "@carbon/web-components/es/components/text-input/text-input.js",
+  "@carbon/web-components/es/components/select/select.js",
+  "@carbon/web-components/es/components/select/select-item.js",
+];
 
 /**
  * Every bare specifier the vendored tree is allowed to contain, and the path

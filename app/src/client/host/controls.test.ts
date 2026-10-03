@@ -26,10 +26,22 @@ import {
   BUTTON_KIND,
   BUTTON_SIZE,
 } from "@carbon/web-components/es/components/button/defs.js";
+import {
+  TAG_SIZE,
+  TAG_TYPE,
+} from "@carbon/web-components/es/components/tag/defs.js";
+import {
+  INPUT_SIZE,
+  INPUT_TYPE,
+} from "@carbon/web-components/es/components/text-input/defs.js";
 
 import {
   CARBON_BUTTON_KINDS,
   CARBON_BUTTON_SIZES,
+  CARBON_INPUT_SIZES,
+  CARBON_INPUT_TYPES,
+  CARBON_TAG_SIZES,
+  CARBON_TAG_TYPES,
 } from "./carbon.ts";
 import { spaceVerdict, type SpaceKey } from "./controls.ts";
 
@@ -115,6 +127,51 @@ describe("the space bar advances the run of show", () => {
       "ignore",
     );
   });
+
+  /*
+   * And a Carbon field, which reports a tag none of the three above is.
+   *
+   * `<cds-text-input>` renders its `<input>` into a shadow root, so a keydown
+   * dispatched on that `<input>` is retargeted on the way out and a
+   * document-level listener's `event.target` is the **host**: `CDS-TEXT-INPUT`.
+   * Not a field tag, not a button tag — so before issue #28 step 3 taught this
+   * decision the two Carbon tags, the verdict fell through to `"fire"`.
+   *
+   * Measured in the running console rather than argued. With the two tags
+   * removed from `isFieldTag` and the client rebuilt, a space dispatched on the
+   * `<input>` inside the card editor's title field pressed the primary button
+   * once — `Open the lobby   (space)` — and swallowed the space. With them, the
+   * primary is never pressed and the space reaches the field.
+   *
+   * This is the half of that which does not need a browser. It is written as
+   * the tag each element actually reports, because asserting `"INPUT"` here
+   * would stay green while the console handed the space bar to the run of show
+   * in the middle of a card title.
+   */
+  test("and so does a Carbon field, which reports its host's tag", () => {
+    for (const [tag, cls] of [
+      ["CDS-TEXT-INPUT", "field"],
+      ["CDS-TEXT-INPUT", "field rs-field"],
+      ["CDS-SELECT", "rb-card"],
+    ] as const) {
+      assert.equal(
+        spaceVerdict(key({ target: on(tag, ...cls.split(" ")) })),
+        "ignore",
+        `space inside ${tag} must stay in the field`,
+      );
+    }
+  });
+
+  test("a Carbon field is not mistaken for a Carbon button either", () => {
+    // The two wrong answers are different sizes of wrong and both are silent.
+    // "fire" presses the primary; "handBackAndFire" blurs the field the host
+    // is typing into *and* presses the primary. Neither is "ignore".
+    for (const tag of ["CDS-TEXT-INPUT", "CDS-SELECT"]) {
+      const verdict = spaceVerdict(key({ target: on(tag, "field") }));
+      assert.notEqual(verdict, "fire", tag);
+      assert.notEqual(verdict, "handBackAndFire", tag);
+    }
+  });
 });
 
 /*
@@ -155,7 +212,14 @@ describe("the space bar cannot start or fire a restart", () => {
   }
 
   test("the confirmation field swallows space, so a stray press types a space", () => {
-    assert.equal(spaceVerdict(key({ target: on("INPUT", "field", "rs-field") })), "ignore");
+    // `CDS-TEXT-INPUT` since #28 step 3, and the tag is the whole of what this
+    // decision looks at. Written as `INPUT` this stayed green while the field
+    // on the one control that wipes an afternoon handed the space bar to the
+    // primary button.
+    assert.equal(
+      spaceVerdict(key({ target: on("CDS-TEXT-INPUT", "field", "rs-field") })),
+      "ignore",
+    );
   });
 
   test("the wipe's buttons are not in the set that owns the space bar", () => {
@@ -262,13 +326,72 @@ const CARBON_SIZES: readonly string[] = Object.values(BUTTON_SIZE);
 /** The console's own files that are allowed to build a Carbon button. */
 const CARBON_DOOR = "carbon.ts";
 
+/**
+ * A source with its comments blanked out, so these scans read code.
+ *
+ * Added when the "only one file names the tag" test went red on a *comment* in
+ * `main.ts` that quoted `"cds-select-item"` while explaining why Carbon finds
+ * its options with `matches()`. Rewording the comment would have worked once
+ * and left the next person to describe a tag in prose with a failing suite and
+ * no idea why.
+ *
+ * A character walk rather than a regex, for the reason `callsTo` is one: the
+ * strings in these files contain `//` — join links do — and a regex that
+ * treats one as a line comment eats the rest of the line, which is how a
+ * scanner comes to find nothing and pass. Quotes are tracked, escapes are
+ * skipped, and template literals are left intact because a tag name in one is
+ * still a tag name being written.
+ *
+ * Comment bodies are replaced by spaces rather than removed, so every offset a
+ * failure message prints still lines up with the file on disk.
+ */
+function stripComments(src: string): string {
+  const out: string[] = [];
+  let i = 0;
+  while (i < src.length) {
+    const c = src[i] as string;
+    const next = src[i + 1];
+    if (c === '"' || c === "'" || c === "`") {
+      out.push(c);
+      i++;
+      while (i < src.length) {
+        const d = src[i] as string;
+        out.push(d);
+        i++;
+        if (d === "\\") {
+          if (i < src.length) out.push(src[i] as string), i++;
+          continue;
+        }
+        if (d === c) break;
+      }
+      continue;
+    }
+    if (c === "/" && next === "/") {
+      while (i < src.length && src[i] !== "\n") out.push(" "), i++;
+      continue;
+    }
+    if (c === "/" && next === "*") {
+      while (i < src.length && !(src[i] === "*" && src[i + 1] === "/")) {
+        out.push(src[i] === "\n" ? "\n" : " ");
+        i++;
+      }
+      out.push("  ");
+      i += 2;
+      continue;
+    }
+    out.push(c);
+    i++;
+  }
+  return out.join("");
+}
+
 /** Every `src/client/host/*.ts` source, by name, test files excluded. */
 function hostSources(): readonly (readonly [string, string])[] {
   const dir = import.meta.dirname;
   return readdirSync(dir)
     .filter((f) => f.endsWith(".ts") && !f.endsWith(".test.ts"))
     .sort()
-    .map((f) => [f, readFileSync(join(dir, f), "utf8")] as const);
+    .map((f) => [f, stripComments(readFileSync(join(dir, f), "utf8"))] as const);
 }
 
 /**
@@ -316,6 +439,39 @@ function literals(call: string, key: string): readonly string[] {
   );
 }
 
+describe("the scanner these scans are built on", () => {
+  test("blanks comments and leaves strings alone", () => {
+    const src = [
+      'const a = "cds-tag";',
+      '// a comment naming "cds-tag"',
+      '/* and a block one naming "cds-tag" */',
+      'const url = "http://example.test/j/code";',
+      "const t = `a template naming cds-tag`;",
+    ].join("\n");
+    const out = stripComments(src);
+    // Two spellings survive: the string and the template. The two in comments
+    // do not.
+    assert.equal((out.match(/"cds-tag"/g) ?? []).length, 1);
+    assert.ok(out.includes("const t = `a template naming cds-tag`;"));
+    // And the `//` inside a URL is not a comment, which is the failure mode a
+    // regex has: it would blank the rest of that line and the scan would then
+    // pass by finding nothing.
+    assert.ok(out.includes('"http://example.test/j/code"'), out);
+    // Line count is preserved, so an offset still means something.
+    assert.equal(out.split("\n").length, src.split("\n").length);
+  });
+
+  test("and the console's own sources still read as code after it", () => {
+    // The guard against a stripper that blanks everything: these scans pass
+    // trivially against an empty read, which is the failure this whole file
+    // keeps finding.
+    const total = hostSources().reduce((n, [, src]) => n + src.length, 0);
+    assert.ok(total > 100_000, `host sources read as ${total} characters`);
+    const main = hostSources().find(([n]) => n === "main.ts");
+    assert.ok(main?.[1].includes('carbonTag({'), "main.ts has lost its code");
+  });
+});
+
 describe("the kinds and sizes the console asks Carbon for", () => {
   test("are exactly Carbon's own, in both directions", () => {
     assert.deepEqual(
@@ -342,21 +498,63 @@ describe("the kinds and sizes the console asks Carbon for", () => {
   });
 
   test("through one factory, which is the only file that names the tag", () => {
-    const named = hostSources()
-      .filter(([, src]) => src.includes('"cds-button"'))
+    // All five tags the console mounts, each checked the same way. #28 step 3
+    // added four, and the rule is the rule: a second site is a site where a
+    // value Carbon does not have compiles.
+    //
+    // The quoted *lowercase* spelling, because that is how an element is
+    // named. `controls.ts` holds "CDS-TEXT-INPUT" and "CDS-SELECT" in
+    // `isFieldTag`, which is a `tagName` comparison and not a tag being
+    // created — a different thing, and the case is what tells them apart.
+    for (const tag of [
+      "cds-button",
+      "cds-tag",
+      "cds-text-input",
+      "cds-select",
+      "cds-select-item",
+    ]) {
+      // `hostSources()` has the comments blanked out, so a tag named in prose
+      // — and `main.ts` names three of them, explaining what Carbon does with
+      // its children — is not a second site. A tag named in code is.
+      const named = hostSources()
+        .filter(([, src]) => src.includes(`"${tag}"`))
+        .map(([name]) => name);
+      assert.deepEqual(
+        named,
+        [CARBON_DOOR],
+        `"${tag}" is spelled in ${named.join(", ") || "nothing"}. It belongs ` +
+          `in ${CARBON_DOOR} alone, where every enumerated attribute is typed.`,
+      );
+    }
+  });
+
+  test("and `hx()` itself is called from nowhere else", () => {
+    // The tag test above catches a *known* tag spelled twice. This catches the
+    // other half: a sixth element built straight through the escape hatch,
+    // where there is no union to be wrong about because nobody wrote one.
+    // `hx` is `h()` for a custom element and `carbon.ts` is where custom
+    // elements are built.
+    const callers = hostSources()
+      .filter(([, src]) => /\bhx\s*\(/.test(src))
       .map(([name]) => name);
     assert.deepEqual(
-      named,
+      callers,
       [CARBON_DOOR],
-      `"cds-button" is spelled in ${named.join(", ")}. It belongs in ` +
-        `${CARBON_DOOR} alone, where kind and size are typed — a second site ` +
-        "is a site where a kind Carbon does not have compiles.",
+      `hx() is called in ${callers.join(", ") || "nothing"}. A Carbon element ` +
+        `built outside ${CARBON_DOOR} is one whose enumerated attributes ` +
+        "nothing types and nothing checks.",
     );
   });
 
   test("and not smuggled through the attrs escape hatch", () => {
     // `attrs` is `Record<string, …>`, so `attrs: { kind: "ghost--x" }` would
     // type-check. Nothing does it and nothing may start.
+    //
+    // `kind` and `size` are checked across the whole file, because no native
+    // element the console builds has either. `type` cannot be: a native
+    // `<input type="range">` is the send-off speed slider and is none of
+    // Carbon's business. So `type` is checked inside Carbon call sites only —
+    // see the step 3 suite below, which scans each factory's calls.
     for (const [name, src] of hostSources()) {
       const bypass = /attrs:\s*\{[^}]*\b(?:kind|size):/.exec(src);
       assert.equal(
@@ -409,6 +607,183 @@ describe("the kinds and sizes the console asks Carbon for", () => {
       seen.sizes.length >= 5,
       `the scan found ${seen.sizes.length} size literals at call sites.`,
     );
+  });
+});
+
+/*
+ * ------------------------------------------------------------------
+ * The three elements step 3 added
+ * ------------------------------------------------------------------
+ *
+ * The same three properties, for `cds-tag`, `cds-text-input` and `cds-select`.
+ * Written out per element rather than folded into a loop over the button's
+ * tests, because the enums are *not* the same enum and the difference is the
+ * point: `BUTTON_SIZE` has a `2xl` that `INPUT_SIZE` does not, and a union
+ * checked against the wrong enum is a union that passes while the attribute it
+ * writes is one Carbon drops on the floor.
+ */
+const CARBON_TAG_SIZE_VALUES: readonly string[] = Object.values(TAG_SIZE);
+const CARBON_TAG_TYPE_VALUES: readonly string[] = Object.values(TAG_TYPE);
+const CARBON_INPUT_SIZE_VALUES: readonly string[] = Object.values(INPUT_SIZE);
+const CARBON_INPUT_TYPE_VALUES: readonly string[] = Object.values(INPUT_TYPE);
+
+describe("the tag, field and select attributes the console asks Carbon for", () => {
+  test("are exactly Carbon's own, in both directions", () => {
+    for (const [what, ours, theirs] of [
+      ["tag sizes", CARBON_TAG_SIZES, CARBON_TAG_SIZE_VALUES],
+      ["tag types", CARBON_TAG_TYPES, CARBON_TAG_TYPE_VALUES],
+      ["input sizes", CARBON_INPUT_SIZES, CARBON_INPUT_SIZE_VALUES],
+      ["input types", CARBON_INPUT_TYPES, CARBON_INPUT_TYPE_VALUES],
+    ] as const) {
+      assert.deepEqual(
+        [...ours].sort(),
+        [...theirs].sort(),
+        `carbon.ts's ${what} and Carbon's enum have drifted apart. A value ` +
+          "missing from carbon.ts is one the console cannot ask for; a value " +
+          "Carbon has dropped is an attribute it will ignore in silence.",
+      );
+    }
+  });
+
+  test("and the two scales are not one scale, which is why each has its own enum", () => {
+    // If this ever starts failing, Carbon has aligned them and the four tests
+    // above have stopped being able to catch a union checked against the wrong
+    // one. `2xl` is a button size and not an input size.
+    assert.ok(CARBON_BUTTON_SIZES.includes("2xl"));
+    assert.ok(!(CARBON_INPUT_SIZES as readonly string[]).includes("2xl"));
+  });
+
+  /*
+   * The scope boundary of step 3, as a test rather than as a paragraph.
+   *
+   * The console's fifteen arcade setup fields are `<input type="number">` with
+   * a `min` and a `max` on every one. `cds-text-input` supports textual types
+   * only and forwards neither clamp, so converting them would drop both
+   * silently. That is why they are still hand-built.
+   *
+   * The assertion is written so it fails the day the constraint lifts: if
+   * Carbon adds `number` to `INPUT_TYPE`, this goes red and whoever is reading
+   * it finds out that the fifteen can now be converted. A comment cannot do
+   * that.
+   */
+  test("and `number` is not among them, which is why fifteen fields are not Carbon's", () => {
+    assert.ok(
+      !CARBON_INPUT_TYPE_VALUES.includes("number"),
+      "Carbon's INPUT_TYPE now has `number`. The arcade's fifteen setup " +
+        "fields were left hand-built because cds-text-input could not carry " +
+        "a type=number with its min and max; check whether it forwards " +
+        "`min`/`max`/`step` too, and if it does, they can be converted.",
+    );
+    assert.ok(CARBON_INPUT_TYPE_VALUES.includes("text"));
+  });
+
+  test("and every size and type written at a call site is one Carbon has", () => {
+    const seen: Record<string, string[]> = {
+      tagSize: [],
+      tagType: [],
+      inputSize: [],
+      inputType: [],
+    };
+    const check = (ok: boolean, msg: string): void => assert.ok(ok, msg);
+    for (const [name, src] of hostSources()) {
+      const scan = (
+        open: string,
+        pairs: readonly (readonly [string, readonly string[], string])[],
+      ): void => {
+        for (const call of callsTo(src, open)) {
+          if (!call.startsWith(open)) continue;
+          const where = `${name}: ${call.slice(0, 70).replace(/\s+/g, " ")}…`;
+          for (const [key, allowed, bucket] of pairs) {
+            for (const v of literals(call, key)) {
+              (seen[bucket] as string[]).push(v);
+              check(
+                allowed.includes(v),
+                `${key}="${v}" at ${where} is not one of Carbon's ` +
+                  `${allowed.join(", ")}.`,
+              );
+            }
+          }
+        }
+      };
+      scan("carbonTag(", [
+        ["size", CARBON_TAG_SIZE_VALUES, "tagSize"],
+        ["type", CARBON_TAG_TYPE_VALUES, "tagType"],
+      ]);
+      scan("carbonTextInput(", [
+        ["size", CARBON_INPUT_SIZE_VALUES, "inputSize"],
+        ["inputType", CARBON_INPUT_TYPE_VALUES, "inputType"],
+      ]);
+      scan("carbonSelect(", [["size", CARBON_INPUT_SIZE_VALUES, "inputSize"]]);
+    }
+    // Against a scanner that found nothing every assertion above passes, which
+    // is how the array this pattern replaced came to cover three sites of
+    // seven. The console builds two tags, three fields and one select.
+    assert.ok(seen["tagSize"]!.length >= 2, `tag sizes found: ${seen["tagSize"]!.length}`);
+    assert.ok(seen["tagType"]!.length >= 2, `tag types found: ${seen["tagType"]!.length}`);
+    assert.ok(
+      seen["inputSize"]!.length >= 4,
+      `input sizes found: ${seen["inputSize"]!.length} (three fields and a select)`,
+    );
+    assert.ok(seen["inputType"]!.length >= 3, `input types found: ${seen["inputType"]!.length}`);
+  });
+
+  /*
+   * One label decision, applied everywhere.
+   *
+   * #28 step 3's instruction was to decide between `hide-label` beside the
+   * console's own label and Carbon's stacked form *once*, because half and
+   * half is what reads as bolted on. `hideLabel` is a required boolean in
+   * `CarbonTextInputOpts`, so a field without one is a compile error — but
+   * `hideLabel: false` compiles, and this is what holds the decision.
+   */
+  test("and no Carbon call site writes an enumerated attribute by hand", () => {
+    // The `type` half of the escape-hatch guard, scoped to the calls where
+    // `type` means a Carbon enum rather than `<input type="range">`.
+    let calls = 0;
+    for (const [name, src] of hostSources()) {
+      if (name === CARBON_DOOR) continue;
+      for (const open of [
+        "carbonButton(",
+        "carbonTag(",
+        "carbonTextInput(",
+        "carbonSelect(",
+        "carbonSelectItem(",
+      ]) {
+        for (const call of callsTo(src, open)) {
+          if (!call.startsWith(open)) continue;
+          calls += 1;
+          assert.doesNotMatch(
+            call.replace(/\s+/g, " "),
+            /attrs: \{[^}]*\b(?:kind|size|type|hide-label|label-text|max-count):/,
+            `${name} writes a Carbon attribute inside attrs at ${open}…, ` +
+              "which is the one spelling the unions and the required fields " +
+              "in carbon.ts cannot see.",
+          );
+        }
+      }
+    }
+    assert.ok(calls >= 12, `the scan found ${calls} Carbon call sites`);
+  });
+
+  test("and every field and picker hides Carbon's label, which is the decision", () => {
+    let fields = 0;
+    for (const [name, src] of hostSources()) {
+      if (name === CARBON_DOOR) continue;
+      for (const open of ["carbonTextInput(", "carbonSelect("]) {
+        for (const call of callsTo(src, open)) {
+          if (!call.startsWith(open)) continue;
+          fields += 1;
+          assert.match(
+            call.replace(/\s+/g, " "),
+            /hideLabel: true/,
+            `${name} builds a Carbon field with Carbon's own label showing. ` +
+              "The console puts its label in the 90px column beside the box " +
+              "and this is one decision for the whole surface — see host.css.",
+          );
+        }
+      }
+    }
+    assert.ok(fields >= 4, `the scan found ${fields} Carbon fields at call sites`);
   });
 });
 
@@ -500,11 +875,36 @@ describe("the Carbon token bridge", () => {
     "utf8",
   ).replace(/\/\*[\s\S]*?\*\//g, "");
 
+  /*
+   * Thirteen since #28 step 3, and the nine it added split in two.
+   *
+   * Six of them `@carbon/themes` exports, so the generator has to leave them
+   * out of its four blocks or the specificity race above comes back. The other
+   * seven are the layer-context aliases `@carbon/styles` would declare — not
+   * theme tokens at all, so they appear in no generated block and the "exactly
+   * once" check is the whole of what there is to check. Both are listed here,
+   * because the file is what the browser loads and "declared once" is the
+   * property either way.
+   */
   const BRIDGED = [
     "--cds-focus",
     "--cds-background",
     "--cds-layer-01",
     "--cds-layer-02",
+    // Step 3's layer-context aliases. Carbon reads these with **no fallback**:
+    // undefined, a `cds-text-input` renders with `background-color:
+    // transparent` and `border-block-end-style: none`, which is a field with
+    // no fill and no edge. Measured in the browser.
+    "--cds-layer",
+    "--cds-layer-hover",
+    "--cds-layer-background",
+    "--cds-field",
+    "--cds-field-hover",
+    "--cds-border-strong",
+    "--cds-border-subtle",
+    // And the two inks the theme does export.
+    "--cds-text-primary",
+    "--cds-text-placeholder",
   ];
 
   test("declares each bridged token exactly once, so nothing can outrank it", () => {
@@ -527,8 +927,51 @@ describe("the Carbon token bridge", () => {
       ["--cds-background", "var(--ground)"],
       ["--cds-layer-01", "var(--panel)"],
       ["--cds-layer-02", "var(--panel-2)"],
+      // Step 3's nine, in the same direction. A hex on any of these right-hand
+      // sides is a Carbon grey the console does not have — #262626 and #393939
+      // are exactly the two surfaces step 2 measured four product inks off, so
+      // the direction is not a style and cannot be taken back one token at a
+      // time.
+      ["--cds-layer", "var(--panel)"],
+      ["--cds-layer-hover", "var(--panel-2)"],
+      ["--cds-layer-background", "var(--ground)"],
+      ["--cds-field", "var(--panel)"],
+      ["--cds-field-hover", "var(--panel-2)"],
+      ["--cds-border-strong", "var(--muted)"],
+      ["--cds-border-subtle", "var(--line)"],
+      ["--cds-text-primary", "var(--ink)"],
+      ["--cds-text-placeholder", "var(--muted)"],
     ] as const) {
       assert.match(css, new RegExp(`${token}:\\s*${expected.replace(/[()\-]/g, "\\$&")};`));
+    }
+  });
+
+  /*
+   * The two inks have to leave the generated blocks, and the seven aliases
+   * have to not be in them.
+   *
+   * `--cds-text-primary` is in all four theme blocks as shipped — #f4f4f4 in
+   * g100 and #161616 in white — so the generator's `BRIDGE_OWNS` has to drop
+   * it, or `:root[data-theme="dark"]` at (0,2,0) beats the bridge at (0,1,0)
+   * and a host who pressed the theme toggle twice would get Carbon's white in
+   * a field and the console's in the sentence above it. The "exactly once"
+   * test above is what catches that; this one says which direction the
+   * omission has to go, so a generated block that quietly starts emitting one
+   * of the seven is caught too.
+   */
+  test("and Carbon's own values for them appear nowhere in the file", () => {
+    for (const hex of ["#f4f4f4;", "rgba(244, 244, 244, 0.4);"]) {
+      // Both are still legitimate values of *other* tokens — `--cds-text-
+      // primary` is not the only thing that is #f4f4f4 — so the check is that
+      // no bridged token is ever assigned one.
+      for (const token of ["--cds-text-primary", "--cds-text-placeholder"]) {
+        assert.doesNotMatch(
+          css,
+          new RegExp(`${token}:\\s*${hex.replace(/[()\-.]/g, "\\$&")}`),
+          `${token} still carries Carbon's ${hex} somewhere in the generated ` +
+            "blocks. The bridge owns it and the generator must omit it.",
+        );
+      }
     }
   });
 

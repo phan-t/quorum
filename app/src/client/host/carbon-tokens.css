@@ -328,8 +328,6 @@
   --cds-text-inverse: #161616;
   --cds-text-on-color: #ffffff;
   --cds-text-on-color-disabled: rgba(255, 255, 255, 0.25);
-  --cds-text-placeholder: rgba(244, 244, 244, 0.4);
-  --cds-text-primary: #f4f4f4;
   --cds-text-secondary: #c6c6c6;
   --cds-toggle-off: #6f6f6f;
 }
@@ -640,8 +638,6 @@
     --cds-text-inverse: #ffffff;
     --cds-text-on-color: #ffffff;
     --cds-text-on-color-disabled: #8d8d8d;
-    --cds-text-placeholder: rgba(22, 22, 22, 0.4);
-    --cds-text-primary: #161616;
     --cds-text-secondary: #525252;
     --cds-toggle-off: #8d8d8d;
   }
@@ -952,8 +948,6 @@
   --cds-text-inverse: #ffffff;
   --cds-text-on-color: #ffffff;
   --cds-text-on-color-disabled: #8d8d8d;
-  --cds-text-placeholder: rgba(22, 22, 22, 0.4);
-  --cds-text-primary: #161616;
   --cds-text-secondary: #525252;
   --cds-toggle-off: #8d8d8d;
 }
@@ -1263,16 +1257,22 @@
   --cds-text-inverse: #161616;
   --cds-text-on-color: #ffffff;
   --cds-text-on-color-disabled: rgba(255, 255, 255, 0.25);
-  --cds-text-placeholder: rgba(244, 244, 244, 0.4);
-  --cds-text-primary: #f4f4f4;
   --cds-text-secondary: #c6c6c6;
   --cds-toggle-off: #6f6f6f;
 }
 
 /* ---- the bridge ---------------------------------------------------------
  *
- * Four tokens cross between the two systems. Everything else on either side is
- * left alone, because a bridge that grows is a second design system.
+ * Thirteen tokens cross between the two systems. Everything else on either
+ * side is left alone.
+ *
+ * It was four for steps 1 and 2, and the growth is the thing to understand
+ * about step 3 rather than a sign of drift: `cds-button` reads almost nothing
+ * from a theme — a tertiary's border and label come from one component token
+ * and its focus halo from two — so four was all a button needed. Fields, tags
+ * and pickers read a great deal, and nine more are what they turn out to
+ * require. The reason it is nine and not thirty is below, and it is not what
+ * step 3 was expected to find.
  *
  * Three of the four cross in the direction step 1 did not take: Carbon's token
  * takes the console's value, not the other way round. Step 1 bridged
@@ -1333,20 +1333,145 @@
  *    because the three are one idea and splitting them across two steps is how
  *    a bridge ends up with a token that disagrees with its neighbours.
  *
- * All four are declared once under `:root` and omitted from the four generated
- * blocks above, so there is no specificity race with the explicit-theme
- * selectors — `:root[data-theme="dark"]` is (0,2,0) and `:root` is (0,1,0), so
- * a generated `--cds-background: #161616` under the explicit-dark selector
- * would beat a bridge declaration written afterwards under `:root`, and the
- * page would change colour the moment someone pressed the theme toggle twice.
- * Leaving the token out of the generated blocks removes the race rather than
- * winning it. One declaration is correct in all four states because the
- * right-hand side is itself a `tokens.css` token that already moves with the
- * theme.
+ * ---- 5 to 11: the seven tokens that are not tokens -----------------------
+ *
+ *    `--cds-layer`, `--cds-layer-hover`, `--cds-layer-background`,
+ *    `--cds-field`, `--cds-field-hover`, `--cds-border-strong`,
+ *    `--cds-border-subtle`.
+ *
+ *    These are the ones step 3 was not expecting, and they are not a colour
+ *    decision — without them the components do not render.
+ *
+ *    `cds-text-input` paints its box with `background-color: var(--cds-field)`
+ *    and draws its one edge with `border-block-end: 1px solid
+ *    var(--cds-border-strong)`. Neither has a fallback, and neither token is
+ *    among the 234 `@carbon/themes` exports: the theme ships `field-01`,
+ *    `field-02`, `field-03` and `border-strong-01..03`, and the unnumbered
+ *    name is an *alias for the current layer*, which Carbon sets with
+ *
+ *        .cds--layer-one, :root { --cds-field: var(--cds-field-01); … }
+ *
+ *    That rule is compiled into each component's own stylesheet, which Lit
+ *    adopts into the shadow root — where `:root` matches nothing, because the
+ *    root of a shadow tree is a `ShadowRoot` and not an element, and
+ *    `.cds--layer-one` is a class no element here has. Carbon's intent is that
+ *    the *document* loads `@carbon/styles`, where the same rule's `:root` does
+ *    match. This console does not and will not: that stylesheet is the 1.1 MB
+ *    artifact with 105 `@font-face` rules that this generator exists to avoid.
+ *
+ *    So on this console the aliases are undefined, a `var()` with no fallback
+ *    is invalid at computed-value time, and the declaration behaves as
+ *    `unset`. A field gets `background-color: transparent` and
+ *    `border-block-end-style: none` — no fill, no edge, a caret and some text
+ *    floating on the panel. Measured in the browser before the bridge grew.
+ *    The same failure class as step 1's `--cds-button-tertiary` falling back
+ *    to Carbon Blue 60, and worse, because there is no fallback to be wrong:
+ *    there is nothing at all.
+ *
+ *    Pointed, like the layers, at the console's own surfaces:
+ *
+ *      --cds-layer             --panel      the current layer
+ *      --cds-layer-hover       --panel-2    one step up
+ *      --cds-layer-background  --ground     the page a layer sits on
+ *      --cds-field             --panel      a field's fill
+ *      --cds-field-hover       --panel-2
+ *      --cds-border-strong     --muted      a field's one edge
+ *      --cds-border-subtle     --line       structural hairlines
+ *
+ *    Contrast, computed, dark then light. Text at 4.5:1, non-text UI at 3:1.
+ *
+ *      the field's fill    --panel on --ground            1.08  1.04
+ *      the field's edge    --muted on --panel             5.41  5.19   AA
+ *      .rs-field's edge    --muted on --ground            5.84  5.42   AA
+ *
+ *    The edge carries the 3:1 and the fill does not, which is deliberate and
+ *    is the one figure here that is a change rather than a translation.
+ *    `--cds-border-strong` is Carbon's *control boundary*, and on a Carbon
+ *    field it is the only edge there is: the component sets `border: none` and
+ *    draws one rule along the bottom. The console's `--line` is HDS
+ *    `border-primary`, a structural hairline, and it measures 1.33:1 dark and
+ *    1.25:1 light on `--panel` — as a full 1px box round a boxed field that
+ *    was under the floor already but traced the whole control, and as a single
+ *    bottom rule under a fill 1.08:1 from its surround it would leave nothing
+ *    identifying the field at all. `--muted` is the console's own quiet ink,
+ *    clears 3:1 with room in both themes on both surfaces, and `host.css`
+ *    redraws the hand-built `.field` to the same edge so the surface has one
+ *    field rather than two.
+ *
+ * ---- 12 and 13: the two inks --------------------------------------------
+ *
+ *    `--cds-text-primary` takes `--ink`; `--cds-text-placeholder` takes
+ *    `--muted`.
+ *
+ *      --cds-text-primary      --ink on --panel          16.80  18.72   AA
+ *                              --ink on --ground         18.13  19.54   AA
+ *      --cds-text-placeholder  --muted on --panel         5.41   5.19   AA
+ *                              --muted on --ground        5.84   5.42   AA
+ *
+ *    `text-primary` is a field's ink and its caret, and Carbon's g100 value
+ *    #f4f4f4 is a half-step off `--ink` #f6f5f3 — imperceptible alone and
+ *    wrong beside it, because what a host reads is a Carbon field's text an
+ *    inch under `.a-item`'s. Two whites on one panel is the kind of thing
+ *    nobody can name and everybody can see.
+ *
+ *    `text-placeholder` is a measured failure rather than a preference.
+ *    Carbon's is `rgba(244, 244, 244, 0.4)`, and composited over the surface
+ *    it actually lands on it is **3.59:1** on `--panel` and 3.45:1 on Carbon's
+ *    own `field-01` #262626 — under 4.5:1 on text, in both places, in the
+ *    theme as shipped. The placeholder on the wipe's field is the word
+ *    "restart", which is the instruction. `--muted` is 5.41:1.
+ *
+ * ---- what is NOT bridged, having been expected to be ---------------------
+ *
+ *    `--cds-field-01` #262626, `--cds-field-02` #393939,
+ *    `--cds-border-subtle-01` #525252, `--cds-layer-hover-01` #333333 and
+ *    `--cds-layer-accent-01` #393939 are read by **nothing on this console**.
+ *    Every declaration that names them is inside the `.cds--layer-one, :root`
+ *    block above, which never matches, so the numbered tokens are dead here
+ *    and the unnumbered aliases are what the components read. Bridging them
+ *    would be five lines that move no pixel — and the arithmetic that made
+ *    them look dangerous, `--muted` at 4.48:1 on #262626, never arises,
+ *    because no surface on this console is ever #262626.
+ *
+ *    `--cds-text-secondary` #c6c6c6 and `--cds-text-helper` #a8a8a8 are the
+ *    stacked label and the helper text. Every field and the one picker is
+ *    built with `hide-label` and no helper text, so both colours land in
+ *    elements that are `visually-hidden` or `hidden`. The label decision is
+ *    what takes them off the list; if #28 step 5 adopts Carbon's stacked
+ *    label, they go back on it.
+ *
+ *    `--cds-tag-background-gray` and `--cds-tag-color-gray` are component
+ *    tokens rather than palette, so they are set in `host.css` on `cds-tag`
+ *    itself — exactly as `--cds-button-disabled` is set on `cds-button`, and
+ *    for the reason recorded there: a component token declared on `:root` is a
+ *    decision handed by inheritance to every component that reads it.
+ *
+ * All thirteen are declared once under `:root` and — for the six that
+ * `@carbon/themes` exports at all — omitted from the four generated blocks
+ * above, so there is no specificity race with the explicit-theme selectors.
+ * `:root[data-theme="dark"]` is (0,2,0) and `:root` is (0,1,0), so a generated
+ * `--cds-background: #161616` under the explicit-dark selector would beat a
+ * bridge declaration written afterwards under `:root`, and the page would
+ * change colour the moment someone pressed the theme toggle twice. Leaving the
+ * token out of the generated blocks removes the race rather than winning it.
+ * One declaration is correct in all four states because the right-hand side is
+ * itself a `tokens.css` token that already moves with the theme.
  */
 :root {
   --cds-focus: var(--action);
   --cds-background: var(--ground);
   --cds-layer-01: var(--panel);
   --cds-layer-02: var(--panel-2);
+
+  /* Step 3. The layer-context aliases `@carbon/styles` would otherwise
+     declare, and the two inks. See above for each one's figures. */
+  --cds-layer: var(--panel);
+  --cds-layer-hover: var(--panel-2);
+  --cds-layer-background: var(--ground);
+  --cds-field: var(--panel);
+  --cds-field-hover: var(--panel-2);
+  --cds-border-strong: var(--muted);
+  --cds-border-subtle: var(--line);
+  --cds-text-primary: var(--ink);
+  --cds-text-placeholder: var(--muted);
 }

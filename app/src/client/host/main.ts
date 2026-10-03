@@ -22,6 +22,22 @@
 // module's imports are evaluated before its body, so the element is defined
 // before the first control is built.
 import "@carbon/web-components/es/components/button/button.js";
+// Step 3's four. Each element by its own module rather than by the folder's
+// `index.js`, which would bring the skeletons and, for tags, all three
+// interactive variants — see `copy-client-assets.mjs`, whose crawl copies
+// exactly what these reach and prints the count.
+//
+// `select-item.js` is a separate line because `select.js` does not import it:
+// `cds-select` finds its options with `matches("cds-select-item")` and
+// `getAttribute`, both of which work on an element the browser has never
+// upgraded, so nothing in the graph reaches the item's own
+// `customElements.define`. Dropping the line from the build's entry points and
+// rebuilding from clean takes the console out entirely — the module 404s, the
+// failed import takes this file with it, and `#app` stays empty.
+import "@carbon/web-components/es/components/tag/tag.js";
+import "@carbon/web-components/es/components/text-input/text-input.js";
+import "@carbon/web-components/es/components/select/select.js";
+import "@carbon/web-components/es/components/select/select-item.js";
 
 import type {
   ArcadePlanApplyView,
@@ -73,7 +89,17 @@ import {
   remainingMs,
   stackedBar,
 } from "../shared/view.ts";
-import { carbonButton } from "./carbon.ts";
+import {
+  CARBON_SELECT_EVENT,
+  blurField,
+  carbonButton,
+  carbonSelect,
+  carbonSelectItem,
+  carbonTag,
+  carbonTextInput,
+  fieldValue,
+  setFieldValue,
+} from "./carbon.ts";
 import {
   bindEscape,
   bindSpace,
@@ -184,7 +210,20 @@ if (hostToken === "") {
 /* ------------------------------------------------------------------ */
 
 const elTitle = h("span", { class: "sb-title" });
-const elScoreboard = h("span", { class: "sb-seal mono" });
+/**
+ * The one badge on the console, and a Carbon tag since #28 step 3.
+ *
+ * `setText` and `setAttr` reach it exactly as they reached the `<span>`: the
+ * word goes in the default slot as light-DOM text, and `data-seal` stays on
+ * the host where `host.css` keys the three states off it. Nothing about this
+ * element is interactive, which is the whole reason `cds-tag` is the right
+ * component for it and `cds-selectable-tag` is not — see `carbon.ts`.
+ */
+const elScoreboard = carbonTag({
+  class: "sb-seal mono",
+  size: "sm",
+  type: "gray",
+});
 
 /**
  * The scoreboard's three states, said as what the room can see.
@@ -847,18 +886,38 @@ const restartArm = handsBackSpace(
 
 const restartKeeps = h("p", { class: "pb-note rs-keeps" });
 
-const restartField = h("input", {
+/**
+ * Where the word is typed. A Carbon field since #28 step 3.
+ *
+ * Three things moved and none of them is cosmetic.
+ *
+ * The name. It was an `aria-label` on the `<input>`, and a `<label
+ * for="restart-word">` beside it carrying the sentence. Neither survives a
+ * shadow root: Carbon's template binds no `aria-label` onto the `<input>` it
+ * renders, and a document `for` cannot reference an element inside a shadow
+ * tree — the host is not labelable. So the name is Carbon's `label`, hidden
+ * with `hideLabel` because the sentence is already on the row, and the
+ * sentence is a `<p>` rather than a `<label>` that points at nothing.
+ *
+ * The value. `restartField.value` is the host's property, which Carbon
+ * declares `reflect: true`, so it is the same bit before and after the
+ * element upgrades. `restartTyped()` reads it unchanged.
+ *
+ * What did not survive, and is small: `autocorrect`, `autocapitalize` and
+ * `spellcheck` are not in Carbon's forwarded set, so a red squiggle can appear
+ * under a half-typed "restart". `autocomplete: "off"` is forwarded and is the
+ * one of the four that mattered — it is what keeps the browser from offering
+ * the word back.
+ */
+const restartField = carbonTextInput({
   class: "field rs-field",
-  type: "text",
-  attrs: {
-    autocomplete: "off",
-    autocorrect: "off",
-    autocapitalize: "off",
-    spellcheck: "false",
-    placeholder: RESTART_WORD,
-    "aria-label": `Type ${RESTART_WORD} to confirm`,
-  },
-}) as HTMLInputElement;
+  size: "sm",
+  inputType: "text",
+  label: `Type ${RESTART_WORD} to confirm`,
+  hideLabel: true,
+  placeholder: RESTART_WORD,
+  attrs: { autocomplete: "off" },
+});
 
 const restartGo = carbonButton({
   class: "rs-go",
@@ -888,7 +947,15 @@ const restartPanel = h(
     }),
     restartKeeps,
     h("div", { class: "rs-row" }, [
-      h("label", { class: "rs-ask", attrs: { for: "restart-word" } }, [
+      // A `<p>`, and it was a `<label for="restart-word">`. The field is a
+      // Carbon host now, and a host is not a labelable element — the `<input>`
+      // that is one lives in a shadow root no document `for` can reference —
+      // so the association was dead the moment the field converted, with
+      // nothing to say so. A `<label>` that labels nothing is worse than a
+      // sentence, because a reader announces the sentence either way and only
+      // one of the two spellings is honest. The name the field actually has is
+      // its `label`, hidden, six lines up.
+      h("p", { class: "rs-ask" }, [
         "Type ",
         h("span", { class: "mono rs-word", text: RESTART_WORD }),
         " to switch the button on",
@@ -899,13 +966,12 @@ const restartPanel = h(
     ]),
   ],
 );
-setAttr(restartField, "id", "restart-word");
 
 let restartArmed = false;
 let restartTimer: ReturnType<typeof setTimeout> | null = null;
 
 function restartTyped(): boolean {
-  return restartField.value.trim().toLowerCase() === RESTART_WORD;
+  return fieldValue(restartField).trim().toLowerCase() === RESTART_WORD;
 }
 
 function syncRestartGo(): void {
@@ -925,7 +991,7 @@ function setRestartArmed(on: boolean): void {
   setText(restartArm, on ? "Never mind" : "Restart session");
   // Emptied on the way in as well as on the way out: a field that still holds
   // the word from last time would turn the button on before anybody typed.
-  restartField.value = "";
+  setFieldValue(restartField, "");
   syncRestartGo();
   if (restartTimer !== null) clearTimeout(restartTimer);
   restartTimer = null;
@@ -1939,9 +2005,15 @@ function focusRunbookRow(want: RunbookFocus): void {
   }
   // The control it was on is disabled now — it moved to an end. Anything in
   // the same row beats losing the cursor to the top of the document.
-  const any = Array.from(row.querySelectorAll("button, select")).find(
-    (b) => b instanceof HTMLElement && !isDisabled(b),
-  );
+  //
+  // `cds-select` is in the list because the card chooser is one since #28 step
+  // 3, and `querySelectorAll` does not enter a shadow root: the `<select>`
+  // Carbon renders is not findable from here, so a bare `"button, select"`
+  // matches the row's buttons and silently never the picker. The same shape of
+  // mistake as step 1's `querySelector("button")` for the space bar.
+  const any = Array.from(
+    row.querySelectorAll("button, cds-button, select, cds-select"),
+  ).find((b) => b instanceof HTMLElement && !isDisabled(b));
   if (any instanceof HTMLElement) any.focus();
 }
 
@@ -2033,36 +2105,53 @@ function renderRunbookSetup(): void {
       const missing = entry.kind === "holding" && cardForEntry(entry) === null;
       let chooser: HTMLElement | null = null;
       if (entry.kind === "holding") {
-        const select = h("select", {
-          class: "rb-card",
-          attrs: {
-            "data-role": "card",
-            "aria-label": "Which holding card this step shows",
-          },
-        }) as HTMLSelectElement;
-        for (const card of deck) {
-          const option = h("option", {
-            text: cardName(card),
-            attrs: { value: card.id },
-          }) as HTMLOptionElement;
-          option.selected = card.id === entry.card;
-          select.appendChild(option);
-        }
+        // A Carbon select. Issue #28 step 3, and what it is wrapping is still
+        // a real `<select>` — Carbon renders one into its shadow root and
+        // clones each `cds-select-item` into an `<option>` — so the sentence
+        // above about this being the one widget that is keyboard-operable
+        // everywhere still holds.
+        //
+        // The name is Carbon's `labelText`, hidden; the `aria-label` this
+        // carried would have stayed on the host. The options are built before
+        // the host is connected, and Carbon watches its own children with a
+        // `MutationObserver` besides.
+        const options: HTMLElement[] = [];
         if (missing) {
           // The step points at a card that is not in the deck any more. The
           // chooser says so in the one place the host is looking, and it is
           // selected, so the row does not silently claim a card it is not
           // showing.
-          const gone = h("option", {
-            text: "Pick a card",
-            attrs: { value: "" },
-          }) as HTMLOptionElement;
-          gone.selected = true;
-          select.insertBefore(gone, select.firstChild);
+          options.push(
+            carbonSelectItem({ value: "", text: "Pick a card", selected: true }),
+          );
         }
-        select.addEventListener("change", () => {
-          const pick = select.value;
-          if (pick === "") return;
+        for (const card of deck) {
+          options.push(
+            carbonSelectItem({
+              value: card.id,
+              text: cardName(card),
+              selected: !missing && card.id === entry.card,
+            }),
+          );
+        }
+        const select = carbonSelect(
+          {
+            class: "rb-card",
+            size: "sm",
+            labelText: "Which holding card this step shows",
+            hideLabel: true,
+            attrs: { "data-role": "card" },
+          },
+          options,
+        );
+        // Carbon's own event, and not `change`. A native `change` is
+        // `composed: false`, so it stops at the shadow boundary and a `change`
+        // listener here would never fire — no error, nothing in any log, and a
+        // picker that looks right until a host tries to change a card.
+        // `carbon.ts` names the event so this is the only place it is spelled.
+        select.addEventListener(CARBON_SELECT_EVENT, (ev) => {
+          const pick = (ev as CustomEvent<{ value?: string }>).detail?.value;
+          if (pick === undefined || pick === "") return;
           changeRunbook(setEntryCard(runbook, id, pick), "", { id, role: "card" });
         });
         chooser = h("div", { class: "rb-card-row" }, [
@@ -2285,9 +2374,15 @@ function focusCardRow(id: string, role: string): void {
     exact.focus();
     return;
   }
-  const any = Array.from(row.querySelectorAll("button, input")).find(
-    (b) => b instanceof HTMLElement && !isDisabled(b),
-  );
+  // `cds-text-input` is in the list for the reason `focusRunbookRow`'s list
+  // names: the card editor's two fields are Carbon hosts since #28 step 3, the
+  // `<input>`s are in shadow roots `querySelectorAll` cannot enter, and a bare
+  // `"button, input"` would match the row's three buttons and never a field —
+  // so a host who deleted the last card in the deck would land on a move arrow
+  // rather than in the title they were typing.
+  const any = Array.from(
+    row.querySelectorAll("button, cds-button, input, cds-text-input"),
+  ).find((b) => b instanceof HTMLElement && !isDisabled(b));
   if (any instanceof HTMLElement) any.focus();
 }
 
@@ -2334,35 +2429,44 @@ function renderCardsSetup(): void {
       const id = card.id;
       const name = cardName(card);
 
-      const title = h("input", {
+      // Two Carbon fields. Issue #28 step 3, and the three things that moved
+      // are the three in `carbon.ts`'s reading of the template: the name comes
+      // off Carbon's `label` because an `aria-label` on the host reaches
+      // nothing, `maxlength` comes off `maxCount`, and the value is read
+      // through `fieldValue` rather than `.value` because the host's accessor
+      // only exists after the upgrade.
+      //
+      // `hideLabel`, so the console's own "Title" and "Second line" in the
+      // 90px column beside them are still the labels a host reads. That is one
+      // decision for every field on this surface and `host.css` argues it
+      // once.
+      const title = carbonTextInput({
         class: "field",
-        type: "text",
+        size: "sm",
+        inputType: "text",
+        label: `Card ${i + 1} title`,
+        hideLabel: true,
         placeholder: "Agentic Security TTX",
-        value: card.title,
-        attrs: {
-          maxlength: String(CARD_TITLE_MAX),
-          "data-role": "title",
-          "aria-label": `Card ${i + 1} title`,
-        },
-      }) as HTMLInputElement;
-      const line = h("input", {
+        maxCount: CARD_TITLE_MAX,
+        attrs: { value: card.title, "data-role": "title" },
+      });
+      const line = carbonTextInput({
         class: "field",
-        type: "text",
+        size: "sm",
+        inputType: "text",
+        label: `Card ${i + 1} second line`,
+        hideLabel: true,
         placeholder: "Back at 14:20. Prize: the good coffee.",
-        value: card.line,
-        attrs: {
-          maxlength: String(CARD_LINE_MAX),
-          "data-role": "line",
-          "aria-label": `Card ${i + 1} second line`,
-        },
-      }) as HTMLInputElement;
+        maxCount: CARD_LINE_MAX,
+        attrs: { value: card.line, "data-role": "line" },
+      });
 
       title.addEventListener("input", () => {
-        deck = editCard(deck, id, { title: title.value });
+        deck = editCard(deck, id, { title: fieldValue(title) });
         renamedCard();
       });
       line.addEventListener("input", () => {
-        deck = editCard(deck, id, { line: line.value });
+        deck = editCard(deck, id, { line: fieldValue(line) });
         renamedCard();
       });
       for (const field of [title, line]) {
@@ -2371,13 +2475,19 @@ function renderCardsSetup(): void {
           // Escape and Enter both get the cursor out. This matters at 13:59:
           // a host who left the caret in here would press space at 14:00 and
           // type a space into a text field instead of starting the session.
+          //
+          // `blurField` and not `field.blur()`: the field is a Carbon host
+          // whose shadow root delegates focus, so the caret is on an `<input>`
+          // the host answers for and `host.blur()` alone is not specified to
+          // move it. This is the line that keeps a space at 14:00 off the card
+          // title, so it blurs both.
           if (e.key === "Escape") {
-            field.blur();
+            blurField(field);
             return;
           }
           if (e.key !== "Enter") return;
           e.preventDefault();
-          field.blur();
+          blurField(field);
         });
       }
 
@@ -2435,12 +2545,20 @@ function renderCardsSetup(): void {
         { class: "a-setup-row hc-edit", attrs: { "data-card": id } },
         [
           h("span", { class: "mono a-setup-pos", text: String(i + 1) }),
+          // `<div>`, and these were `<label>`s. A `<label>` wrapped round a
+          // Carbon host labels nothing: implicit association needs a labelable
+          // descendant, and the only labelable element here is the `<input>`
+          // inside a shadow root, which the flat tree does not expose to the
+          // label. Clicking the word "Title" no longer puts the caret in the
+          // field — that is the cost, it is one click, and the alternative is
+          // an element that claims an association it does not have. The name
+          // the field answers to is its Carbon `label`.
           h("div", { class: "a-setup-main" }, [
-            h("label", { class: "field-row" }, [
+            h("div", { class: "field-row" }, [
               h("span", { class: "label", text: "Title" }),
               title,
             ]),
-            h("label", { class: "field-row" }, [
+            h("div", { class: "field-row" }, [
               h("span", { class: "label", text: "Second line" }),
               line,
             ]),
@@ -4220,8 +4338,15 @@ function renderArcade(s: RenderState): void {
                 // it does on the live line: "OVER" on its own settles nothing.
                 text: `${GGANBU_SIDE[row.answer].word} ${row.threshold}`,
               }),
+              // A Carbon tag. Issue #28 step 3: a static chip with a word in
+              // it is what `cds-tag` is, and this is the console's clearest
+              // one. Squared, and `host.css` says how that is possible when a
+              // `cds-button`'s corner is not.
               row.verify
-                ? h("span", { class: "mono a-gganbu-verify", text: "VERIFY" })
+                ? carbonTag(
+                    { class: "mono a-gganbu-verify", size: "sm", type: "gray" },
+                    ["VERIFY"],
+                  )
                 : null,
               // No note. Six notes is six paragraphs of prose on a panel a
               // host glances at between sentences, and the console is not

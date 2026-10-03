@@ -106,6 +106,44 @@ function isButtonTag(tagName: string): boolean {
   return tagName === "BUTTON" || tagName === "CDS-BUTTON";
 }
 
+/**
+ * A field, as a tag test, and the most expensive thing on this branch so far.
+ *
+ * `spaceVerdict` has always excused text fields by tag name — `INPUT`,
+ * `TEXTAREA`, `SELECT` — because a field owns every key that lands in it, and
+ * that is what makes "type the word to arm the wipe" a guard the space bar
+ * cannot help with.
+ *
+ * A Carbon field is none of those three. `<cds-text-input>` renders its
+ * `<input>` into a shadow root, so a keydown dispatched on that `<input>` is
+ * retargeted on its way out: a document-level listener's `event.target` is the
+ * **host**, whose `tagName` is `CDS-TEXT-INPUT`. It is not a field tag and not
+ * a button tag, so without this line the verdict falls all the way through to
+ * `"fire"` — and the space bar a host pressed while typing a holding card's
+ * title would `preventDefault()` the space and press the primary button
+ * instead. On the lobby panel that is "Open the lobby"; mid-session it is
+ * whatever the run of show does next, in front of the room, with a card title
+ * that is missing a word.
+ *
+ * The console's own fields are safe because a native `<input>` *is* the event
+ * target. #28 step 3 converted three of them, and step 4 converts the scoring
+ * grid's hundred and thirty-five, so this is the line that has to be right
+ * before that step rather than after it.
+ *
+ * `CDS-SELECT` is here for the same retargeting and a smaller consequence: a
+ * space on a focused native `<select>` opens the list, and the console must not
+ * take that key either.
+ */
+function isFieldTag(tagName: string): boolean {
+  return (
+    tagName === "INPUT" ||
+    tagName === "TEXTAREA" ||
+    tagName === "SELECT" ||
+    tagName === "CDS-TEXT-INPUT" ||
+    tagName === "CDS-SELECT"
+  );
+}
+
 export interface Control {
   readonly el: HTMLElement;
   /** Show a refusal in place of the label for three seconds. */
@@ -251,8 +289,10 @@ export function spaceVerdict(ev: SpaceKey): SpaceVerdict {
   if (ev.metaKey || ev.ctrlKey || ev.altKey) return "ignore";
   const tag = ev.target?.tagName;
   // A text field owns every key that lands in it, which is why typing a
-  // confirmation word is a guard the space bar cannot help with.
-  if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return "ignore";
+  // confirmation word is a guard the space bar cannot help with. The list is
+  // {@link isFieldTag} because a Carbon field reports its host's tag and not
+  // the `<input>`'s — see there.
+  if (tag !== undefined && isFieldTag(tag)) return "ignore";
   if (ev.target?.isContentEditable === true) return "ignore";
   if (tag !== undefined && isButtonTag(tag)) {
     // Only the Yes and No of a half-pressed confirm, which took focus
