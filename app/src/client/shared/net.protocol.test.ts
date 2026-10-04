@@ -152,6 +152,7 @@ function state(seq: number): ServerMessage {
       phase: "running",
       segment: "lobby",
       seal: "live",
+      reveals: 0,
       practice: false,
       holding: null,
       roster: [],

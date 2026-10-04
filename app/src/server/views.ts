@@ -1439,6 +1439,7 @@ export function prepareViews(
       phase: state.phase,
       segment: state.segment,
       seal: state.seal,
+      reveals: state.reveals ?? 0,
       practice: state.practice,
       ...(sendoffView === undefined ? {} : { sendoff: sendoffView }),
       holding: state.holding,

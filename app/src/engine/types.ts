@@ -381,6 +381,17 @@ export interface SessionState {
   readonly segment: Segment;
   readonly seal: Seal;
   /**
+   * How many times the board has gone to `revealed` (#50).
+   *
+   * A surface remembers a climb it has finished, so the Final doesn't count
+   * down a result the room watched counted down on Standings. But a host who
+   * hides the board and reveals it again has asked for the countdown again,
+   * and the console's confirm promises one. This is what tells the two apart:
+   * the same reveal seen twice, or a second reveal. Optional because a session
+   * persisted before it existed has had at most the reveals its seal shows.
+   */
+  readonly reveals?: number;
+  /**
    * Practice: the games run, and nothing they score reaches the board.
    *
    * SPEC assumes a room that knows the rules. A room meeting Red Light, Green

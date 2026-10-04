@@ -1934,9 +1934,10 @@ describe("a question's label", () => {
 });
 
 describe("a climb the room has already seen", () => {
-  const state = (sid: string, totals: number[]): RenderState =>
+  const state = (sid: string, totals: number[], reveals = 1): RenderState =>
     ({
       sid,
+      reveals,
       standings: totals.map((total, i) => ({ rank: i + 1, nickname: `p${i}`, total })),
     }) as unknown as RenderState;
 
@@ -1969,6 +1970,16 @@ describe("a climb the room has already seen", () => {
       markClimbShown(climbKey(state("s1", [300, 200, 100])));
       assert.equal(climbAlreadyShown(climbKey(state("s1", [300, 250, 100]))), false);
       assert.equal(climbAlreadyShown(climbKey(state("s2", [300, 200, 100]))), false);
+    });
+  });
+
+  it("climbs again on a second reveal of the same result, which the host asked for (#50)", () => {
+    withStorage(() => {
+      markClimbShown(climbKey(state("s1", [300, 200, 100], 1)));
+      // The Final after a Standings reveal is the same reveal: no replay.
+      assert.equal(climbAlreadyShown(climbKey(state("s1", [300, 200, 100], 1))), true);
+      // Hidden and revealed again: an encore.
+      assert.equal(climbAlreadyShown(climbKey(state("s1", [300, 200, 100], 2))), false);
     });
   });
 

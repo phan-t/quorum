@@ -638,6 +638,8 @@ export function reduce(
           phase: "closed",
           segment: "final",
           seal: "revealed",
+          // Closing a sealed board is a reveal; closing a revealed one isn't.
+          ...(state.seal === "revealed" ? {} : { reveals: (state.reveals ?? 0) + 1 }),
           joinsLocked: true,
         },
         [BROADCAST_STATE, ...BROADCAST_STANDINGS, PERSIST],
@@ -954,11 +956,14 @@ export function reduce(
     case "setSeal": {
       if (state.seal === event.seal) return unchanged();
       // Sealing changes what every surface may show, so standings go with it.
-      return applied({ ...state, seal: event.seal }, [
-        BROADCAST_STATE,
-        ...BROADCAST_STANDINGS,
-        PERSIST,
-      ]);
+      return applied(
+        {
+          ...state,
+          seal: event.seal,
+          ...(event.seal === "revealed" ? { reveals: (state.reveals ?? 0) + 1 } : {}),
+        },
+        [BROADCAST_STATE, ...BROADCAST_STANDINGS, PERSIST],
+      );
     }
 
     case "setHolding": {

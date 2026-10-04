@@ -701,6 +701,26 @@ describe("seal", () => {
     assertNoOp(s, run(s, { type: "setSeal", seal: "sealed" }));
   });
 
+  test("each reveal is counted, so a second one is an encore and not a replay (#50)", () => {
+    const s = accept(running(), [
+      { type: "setSeal", seal: "sealed" },
+      { type: "setSeal", seal: "revealed" },
+    ]);
+    assert.equal(s.reveals, 1);
+    // Show it again, hide it, reveal it again: the host asked twice.
+    const again = accept(s, [
+      { type: "setSeal", seal: "live" },
+      { type: "setSeal", seal: "sealed" },
+      { type: "setSeal", seal: "revealed" },
+    ]);
+    assert.equal(again.reveals, 2);
+    // Closing a board that is already revealed isn't another reveal.
+    assert.equal(run(again, { type: "close" }).state.reveals, 2);
+    // Closing a sealed one is.
+    const sealed = accept(running(), [{ type: "setSeal", seal: "sealed" }]);
+    assert.equal(run(sealed, { type: "close" }).state.reveals, 1);
+  });
+
   test("unseal (sealed -> live) is allowed; the host makes the call", () => {
     const s = accept(running(), [{ type: "setSeal", seal: "sealed" }]);
     assert.equal(run(s, { type: "setSeal", seal: "live" }).state.seal, "live");

@@ -1455,6 +1455,8 @@ class MockSession {
   phase: SessionPhase = "draft";
   segment: Segment = "lobby";
   seal: Seal = "live";
+  /** `SessionState.reveals`: never reset, so a restart can't reuse a key. */
+  reveals = 0;
   practice = false;
   holding: { title: string; line: string } | null = null;
   joinsLocked = false;
@@ -3083,6 +3085,7 @@ class MockSession {
       phase: this.phase,
       segment: this.segment,
       seal: this.seal,
+      reveals: this.reveals,
       practice: this.practice,
       holding: this.holding,
       roster: this.roster(),
@@ -3637,6 +3640,7 @@ class MockHub {
         }
         s.phase = "closed";
         s.segment = "final";
+        if (s.seal !== "revealed") s.reveals += 1;
         s.seal = "revealed";
         s.joinsLocked = true;
         // And the clocks, which the freeze above only covers for a *press*.
@@ -3754,6 +3758,7 @@ class MockHub {
        */
       case "seal":
         if (s.seal === cmd.state) return noop();
+        if (cmd.state === "revealed") s.reveals += 1;
         s.seal = cmd.state;
         break;
       /**
@@ -7031,6 +7036,7 @@ class MockHub {
     const SENDOFF_STEP_S = 5;
 
     this.#at(FINAL_AT_S, () => {
+      this.session.reveals += 1;
       this.session.seal = "revealed";
       this.session.segment = "final";
       this.#broadcastState();
