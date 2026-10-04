@@ -720,7 +720,13 @@ export function arcadeUnsealFor(
       //
       // Omitted rather than nulled where nobody qualified, so the key is not
       // in the bytes.
-      ...((isHost || revealed) && fastest !== null
+      //
+      // The host's and the big screen's, and nobody else's: this was
+      // `isHost || revealed`, which sent it to every phone at the reveal. No
+      // phone draws it — the participant page has no fastest line — and the
+      // phone's own guard counts it as the Floor's results, so every Unseal
+      // reveal logged a protocol violation on every phone (#42).
+      ...((isHost || (revealed && privileged)) && fastest !== null
         ? { fastest: numbersOf(arcade, state, [fastest])[0] ?? 0 }
         : {}),
     };
