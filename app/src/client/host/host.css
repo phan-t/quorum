@@ -651,14 +651,22 @@ body {
  * the primary button off the screen.
  *
  * The 340px ceiling is the other half of the bargain, and every digit in it
- * was measured rather than guessed:
+ * was measured rather than guessed. Re-measured after #28's Carbon type scale
+ * and the move to the UI Shell, over a scripted run at 1512×828 and 1280×800,
+ * as the deepest *enabled* control from the body's top:
  *
- *   315px  the Glass Bridge, the deepest panel in the product, whole — its
- *          last round control sits at 256px, 272px with the Out-this-round
- *          line wrapped to two
- *   226px  trivia's tallest state, question and four answers and the counts
- *   334px  what the lobby's own panel gets today, so the pre-flight list and
- *          the running order are not given less room than they have now
+ *   278px  trivia, a question open with the "Waiting on…" line at its longest
+ *          (269 on the host's 1512 screen)
+ *   307px  the send-off's Back and Skip, with `.so-next` refitted to 185px
+ *   240px  the arcade, any round, any phase (221 at 1512) — the round's
+ *          controls sit above its lists since the Gganbu prompts left them at
+ *          379–451px in this box, enabled and out of sight
+ *
+ * The 315 / 226 / 334 this note carried were measured at the console's old
+ * 13px and went stale with Carbon's 14px; what made them true again was moving
+ * the controls, not raising the cap. A 420px cap was measured and rejected: it
+ * cost trivia one grid row and the deep arcade rounds three, and left Gganbu's
+ * controls cut anyway, because what is deep in those panels is lists.
  *
  * Everything a host reads or presses *during* something therefore sits under
  * it whole, and nothing live is ever cut. What does not fit is the long
@@ -669,9 +677,15 @@ body {
  * entry goes on while the standings are in front of the room.
  */
 .panel-body {
-  flex: 0 1 auto;
+  /* `0 0 auto`, not `0 1 auto`: flex-shrink is weighted by basis, so even
+     against the grid's 30 the body still absorbed a sliver of any shortfall
+     and scrolled by 3–4px in trivia and two arcade rounds. The window floor
+     moved into the cap instead — on a window too short for 340px plus the
+     header, the scoring block's floor and the foot, the body gives way and
+     the primary button stays on screen. */
+  flex: 0 0 auto;
   min-height: 0;
-  max-height: 340px;
+  max-height: min(340px, calc(100vh - 338px));
   overflow: auto;
 }
 .pb {
@@ -2498,11 +2512,14 @@ cds-number-input {
   border-left: 3px solid var(--sealed);
   background: var(--panel-2);
   /* `.panel-body` is 340px and scrolls. Everything else in this panel — the
-     position line, the two buttons, the hint — comes to about 110, so this is
-     what is left: the box takes the rest and the *panel* never scrolls, which
-     is what keeps Back and Skip where the host last saw them. A kudo longer
-     than even the 13px step below can hold gets a scrollbar of its own. */
-  max-height: 228px;
+     position line, the pace row, Back and Skip, the hint — comes to 151px
+     since Carbon's type scale (it was about 110 at 13px), so this is what is
+     left: the box takes the rest and the *panel* never scrolls, which is what
+     keeps Back and Skip where the host last saw them. At the old 228px the
+     panel needed 379 of its 340 and Back and Skip sat at 318–350px, cut
+     through by the panel's edge. A kudo longer than this holds gets a
+     scrollbar of its own. */
+  max-height: 185px;
   overflow-y: auto;
 }
 .so-next.is-empty {

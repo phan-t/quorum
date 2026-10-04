@@ -2948,15 +2948,12 @@ triviaSpeed.addEventListener("change", () => {
 /** What the pace row says, under the buttons. */
 const triviaPace = h("p", { class: "pb-note t-pace-note" });
 
-const triviaActions = h("div", { class: "field-actions" }, [triviaPractice.el]);
-
 const triviaLoad = h("div", { class: "t-load" }, [
   h("label", { class: "label", text: "Question set" }),
   triviaSet,
 ]);
 
 const bodyTrivia = h("section", { class: "pb pb-trivia" }, [
-  triviaActions,
   triviaHead,
   triviaRound,
   triviaQuestion,
@@ -2967,10 +2964,16 @@ const bodyTrivia = h("section", { class: "pb pb-trivia" }, [
   // Auto sits in the same row as Close early and Sudden death, so it inherits
   // `.field-actions` wrapping and `.ctl-button`'s `white-space: nowrap` —
   // which between them are what keep every button in this console one height.
+  //
+  // Practice is in this row too. It had a row of its own above the question,
+  // and that row was 40px of the panel the scoring grid gives way to: one grid
+  // row at 1512×828. It is still on the game, beside the controls that run it;
+  // it fits on the one line at 1280.
   h("div", { class: "field-actions" }, [
     closeEarly.el,
     suddenDeath.el,
     triviaAutoControl.el,
+    triviaPractice.el,
     triviaSpeedRow,
   ]),
   triviaPace,
@@ -3878,12 +3881,6 @@ const arcadeBacking = h("ul", { class: "a-backing" });
 const arcadeItem = h("p", { class: "a-item" });
 const arcadeNote = h("p", { class: "pb-note a-note", attrs: { hidden: true } });
 
-const arcadeEnd = control({
-  label: "End the round",
-  className: "ctl-secondary",
-  title: "Stops play now. This happens on its own when the clock runs out.",
-  onFire: (c) => issue({ name: "arcade.end" }, c),
-});
 const arcadeNext = control({
   label: "Skip to the next item",
   className: "ctl-secondary",
@@ -3935,6 +3932,15 @@ const arcadeNextPrompt = control({
   onFire: (c) => issue({ name: "arcade.nextPrompt" }, c),
 });
 
+/** Which round each of the strip's round-specific controls belongs to. */
+const arcadeRoundControls: readonly (readonly [Control, ArcadeRoundKind])[] = [
+  [arcadeNext, "recruitment"],
+  [arcadeNextPull, "tug_of_raft"],
+  [arcadeNextPrompt, "gganbu"],
+  [arcadeNextStep, "glass_bridge"],
+  [arcadeNextWave, "glass_bridge"],
+];
+
 /**
  * Gganbu, as the host reads it out: the six prompts, the answers, and the
  * VERIFY flags.
@@ -3956,23 +3962,29 @@ const bodyArcade = h("section", { class: "pb pb-arcade" }, [
   arcadeAlt,
   arcadeItem,
   arcadeNote,
-  arcadeBridge,
-  arcadeGganbu,
-  arcadeSplit,
-  arcadeFloorList,
-  // Above the Backing list, not below it. The list grows by a row for every
-  // person the round drains, and a control that walks away down a scrolling
-  // panel as the round goes on is a control the host cannot press at the
-  // moment they need it — which on this bridge is eighteen times.
+  // Above every list, not just the Backing list. Each list grows as the round
+  // goes on — a row per person drained, a row per prompt — and a control that
+  // walks away down a scrolling panel is a control the host cannot press at
+  // the moment they need it. It was above the Backing list only, which left it
+  // under the Gganbu prompt list and the bridge panel: at 1512×828 "Settle the
+  // prompt" and "End the round" sat at 379–451px in a 340px panel body,
+  // enabled and out of sight.
+  //
+  // Only the current round's controls are shown; see `arcadeRoundControls`.
+  // The panel's own "End the round" is gone: it issued `arcade.end`, which is
+  // what the foot's primary does on Space during play.
   h("div", { class: "field-actions" }, [
     arcadePractice.el,
-    arcadeEnd.el,
     arcadeNext.el,
     arcadeNextPull.el,
     arcadeNextPrompt.el,
     arcadeNextStep.el,
     arcadeNextWave.el,
   ]),
+  arcadeBridge,
+  arcadeGganbu,
+  arcadeSplit,
+  arcadeFloorList,
   h("p", {
     class: "label",
     text: "Backing: players who are out pick someone to root for",
@@ -4134,7 +4146,6 @@ function renderArcade(s: RenderState): void {
     replace(arcadeBacking, []);
     arcadeBridge.hidden = true;
     arcadeGganbu.hidden = true;
-    arcadeEnd.setDisabled(true);
     arcadeNext.setDisabled(true);
     arcadeNextPull.setDisabled(true);
     arcadeNextPrompt.setDisabled(true);
@@ -4542,7 +4553,15 @@ function renderArcade(s: RenderState): void {
     ),
   );
 
-  arcadeEnd.setDisabled(a.phase !== "running");
+  // Each round's own controls, and nobody else's. They were all seven on screen
+  // in every round, five of them disabled at any moment (66–82 of 88 samples
+  // across a scripted run), so the host scanned seven boxes for the one or
+  // two that were live. Within a round the set is fixed and keeps its
+  // positions — that is the span muscle memory needs — and the enabled state
+  // still says what the engine will accept right now.
+  for (const [control, round] of arcadeRoundControls) {
+    control.el.hidden = a.round !== round;
+  }
   arcadeNext.setDisabled(a.phase !== "running" || a.round !== "recruitment");
   const bridging = a.phase === "running" && a.round === "glass_bridge";
   const g = a.glass;
