@@ -563,7 +563,7 @@ body {
 }
 .r-num {
   margin-left: auto;
-  color: var(--dim);
+  color: var(--muted);
   font-size: var(--cds-label-01-font-size);
   letter-spacing: var(--cds-label-01-letter-spacing);
   line-height: var(--cds-label-01-line-height);
@@ -630,8 +630,19 @@ body {
  * `lobby` the panel takes what it needs and the grid falls back to its floor,
  * and from the moment the session is running the ceiling is back on.
  */
+/* And no scoring grid at all: in `draft` and `lobby` it was an empty table
+   under a scroll box holding the whole of setup, taking ~130px of the box for
+   a grid with nothing in it. It comes back the moment the session runs. */
+.panel.is-setup .scoring {
+  display: none;
+}
 .panel.is-setup .panel-body {
   max-height: none;
+  /* Setup shrinks to what the panel leaves and scrolls inside itself. The
+     running panel is `0 0 auto` under a 340px cap; with no cap here, not
+     shrinking would make the body as tall as all of setup — 2,236px — and
+     push the foot and its primary off the screen. */
+  flex: 0 1 auto;
 }
 
 /*
@@ -1043,10 +1054,14 @@ cds-number-input.field {
   align-items: baseline;
   gap: 12px;
 }
+/* --muted, not --dim: DESIGN.md keeps --dim for decoration, and these three
+   are read — the grid's keys, and the player numbers the arcade reads aloud.
+   --dim at 12px was 3.07:1 on --ground dark and 3.19:1 light, under AA;
+   --muted is 5.84:1 and 5.38:1. Same change on `.sc-num` and `.r-num`. */
 .sc-hint {
   font-size: var(--cds-label-01-font-size);
   line-height: var(--cds-label-01-line-height);
-  color: var(--dim);
+  color: var(--muted);
   letter-spacing: var(--cds-label-01-letter-spacing);
 }
 
@@ -1251,7 +1266,7 @@ cds-number-input.field {
   vertical-align: middle;
 }
 .sc-num {
-  color: var(--dim);
+  color: var(--muted);
   font-size: var(--cds-label-01-font-size);
   letter-spacing: var(--cds-label-01-letter-spacing);
   line-height: var(--cds-label-01-line-height);

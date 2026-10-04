@@ -1026,12 +1026,20 @@ const cpHolding = shortcutButton("Holding card", "SHIFT+H", () =>
 const cpDriving = shortcutButton("Driving mode", "SHIFT+D", () =>
   setDriving(!driving),
 );
-const cpGrid = shortcutButton("Scoring grid", "G", () => {
-  // Same two steps the key takes: the grid is on the console, and driving
-  // mode is the console put away.
+/**
+ * The cursor into the scoring grid: what `G` and the Shortcuts button both do.
+ *
+ * The grid is on the console, and driving mode is the console put away, so
+ * asking for the grid is asking for the console back. In setup there is no
+ * grid to go to — it is hidden until the session runs, because no scores exist
+ * yet — so the key brings the console back and leaves the cursor where it is.
+ */
+function focusGrid(): void {
   setDriving(false);
-  scoring.focusFirst();
-});
+  if (!panel.classList.contains("is-setup")) scoring.focusFirst();
+}
+
+const cpGrid = shortcutButton("Scoring grid", "G", () => focusGrid());
 setAttr(cpDriving, "aria-pressed", "false");
 
 /*
@@ -5888,10 +5896,7 @@ document.addEventListener("keydown", (ev) => {
   if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
   if (el?.isContentEditable) return;
   ev.preventDefault();
-  // The grid is on the console, and driving mode is the console put away.
-  // Asking for the grid is asking for the console back.
-  setDriving(false);
-  scoring.focusFirst();
+  focusGrid();
 });
 
 client.start();
