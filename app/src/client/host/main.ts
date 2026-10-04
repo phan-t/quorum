@@ -2938,14 +2938,16 @@ const suddenDeath = control({
   label: "Sudden death: off",
   className: "ctl-secondary ctl-quiet",
   title:
-    "First correct answer wins. No timer, and nobody's score changes. Takes effect on the next question you open.",
-  onFire: (c) => {
-    suddenDeathArmed = !suddenDeathArmed;
-    c.setLabel(`Sudden death: ${suddenDeathArmed ? "on" : "off"}`);
-    c.setOn(suddenDeathArmed);
-    if (lastState) render(lastState);
-  },
+    "First correct answer wins. No timer, and nobody's score changes. Takes effect on the next question you open — after the last question, Space opens it.",
+  onFire: () => setSuddenDeathArmed(!suddenDeathArmed),
 });
+
+function setSuddenDeathArmed(on: boolean): void {
+  suddenDeathArmed = on;
+  suddenDeath.setLabel(`Sudden death: ${on ? "on" : "off"}`);
+  suddenDeath.setOn(on);
+  if (lastState) render(lastState);
+}
 
 /**
  * Auto / Manual for the question set, and how long its beats are.
@@ -4787,7 +4789,28 @@ function primaryPlan(): Plan {
       case "closed":
         return cmdPlan("Reveal the answer", { name: "trivia.reveal" });
       case "revealed": {
-        if (t.index + 1 >= t.of) return advanceFromHere(s);
+        if (t.index + 1 >= t.of) {
+          // The set is done, and an armed sudden death is the tiebreak: the
+          // one question still to open here. The engine accepts it over a
+          // revealed question for exactly this case. This returned the next
+          // runbook step regardless, so arming it after the last question did
+          // nothing and the next Space walked the room into whatever came
+          // after trivia (#41).
+          //
+          // One tiebreak per arming: opening it disarms the toggle, so once it
+          // is revealed the space bar walks the runbook again, and a room that
+          // is still tied is one more press of the toggle away.
+          if (suddenDeathArmed) {
+            return {
+              label: "Open sudden death",
+              fire: (c) => {
+                issue({ name: "trivia.open", suddenDeath: true }, c);
+                setSuddenDeathArmed(false);
+              },
+            };
+          }
+          return advanceFromHere(s);
+        }
         // Under Auto the press does exactly what the clock was about to do,
         // which is the send-off's answer to a host pressing mid-interval: the
         // step happens now and the run carries on from there.
