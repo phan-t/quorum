@@ -39,9 +39,10 @@ interface Opts {
   readonly joinOnly: boolean;
   /**
    * Milliseconds between joins. Zero is the honest default — a QR code on a
-   * screen produces a storm — but the server admits ten hellos a minute per
-   * IP, so every bot past the tenth from one machine is refused. Stagger to
-   * get a gameplay run past that; leave it at zero to measure the limit.
+   * screen produces a storm — but the server admits `HELLO_FLOOD_LIMIT`
+   * hellos a minute per IP (server/limits.ts), so every bot past that from one
+   * machine is refused. Stagger to get a bigger run past it; leave it at zero
+   * to measure the limit.
    */
   readonly staggerMs: number;
   /**
@@ -1126,9 +1127,9 @@ function report(
   }
   if (limited.length > 0) {
     line(`    rate limited ${limited.length} of ${opts.count}`);
-    line(`                 the server admits 10 hellos a minute per IP and every`);
-    line(`                 bot here shares one, so a run of more than 10 needs`);
-    line(`                 --stagger 6500 or more to get past it. A room behind`);
+    line(`                 the server admits ${HELLO_FLOOD_LIMIT} hellos a minute per IP and every`);
+    line(`                 bot here shares one, so a run of more than ${HELLO_FLOOD_LIMIT} needs`);
+    line(`                 --stagger ${Math.ceil(60_000 / HELLO_FLOOD_LIMIT) + 50} or more to get past it. A room behind`);
     line(`                 one office NAT shares an IP too, and cannot stagger.`);
   }
   for (const c of never) line(`    never joined ${pad(c.label, 14)} ${c.error ?? "silent"}`);
@@ -1473,7 +1474,7 @@ async function main(): Promise<void> {
 
   // Everyone but the late arrivals, all at once: a QR code on a screen makes
   // a storm, and staggering by default would test something that does not
-  // happen. `--stagger` exists because ten hellos a minute per IP is the cap.
+  // happen. `--stagger` exists because hellos per IP per minute are capped.
   const onTime = bots.slice(0, bots.length - opts.lateCount);
   const late = bots.slice(bots.length - opts.lateCount);
   await Promise.all(

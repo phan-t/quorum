@@ -54,6 +54,10 @@ describe("the Desktop's reveals", () => {
     assert.match(src, /addEventListener\("resize", refit\)/);
   });
 
+  test("a drain inside the last one's dwell joins it rather than replacing it", () => {
+    assert.match(src, /drainTimer !== null \? Array\.from\(drainLog\.querySelectorAll<HTMLElement>\("\.s-drain-who"\)\)/);
+  });
+
   test("and again when a timed beat leaves the frame it was worked out for", () => {
     assert.match(src, /drainLog\.hidden = true;[\s\S]{0,120}refit\(\);/);
     assert.match(src, /winLog\.hidden = true;[\s\S]{0,120}refit\(\);/);

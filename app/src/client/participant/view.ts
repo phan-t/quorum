@@ -4438,7 +4438,8 @@ function sceneArcade(ctx: SceneCtx): Scene {
       buzz([120, 60, 120]);
       setText(
         announce,
-        `${glassExit ?? unsealExit ?? gganbuExit ?? STATE_LOCK_ERROR}. ${HOUSE.drained(mine.playerNumber)}`,
+        // Each exit line ends in its own full stop.
+        `${(glassExit ?? unsealExit ?? gganbuExit ?? STATE_LOCK_ERROR).replace(/\.$/, "")}. ${HOUSE.drained(mine.playerNumber)}`,
       );
       // The Lounge is about to mount underneath this, and a mount clears the
       // live region. This one message outlives its screen on purpose.

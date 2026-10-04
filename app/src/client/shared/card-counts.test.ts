@@ -9,17 +9,19 @@
  */
 import { strict as assert } from "node:assert";
 import { describe, it } from "node:test";
-import type { ArcadeGganbuView, ArcadeGlassView } from "../../protocol.ts";
+import type { ArcadeGganbuView, ArcadeGlassView, ArcadeTugView } from "../../protocol.ts";
 import {
   ARCADE_ROUND_CARD,
   HOW_TO_PLAY,
   glassRevealHead,
   howToPlayLines,
   roundCardLines,
+  tugRevealHead,
 } from "./view.ts";
 
 const glass = (of: number) => ({ of }) as unknown as ArcadeGlassView;
-const gganbu = (of: number) => ({ of }) as unknown as ArcadeGganbuView;
+const gganbu = (of: number, startTokens = 10) => ({ of, startTokens }) as unknown as ArcadeGganbuView;
+const tug = (pulls: number) => ({ pulls }) as unknown as ArcadeTugView;
 
 describe("the round cards count what was dealt", () => {
   it("the Bridge card counts its panes", () => {
@@ -36,6 +38,21 @@ describe("the round cards count what was dealt", () => {
   it("Gganbu counts its prompts", () => {
     const lines = howToPlayLines({ round: "gganbu", gganbu: gganbu(8) });
     assert.equal(lines[1], "Eight over-or-under questions. Bet tokens on your answer.");
+  });
+
+  it("Gganbu's card and how-to count the tokens the console set", () => {
+    const view = { round: "gganbu" as const, gganbu: gganbu(8, 7) };
+    assert.equal(roundCardLines(view)[1], "You have been paired. You each hold seven tokens.");
+    assert.equal(howToPlayLines(view)[0], "You are paired with one other player. Seven tokens each.");
+  });
+
+  it("Tug of Raft counts its pulls, on the card and the reveal", () => {
+    assert.equal(
+      howToPlayLines({ round: "tug_of_raft", tug: tug(5) })[2],
+      "Nobody is knocked out. Five pulls, and the sides are reshuffled.",
+    );
+    assert.equal(tugRevealHead(5), "FIVE PULLS. ONE ROPE.");
+    assert.equal(tugRevealHead(3), "THREE PULLS. ONE ROPE.");
   });
 
   it("the Bridge reveal head counts the same board", () => {
@@ -56,6 +73,8 @@ describe("the round cards count what was dealt", () => {
       howToPlayLines({ round: "gganbu", gganbu: gganbu(6) }),
       HOW_TO_PLAY.gganbu,
     );
+    assert.deepEqual(roundCardLines({ round: "gganbu", gganbu: gganbu(6) }), ARCADE_ROUND_CARD.gganbu);
+    assert.deepEqual(howToPlayLines({ round: "tug_of_raft", tug: tug(3) }), HOW_TO_PLAY.tug_of_raft);
   });
 
   it("a frame without a count gets the table", () => {

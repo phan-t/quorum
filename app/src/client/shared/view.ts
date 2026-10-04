@@ -1918,7 +1918,7 @@ function countWord(n: number): string {
 }
 
 /** Just what the card lines read off a frame. */
-type CardCounts = Pick<ArcadeView, "round" | "glass" | "gganbu">;
+type CardCounts = Pick<ArcadeView, "round" | "glass" | "gganbu" | "tug">;
 
 /**
  * The round card, counted from the board that was dealt (#46).
@@ -1935,6 +1935,10 @@ export function roundCardLines(arcade: CardCounts): readonly string[] {
     const steps = arcade.glass.of;
     lines[1] = `${countWord(steps * 2)} panes. ${countWord(steps)} are tempered. The tempered ones are real.`;
   }
+  // The console's "Tokens each" field: the card said ten whatever it was.
+  if (round === "gganbu" && arcade.gganbu !== undefined) {
+    lines[1] = `You have been paired. You each hold ${countWord(arcade.gganbu.startTokens).toLowerCase()} tokens.`;
+  }
   return lines;
 }
 
@@ -1946,12 +1950,21 @@ export function howToPlayLines(arcade: CardCounts): readonly string[] {
   if (arcade.round === null) return [];
   const lines = [...HOW_TO_PLAY[arcade.round]];
   if (arcade.round === "gganbu" && arcade.gganbu !== undefined) {
+    lines[0] = `You are paired with one other player. ${countWord(arcade.gganbu.startTokens)} tokens each.`;
     lines[1] = `${countWord(arcade.gganbu.of)} over-or-under questions. Bet tokens on your answer.`;
+  }
+  if (arcade.round === "tug_of_raft" && arcade.tug !== undefined) {
+    lines[2] = `Nobody is knocked out. ${countWord(arcade.tug.pulls)} pulls, and the sides are reshuffled.`;
   }
   if (arcade.round === "glass_bridge" && arcade.glass !== undefined) {
     lines[0] = `${countWord(arcade.glass.of)} steps. Two panes at each: one real HashiCorp feature, one invented.`;
   }
   return lines;
+}
+
+/** Tug of Raft's reveal header, counted from the staged pulls. */
+export function tugRevealHead(pulls: number): string {
+  return pulls === 1 ? "ONE PULL. ONE ROPE." : `${COUNT_WORDS[pulls] ?? String(pulls)} PULLS. ONE ROPE.`;
 }
 
 /** The Bridge's reveal header: "TWELVE PANES. SIX ARE TEMPERED." */

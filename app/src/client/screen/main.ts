@@ -56,6 +56,7 @@ import {
   tugRope,
   unsealRevealHead,
   glassRevealHead,
+  tugRevealHead,
   glassDrainLine,
   type GlassMoment,
   howToPlayLines,
@@ -1846,10 +1847,13 @@ function sceneArcade(): Scene {
     const wagers = arcade.gganbu !== undefined;
     const inflow = g !== undefined || tins || wagers;
     setClass(drainLog, "inline", inflow);
-    replace(drainLog, [
-      inflow
-        ? null
-        : h("p", { class: "mono s-drain-error", text: STATE_LOCK_ERROR }),
+    // Still inside the last beat's dwell, its lines stay and these join them:
+    // a fall and the step closing 70 ms later are two drains, and replacing
+    // the first left the room reading only the second.
+    const kept =
+      drainTimer !== null ? Array.from(drainLog.querySelectorAll<HTMLElement>(".s-drain-who")) : [];
+    const lines = [
+      ...kept,
       ...fresh
         .map(Number)
         .sort((a, b) => a - b)
@@ -1866,6 +1870,10 @@ function sceneArcade(): Scene {
                   : HOUSE.drained(n),
           }),
         ),
+    ].slice(inflow ? -3 : -6);
+    replace(drainLog, [
+      inflow ? null : h("p", { class: "mono s-drain-error", text: STATE_LOCK_ERROR }),
+      ...lines,
     ]);
     drainLog.hidden = false;
     if (drainTimer !== null) clearTimeout(drainTimer);
@@ -2320,7 +2328,7 @@ function sceneArcade(): Scene {
     setText(
       tugHead,
       arcade.phase === "reveal"
-        ? "THREE PULLS. ONE ROPE."
+        ? tugRevealHead(t.pulls)
         : [
             `PULL ${t.pull + 1} OF ${t.pulls}`,
             `${Math.round(60_000 / t.beatMs)} BPM`,
