@@ -1941,7 +1941,7 @@ describe("somebody who joined after the round started still has a number", () =>
    * round card must hand them **6**. A first version of this test did not do
    * that, and the mutation that deletes the re-assignment came back green.
    */
-  it("draws them by join order until a round card numbers them, as the engine does", async (t) => {
+  it("draws them at the number the next round will give, as the engine does", async (t) => {
     const first = roundPair("glass_bridge");
     const second = roundPair("recruitment");
     const r = await room(t, 6);
@@ -1976,8 +1976,10 @@ describe("somebody who joined after the round started still has a number", () =>
       "the grid, while the latecomer is unnumbered",
     );
     // Spelled out so that one grid matching another cannot pass by accident:
-    // the latecomer is drawn last, on their join-order number, rather than
-    // first on `000`.
+    // the latecomer is drawn last, on the number the next round card will hand
+    // them (6) — not first on `000`, and not on their join slot (7), which in
+    // a room with a released person can collide with a number already in use
+    // (#38).
     const cells = engineView(engine).arcade?.grid ?? [];
     assert.deepEqual(
       cells.map((c) => ({ pid: c.pid, playerNumber: c.playerNumber })),
@@ -1987,7 +1989,7 @@ describe("somebody who joined after the round started still has a number", () =>
         { pid: "p4", playerNumber: 3 },
         { pid: "p5", playerNumber: 4 },
         { pid: "p6", playerNumber: 5 },
-        { pid: "p7", playerNumber: 7 },
+        { pid: "p7", playerNumber: 6 },
       ],
       "the engine's own grid before the latecomer has an arcade number",
     );

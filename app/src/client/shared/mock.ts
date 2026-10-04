@@ -1594,11 +1594,11 @@ class MockSession {
    * The number a surface draws, which is not quite the number the rules run
    * on.
    *
-   * Every projection in views.ts spells the fallback out — `playerNumbers[pid]
-   * ?? p.playerNumber ?? 0` — so somebody who joined after the round started
-   * and has no arcade number yet is drawn with their join-order number rather
-   * than as `000`. `000` sorts to the front of the grid and reads as a person
-   * who is somehow before player one.
+   * Every projection in views.ts goes through `numberer`, so somebody who
+   * joined after the round started and has no arcade number yet is drawn with
+   * the number the next round will give them rather than as `000` — which
+   * sorts to the front of the grid and reads as a person who is somehow
+   * before player one — or as their join slot, which collides.
    *
    * The *rules* must not take the fallback. `waveOf` and `tinIndexFor` in the
    * engine are both handed `arcade.playerNumbers[pid]` raw and both have a
@@ -1609,7 +1609,24 @@ class MockSession {
    * `arcadeNumbers` directly and this is for the wire.
    */
   arcadeNumber(pid: string): number {
-    return this.arcadeNumbers[pid] ?? this.find_pid(pid)?.playerNumber ?? 0;
+    const assigned = this.arcadeNumbers[pid];
+    if (assigned !== undefined) return assigned;
+    const join = this.find_pid(pid)?.playerNumber ?? 0;
+    // Before the arcade there is nothing to collide with: the join slot.
+    if (Object.keys(this.arcadeNumbers).length === 0) return join;
+    // In the arcade and not numbered yet: the number the next round will hand
+    // out, as views.ts's `numberer` computes it — {@link assignArcadeNumbers}
+    // without the assignment. The join slot collided: somebody released before
+    // the arcade and back after it kept a low slot an arcade number already
+    // used, and the grid showed two of it (#38).
+    let next = 1;
+    for (const n of Object.values(this.arcadeNumbers)) next = Math.max(next, n + 1);
+    for (const p of this.inTheRoom()) {
+      if (this.arcadeNumbers[p.pid] !== undefined) continue;
+      if (p.pid === pid) return next;
+      next++;
+    }
+    return join;
   }
 
   /**

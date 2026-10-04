@@ -445,15 +445,17 @@ export function arcadeGrid(state: SessionState, arcade: ArcadeState): ArcadeCell
     if (seat.backing === null) continue;
     backers[seat.backing] = (backers[seat.backing] ?? 0) + 1;
   }
+  const number = numberer(state);
   return Object.values(state.participants)
     .filter((p) => !p.kicked && p.nicknameKey !== "")
     .map((p) => {
       const standing = arcade.standing[p.pid] ?? "floor";
       return {
         pid: p.pid,
-        // The arcade's own number, which is gapless; `playerNumber` is join
-        // order and has a hole in it for everyone who was ever kicked.
-        playerNumber: arcade.playerNumbers[p.pid] ?? p.playerNumber,
+        // The arcade's own number, which is gapless, or the one it will hand
+        // out — never the join slot, which has holes and collides. See
+        // `numberer`, which every surface's number comes through.
+        playerNumber: number(p.pid),
         standing,
         backers: backers[p.pid] ?? 0,
         struck: standing === "drained",
@@ -481,9 +483,8 @@ function numbersOf(
   state: SessionState,
   pids: readonly ParticipantId[],
 ): number[] {
-  return pids.map(
-    (pid) => arcade.playerNumbers[pid] ?? state.participants[pid]?.playerNumber ?? 0,
-  );
+  const number = numberer(state);
+  return pids.map((pid) => number(pid));
 }
 
 /**
@@ -649,7 +650,7 @@ function planApplyLeaders(
     const p = state.participants[pid];
     if (!p || p.kicked || p.nicknameKey === "") continue;
     rows.push({
-      playerNumber: arcade.playerNumbers[pid] ?? p.playerNumber,
+      playerNumber: numberer(state)(pid),
       resources,
     });
   }
@@ -1070,10 +1071,7 @@ export function arcadeGlassFor(
     // and could not be: `position` already says who is across.
     extra.crossed = numbersOf(arcade, state, floor.crossed);
     if (floor.fastest !== null) {
-      extra.fastest =
-        arcade.playerNumbers[floor.fastest] ??
-        state.participants[floor.fastest]?.playerNumber ??
-        0;
+      extra.fastest = numberer(state)(floor.fastest);
     }
   }
   if (isHost) extra.elapsedMs = floor.elapsedMs;
@@ -1246,8 +1244,7 @@ export function arcadeMineFor(
   }
 
   return {
-    playerNumber:
-      arcade.playerNumbers[pid] ?? state.participants[pid]?.playerNumber ?? 0,
+    playerNumber: numberer(state)(pid),
     standing: arcade.standing[pid] ?? "floor",
     banked: arcade.banked[pid] ?? 0,
     total: arcade.totals[pid] ?? 0,

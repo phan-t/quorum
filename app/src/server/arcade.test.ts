@@ -1373,6 +1373,13 @@ describe("one number per person, on every surface (#38)", () => {
       3,
       "the number the next round will hand out",
     );
+    // And the Desktop's grid says the same: one number per person on every
+    // surface, pending included. The grid read the join slot and showed two
+    // "001"s while the rail said 003.
+    const cells = view(reclaimed, "screen").arcade?.grid ?? [];
+    const cellNums = cells.map((c) => c.playerNumber);
+    assert.equal(new Set(cellNums).size, cellNums.length, `duplicate grid numbers: ${cellNums.join(", ")}`);
+    assert.equal(cells.find((c) => c.pid === "p1")?.playerNumber, 3);
 
     // And the join slot is still what shows before the arcade.
     const lobby = view(
