@@ -24,10 +24,8 @@ import { checkProtocol } from "../shared/protocol-guard.ts";
 import { fitFrame } from "./fit.ts";
 import { mockBadge, mockTransport, readMockConfig } from "../shared/mock.ts";
 import {
-  ARCADE_ROUND_CARD,
   GGANBU_HOUSE,
   GGANBU_SIDE,
-  HOW_TO_PLAY,
   ARCADE_ROUND_LABEL,
   HOUSE,
   FINAL_DWELL_MS,
@@ -57,6 +55,9 @@ import {
   tugBeatAt,
   tugRope,
   unsealRevealHead,
+  glassRevealHead,
+  howToPlayLines,
+  roundCardLines,
   waveRosters,
   wipeFraction,
   type GridEntry,
@@ -2041,7 +2042,7 @@ function sceneArcade(): Scene {
     setText(
       bridgeClock,
       revealed
-        ? "EIGHTEEN PANES. NINE ARE TEMPERED."
+        ? glassRevealHead(g.of)
         : [
             `WAVE ${g.wave} OF 3`,
             `STEP ${(g.step ?? 0) + 1} OF ${g.of}`,
@@ -2807,11 +2808,7 @@ function sceneArcade(): Scene {
       // who is left — DESIGN.md is explicit that the grid says that, quietly.
       const between = arcade.phase === "idle";
       setText(title, between ? "" : roundLabel);
-      const lines = between
-        ? [HOUSE.roundEnd]
-        : arcade.round
-          ? ARCADE_ROUND_CARD[arcade.round]
-          : ARCADE_ROUND_CARD.recruitment;
+      const lines = between ? [HOUSE.roundEnd] : roundCardLines(arcade);
       replace(
         cardLines,
         [
@@ -2829,7 +2826,7 @@ function sceneArcade(): Scene {
                 h(
                   "div",
                   { class: "s-how" },
-                  HOW_TO_PLAY[arcade.round].map((line) =>
+                  howToPlayLines(arcade).map((line) =>
                     h("p", { class: "s-how-line", text: line }),
                   ),
                 ),

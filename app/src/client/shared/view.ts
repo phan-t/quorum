@@ -1870,6 +1870,55 @@ const COUNT_WORDS: readonly string[] = [
   "TWENTY",
 ];
 
+/** A spelled count in sentence case, for a line read aloud: "Twelve". */
+function countWord(n: number): string {
+  const word = COUNT_WORDS[n];
+  return word === undefined ? String(n) : word.charAt(0) + word.slice(1).toLowerCase();
+}
+
+/** Just what the card lines read off a frame. */
+type CardCounts = Pick<ArcadeView, "round" | "glass" | "gganbu">;
+
+/**
+ * The round card, counted from the board that was dealt (#46).
+ *
+ * The Bridge's line was a literal, "Twelve panes", over a staged board of
+ * any length, and the reveal said eighteen. The board is on every card frame
+ * (the round starts before its card shows), so the card counts it, and
+ * {@link ARCADE_ROUND_CARD} is the line for a frame without one.
+ */
+export function roundCardLines(arcade: CardCounts): readonly string[] {
+  const round = arcade.round ?? "recruitment";
+  const lines = [...ARCADE_ROUND_CARD[round]];
+  if (round === "glass_bridge" && arcade.glass !== undefined) {
+    const steps = arcade.glass.of;
+    lines[1] = `${countWord(steps * 2)} panes. ${countWord(steps)} are tempered. The tempered ones are real.`;
+  }
+  return lines;
+}
+
+/**
+ * How to play, counted the same way: Gganbu said "Six over-or-under
+ * questions" over a staged bank of eight, with "8 PROMPTS" under it.
+ */
+export function howToPlayLines(arcade: CardCounts): readonly string[] {
+  if (arcade.round === null) return [];
+  const lines = [...HOW_TO_PLAY[arcade.round]];
+  if (arcade.round === "gganbu" && arcade.gganbu !== undefined) {
+    lines[1] = `${countWord(arcade.gganbu.of)} over-or-under questions. Bet tokens on your answer.`;
+  }
+  if (arcade.round === "glass_bridge" && arcade.glass !== undefined) {
+    lines[0] = `${countWord(arcade.glass.of)} steps. Two panes at each: one real HashiCorp feature, one invented.`;
+  }
+  return lines;
+}
+
+/** The Bridge's reveal header: "TWELVE PANES. SIX ARE TEMPERED." */
+export function glassRevealHead(steps: number): string {
+  const word = (n: number): string => COUNT_WORDS[n] ?? String(n);
+  return `${word(steps * 2)} PANES. ${word(steps)} ARE TEMPERED.`;
+}
+
 /**
  * The Unseal reveal header, counted from the tins that were actually in play.
  *
