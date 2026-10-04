@@ -136,10 +136,17 @@ close: aws-check
 	@test -n "$(SID)" || { echo "Set SID, e.g. make close SID=ses_abc123"; exit 1; }
 	@QUORUM_ADMIN_KEY="$$(aws ssm get-parameter --name /quorum/prod/admin_key \
 	    --with-decryption --region $(REGION) --query Parameter.Value --output text)"; \
-	  curl -fsS -X POST "https://$(HOST)/api/sessions/$(SID)/close$(if $(FORCE),?force=1,)" \
-	    -H "Authorization: Bearer $$QUORUM_ADMIN_KEY" \
-	  && echo "  closed $(SID)" \
-	  || echo "  refused. Somebody may be connected; add FORCE=1 to close it anyway."
+	  resp="$$(curl -sS -X POST "https://$(HOST)/api/sessions/$(SID)/close$(if $(FORCE),?force=1,)" \
+	    -H "Authorization: Bearer $$QUORUM_ADMIN_KEY" -w ' HTTP%{http_code}')"; \
+	  case "$$resp" in \
+	    *" HTTP200") echo "  closed $(SID)" ;; \
+	    *) printf '%s' "$${resp% HTTP*}" | python3 -c 'import json,sys; \
+raw=sys.stdin.read(); \
+d=json.loads(raw) if raw.strip().startswith("{") else {"message": raw.strip() or "no response"}; \
+print("  refused: " + d.get("message", d.get("error", "unknown"))); \
+print("  Somebody is connected; add FORCE=1 to close it anyway.") if d.get("error") == "in_use" else None'; \
+	       exit 1 ;; \
+	  esac
 
 url:
 	@curl -fsS https://$(HOST)/healthz || echo "not answering (parked?)"
