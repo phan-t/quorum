@@ -1756,3 +1756,66 @@ describe("the console's type is Carbon's", () => {
     }
   });
 });
+
+/*
+ * ------------------------------------------------------------------
+ * #34: the two speed sliders stay native
+ * ------------------------------------------------------------------
+ *
+ * `main.ts` has the measurements beside `sendoffSpeed`. These hold the three
+ * reasons against the installed `cds-slider`, so a Carbon release that fixes
+ * any of them turns red here and sends whoever reads it back to that note —
+ * a decision recorded against a version is one that should be re-made when
+ * the version moves.
+ */
+describe("the two speed sliders stay native, for reasons Carbon could fix", () => {
+  const slider = readFileSync(
+    join(
+      import.meta.dirname,
+      "..",
+      "..",
+      "..",
+      "node_modules",
+      "@carbon",
+      "web-components",
+      "es",
+      "components",
+      "slider",
+      "slider.js",
+    ),
+    "utf8",
+  );
+  const thumbs = [
+    ...slider.matchAll(/<div\s+id="thumb(?:-upper)?"[\s\S]*?>/g),
+  ].map((m) => m[0]);
+
+  test("its thumb has no accessible name", () => {
+    assert.ok(thumbs.length >= 2, "found no cds-slider thumb template to read");
+    for (const thumb of thumbs) {
+      assert.ok(thumb.includes('role="slider"'), "the thumb is no longer role=slider");
+      assert.ok(
+        !/aria-label(?:ledby)?=/.test(thumb),
+        "cds-slider's thumb carries an accessible name now. The speed sliders " +
+          "stayed native partly because it had none; re-read the note beside " +
+          "`sendoffSpeed` in main.ts.",
+      );
+    }
+  });
+
+  test("its ArrowUp moves the value down", () => {
+    const dir = /const THUMB_DIRECTION = \{([\s\S]*?)\};/.exec(slider)?.[1] ?? "";
+    assert.match(dir, /ArrowUp:\s*-1/, "cds-slider's ArrowUp increases the value now.");
+    assert.match(dir, /ArrowDown:\s*1/);
+  });
+
+  test("and it has no Home, End, PageUp or PageDown", () => {
+    const dir = /const THUMB_DIRECTION = \{([\s\S]*?)\};/.exec(slider)?.[1] ?? "";
+    assert.ok(dir.includes("ArrowLeft"), "THUMB_DIRECTION was not found");
+    for (const key of ["Home", "End", "PageUp", "PageDown"]) {
+      assert.ok(
+        !slider.includes(`"${key}"`) && !dir.includes(key),
+        `cds-slider handles ${key} now.`,
+      );
+    }
+  });
+});

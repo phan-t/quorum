@@ -2757,6 +2757,41 @@ const sendoffAutoControl = control({
   onFire: (c) => issue({ name: "sendoff.auto", auto: !(lastState?.sendoff?.auto ?? false) }, c),
 });
 
+/*
+ * The console's two speed sliders — this one and the trivia pace below — are
+ * native `<input type="range">`s, and #34 decided they stay that way.
+ *
+ * `cds-slider` is installed and was mounted in the running console beside a
+ * native range with the same min, max, step and name, then driven with real
+ * keys and a real pointer drag. Read against
+ * `@carbon/web-components@2.64.0/es/components/slider/slider.js`:
+ *
+ *                       native                     cds-slider
+ *   accessible name     slider "Seconds per…"      slider "" — none
+ *   ← → ↑ ↓             ±1, ↑ is +1                ±1, but ↑ is −1 and ↓ +1
+ *   Home End PgUp PgDn  min, max, ±10%             nothing
+ *   drag                `input` per step,          `cds-slider-changed` per
+ *                       `change` once on release   step, and twice on release
+ *   height              16px                       58px, with its own label
+ *   payload             —                          +35 modules, +351 KB raw,
+ *                                                  ~+67 KB gzipped, +5 entries
+ *
+ * The name is the template: the thumb is a `div role="slider"`, the label is
+ * a `<label>` with no `for`, and nothing on the thumb points at it, so the
+ * control a host drags announces as an unnamed slider. The direction is
+ * Carbon's `THUMB_DIRECTION`, which maps `ArrowUp` to −1 — the reverse of the
+ * ARIA slider pattern and of every native range — and it has no entries for
+ * Home, End, PageUp or PageDown at all. The drag half is answerable, because
+ * drag steps carry `detail.intermediate: true`; the other three are not
+ * without reaching into the shadow root to name the thumb and intercepting its
+ * keys to put them right, which is reimplementing the slider around Carbon's
+ * markup rather than using Carbon's slider.
+ *
+ * So these stay real range inputs, which already have all of it.
+ * `controls.test.ts` holds the three reasons against the installed package:
+ * the day Carbon names its thumb or fixes its keys, a test goes red, and this
+ * note is the one to re-read.
+ */
 const sendoffSpeedValue = h("span", { class: "mono so-speed-value" });
 const sendoffSpeed = h("input", {
   class: "so-speed",
