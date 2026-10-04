@@ -50,7 +50,7 @@ import {
   CARBON_TAG_SIZES,
   CARBON_TAG_TYPES,
 } from "./carbon.ts";
-import { spaceVerdict, type SpaceKey } from "./controls.ts";
+import { KIND_QUIET, spaceVerdict, type SpaceKey } from "./controls.ts";
 
 /** A keydown, with everything defaulted to the boring case. */
 function key(over: Partial<SpaceKey> = {}): SpaceKey {
@@ -1822,5 +1822,87 @@ describe("the two speed sliders stay native, for reasons Carbon could fix", () =
         `cds-slider handles ${key} now.`,
       );
     }
+  });
+});
+
+/*
+ * ------------------------------------------------------------------
+ * The UI Shell layout's behaviours, held in the source
+ * ------------------------------------------------------------------
+ *
+ * These live in `main.ts`, which builds DOM at import and so cannot run under
+ * `node:test`; the rest of this file's guards read the source for the same
+ * reason. Each one is a promise a comment makes that nothing else checks.
+ */
+describe("the UI Shell layout keeps its promises", () => {
+  const main = stripComments(
+    readFileSync(join(import.meta.dirname, "main.ts"), "utf8"),
+  );
+  const css = readFileSync(join(import.meta.dirname, "host.css"), "utf8")
+    .replace(/\/\*[\s\S]*?\*\//g, "")
+    .replace(/\s+/g, " ");
+
+  test("each arcade round control is mapped to the round its tooltip names", () => {
+    const table = /const arcadeRoundControls[^=]*=\s*\[([\s\S]*?)\];/.exec(main)?.[1] ?? "";
+    const pairs = [...table.matchAll(/\[(\w+),\s*"(\w+)"\]/g)].map(
+      (m) => [m[1] as string, m[2] as string] as const,
+    );
+    assert.equal(pairs.length, 5, "expected the five round-specific controls");
+    const label: Record<string, string> = {
+      recruitment: "Recruitment",
+      tug_of_raft: "Tug of Raft",
+      gganbu: "Gganbu",
+      glass_bridge: "Glass Bridge",
+    };
+    for (const [name, round] of pairs) {
+      const def = callsTo(main, "control(").find((c) =>
+        main.includes(`const ${name} = ${c}`),
+      );
+      assert.ok(def, `no control() call builds ${name}`);
+      assert.match(
+        def as string,
+        new RegExp(`${label[round] ?? round} only`),
+        `${name} is shown only in ${round}, but its title does not say so.`,
+      );
+    }
+  });
+
+  test("and they are hidden before the arcade is entered, not only between rounds", () => {
+    const hides = main.match(/for \(const \[control(?:, round)?\] of arcadeRoundControls\)/g) ?? [];
+    assert.equal(hides.length, 2, "both renderArcade paths must set the controls' visibility");
+  });
+
+  test("folding Close and Restart disarms both, and Escape and driving mode fold it", () => {
+    const fold = /function setDangerOpen\([^)]*\)[^{]*\{([\s\S]*?)\n\}/.exec(main)?.[1] ?? "";
+    assert.match(fold, /closeControl\.disarm\(\)/);
+    assert.match(fold, /setRestartArmed\(false\)/);
+    assert.match(fold, /dangerToggle\.focus\(\)/, "focus must return to the toggle");
+    const esc = /if \(ev\.key !== "Escape"\) return;[\s\S]{0,200}?setDangerOpen\(false\);\s*if \(fromRegion\) dangerToggle\.focus\(\);/.test(main);
+    assert.ok(esc, "Escape must fold the danger region and put the cursor back on its toggle");
+    const driving = /function setDriving[\s\S]*?setDangerOpen\(false\)/.test(main);
+    assert.ok(driving, "driving mode must fold the danger region");
+  });
+
+  test("setup hides the scoring grid, and the shortcut to it says so", () => {
+    assert.ok(css.includes(".panel.is-setup .scoring { display: none; }"));
+    assert.match(main, /setDisabled\(cpGrid, setup\)/);
+  });
+
+  test("settings and toggles are Carbon's ghost kind", () => {
+    assert.equal(KIND_QUIET, "ghost");
+    assert.ok((CARBON_BUTTON_KINDS as readonly string[]).includes(KIND_QUIET));
+    for (const label of [
+      "Lock joining",
+      "Practice: off",
+      "Clear the card",
+      "Sudden death: off",
+    ]) {
+      const call = callsTo(main, "control(").find((c) => c.includes(`label: "${label}"`));
+      assert.ok(call, `no control labelled ${label}`);
+      assert.match(call as string, /ctl-quiet/, `${label} should be quiet`);
+    }
+    const autos = callsTo(main, "control(").filter((c) => c.includes('label: "Auto"'));
+    assert.equal(autos.length, 2);
+    for (const a of autos) assert.match(a, /ctl-quiet/);
   });
 });

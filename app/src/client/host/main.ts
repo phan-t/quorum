@@ -171,6 +171,7 @@ import {
   HOLDING_STEPS_MAX,
   addHoldingStep,
   anchorHoldingCards,
+  glanceRest,
   defaultRunbook,
   dropRunbook,
   entryById,
@@ -496,8 +497,8 @@ const previewBox = h("div", { class: "tray-preview" }, [
  * pressed constantly, and the tray is for the rest.
  *
  * It scrolls rather than pushing anything off the bottom of the tray. The
- * splitter takes the column down to 216px and the panel has to stay usable
- * there, so nothing in it is laid out in fixed columns: the rows wrap, the
+ * header panel is a fixed 16rem and has to stay usable on a short window, so
+ * nothing in it is laid out in fixed columns: the rows wrap, the
  * buttons wrap their labels, and the whole block gives way to a scrollbar
  * before it gives way to a control the host cannot reach.
  */
@@ -1079,6 +1080,12 @@ const dangerRegion = h(
 );
 let dangerOpen = false;
 function setDangerOpen(open: boolean): void {
+  // Folding hides the subtree the cursor may be in — Close session's Yes/No,
+  // the restart's typed-word field — and a hidden element drops focus to the
+  // body, so the next Tab started from the top of the page. It goes back to
+  // the toggle that opened the region instead, which is where the host was.
+  const hadFocus =
+    !open && dangerRegion.contains(document.activeElement);
   if (!open) {
     closeControl.disarm();
     setRestartArmed(false);
@@ -1086,6 +1093,7 @@ function setDangerOpen(open: boolean): void {
   dangerOpen = open;
   dangerRegion.hidden = !open;
   setAttr(dangerToggle, "aria-expanded", open ? "true" : "false");
+  if (hadFocus) dangerToggle.focus();
 }
 dangerToggle.addEventListener("click", () => setDangerOpen(!dangerOpen));
 
@@ -1862,7 +1870,7 @@ function entryFullName(entry: RunbookEntry): string {
   return cardName(card);
 }
 
-/** The same name, cut to something a 216px rail can hold. */
+/** The same name, cut to something the 16rem side nav can hold. */
 function entryName(entry: RunbookEntry): string {
   const full = entryFullName(entry);
   return full.length > SEGMENT_MAX_NAME
@@ -4212,6 +4220,9 @@ function renderArcade(s: RenderState): void {
     arcadeNextPrompt.setDisabled(true);
     arcadeNextStep.setDisabled(true);
     arcadeNextWave.setDisabled(true);
+    // Not in the arcade yet, so no round, so none of the round's controls —
+    // the same rule as below, for the state before there is a round to ask.
+    for (const [control] of arcadeRoundControls) control.el.hidden = true;
     // The running order is still live: the host can still change it, and the
     // line above says which round entering leads to.
     return;
@@ -4903,7 +4914,7 @@ function render(s: RenderState): void {
     setText(elGlanceStep, here === null ? SEGMENT_LABEL[s.segment] : entryName(here));
     const on = s.roster.filter((r) => r.conn === "on").length;
     const away = s.roster.filter((r) => r.conn === "away").length;
-    setText(elGlanceRest, ` · ${sentenceCase(s.phase)} · ${on} on · ${away} away`);
+    setText(elGlanceRest, glanceRest(elGlanceStep.textContent ?? "", s.phase, on, away));
   }
   const code = s.hostExtras?.joinCode ?? "————";
   setText(elScoreboard, SCOREBOARD_STATE[s.seal]);
@@ -5140,6 +5151,8 @@ function renderPreflight(s: RenderState): void {
   runbookSetup.hidden = !setup;
   // Setup gets the whole panel; see `.panel.is-setup` in host.css.
   panel.classList.toggle("is-setup", setup);
+  // No grid in setup, so the shortcut to it has nowhere to go and says so.
+  setDisabled(cpGrid, setup);
   if (!setup) return;
 
   /* The holding steps, and whether each of them has a card to show. This is
@@ -5880,7 +5893,13 @@ bindEscape(() => [
  */
 document.addEventListener("keydown", (ev) => {
   if (ev.key !== "Escape") return;
+  // Where the key came from, read off the event's path rather than off
+  // `document.activeElement`: `bindEscape` runs first and disarms Close, which
+  // replaces the Yes/No the cursor was on, so by now focus has already dropped
+  // to the body. The path was fixed at dispatch and still says it was here.
+  const fromRegion = ev.composedPath().includes(dangerRegion);
   setDangerOpen(false);
+  if (fromRegion) dangerToggle.focus();
 });
 
 /**

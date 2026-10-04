@@ -32,6 +32,7 @@ import {
   runbookOrder,
   runbookRail,
   runbookSummary,
+  glanceRest,
   setEntryCard,
   toggleRunbook,
   type Runbook,
@@ -472,5 +473,17 @@ describe("a runbook stored by the build that had one holding card", () => {
     assert.ok(book);
     assert.equal(book.filter((e) => e.id === "step-5").length, 1);
     assert.equal(entryById(book, "step-5")?.card, "card-1");
+  });
+});
+
+describe("the header's glance line", () => {
+  it("says the phase and the room after the step", () => {
+    assert.equal(glanceRest("Trivia", "running", 15, 1), " · Running · 15 on · 1 away");
+  });
+  it("uses the panel head's words for a draft session", () => {
+    assert.equal(glanceRest("Lobby", "draft", 0, 0), " · Not open yet · 0 on · 0 away");
+  });
+  it("does not say Lobby twice", () => {
+    assert.equal(glanceRest("Lobby", "lobby", 6, 0), " · 6 on · 0 away");
   });
 });

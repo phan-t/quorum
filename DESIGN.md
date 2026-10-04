@@ -226,7 +226,8 @@ kept for the rules under it.
   and returns.
 - **Dense and mono.** The console is the one surface that may look like a
   terminal. Counts, timers and points in Plex Mono, 13–14 px, tabular.
-  Sixty participants fit in the left rail without scrolling at 1440 px.
+  The roster is one column in the 256px side nav and scrolls; sixteen
+  people show at 1512 × 828 under the default runbook.
 - **Connection state is a dot per person**, green / amber (away) / grey
   (gone), and a total in the status bar. Nothing else about the network is
   shown unless it is wrong.

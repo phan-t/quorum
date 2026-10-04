@@ -425,3 +425,31 @@ export function parseRunbook(raw: string | null): Runbook | null {
   }
   return book;
 }
+
+/* ------------------------------------------------------------------ */
+/* The header's glance line                                            */
+/* ------------------------------------------------------------------ */
+
+/**
+ * What follows the step's name in the header: " · Running · 15 on · 1 away".
+ *
+ * The phase in the words the panel head uses — `draft` is "Not open yet" —
+ * and left out when it would only repeat the step: in the lobby the step is
+ * called Lobby and the phase is `lobby`, and "Lobby · Lobby" is a line that
+ * says one thing twice.
+ */
+export function glanceRest(
+  step: string,
+  phase: string,
+  on: number,
+  away: number,
+): string {
+  const word =
+    phase === "draft" ? "Not open yet" : phase.charAt(0).toUpperCase() + phase.slice(1);
+  const parts = [
+    ...(word.toLowerCase() === step.trim().toLowerCase() ? [] : [word]),
+    `${on} on`,
+    `${away} away`,
+  ];
+  return ` \u00b7 ${parts.join(" \u00b7 ")}`;
+}
