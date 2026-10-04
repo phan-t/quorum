@@ -39,7 +39,7 @@ describe("the Desktop's reveals", () => {
     return m[0];
   };
 
-  for (const name of ["question", "rows", "note", "recap", "unsealRecap", "grid"]) {
+  for (const name of ["question", "rows", "note", "recap", "unsealRecap", "ggRecap", "ggPairs", "bridgeRecap", "grid"]) {
     test(`${name} gives way to a long reveal`, () => {
       assert.match(decl(name), /"data-fit"/);
     });
@@ -52,5 +52,10 @@ describe("the Desktop's reveals", () => {
   test("the budget runs after every paint and on resize", () => {
     assert.match(src, /scene\?\.update\(state\);\n\s*refit\(\);/);
     assert.match(src, /addEventListener\("resize", refit\)/);
+  });
+
+  test("and again when a timed beat leaves the frame it was worked out for", () => {
+    assert.match(src, /drainLog\.hidden = true;[\s\S]{0,120}refit\(\);/);
+    assert.match(src, /winLog\.hidden = true;[\s\S]{0,120}refit\(\);/);
   });
 });

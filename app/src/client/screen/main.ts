@@ -1444,7 +1444,9 @@ function doll(): SVGSVGElement {
  */
 function sceneArcade(): Scene {
   const kicker = h("p", { class: "s-kicker label" });
-  const title = h("h1", { class: "display s-title" });
+  // The arcade's title gives way too: Gganbu's reveal line runs to two lines
+  // over a pair board and six answers, and it is the least read thing there.
+  const title = h("h1", { class: "display s-title", attrs: { "data-fit": "" } });
   const cardLines = h("div", { class: "s-arc-card" });
   const stair = h("div", { class: "s-stair", attrs: { "aria-hidden": "true" } });
 
@@ -1495,7 +1497,7 @@ function sceneArcade(): Scene {
   const bridgeClock = h("p", { class: "mono s-bridge-clock" });
   const bridgeRow = h("div", { class: "s-bridge-row", role: "list" });
   const bridgeWaves = h("div", { class: "s-waves" });
-  const bridgeRecap = h("ol", { class: "s-bridge-recap", attrs: { hidden: true } });
+  const bridgeRecap = h("ol", { class: "s-bridge-recap", attrs: { hidden: true, "data-fit": "" } });
   /**
    * The bridge sits in the ordinary document flow and the dormitory grid
    * steps aside for it, rather than the bridge being laid over the top.
@@ -1622,8 +1624,8 @@ function sceneArcade(): Scene {
     ggWagered,
   ]);
   const ggRichest = h("p", { class: "mono s-gg-richest", attrs: { hidden: true } });
-  const ggPairs = h("div", { class: "s-gg-pairs", role: "list" });
-  const ggRecap = h("ol", { class: "s-gg-recap", attrs: { hidden: true } });
+  const ggPairs = h("div", { class: "s-gg-pairs", role: "list", attrs: { "data-fit": "" } });
+  const ggRecap = h("ol", { class: "s-gg-recap", attrs: { hidden: true, "data-fit": "" } });
   /**
    * The pair board, which is the dormitory grid re-cut into rivals.
    *
@@ -1857,6 +1859,8 @@ function sceneArcade(): Scene {
     drainTimer = setTimeout(() => {
       drainLog.hidden = true;
       drainTimer = null;
+      // The beat was in the frame the budget was worked out for.
+      refit();
     }, 4_000);
   };
 
@@ -1996,6 +2000,8 @@ function sceneArcade(): Scene {
     winTimer = setTimeout(() => {
       winLog.hidden = true;
       winTimer = null;
+      // The beat was in the frame the budget was worked out for.
+      refit();
     }, 4_000);
   };
 

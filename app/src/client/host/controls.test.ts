@@ -1956,6 +1956,15 @@ describe("SHIFT+H is a rescue, with a way back (#43)", () => {
     assert.match(plan, /s\.segment === "holding" && holdingReturnId !== null/);
     assert.match(plan, /label: `Back to \$\{entryName\(back\)\}`/);
   });
+  test("a second press keeps the first one's way back", () => {
+    const fn = /function showHoldingNow\(\)[^{]*\{([\s\S]*?)\n\}/.exec(main)?.[1] ?? "";
+    assert.match(fn, /const back = holdingReturnId;\s*showCard\(/);
+    assert.match(fn, /else if \(back !== null\) holdingReturnId = back;/);
+  });
+  test("and survives a reload", () => {
+    assert.match(main, /back: holdingReturnId \}/);
+    assert.match(main, /holdingReturnId = \(o as \{ back: string \}\)\.back;/);
+  });
   test("and any navigation clears it", () => {
     for (const fn of ["goToEntry", "showCard"]) {
       const body = new RegExp(`function ${fn}\\([^)]*\\)[^{]*\\{([\\s\\S]*?)\\n\\}`).exec(main)?.[1] ?? "";
