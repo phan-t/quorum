@@ -1877,7 +1877,9 @@ describe("the UI Shell layout keeps its promises", () => {
     assert.match(fold, /closeControl\.disarm\(\)/);
     assert.match(fold, /setRestartArmed\(false\)/);
     assert.match(fold, /dangerToggle\.focus\(\)/, "focus must return to the toggle");
-    const esc = /if \(ev\.key !== "Escape"\) return;[\s\S]{0,200}?setDangerOpen\(false\);\s*if \(fromRegion\) dangerToggle\.focus\(\);/.test(main);
+    // Comments are blanked to spaces in `main`, so match the statements and
+    // let whitespace of any length sit between them.
+    const esc = /if \(ev\.key !== "Escape"\) return;\s*const fromRegion = ev\.composedPath\(\)\.includes\(dangerRegion\);\s*setDangerOpen\(false\);\s*if \(fromRegion\) dangerToggle\.focus\(\);/.test(main);
     assert.ok(esc, "Escape must fold the danger region and put the cursor back on its toggle");
     const driving = /function setDriving[\s\S]*?setDangerOpen\(false\)/.test(main);
     assert.ok(driving, "driving mode must fold the danger region");
