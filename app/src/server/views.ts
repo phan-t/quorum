@@ -18,6 +18,7 @@ import {
   UNSEAL_SHAPE_SCORE,
   TUG_ELECTION_MS,
   TUG_MISSES_TO_ELECTION,
+  assignPlayerNumbers,
   beatToleranceMs,
   checkpointsFor,
   gganbuFloorView,
@@ -89,19 +90,20 @@ export function rosterOf(
   lastSeen: ReadonlyMap<ParticipantId, number>,
   now: number,
 ): RosterEntry[] {
+  const displayNumber = numberer(state);
   return Object.values(state.participants)
     // Kicked, or released: released clears the collision key, and until the
     // person rejoins they are not in the room. Their score is kept on the
     // record so a phone swap does not cost them anything.
     .filter((p) => !p.kicked && p.nicknameKey !== "")
-    .sort((a, b) => displayNumber(state, a.pid) - displayNumber(state, b.pid))
+    .sort((a, b) => displayNumber(a.pid) - displayNumber(b.pid))
     .map((p) => {
       const seen = lastSeen.get(p.pid) ?? 0;
       const away = !p.connected || now - seen > AWAY_AFTER_MS;
       return {
         pid: p.pid,
         nickname: p.nickname,
-        playerNumber: displayNumber(state, p.pid),
+        playerNumber: displayNumber(p.pid),
         conn: away ? ("away" as const) : ("on" as const),
       };
     });
@@ -117,12 +119,19 @@ export function rosterOf(
  * scoring grid used the join slot, so after one kick or release "Player 012
  * drained" named somebody the console listed as 026 (#38).
  *
- * The arcade's number once it exists, the join slot before. Nobody is shown a
- * number before the arcade except the host, so the switch is invisible to the
- * room, and from then on there is one number per person everywhere.
+ * Before the arcade, the join slot: nobody but the host is shown a number
+ * then. Once it is entered, the arcade's number — and for someone it has not
+ * numbered yet, the number it *will* give them, which is what
+ * `assignPlayerNumbers` computes: append-only, in roster order, so it is
+ * unique against every number already handed out and is the one the next
+ * round confirms. Falling back to the join slot instead collided: a person
+ * released before the arcade and reclaimed after it kept a low slot that an
+ * arcade number already used, and the rail showed two "006" rows.
  */
-function displayNumber(state: SessionState, pid: ParticipantId): number {
-  return state.arcade?.playerNumbers[pid] ?? state.participants[pid]?.playerNumber ?? 0;
+function numberer(state: SessionState): (pid: ParticipantId) => number {
+  if (!state.arcade) return (pid) => state.participants[pid]?.playerNumber ?? 0;
+  const numbers = assignPlayerNumbers(state, state.arcade.playerNumbers);
+  return (pid) => numbers[pid] ?? state.participants[pid]?.playerNumber ?? 0;
 }
 
 export interface ViewOptions {
@@ -147,6 +156,7 @@ function toRow(state: SessionState, s: Standing): StandingRow {
 
 /** The console's grid: raw, status, points and totals for everyone. */
 function scoreRows(state: SessionState, all: readonly Standing[]): ScoreRow[] {
+  const displayNumber = numberer(state);
   return all.map((s) => {
     const raw: Record<string, number | null> = {};
     const status: Record<string, "played" | "unset"> = {};
@@ -160,7 +170,7 @@ function scoreRows(state: SessionState, all: readonly Standing[]): ScoreRow[] {
     return {
       pid: s.pid,
       nickname: s.nickname,
-      playerNumber: displayNumber(state, s.pid),
+      playerNumber: displayNumber(s.pid),
       raw,
       status,
       points,

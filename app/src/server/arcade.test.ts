@@ -1351,6 +1351,29 @@ describe("one number per person, on every surface (#38)", () => {
       if (!grid.has(row.pid)) continue;
       assert.equal(row.playerNumber, grid.get(row.pid), `${row.nickname}: grid and arcade disagree`);
     }
+    // Released before the arcade and reclaimed after it: not numbered yet, and
+    // shown the number the next round will give, not the low join slot an
+    // arcade number already uses — which put two "006" rows on the rail.
+    const reclaimed = session([
+      { type: "open" },
+      { type: "join", pid: "p1", nickname: "Priya" },
+      { type: "join", pid: "p2", nickname: "Kenji" },
+      { type: "join", pid: "p3", nickname: "Ade" },
+      { type: "start" },
+      { type: "releaseNickname", pid: "p1" },
+      { type: "setSegment", segment: "arcade" },
+      { type: "enterArcade", activityId: "arcade" },
+      { type: "join", pid: "p1", nickname: "Priya", reclaim: true },
+    ]);
+    const nums = view(reclaimed, "host").roster.map((r) => r.playerNumber);
+    assert.equal(new Set(nums).size, nums.length, `duplicate numbers: ${nums.join(", ")}`);
+    assert.equal(reclaimed.arcade?.playerNumbers["p1"], undefined, "not numbered by the engine yet");
+    assert.equal(
+      view(reclaimed, "host").roster.find((r) => r.pid === "p1")?.playerNumber,
+      3,
+      "the number the next round will hand out",
+    );
+
     // And the join slot is still what shows before the arcade.
     const lobby = view(
       session([
