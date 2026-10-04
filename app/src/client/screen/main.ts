@@ -21,6 +21,7 @@ import type {
 import { h, qs, replace, setAttr, setClass, setText } from "../shared/dom.ts";
 import { QuorumClient, type ConnStatus } from "../shared/net.ts";
 import { checkProtocol } from "../shared/protocol-guard.ts";
+import { fitFrame } from "./fit.ts";
 import { mockBadge, mockTransport, readMockConfig } from "../shared/mock.ts";
 import {
   ARCADE_ROUND_CARD,
@@ -190,7 +191,15 @@ function render(state: RenderState): void {
     stage.dataset["view"] = next;
   }
   scene?.update(state);
+  refit();
 }
+
+/** The frame budget, after every paint and whenever the frame changes size. */
+function refit(): void {
+  if (scene) fitFrame(scene.node);
+}
+addEventListener("resize", refit);
+void document.fonts.ready.then(refit);
 
 function build(k: ViewKind): Scene {
   switch (k) {
@@ -1059,8 +1068,8 @@ const TRIVIA_TICK_MS = 200;
 function sceneTrivia(): Scene {
   const kicker = h("p", { class: "s-kicker label" });
   const round = h("p", { class: "s-trivia-round label", attrs: { hidden: true } });
-  const question = h("h1", { class: "display s-question" });
-  const rows = h("div", { class: "s-answers" });
+  const question = h("h1", { class: "display s-question", attrs: { "data-fit": "" } });
+  const rows = h("div", { class: "s-answers", attrs: { "data-fit": "" } });
 
   const timerNum = h("span", { class: "mono s-timer-num" });
   const timerFill = h("div", { class: "s-timer-fill" });
@@ -1076,7 +1085,9 @@ function sceneTrivia(): Scene {
     countText,
   ]);
 
-  const note = h("p", { class: "s-note", attrs: { hidden: true } });
+  // The question, the answers and the note give way to a long reveal; the
+  // podium does not, because who is winning is what the room is waiting for.
+  const note = h("p", { class: "s-note", attrs: { hidden: true, "data-fit": "" } });
   const podium = h("ol", { class: "s-rows s-trivia-podium", attrs: { hidden: true } });
 
   const node = h("section", { class: "s-stage s-trivia" }, [
@@ -1433,18 +1444,22 @@ function doll(): SVGSVGElement {
  */
 function sceneArcade(): Scene {
   const kicker = h("p", { class: "s-kicker label" });
-  const title = h("h1", { class: "display s-title" });
+  // The arcade's title gives way too: Gganbu's reveal line runs to two lines
+  // over a pair board and six answers, and it is the least read thing there.
+  const title = h("h1", { class: "display s-title", attrs: { "data-fit": "" } });
   const cardLines = h("div", { class: "s-arc-card" });
   const stair = h("div", { class: "s-stair", attrs: { "aria-hidden": "true" } });
 
   /* the grid */
-  const grid = h("div", { class: "s-grid", role: "list" });
+  // Gives way with the recaps, so a big room's grid and Recruitment's seven
+  // answers share the frame instead of pushing the title off its top.
+  const grid = h("div", { class: "s-grid", role: "list", attrs: { "data-fit": "" } });
   const counts = h("p", { class: "mono s-grid-counts" });
 
   /* recruitment */
   const cue = h("p", { class: "s-arc-cue", attrs: { "aria-hidden": "true" } });
   const recruitCount = h("p", { class: "mono s-arc-count" });
-  const recap = h("ol", { class: "s-recap", attrs: { hidden: true } });
+  const recap = h("ol", { class: "s-recap", attrs: { hidden: true, "data-fit": "" } });
 
   /* plan / apply */
   const sign = h("h2", { class: "display s-sign" });
@@ -1482,7 +1497,7 @@ function sceneArcade(): Scene {
   const bridgeClock = h("p", { class: "mono s-bridge-clock" });
   const bridgeRow = h("div", { class: "s-bridge-row", role: "list" });
   const bridgeWaves = h("div", { class: "s-waves" });
-  const bridgeRecap = h("ol", { class: "s-bridge-recap", attrs: { hidden: true } });
+  const bridgeRecap = h("ol", { class: "s-bridge-recap", attrs: { hidden: true, "data-fit": "" } });
   /**
    * The bridge sits in the ordinary document flow and the dormitory grid
    * steps aside for it, rather than the bridge being laid over the top.
@@ -1504,7 +1519,7 @@ function sceneArcade(): Scene {
   /* Unseal */
   const unsealHead = h("p", { class: "mono s-unseal-head" });
   const unsealTiles = h("div", { class: "s-tins", role: "list" });
-  const unsealRecap = h("ol", { class: "s-unseal-recap", attrs: { hidden: true } });
+  const unsealRecap = h("ol", { class: "s-unseal-recap", attrs: { hidden: true, "data-fit": "" } });
   /**
    * The +10 board, which is a *reveal*.
    *
@@ -1609,8 +1624,8 @@ function sceneArcade(): Scene {
     ggWagered,
   ]);
   const ggRichest = h("p", { class: "mono s-gg-richest", attrs: { hidden: true } });
-  const ggPairs = h("div", { class: "s-gg-pairs", role: "list" });
-  const ggRecap = h("ol", { class: "s-gg-recap", attrs: { hidden: true } });
+  const ggPairs = h("div", { class: "s-gg-pairs", role: "list", attrs: { "data-fit": "" } });
+  const ggRecap = h("ol", { class: "s-gg-recap", attrs: { hidden: true, "data-fit": "" } });
   /**
    * The pair board, which is the dormitory grid re-cut into rivals.
    *
@@ -1844,6 +1859,8 @@ function sceneArcade(): Scene {
     drainTimer = setTimeout(() => {
       drainLog.hidden = true;
       drainTimer = null;
+      // The beat was in the frame the budget was worked out for.
+      refit();
     }, 4_000);
   };
 
@@ -1983,6 +2000,8 @@ function sceneArcade(): Scene {
     winTimer = setTimeout(() => {
       winLog.hidden = true;
       winTimer = null;
+      // The beat was in the frame the budget was worked out for.
+      refit();
     }, 4_000);
   };
 

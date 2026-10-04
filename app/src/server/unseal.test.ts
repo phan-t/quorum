@@ -512,6 +512,11 @@ describe("the Floor's results", () => {
       { event: { type: "revealRound" }, at: T0 + 71_000 },
     ]);
     assert.equal(circle(revealed, "screen")?.fastest, 1);
+    // But not to the phones, even at the reveal: no phone draws it, and the
+    // phone's guard counts it as the Floor's results, so every Unseal reveal
+    // logged a protocol violation on every phone (#42).
+    const phone = view(revealed, "participant", "p1").arcade?.unseal;
+    assert.ok(phone?.shapes.every((sh) => sh.fastest === undefined));
   });
 
   it("puts the four scores on every surface, because the score is the bet", () => {

@@ -1335,6 +1335,19 @@ let atId: string | null = null;
  */
 let atWanted: string | null = null;
 
+/**
+ * Where SHIFT+H was pressed from, while its card is up as a rescue.
+ *
+ * SHIFT+H is the rescue key, not a navigation key (see `showHoldingNow`), but
+ * putting the card up moved the cursor onto the holding step like any
+ * navigation, so the next Space walked on from *there*: raised from Standings,
+ * the primary read "Open trivia" and would have replayed the afternoon from
+ * step one (#43). This remembers the step the room was taken off. The primary
+ * reads "Back to …" while it is set, and any navigation clears it. Saved with
+ * the cursor, so a reload while the card is up still offers the way back.
+ */
+let holdingReturnId: string | null = null;
+
 /** The card the console last put in front of the room, for SHIFT+H. */
 let lastShownCardId: string | null = null;
 
@@ -1348,6 +1361,7 @@ function loadAt(sid: string): void {
   if (atSid === sid) return;
   atSid = sid;
   atId = null;
+  holdingReturnId = null;
   try {
     const raw = localStorage.getItem(AT_KEY);
     if (raw === null) return;
@@ -1359,6 +1373,9 @@ function loadAt(sid: string): void {
     if (typeof (o as { card?: unknown }).card === "string") {
       lastShownCardId = (o as { card: string }).card;
     }
+    if (typeof (o as { back?: unknown }).back === "string") {
+      holdingReturnId = (o as { back: string }).back;
+    }
   } catch {
     // Storage off. The wire says which segment; that is enough to run on.
   }
@@ -1369,7 +1386,7 @@ function saveAt(): void {
   try {
     localStorage.setItem(
       AT_KEY,
-      JSON.stringify({ sid: atSid, id: atId, card: lastShownCardId }),
+      JSON.stringify({ sid: atSid, id: atId, card: lastShownCardId, back: holdingReturnId }),
     );
   } catch {
     // See the runbook: it still works, it just will not survive a reload.
@@ -1438,6 +1455,7 @@ function firstHoldingStepId(): string | null {
  * commands and no new ones: `setHolding` has always taken a title and a line.
  */
 function goToEntry(entry: RunbookEntry, from: Control | null): void {
+  holdingReturnId = null;
   atId = entry.id;
   atWanted = entry.id;
   if (entry.kind === "holding") {
@@ -1468,6 +1486,9 @@ function goToEntry(entry: RunbookEntry, from: Control | null): void {
 function showCard(card: HoldingCard | null, from: Control | null): void {
   const s = lastState;
   if (s === null) return;
+  // A card put up from its Show button is a choice of what the room sees
+  // next, not a rescue. SHIFT+H sets the return after calling this.
+  holdingReturnId = null;
   if (s.phase !== "running") {
     (from ?? primary).flash("nothing is in front of the room yet");
     return;
@@ -1485,7 +1506,11 @@ function showCard(card: HoldingCard | null, from: Control | null): void {
   atWanted = atId;
   saveAt();
   // See `goToEntry`: the state coming back is the repaint, and a render
-  // against the segment we are leaving would undo the cursor.
+  // against the segment we are leaving would undo the cursor. Already on a
+  // holding segment there is nothing to undo, and the same card again is a
+  // no-op on the server that sends no state back, so the primary is repainted
+  // here or it keeps offering a return that was just cleared.
+  if (s.segment === "holding") render(s);
 }
 
 interface RailRow {
@@ -4782,6 +4807,16 @@ function primaryPlan(): Plan {
   if (s.phase === "lobby") {
     return cmdPlan("Start the session", { name: "start" });
   }
+  // A card raised with SHIFT+H over something else: the way back to it.
+  if (s.segment === "holding" && holdingReturnId !== null) {
+    const back = runbookRail(runbook).find((e) => e.id === holdingReturnId);
+    if (back !== undefined) {
+      return {
+        label: `Back to ${entryName(back)}`,
+        fire: (c) => goToEntry(back, c),
+      };
+    }
+  }
   // Inside trivia the primary button walks the question rather than the run of
   // show: open, close, reveal, next. That is the whole activity on the space
   // bar, which is what the host is holding while they read the question out.
@@ -5883,7 +5918,18 @@ function showHoldingNow(): void {
     cardById(deck, lastShownCardId) ??
     deck[0] ??
     null;
+  // A second press "to be sure" lands on the holding step the first one
+  // moved to, and must not lose the first one's way back.
+  const back = holdingReturnId;
   showCard(card, primary);
+  // Off a step that is not a holding step, the card is a rescue: the primary
+  // offers the way back to it rather than walking on from the card's step.
+  if (here !== null && here.kind !== "holding") holdingReturnId = here.id;
+  else if (back !== null) holdingReturnId = back;
+  saveAt();
+  // Repainted only when already on a holding segment, for `showCard`'s reason;
+  // otherwise the state coming back repaints, as `goToEntry` explains.
+  if (s.segment === "holding") render(s);
 }
 
 /* ---- driving mode ---- */

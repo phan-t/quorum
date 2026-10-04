@@ -1942,3 +1942,33 @@ describe("the console names the tiebreak's winner", () => {
     assert.match(main, /setText\(triviaCounts, `\$\{tiebreakResult\}/);
   });
 });
+
+describe("SHIFT+H is a rescue, with a way back (#43)", () => {
+  const main = stripComments(
+    readFileSync(join(import.meta.dirname, "main.ts"), "utf8"),
+  );
+  test("raised over another step, it remembers that step", () => {
+    const fn = /function showHoldingNow\(\)[^{]*\{([\s\S]*?)\n\}/.exec(main)?.[1] ?? "";
+    assert.match(fn, /if \(here !== null && here\.kind !== "holding"\) holdingReturnId = here\.id;/);
+  });
+  test("and the primary offers the way back while the card is up", () => {
+    const plan = /function primaryPlan\(\)[^{]*\{([\s\S]*?)\n\}/.exec(main)?.[1] ?? "";
+    assert.match(plan, /s\.segment === "holding" && holdingReturnId !== null/);
+    assert.match(plan, /label: `Back to \$\{entryName\(back\)\}`/);
+  });
+  test("a second press keeps the first one's way back", () => {
+    const fn = /function showHoldingNow\(\)[^{]*\{([\s\S]*?)\n\}/.exec(main)?.[1] ?? "";
+    assert.match(fn, /const back = holdingReturnId;\s*showCard\(/);
+    assert.match(fn, /else if \(back !== null\) holdingReturnId = back;/);
+  });
+  test("and survives a reload", () => {
+    assert.match(main, /back: holdingReturnId \}/);
+    assert.match(main, /holdingReturnId = \(o as \{ back: string \}\)\.back;/);
+  });
+  test("and any navigation clears it", () => {
+    for (const fn of ["goToEntry", "showCard"]) {
+      const body = new RegExp(`function ${fn}\\([^)]*\\)[^{]*\\{([\\s\\S]*?)\\n\\}`).exec(main)?.[1] ?? "";
+      assert.match(body, /holdingReturnId = null;/, `${fn} must clear the return`);
+    }
+  });
+});

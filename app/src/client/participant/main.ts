@@ -633,8 +633,11 @@ function guardTopFive(state: RenderState): void {
       "protocol violation: participant received the light schedule; the lock must not be predictable from the phone",
     );
   }
+  // Each round's guard names its round. Two of them printed the same line, so
+  // the rehearsal's one violation could not be placed: it was logged near the
+  // Tug of Raft reveal and was in fact Unseal's (#42).
   if (pa?.finishOrder !== undefined || pa?.crossed !== undefined) {
-    console.error("protocol violation: participant received the Floor's results");
+    console.error("protocol violation: participant received the Floor's results (Plan / Apply)");
   }
   const r = arcade.recruitment;
   if (arcade.phase !== "reveal" && (r?.answer !== undefined || r?.recap !== undefined)) {
@@ -662,7 +665,7 @@ function guardTopFive(state: RenderState): void {
       console.error("protocol violation: participant received the room's Unseal detail");
     }
     if (u.unsealOrder !== undefined || u.shapes.some((sh) => sh.fastest !== undefined)) {
-      console.error("protocol violation: participant received the Floor's results");
+      console.error("protocol violation: participant received the Floor's results (Unseal)");
     }
   }
 
@@ -691,7 +694,7 @@ function guardTopFive(state: RenderState): void {
     );
   }
   if (g.crossed !== undefined || g.fastest !== undefined || g.elapsedMs !== undefined) {
-    console.error("protocol violation: participant received the Floor's results");
+    console.error("protocol violation: participant received the Floor's results (Glass Bridge)");
   }
   if (arcade.phase === "card" && g.board !== undefined) {
     console.error(
