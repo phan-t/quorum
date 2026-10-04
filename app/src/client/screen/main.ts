@@ -56,6 +56,8 @@ import {
   tugRope,
   unsealRevealHead,
   glassRevealHead,
+  glassDrainLine,
+  type GlassMoment,
   howToPlayLines,
   roundCardLines,
   waveRosters,
@@ -1714,6 +1716,17 @@ function sceneArcade(): Scene {
    * and "a reading of nothing" are different things.
    */
   let struck: Set<string> | null = null;
+  /**
+   * The bridge as the last frame had it, which is what says why the next
+   * drain happened and on which pane. See `glassDrainLine`.
+   */
+  let glassBefore: GlassMoment | null = null;
+  const glassMoment = (arcade: ArcadeView): GlassMoment => ({
+    running: arcade.phase === "running",
+    wave: arcade.glass?.wave ?? 0,
+    step: arcade.glass?.step,
+    position: arcade.glass?.position ?? {},
+  });
   let drainTimer: ReturnType<typeof setTimeout> | null = null;
   // The win beat's memory: the last frame's pulls won, and the last frame's
   // open tins per shape. Both start empty rather than at zero, because "no
@@ -1785,7 +1798,9 @@ function sceneArcade(): Scene {
      * step is one too far by the time this runs.
      *
      * Two ways off the bridge and two lines, told apart by whether the step
-     * they were facing is still the open one. Falling is a pane that was not
+     * they were facing is still the open one — read against the previous
+     * frame, by `glassDrainLine`, because this frame's own `step` is reset by
+     * a new wave and missing once the round ends (#44). Falling is a pane that was not
      * tempered; running the clock out is a pane that was not chosen, and
      * telling somebody they stood on a pane they never touched would be the
      * screen making something up.
@@ -1796,8 +1811,7 @@ function sceneArcade(): Scene {
      */
     const glassLine = (n: number): string => {
       const cell = arcade.grid.find((c) => c.playerNumber === n);
-      const at = (cell ? (g?.position?.[cell.pid] ?? 0) : 0) + 1;
-      return g?.step === at - 1 ? HOUSE.glassFall(at, n) : HOUSE.glassTimeout(at, n);
+      return glassDrainLine(glassBefore, glassMoment(arcade), cell?.pid ?? "", n);
     };
     // On the bridge the log goes *in the flow*, under the bridge, rather than
     // over the top of it. A panel laid over this surface is how the big
@@ -2772,6 +2786,7 @@ function sceneArcade(): Scene {
     counts.hidden = grid.hidden;
     paintGrid(state, arcade);
     paintDrains(arcade);
+    glassBefore = arcade.round === "glass_bridge" && arcade.glass ? glassMoment(arcade) : null;
     // Before the phase branches, like the drain, because the last pull of a
     // round is won on the frame that *ends* it and a branch that returned
     // early would eat the one result the round was about.

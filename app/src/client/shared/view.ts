@@ -1870,6 +1870,47 @@ const COUNT_WORDS: readonly string[] = [
   "TWENTY",
 ];
 
+/** What the Desktop remembers of one bridge frame, to read the next drain. */
+export interface GlassMoment {
+  readonly running: boolean;
+  readonly wave: number;
+  readonly step: number | undefined;
+  readonly position: Readonly<Record<string, number>>;
+}
+
+/**
+ * The Desktop's drain line for the bridge: which pane, and why (#44).
+ *
+ * The screen used to guess the why from `step`: still on the step they faced
+ * meant a fall. Two frames broke the guess:
+ * - a host's "next wave" resets `step` to 0, so anyone cut at step 1 read
+ *   "not tempered";
+ * - the frame that ends the round carries neither `step` nor `position`, so
+ *   every last-step drain in wave 3 read "Pane 1".
+ *
+ * A fall is its own frame, sent the moment the pane breaks, with the step
+ * still open. A drain for not stepping only ever arrives on a frame that
+ * closed the step: a new step, a new wave, or the round's end. So the
+ * previous frame decides both. The step is the one it had open, the pane is
+ * the player's position on it, and the reason is whether that step is still
+ * the open one.
+ */
+export function glassDrainLine(
+  before: GlassMoment | null,
+  now: GlassMoment,
+  pid: string,
+  playerNumber: number,
+): string {
+  const pane = (before?.position[pid] ?? now.position[pid] ?? 0) + 1;
+  const fell =
+    before !== null &&
+    before.running &&
+    now.running &&
+    before.wave === now.wave &&
+    before.step === now.step;
+  return fell ? HOUSE.glassFall(pane, playerNumber) : HOUSE.glassTimeout(pane, playerNumber);
+}
+
 /** A spelled count in sentence case, for a line read aloud: "Twelve". */
 function countWord(n: number): string {
   const word = COUNT_WORDS[n];
