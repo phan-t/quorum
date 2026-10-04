@@ -24,10 +24,8 @@ import { checkProtocol } from "../shared/protocol-guard.ts";
 import { fitFrame } from "./fit.ts";
 import { mockBadge, mockTransport, readMockConfig } from "../shared/mock.ts";
 import {
-  ARCADE_ROUND_CARD,
   GGANBU_HOUSE,
   GGANBU_SIDE,
-  HOW_TO_PLAY,
   ARCADE_ROUND_LABEL,
   HOUSE,
   FINAL_DWELL_MS,
@@ -57,6 +55,12 @@ import {
   tugBeatAt,
   tugRope,
   unsealRevealHead,
+  glassRevealHead,
+  tugRevealHead,
+  glassDrainLine,
+  type GlassMoment,
+  howToPlayLines,
+  roundCardLines,
   waveRosters,
   wipeFraction,
   type GridEntry,
@@ -1713,6 +1717,17 @@ function sceneArcade(): Scene {
    * and "a reading of nothing" are different things.
    */
   let struck: Set<string> | null = null;
+  /**
+   * The bridge as the last frame had it, which is what says why the next
+   * drain happened and on which pane. See `glassDrainLine`.
+   */
+  let glassBefore: GlassMoment | null = null;
+  const glassMoment = (arcade: ArcadeView): GlassMoment => ({
+    running: arcade.phase === "running",
+    wave: arcade.glass?.wave ?? 0,
+    step: arcade.glass?.step,
+    position: arcade.glass?.position ?? {},
+  });
   let drainTimer: ReturnType<typeof setTimeout> | null = null;
   // The win beat's memory: the last frame's pulls won, and the last frame's
   // open tins per shape. Both start empty rather than at zero, because "no
@@ -1784,7 +1799,9 @@ function sceneArcade(): Scene {
      * step is one too far by the time this runs.
      *
      * Two ways off the bridge and two lines, told apart by whether the step
-     * they were facing is still the open one. Falling is a pane that was not
+     * they were facing is still the open one — read against the previous
+     * frame, by `glassDrainLine`, because this frame's own `step` is reset by
+     * a new wave and missing once the round ends (#44). Falling is a pane that was not
      * tempered; running the clock out is a pane that was not chosen, and
      * telling somebody they stood on a pane they never touched would be the
      * screen making something up.
@@ -1795,8 +1812,7 @@ function sceneArcade(): Scene {
      */
     const glassLine = (n: number): string => {
       const cell = arcade.grid.find((c) => c.playerNumber === n);
-      const at = (cell ? (g?.position?.[cell.pid] ?? 0) : 0) + 1;
-      return g?.step === at - 1 ? HOUSE.glassFall(at, n) : HOUSE.glassTimeout(at, n);
+      return glassDrainLine(glassBefore, glassMoment(arcade), cell?.pid ?? "", n);
     };
     // On the bridge the log goes *in the flow*, under the bridge, rather than
     // over the top of it. A panel laid over this surface is how the big
@@ -1831,10 +1847,13 @@ function sceneArcade(): Scene {
     const wagers = arcade.gganbu !== undefined;
     const inflow = g !== undefined || tins || wagers;
     setClass(drainLog, "inline", inflow);
-    replace(drainLog, [
-      inflow
-        ? null
-        : h("p", { class: "mono s-drain-error", text: STATE_LOCK_ERROR }),
+    // Still inside the last beat's dwell, its lines stay and these join them:
+    // a fall and the step closing 70 ms later are two drains, and replacing
+    // the first left the room reading only the second.
+    const kept =
+      drainTimer !== null ? Array.from(drainLog.querySelectorAll<HTMLElement>(".s-drain-who")) : [];
+    const lines = [
+      ...kept,
       ...fresh
         .map(Number)
         .sort((a, b) => a - b)
@@ -1851,6 +1870,10 @@ function sceneArcade(): Scene {
                   : HOUSE.drained(n),
           }),
         ),
+    ].slice(inflow ? -3 : -6);
+    replace(drainLog, [
+      inflow ? null : h("p", { class: "mono s-drain-error", text: STATE_LOCK_ERROR }),
+      ...lines,
     ]);
     drainLog.hidden = false;
     if (drainTimer !== null) clearTimeout(drainTimer);
@@ -2041,7 +2064,7 @@ function sceneArcade(): Scene {
     setText(
       bridgeClock,
       revealed
-        ? "EIGHTEEN PANES. NINE ARE TEMPERED."
+        ? glassRevealHead(g.of)
         : [
             `WAVE ${g.wave} OF 3`,
             `STEP ${(g.step ?? 0) + 1} OF ${g.of}`,
@@ -2305,7 +2328,7 @@ function sceneArcade(): Scene {
     setText(
       tugHead,
       arcade.phase === "reveal"
-        ? "THREE PULLS. ONE ROPE."
+        ? tugRevealHead(t.pulls)
         : [
             `PULL ${t.pull + 1} OF ${t.pulls}`,
             `${Math.round(60_000 / t.beatMs)} BPM`,
@@ -2771,6 +2794,7 @@ function sceneArcade(): Scene {
     counts.hidden = grid.hidden;
     paintGrid(state, arcade);
     paintDrains(arcade);
+    glassBefore = arcade.round === "glass_bridge" && arcade.glass ? glassMoment(arcade) : null;
     // Before the phase branches, like the drain, because the last pull of a
     // round is won on the frame that *ends* it and a branch that returned
     // early would eat the one result the round was about.
@@ -2807,11 +2831,7 @@ function sceneArcade(): Scene {
       // who is left — DESIGN.md is explicit that the grid says that, quietly.
       const between = arcade.phase === "idle";
       setText(title, between ? "" : roundLabel);
-      const lines = between
-        ? [HOUSE.roundEnd]
-        : arcade.round
-          ? ARCADE_ROUND_CARD[arcade.round]
-          : ARCADE_ROUND_CARD.recruitment;
+      const lines = between ? [HOUSE.roundEnd] : roundCardLines(arcade);
       replace(
         cardLines,
         [
@@ -2829,7 +2849,7 @@ function sceneArcade(): Scene {
                 h(
                   "div",
                   { class: "s-how" },
-                  HOW_TO_PLAY[arcade.round].map((line) =>
+                  howToPlayLines(arcade).map((line) =>
                     h("p", { class: "s-how-line", text: line }),
                   ),
                 ),

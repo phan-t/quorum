@@ -20,7 +20,8 @@ import type {
 import type { OverUnder, UnsealShape } from "../../engine/types.ts";
 import { append, h, replace, setAttr, setClass, setText } from "../shared/dom.ts";
 import {
-  ARCADE_ROUND_CARD,
+  roundCardLines,
+  howToPlayLines,
   HOW_TO_PLAY,
   ARCADE_ROUND_LABEL,
   HOUSE,
@@ -3896,7 +3897,7 @@ function sceneArcade(ctx: SceneCtx): Scene {
 
   const paintCard = (arcade: ArcadeView): void => {
     const round = arcade.round;
-    const lines = round ? ARCADE_ROUND_CARD[round] : ARCADE_ROUND_CARD.recruitment;
+    const lines = roundCardLines(arcade);
     mount(`card:${round ?? "none"}`, [
       h("div", { class: "a-card" }, [
         // The stairwell is DESIGN.md's one indulgence and it is behind the
@@ -3918,7 +3919,7 @@ function sceneArcade(ctx: SceneCtx): Scene {
               h(
                 "div",
                 { class: "a-how" },
-                HOW_TO_PLAY[round].map((line) => h("p", { class: "a-how-line", text: line })),
+                howToPlayLines(arcade).map((line) => h("p", { class: "a-how-line", text: line })),
               ),
             ]
           : []),
@@ -4437,7 +4438,8 @@ function sceneArcade(ctx: SceneCtx): Scene {
       buzz([120, 60, 120]);
       setText(
         announce,
-        `${glassExit ?? unsealExit ?? gganbuExit ?? STATE_LOCK_ERROR}. ${HOUSE.drained(mine.playerNumber)}`,
+        // Each exit line ends in its own full stop.
+        `${(glassExit ?? unsealExit ?? gganbuExit ?? STATE_LOCK_ERROR).replace(/\.$/, "")}. ${HOUSE.drained(mine.playerNumber)}`,
       );
       // The Lounge is about to mount underneath this, and a mount clears the
       // live region. This one message outlives its screen on purpose.

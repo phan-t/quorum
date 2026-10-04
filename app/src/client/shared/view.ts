@@ -1870,6 +1870,109 @@ const COUNT_WORDS: readonly string[] = [
   "TWENTY",
 ];
 
+/** What the Desktop remembers of one bridge frame, to read the next drain. */
+export interface GlassMoment {
+  readonly running: boolean;
+  readonly wave: number;
+  readonly step: number | undefined;
+  readonly position: Readonly<Record<string, number>>;
+}
+
+/**
+ * The Desktop's drain line for the bridge: which pane, and why (#44).
+ *
+ * The screen used to guess the why from `step`: still on the step they faced
+ * meant a fall. Two frames broke the guess:
+ * - a host's "next wave" resets `step` to 0, so anyone cut at step 1 read
+ *   "not tempered";
+ * - the frame that ends the round carries neither `step` nor `position`, so
+ *   every last-step drain in wave 3 read "Pane 1".
+ *
+ * A fall is its own frame, sent the moment the pane breaks, with the step
+ * still open. A drain for not stepping only ever arrives on a frame that
+ * closed the step: a new step, a new wave, or the round's end. So the
+ * previous frame decides both. The step is the one it had open, the pane is
+ * the player's position on it, and the reason is whether that step is still
+ * the open one.
+ */
+export function glassDrainLine(
+  before: GlassMoment | null,
+  now: GlassMoment,
+  pid: string,
+  playerNumber: number,
+): string {
+  const pane = (before?.position[pid] ?? now.position[pid] ?? 0) + 1;
+  const fell =
+    before !== null &&
+    before.running &&
+    now.running &&
+    before.wave === now.wave &&
+    before.step === now.step;
+  return fell ? HOUSE.glassFall(pane, playerNumber) : HOUSE.glassTimeout(pane, playerNumber);
+}
+
+/** A spelled count in sentence case, for a line read aloud: "Twelve". */
+function countWord(n: number): string {
+  const word = COUNT_WORDS[n];
+  return word === undefined ? String(n) : word.charAt(0) + word.slice(1).toLowerCase();
+}
+
+/** Just what the card lines read off a frame. */
+type CardCounts = Pick<ArcadeView, "round" | "glass" | "gganbu" | "tug">;
+
+/**
+ * The round card, counted from the board that was dealt (#46).
+ *
+ * The Bridge's line was a literal, "Twelve panes", over a staged board of
+ * any length, and the reveal said eighteen. The board is on every card frame
+ * (the round starts before its card shows), so the card counts it, and
+ * {@link ARCADE_ROUND_CARD} is the line for a frame without one.
+ */
+export function roundCardLines(arcade: CardCounts): readonly string[] {
+  const round = arcade.round ?? "recruitment";
+  const lines = [...ARCADE_ROUND_CARD[round]];
+  if (round === "glass_bridge" && arcade.glass !== undefined) {
+    const steps = arcade.glass.of;
+    lines[1] = `${countWord(steps * 2)} panes. ${countWord(steps)} are tempered. The tempered ones are real.`;
+  }
+  // The console's "Tokens each" field: the card said ten whatever it was.
+  if (round === "gganbu" && arcade.gganbu !== undefined) {
+    lines[1] = `You have been paired. You each hold ${countWord(arcade.gganbu.startTokens).toLowerCase()} tokens.`;
+  }
+  return lines;
+}
+
+/**
+ * How to play, counted the same way: Gganbu said "Six over-or-under
+ * questions" over a staged bank of eight, with "8 PROMPTS" under it.
+ */
+export function howToPlayLines(arcade: CardCounts): readonly string[] {
+  if (arcade.round === null) return [];
+  const lines = [...HOW_TO_PLAY[arcade.round]];
+  if (arcade.round === "gganbu" && arcade.gganbu !== undefined) {
+    lines[0] = `You are paired with one other player. ${countWord(arcade.gganbu.startTokens)} tokens each.`;
+    lines[1] = `${countWord(arcade.gganbu.of)} over-or-under questions. Bet tokens on your answer.`;
+  }
+  if (arcade.round === "tug_of_raft" && arcade.tug !== undefined) {
+    lines[2] = `Nobody is knocked out. ${countWord(arcade.tug.pulls)} pulls, and the sides are reshuffled.`;
+  }
+  if (arcade.round === "glass_bridge" && arcade.glass !== undefined) {
+    lines[0] = `${countWord(arcade.glass.of)} steps. Two panes at each: one real HashiCorp feature, one invented.`;
+  }
+  return lines;
+}
+
+/** Tug of Raft's reveal header, counted from the staged pulls. */
+export function tugRevealHead(pulls: number): string {
+  return pulls === 1 ? "ONE PULL. ONE ROPE." : `${COUNT_WORDS[pulls] ?? String(pulls)} PULLS. ONE ROPE.`;
+}
+
+/** The Bridge's reveal header: "TWELVE PANES. SIX ARE TEMPERED." */
+export function glassRevealHead(steps: number): string {
+  const word = (n: number): string => COUNT_WORDS[n] ?? String(n);
+  return `${word(steps * 2)} PANES. ${word(steps)} ARE TEMPERED.`;
+}
+
 /**
  * The Unseal reveal header, counted from the tins that were actually in play.
  *

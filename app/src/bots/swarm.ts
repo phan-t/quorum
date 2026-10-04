@@ -39,9 +39,10 @@ interface Opts {
   readonly joinOnly: boolean;
   /**
    * Milliseconds between joins. Zero is the honest default — a QR code on a
-   * screen produces a storm — but the server admits ten hellos a minute per
-   * IP, so every bot past the tenth from one machine is refused. Stagger to
-   * get a gameplay run past that; leave it at zero to measure the limit.
+   * screen produces a storm — but the server admits `HELLO_FLOOD_LIMIT`
+   * hellos a minute per IP (server/limits.ts), so every bot past that from one
+   * machine is refused. Stagger to get a bigger run past it; leave it at zero
+   * to measure the limit.
    */
   readonly staggerMs: number;
   /**
@@ -195,6 +196,16 @@ class Conn {
     this.ws.send(JSON.stringify(msg));
   }
 }
+
+/**
+ * The participant client's ping interval (`PING_EVERY_MS` in net.ts).
+ *
+ * The server only counts a socket as present when a frame arrives on it
+ * (`lastSeen`), and a bot with nothing to press sends nothing. Without a
+ * ping, a console watching the swarm showed every bot as away after 30 s,
+ * which made a swarm rehearsal with a real console lie about the room (#48).
+ */
+const PING_EVERY_MS = 10_000;
 
 function percentile(values: readonly number[], p: number): number {
   if (values.length === 0) return 0;
@@ -565,6 +576,7 @@ function connect(
     conn.ws = ws;
     conn.openedAt = Date.now();
     let settled = false;
+    let pinger: ReturnType<typeof setInterval> | null = null;
     const settle = (): void => {
       if (!settled) {
         settled = true;
@@ -576,9 +588,6 @@ function connect(
 
     ws.on("message", (raw: Buffer | string) => {
       const text = typeof raw === "string" ? raw : raw.toString("utf8");
-      conn.frames += 1;
-      conn.bytes += Buffer.byteLength(text, "utf8");
-      conn.largestFrame = Math.max(conn.largestFrame, Buffer.byteLength(text, "utf8"));
       let msg: ServerMessage;
       try {
         msg = JSON.parse(text) as ServerMessage;
@@ -586,12 +595,26 @@ function connect(
         conn.error = "a frame was not JSON";
         return;
       }
+      // Our own keep-alive's answer, which isn't traffic the room caused and
+      // would only pad the per-socket frame counts.
+      if (msg.t === "pong") return;
+      conn.frames += 1;
+      conn.bytes += Buffer.byteLength(text, "utf8");
+      conn.largestFrame = Math.max(conn.largestFrame, Buffer.byteLength(text, "utf8"));
 
       switch (msg.t) {
         case "welcome":
           conn.joinedAt = Date.now();
           conn.pid = msg.pid ?? null;
           conn.rejoinToken = msg.rejoinToken ?? null;
+          if (pinger === null) {
+            pinger = setInterval(() => {
+              if (ws.readyState === WebSocket.OPEN) {
+                ws.send(JSON.stringify({ t: "ping", t0: Date.now() } satisfies ClientMessage));
+              }
+            }, PING_EVERY_MS);
+            pinger.unref?.();
+          }
           settle();
           return;
         case "refused":
@@ -659,6 +682,8 @@ function connect(
     });
 
     ws.on("close", (code: number) => {
+      if (pinger !== null) clearInterval(pinger);
+      pinger = null;
       conn.closedWith = code;
       settle();
     });
@@ -1102,9 +1127,9 @@ function report(
   }
   if (limited.length > 0) {
     line(`    rate limited ${limited.length} of ${opts.count}`);
-    line(`                 the server admits 10 hellos a minute per IP and every`);
-    line(`                 bot here shares one, so a run of more than 10 needs`);
-    line(`                 --stagger 6500 or more to get past it. A room behind`);
+    line(`                 the server admits ${HELLO_FLOOD_LIMIT} hellos a minute per IP and every`);
+    line(`                 bot here shares one, so a run of more than ${HELLO_FLOOD_LIMIT} needs`);
+    line(`                 --stagger ${Math.ceil(60_000 / HELLO_FLOOD_LIMIT) + 50} or more to get past it. A room behind`);
     line(`                 one office NAT shares an IP too, and cannot stagger.`);
   }
   for (const c of never) line(`    never joined ${pad(c.label, 14)} ${c.error ?? "silent"}`);
@@ -1128,6 +1153,19 @@ function report(
   } else {
     line(`    Desktop      not connected — pass --screen-token to measure the heaviest surface`);
   }
+  line();
+
+  // What the console's head line says, read off the host's own last frame:
+  // the swarm's frame counts can't see presence, and presence is what a
+  // facilitator reads out (#48).
+  const roster = host.state?.roster ?? [];
+  const open = joined.filter((c) => c.ws?.readyState === WebSocket.OPEN && c.pid !== null);
+  const awayOpen = open.filter((c) => roster.find((r) => r.pid === c.pid)?.conn === "away");
+  line("  Presence, as the console sees it");
+  line(
+    `    room         ${roster.filter((r) => r.conn === "on").length} on · ${roster.filter((r) => r.conn === "away").length} away`,
+  );
+  line(`    open bots    ${open.length}, of which the console shows ${awayOpen.length} away`);
   line();
 
   line("  Play");
@@ -1299,6 +1337,13 @@ function report(
           `${IDLE_ALARM_MS / 1000}s with nothing to press — the failure the arcade exists to avoid`,
     },
     {
+      ok: awayOpen.length === 0,
+      text:
+        awayOpen.length === 0
+          ? "the console shows every open bot as on"
+          : `the console shows ${awayOpen.length} open bot(s) as away — presence is wrong`,
+    },
+    {
       ok: conns.every((c) => c.error === null),
       text: conns.every((c) => c.error === null)
         ? "no socket errored"
@@ -1429,7 +1474,7 @@ async function main(): Promise<void> {
 
   // Everyone but the late arrivals, all at once: a QR code on a screen makes
   // a storm, and staggering by default would test something that does not
-  // happen. `--stagger` exists because ten hellos a minute per IP is the cap.
+  // happen. `--stagger` exists because hellos per IP per minute are capped.
   const onTime = bots.slice(0, bots.length - opts.lateCount);
   const late = bots.slice(bots.length - opts.lateCount);
   await Promise.all(

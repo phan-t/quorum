@@ -3120,7 +3120,7 @@ const ARCADE_ROUNDS: readonly ArcadeRoundKind[] = [
  * the console counts it two lines away: *N on the Floor · N in the Lounge*.
  */
 const ARCADE_ROUND_WHAT: Readonly<Record<ArcadeRoundKind, string>> = {
-  recruitment: "Two emoji, one product name. Type it. Seven items, nobody is knocked out.",
+  recruitment: "Two emoji, one product name. Type it. Nobody is knocked out.",
   plan_apply: "Tap fast while the light is green. Stop the moment it turns. Tapping on red drains you to the Lounge.",
   unseal:
     "Pick a shape, then tap the scrambled letters in order. One wrong tap cracks the tin; a second drains you to the Lounge.",
@@ -3131,8 +3131,8 @@ const ARCADE_ROUND_WHAT: Readonly<Record<ArcadeRoundKind, string>> = {
     // the pair. The rival matters because the +10 at the end goes to whoever
     // of the two holds more, not because you are playing out of each other's
     // hands. This line is read out loud, so it has to be the mechanic.
-    "Paired off with one rival. Six over-or-under prompts, and you secretly stake 1 to 5 of your ten tokens on each; right and the stake is credited, wrong and it is debited. Run out and you are drained to the Lounge. At the end tokens convert 1:1, and whoever of the pair holds more takes +10.",
-  glass_bridge: "Pick the real product feature, twice per step. Pick the fake one and you are drained to the Lounge.",
+    "Paired off with one rival. Over-or-under prompts, and you secretly stake 1 to 5 of your tokens on each; right and the stake is credited, wrong and it is debited. Run out and you are drained to the Lounge. At the end tokens convert 1:1, and whoever of the pair holds more takes +10.",
+  glass_bridge: "Pick the real product feature at each step. Pick the fake one and you are drained to the Lounge.",
 };
 
 /** The round's state, as the thing that is happening in the room. */
@@ -3318,7 +3318,7 @@ const arcadeRecruitCfg = h("div", { class: "a-cfg" }, [
   ]),
   h("p", {
     class: "pb-note",
-    text: "Seven items, timed one after another. You do not have to press anything.",
+    text: "The items are timed one after another. You do not have to press anything.",
   }),
 ]);
 const arcadePlanCfg = h("div", { class: "a-cfg" }, [
@@ -3528,7 +3528,7 @@ const arcadeGganbuCfg = h("div", { class: "a-cfg" }, [
   ]),
   h("p", {
     class: "pb-note",
-    text: "Six prompts, each on its own clock. Everyone is paired with one rival and stakes tokens against them; the tokens only move when a prompt settles, which the clock does on its own. Reach zero and you are drained to the Lounge.",
+    text: "Each prompt runs on its own clock. Everyone is paired with one rival and stakes tokens against them; the tokens only move when a prompt settles, which the clock does on its own. Reach zero and you are drained to the Lounge.",
   }),
 ]);
 
@@ -3552,7 +3552,7 @@ const arcadeGlassCfg = h("div", { class: "a-cfg" }, [
   ]),
   h("p", {
     class: "pb-note",
-    text: "Six steps, two panes at each. The room crosses in three groups by player number, and each step runs on its own clock. The buttons below cut one short.",
+    text: "Two panes at each step. The room crosses in three groups by player number, and each step runs on its own clock. The buttons below cut one short.",
   }),
 ]);
 
@@ -4236,7 +4236,9 @@ function renderArcade(s: RenderState): void {
       ? "Every round you chose has been played. The button moves on to the standings."
       : arcadeOverride !== null
         ? `Next: ${ARCADE_ROUND_LABEL[pick]}. You picked this one by hand.`
-        : `Next: ${ARCADE_ROUND_LABEL[pick]}. Round ${at + 1} of ${order.length} in your running order.`,
+        // "1 of 6", not "Round 1 of 6": the head line above it says
+        // "Round 0 · Recruitment", SPEC's number for the game (#46).
+        : `Next: ${ARCADE_ROUND_LABEL[pick]}, ${at + 1} of ${order.length} in your running order.`,
   );
 
   if (a === undefined) {
