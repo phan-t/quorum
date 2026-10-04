@@ -1121,3 +1121,117 @@ export function carbonTableCell(
 ): HTMLElement {
   return hx(CARBON_TABLE_CELL_TAG, opts, children);
 }
+
+/* ====================================================================== */
+/* The UI Shell: header, side nav, header panel                           */
+/* ====================================================================== */
+
+/**
+ * Carbon's UI Shell, which the console has been laid out in since the
+ * three columns moved onto it: a 48px `cds-header` across the top, a 256px
+ * `cds-side-nav` on the left and a 256px `cds-header-panel` on the right,
+ * with the console's centre panel in the space between.
+ *
+ * Read against `@carbon/web-components@2.64.0/es/components/ui-shell/`, all
+ * four are containers: each renders a `<slot>` (`cds-header-name` wraps its
+ * slot in an `<a>`) and carries its own geometry on `:host` or on a shadow
+ * box. So the console's runbook buttons, roster, preview and controls stay
+ * the console's own light-DOM elements inside them, with every keyboard
+ * path and `aria-*` they had. What Carbon takes over is position and size:
+ *
+ *   cds-header         fixed, top, full width, 3rem tall, role="banner"
+ *   cds-side-nav       its shadow box is fixed at top 3rem, bottom 0, left 0,
+ *                      16rem wide when expanded; role="navigation"
+ *   cds-header-panel   fixed at top 3rem, bottom 0, right 0; 16rem wide and
+ *                      `overflow-y: auto` only when `expanded`, 0 otherwise
+ *
+ * Two of those are traps the factories close, both silent if missed:
+ *
+ *   - `cds-side-nav` defaults to `collapse-mode="responsive"`, which collapses
+ *     it to an overlay that opens on hover. The console's runbook is not a
+ *     menu to be summoned, so the factory always writes `fixed` and
+ *     `expanded` — without `expanded` a fixed side nav is drawn at 0 width.
+ *   - `cds-header-panel` is 0px wide until `expanded`. The factory writes it,
+ *     because a tray that is present and invisible is the worst of both.
+ *
+ * Below 66rem (1056px) Carbon's stylesheet takes the side nav to 0 width. The
+ * console's floor is 1280×800, so that breakpoint is never met on a host
+ * laptop; it is recorded so nobody is surprised on a narrower window.
+ */
+const CARBON_HEADER_TAG = "cds-header";
+const CARBON_HEADER_NAME_TAG = "cds-header-name";
+const CARBON_SIDE_NAV_TAG = "cds-side-nav";
+const CARBON_HEADER_PANEL_TAG = "cds-header-panel";
+
+export interface CarbonLandmarkOpts extends ElemOptions {
+  /**
+   * The landmark's accessible name. Required: there are three landmarks on
+   * the page and a reader lists them by name. Set on the host, which is the
+   * element that carries the role, so — unlike a button's — it is read.
+   */
+  readonly label: string;
+}
+
+export function carbonHeader(
+  opts: CarbonLandmarkOpts,
+  children?: readonly Child[],
+): HTMLElement {
+  const { label, attrs, ...rest } = opts;
+  return hx(
+    CARBON_HEADER_TAG,
+    { ...rest, attrs: { ...attrs, "aria-label": label } },
+    children,
+  );
+}
+
+/**
+ * The header's product name. Carbon renders it as an `<a>`; with no `href`
+ * it is an anchor without a destination, which is not focusable and reads as
+ * text, and that is what the session title is.
+ */
+export function carbonHeaderName(
+  opts: ElemOptions,
+  children?: readonly Child[],
+): HTMLElement {
+  return hx(CARBON_HEADER_NAME_TAG, opts, children);
+}
+
+export function carbonSideNav(
+  opts: CarbonLandmarkOpts,
+  children?: readonly Child[],
+): HTMLElement {
+  const { label, attrs, ...rest } = opts;
+  return hx(
+    CARBON_SIDE_NAV_TAG,
+    {
+      ...rest,
+      attrs: {
+        ...attrs,
+        "aria-label": label,
+        "collapse-mode": "fixed",
+        expanded: "",
+      },
+    },
+    children,
+  );
+}
+
+export function carbonHeaderPanel(
+  opts: CarbonLandmarkOpts,
+  children?: readonly Child[],
+): HTMLElement {
+  const { label, attrs, ...rest } = opts;
+  return hx(
+    CARBON_HEADER_PANEL_TAG,
+    {
+      ...rest,
+      attrs: {
+        ...attrs,
+        role: "complementary",
+        "aria-label": label,
+        expanded: "",
+      },
+    },
+    children,
+  );
+}

@@ -427,30 +427,29 @@ export function parseRunbook(raw: string | null): Runbook | null {
 }
 
 /* ------------------------------------------------------------------ */
-/* The tray's width                                                    */
+/* The header's glance line                                            */
 /* ------------------------------------------------------------------ */
 
 /**
- * How wide the preview column is, in pixels.
+ * What follows the step's name in the header: " · Running · 15 on · 1 away".
  *
- * The floor is the narrowest the preview is still worth looking at; the
- * ceiling is what leaves the scoring grid its ~700px without a sideways
- * scrollbar on a 1280px laptop, plus the rail. Both are clamped here rather
- * than at the drag site so the stored value and the dragged value cannot
- * disagree.
+ * The phase in the words the panel head uses — `draft` is "Not open yet" —
+ * and left out when it would only repeat the step: in the lobby the step is
+ * called Lobby and the phase is `lobby`, and "Lobby · Lobby" is a line that
+ * says one thing twice.
  */
-export const TRAY_MIN = 216;
-export const TRAY_MAX = 560;
-
-export function clampTray(width: number): number {
-  if (!Number.isFinite(width)) return TRAY_MIN;
-  return Math.round(Math.max(TRAY_MIN, Math.min(TRAY_MAX, width)));
-}
-
-/** `null` when nothing usable is stored, which means "use the default". */
-export function parseTrayWidth(raw: string | null): number | null {
-  if (raw === null || raw === "") return null;
-  const n = Number(raw);
-  if (!Number.isFinite(n) || n <= 0) return null;
-  return clampTray(n);
+export function glanceRest(
+  step: string,
+  phase: string,
+  on: number,
+  away: number,
+): string {
+  const word =
+    phase === "draft" ? "Not open yet" : phase.charAt(0).toUpperCase() + phase.slice(1);
+  const parts = [
+    ...(word.toLowerCase() === step.trim().toLowerCase() ? [] : [word]),
+    `${on} on`,
+    `${away} away`,
+  ];
+  return ` \u00b7 ${parts.join(" \u00b7 ")}`;
 }

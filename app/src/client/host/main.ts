@@ -63,6 +63,13 @@ import "@carbon/web-components/es/components/data-table/table-header-cell.js";
 import "@carbon/web-components/es/components/data-table/table-body.js";
 import "@carbon/web-components/es/components/data-table/table-row.js";
 import "@carbon/web-components/es/components/data-table/table-cell.js";
+// The UI Shell's four containers, for the three-column layout. Each by its own
+// module: `ui-shell/index.js` would bring the header menus, the switcher and
+// the side-nav menus and links, none of which the console renders.
+import "@carbon/web-components/es/components/ui-shell/header.js";
+import "@carbon/web-components/es/components/ui-shell/header-name.js";
+import "@carbon/web-components/es/components/ui-shell/side-nav.js";
+import "@carbon/web-components/es/components/ui-shell/header-panel.js";
 
 import type {
   ArcadePlanApplyView,
@@ -119,9 +126,13 @@ import {
   CARBON_SELECT_EVENT,
   blurField,
   carbonButton,
+  carbonHeader,
+  carbonHeaderName,
+  carbonHeaderPanel,
   carbonNumberInput,
   carbonSelect,
   carbonSelectItem,
+  carbonSideNav,
   carbonTag,
   carbonTextInput,
   fieldValue,
@@ -158,11 +169,9 @@ import {
 } from "./plan.ts";
 import {
   HOLDING_STEPS_MAX,
-  TRAY_MAX,
-  TRAY_MIN,
   addHoldingStep,
   anchorHoldingCards,
-  clampTray,
+  glanceRest,
   defaultRunbook,
   dropRunbook,
   entryById,
@@ -172,7 +181,6 @@ import {
   moveRunbook,
   nextEntryAfter,
   parseRunbook,
-  parseTrayWidth,
   removeStep,
   runbookIncludedEntries,
   runbookRail,
@@ -280,22 +288,34 @@ const SCOREBOARD_STATE: Readonly<Record<Seal, string>> = {
 
 const elConn = h("span", { class: "sb-conn mono", attrs: { hidden: true } });
 
+/** The glance line: the step, the phase, who is on and who is away. */
+const elGlanceStep = h("span", { class: "sb-glance-step" });
+const elGlanceRest = h("span", { class: "sb-glance-rest" });
+const elGlance = h("span", { class: "sb-glance" }, [elGlanceStep, elGlanceRest]);
+
 const elTheme = themeToggle();
 
 /**
- * Whose session, whether it is connected, whether the room can see the scores.
+ * Whose session, what is happening, who is in the room, whether it is
+ * connected, whether the room can see the scores.
  *
- * Four things have left this bar and none of them is lost. A red DO NOT SHARE
- * chip and the join code went first: the code is in the lobby panel beside the
- * join link with a copy button on each, which is where a host reaches for it.
- * The head count and the phase followed, because both were second copies — the
- * rail counts the roster two inches to the left, and the panel head says the
- * phase directly above the controls the phase governs. A bar of duplicates is
- * a bar the eye stops reading, and then it is not there for the one line that
- * is only here.
+ * The head of `host.css` says a host glancing at this console for two seconds
+ * knows the phase, the seal, the headcount and what Space will do, and
+ * DESIGN.md's wireframe of it puts "Team Offsite · RAFT · 27 on · 2 away" in
+ * this bar. The phase and the headcount left it once, as second copies — the rail
+ * counts the roster and the panel head said the phase — and the result was the
+ * four glance facts in three corners of the screen. They are back as one line
+ * after the title: "Trivia · Running · 15 on · 1 away", which is the line
+ * driving mode already proves out, in 800px of a header that was empty. The
+ * rail keeps its own copy, because the rail is navigation.
+ *
+ * A red DO NOT SHARE chip and the join code left for good: the tab title
+ * carries the warning, and the code is in the lobby panel beside the join link
+ * with a copy button on each.
  */
-const statusBar = h("header", { class: "statusbar" }, [
-  elTitle,
+const statusBar = carbonHeader({ class: "statusbar", label: "Session" }, [
+  carbonHeaderName({ class: "sb-name" }, [elTitle]),
+  elGlance,
   elConn,
   elScoreboard,
   elTheme,
@@ -375,7 +395,9 @@ const railCount = h("span", { class: "mono rail-count" });
 const KEYS_HINT =
   "SPACE next \u00b7 G scoring grid \u00b7 SHIFT+H holding card \u00b7 SHIFT+D driving mode \u00b7 ESC cancel";
 
-const rail = h("aside", { class: "rail" }, [
+// Carbon's side nav: fixed at the left under the header, 256px, always
+// expanded. The roster is one column at this width and scrolls; see host.css.
+const rail = carbonSideNav({ class: "rail", label: "Runbook and participants" }, [
   h("section", { class: "rail-block" }, [
     h("p", { class: "label", text: "Runbook" }),
     railSegments,
@@ -475,8 +497,8 @@ const previewBox = h("div", { class: "tray-preview" }, [
  * pressed constantly, and the tray is for the rest.
  *
  * It scrolls rather than pushing anything off the bottom of the tray. The
- * splitter takes the column down to 216px and the panel has to stay usable
- * there, so nothing in it is laid out in fixed columns: the rows wrap, the
+ * header panel is a fixed 16rem and has to stay usable on a short window, so
+ * nothing in it is laid out in fixed columns: the rows wrap, the
  * buttons wrap their labels, and the whole block gives way to a scrollbar
  * before it gives way to a control the host cannot reach.
  */
@@ -495,7 +517,9 @@ const trayControls = h("section", {
  * of them to nothing. On a short window that means the Recent list is the
  * part you scroll to, which is the right way round: it is a log.
  */
-const tray = h("aside", { class: "tray" }, [
+// Carbon's header panel, held open: fixed at the right under the header,
+// 256px. It replaces the resizable tray — see host.css on the fixed width.
+const tray = carbonHeaderPanel({ class: "tray", label: "Preview and session" }, [
   previewBox,
   h("div", { class: "tray-body" }, [
     // The tray had a "Recent" list of the last five toasts under these
@@ -507,61 +531,19 @@ const tray = h("aside", { class: "tray" }, [
 ]);
 
 /* ------------------------------------------------------------------ */
-/* The preview column's width                                          */
+/* The preview's scale                                                 */
 /* ------------------------------------------------------------------ */
 
 /**
- * A splitter between the activity panel and the preview.
+ * The preview renders the participant surface at 1280 x 800 and scales it to
+ * the panel, so the participant view's own container queries still measure
+ * 1280px and resolve to the laptop layout the room is looking at.
  *
- * Wider is a better preview and a narrower scoring grid, and which of those
- * a host wants is not something this file can know — it depends on the room,
- * the laptop and whether they are scoring by hand. So it is theirs to set,
- * and it is remembered.
- *
- * `role="separator"` with a tabindex is the window-splitter pattern, and it
- * is in the tab order on purpose: this console is driven by keyboard, and a
- * resize that can only be dragged is a resize this host cannot do while they
- * are talking. Arrow keys move it, Shift+Arrow moves it faster, Home and End
- * go to the stops, and the widths are the ones runbook.ts clamps to.
- */
-const TRAY_KEY = "quorum.host.tray.v1";
-
-const trayGrip = h("div", {
-  class: "tray-grip",
-  attrs: {
-    role: "separator",
-    tabindex: "0",
-    "aria-orientation": "vertical",
-    "aria-label": "Preview column width",
-    "aria-valuemin": String(TRAY_MIN),
-    "aria-valuemax": String(TRAY_MAX),
-    title: "Drag to resize the preview, or focus it and use ← →",
-  },
-});
-
-/** `null` means "whatever the stylesheet says for this window width". */
-let trayWidth: number | null = null;
-
-try {
-  trayWidth = parseTrayWidth(localStorage.getItem(TRAY_KEY));
-} catch {
-  // Storage off. The stylesheet's default is a working console.
-}
-
-function saveTray(): void {
-  try {
-    if (trayWidth === null) localStorage.removeItem(TRAY_KEY);
-    else localStorage.setItem(TRAY_KEY, String(trayWidth));
-  } catch {
-    // See the runbook: it still works, it just will not survive a reload.
-  }
-}
-
-/**
- * The preview renders the participant surface at 1280 x 800 and scales it
- * down to whatever the column is. It is a transform, so the participant's
- * own container queries still measure 1280px and still resolve to the laptop
- * layout — which is the whole point of previewing at that size.
+ * The panel used to be a resizable column with a splitter, a remembered width
+ * and a ceiling worked out from the window. Carbon's header panel is a fixed
+ * 16rem, so all of that went with it: the preview is as wide as the panel
+ * allows, and the scoring grid never has to give way to a column a host
+ * dragged wider than the window could afford.
  */
 function sizePreview(): void {
   // Inside the 1px border on each side.
@@ -569,51 +551,7 @@ function sizePreview(): void {
   previewFrame.style.setProperty("--pv-scale", String(inner / 1280));
 }
 
-function applyTray(): void {
-  if (trayWidth === null) cols.style.removeProperty("--tray-w");
-  else cols.style.setProperty("--tray-w", `${trayWidth}px`);
-  setAttr(
-    trayGrip,
-    "aria-valuenow",
-    String(trayWidth ?? Math.round(tray.getBoundingClientRect().width)),
-  );
-  sizePreview();
-}
-
-/**
- * The widest this window can afford.
- *
- * runbook.ts clamps to 216-560px, which is about the preview; this is about
- * everything else. The rail is 300px and the splitter is 6, and the activity
- * panel needs 620 to keep the scoring grid's ~700px table close to fitting.
- * (It used to also have to hold the foot's four secondary controls on one
- * row; those are in the tray now, and the grid is what the number is for.)
- * On a 1512px window that leaves the
- * full 560; on a 1280px laptop it leaves 354, and 354 is the honest answer
- * there — the pixels are not available, and a splitter that let the host drag
- * past them would be a splitter that broke the grid.
- */
-const PANEL_FLOOR = 620;
-
-function maxTray(): number {
-  const room = window.innerWidth - 300 - 6 - PANEL_FLOOR;
-  return Math.max(TRAY_MIN, Math.min(TRAY_MAX, Math.round(room)));
-}
-
-function setTray(width: number): void {
-  const next = Math.min(clampTray(width), maxTray());
-  if (next === trayWidth) return;
-  trayWidth = next;
-  applyTray();
-}
-
-// A window that got narrower must not leave a preview column the panel cannot
-// live with. The stylesheet's own default follows the window already; a width
-// the host set does not, so it is re-clamped here.
-window.addEventListener("resize", () => {
-  if (trayWidth !== null) setTray(trayWidth);
-  sizePreview();
-});
+window.addEventListener("resize", () => sizePreview());
 
 /* ------------------------------------------------------------------ */
 /* Driving mode                                                        */
@@ -647,7 +585,7 @@ const drivingView = h("section", { class: "driving-view", attrs: { hidden: true 
   h("p", { class: "mono dv-keys", text: KEYS_HINT }),
 ]);
 
-const cols = h("div", { class: "cols" }, [rail, panel, trayGrip, tray]);
+const cols = h("div", { class: "cols" }, [rail, panel, tray]);
 
 // The stale bar sits directly under the status bar and above everything else,
 // which puts it on screen in driving mode too — driving mode hides `cols`, and
@@ -655,73 +593,8 @@ const cols = h("div", { class: "cols" }, [rail, panel, trayGrip, tray]);
 // would otherwise never see this.
 replace(app, [statusBar, staleBar, cols, drivingView]);
 
-/* ---- the splitter, by pointer and by key ---- */
-
-let trayDragging = false;
-
-trayGrip.addEventListener("pointerdown", (ev) => {
-  const e = ev as PointerEvent;
-  if (e.button !== 0) return;
-  trayDragging = true;
-  trayGrip.setPointerCapture(e.pointerId);
-  trayGrip.classList.add("is-dragging");
-  e.preventDefault();
-});
-trayGrip.addEventListener("pointermove", (ev) => {
-  if (!trayDragging) return;
-  const e = ev as PointerEvent;
-  // The splitter is 6px wide and sits to the left of the column it sizes.
-  setTray(window.innerWidth - e.clientX - 3);
-});
-const endTrayDrag = (ev: Event): void => {
-  if (!trayDragging) return;
-  trayDragging = false;
-  trayGrip.classList.remove("is-dragging");
-  const e = ev as PointerEvent;
-  if (trayGrip.hasPointerCapture(e.pointerId)) {
-    trayGrip.releasePointerCapture(e.pointerId);
-  }
-  saveTray();
-};
-trayGrip.addEventListener("pointerup", endTrayDrag);
-trayGrip.addEventListener("pointercancel", endTrayDrag);
-// Nudging it back to the stylesheet's default, which is the one width that
-// follows the window rather than a number the host once dragged to.
-trayGrip.addEventListener("dblclick", () => {
-  trayWidth = null;
-  applyTray();
-  saveTray();
-});
-
-trayGrip.addEventListener("keydown", (ev) => {
-  const e = ev as KeyboardEvent;
-  if (e.metaKey || e.ctrlKey || e.altKey) return;
-  const now = trayWidth ?? Math.round(tray.getBoundingClientRect().width);
-  const step = e.shiftKey ? 48 : 16;
-  switch (e.key) {
-    case "ArrowLeft":
-      setTray(now + step);
-      break;
-    case "ArrowRight":
-      setTray(now - step);
-      break;
-    case "Home":
-      setTray(TRAY_MAX);
-      break;
-    case "End":
-      setTray(TRAY_MIN);
-      break;
-    default:
-      return;
-  }
-  e.preventDefault();
-  saveTray();
-});
-
-if (trayWidth !== null) trayWidth = Math.min(trayWidth, maxTray());
-applyTray();
-// The column also changes width when the window does, and the preview's
-// scale is a function of the column. One observer covers both.
+// The preview's scale is a function of its frame, which is laid out after
+// the header panel's styles arrive; the observer catches that first layout.
 new ResizeObserver(() => sizePreview()).observe(previewFrame);
 if (mock) document.body.appendChild(mockBadge());
 
@@ -731,7 +604,7 @@ if (mock) document.body.appendChild(mockBadge());
 
 const lockControl = control({
   label: "Lock joining",
-  className: "ctl-secondary",
+  className: "ctl-secondary ctl-quiet",
   onFire: (c) => issue({ name: "lobby.lock", locked: !lastState?.joinsLocked }, c),
 });
 
@@ -786,7 +659,7 @@ const unsealControl = control({
 function practiceToggle(): Control {
   return control({
     label: "Practice: off",
-    className: "ctl-secondary ctl-practice",
+    className: "ctl-secondary ctl-quiet ctl-practice",
     title:
       "The game runs normally and nobody scores. Use it for a first run, then turn it off and play it for real.",
     question: () =>
@@ -1154,13 +1027,75 @@ const cpHolding = shortcutButton("Holding card", "SHIFT+H", () =>
 const cpDriving = shortcutButton("Driving mode", "SHIFT+D", () =>
   setDriving(!driving),
 );
-const cpGrid = shortcutButton("Scoring grid", "G", () => {
-  // Same two steps the key takes: the grid is on the console, and driving
-  // mode is the console put away.
+/**
+ * The cursor into the scoring grid: what `G` and the Shortcuts button both do.
+ *
+ * The grid is on the console, and driving mode is the console put away, so
+ * asking for the grid is asking for the console back. In setup there is no
+ * grid to go to — it is hidden until the session runs, because no scores exist
+ * yet — so the key brings the console back and leaves the cursor where it is.
+ */
+function focusGrid(): void {
   setDriving(false);
-  scoring.focusFirst();
-});
+  if (!panel.classList.contains("is-setup")) scoring.focusFirst();
+}
+
+const cpGrid = shortcutButton("Scoring grid", "G", () => focusGrid());
 setAttr(cpDriving, "aria-pressed", "false");
+
+/*
+ * Close and Restart, folded behind a disclosure at the foot of the panel.
+ *
+ * They were a red-bordered block directly under Lock joining, always open:
+ * the loudest thing on the console after the primary, for two controls a host
+ * presses once an afternoon at most, with Close session sixteen pixels under
+ * a button they press when somebody joins late. Folded, the block keeps every
+ * guard it had — Close still arms and asks, Restart still wants the word
+ * typed — and gains a step in front of both.
+ *
+ * In flow, not a pop-out. `setDriving` already holds the rule that a
+ * half-armed wipe must never be somewhere the host cannot see it, and a
+ * pop-out that light-dismisses breaks that by design. So this is a real
+ * `<button aria-expanded>` over a region that is hidden or not, the same
+ * pattern as `rs-arm` and for the reason given there; it hands Space back to
+ * the primary like every control near the wipe. Folding it — by its own
+ * button, by Escape or by driving mode — disarms both.
+ */
+const dangerToggle = handsBackSpace(
+  h("button", {
+    class: "cp-danger-toggle",
+    type: "button",
+    text: "End or restart the session\u2026",
+    attrs: { "aria-expanded": "false", "aria-controls": "session-danger" },
+  }),
+);
+const dangerRegion = h(
+  "div",
+  { class: "cp-danger", attrs: { id: "session-danger", hidden: true } },
+  [
+    h("p", { class: "label cp-danger-label", text: "Cannot be undone" }),
+    h("div", { class: "cp-row" }, [closeControl.el, restartArm]),
+    restartPanel,
+  ],
+);
+let dangerOpen = false;
+function setDangerOpen(open: boolean): void {
+  // Folding hides the subtree the cursor may be in — Close session's Yes/No,
+  // the restart's typed-word field — and a hidden element drops focus to the
+  // body, so the next Tab started from the top of the page. It goes back to
+  // the toggle that opened the region instead, which is where the host was.
+  const hadFocus =
+    !open && dangerRegion.contains(document.activeElement);
+  if (!open) {
+    closeControl.disarm();
+    setRestartArmed(false);
+  }
+  dangerOpen = open;
+  dangerRegion.hidden = !open;
+  setAttr(dangerToggle, "aria-expanded", open ? "true" : "false");
+  if (hadFocus) dangerToggle.focus();
+}
+dangerToggle.addEventListener("click", () => setDangerOpen(!dangerOpen));
 
 replace(trayControls, [
   h("section", { class: "cp-group" }, [
@@ -1169,11 +1104,6 @@ replace(trayControls, [
     // borrowed until the session is running. See `placePrimary`.
     cpLifecycle,
     h("div", { class: "cp-row" }, [lockControl.el, reopenControl.el]),
-    h("div", { class: "cp-danger" }, [
-      h("p", { class: "label cp-danger-label", text: "Cannot be undone" }),
-      h("div", { class: "cp-row" }, [closeControl.el, restartArm]),
-      restartPanel,
-    ]),
   ]),
   h("section", { class: "cp-group" }, [
     h("p", { class: "label", text: "Scoreboard" }),
@@ -1183,6 +1113,7 @@ replace(trayControls, [
     h("p", { class: "label", text: "Shortcuts" }),
     h("div", { class: "cp-row cp-row-keys" }, [cpHolding, cpDriving, cpGrid]),
   ]),
+  h("section", { class: "cp-group cp-group-danger" }, [dangerToggle, dangerRegion]),
 ]);
 
 /* ------------------------------------------------------------------ */
@@ -1939,7 +1870,7 @@ function entryFullName(entry: RunbookEntry): string {
   return cardName(card);
 }
 
-/** The same name, cut to something a 216px rail can hold. */
+/** The same name, cut to something the 16rem side nav can hold. */
 function entryName(entry: RunbookEntry): string {
   const full = entryFullName(entry);
   return full.length > SEGMENT_MAX_NAME
@@ -2643,7 +2574,7 @@ const holdingMarks = new Map<string, { mark: HTMLElement; word: HTMLElement }>()
 
 const holdingClear = control({
   label: "Clear the card",
-  className: "ctl-secondary",
+  className: "ctl-secondary ctl-quiet",
   question: "Take the words off the room's screen?",
   onFire: (c) => {
     lastShownCardId = null;
@@ -2751,7 +2682,7 @@ const sendoffNote = h("p", { class: "pb-note so-hint" });
  */
 const sendoffAutoControl = control({
   label: "Auto",
-  className: "ctl-secondary",
+  className: "ctl-secondary ctl-quiet",
   title:
     "Play the run on a clock. The title card and the closing card still wait for you, and Manual takes it back at any point.",
   onFire: (c) => issue({ name: "sendoff.auto", auto: !(lastState?.sendoff?.auto ?? false) }, c),
@@ -3005,7 +2936,7 @@ const closeEarly = control({
 
 const suddenDeath = control({
   label: "Sudden death: off",
-  className: "ctl-secondary",
+  className: "ctl-secondary ctl-quiet",
   title:
     "First correct answer wins. No timer, and nobody's score changes. Takes effect on the next question you open.",
   onFire: (c) => {
@@ -3042,7 +2973,7 @@ const suddenDeath = control({
  */
 const triviaAutoControl = control({
   label: "Auto",
-  className: "ctl-secondary",
+  className: "ctl-secondary ctl-quiet",
   title:
     "Reveal each question and open the next one on a clock. It never opens the first question, never runs a sudden death, and stops at the end of the set. Manual takes it back at any point.",
   onFire: (c) =>
@@ -3086,15 +3017,12 @@ triviaSpeed.addEventListener("change", () => {
 /** What the pace row says, under the buttons. */
 const triviaPace = h("p", { class: "pb-note t-pace-note" });
 
-const triviaActions = h("div", { class: "field-actions" }, [triviaPractice.el]);
-
 const triviaLoad = h("div", { class: "t-load" }, [
   h("label", { class: "label", text: "Question set" }),
   triviaSet,
 ]);
 
 const bodyTrivia = h("section", { class: "pb pb-trivia" }, [
-  triviaActions,
   triviaHead,
   triviaRound,
   triviaQuestion,
@@ -3105,10 +3033,16 @@ const bodyTrivia = h("section", { class: "pb pb-trivia" }, [
   // Auto sits in the same row as Close early and Sudden death, so it inherits
   // `.field-actions` wrapping and `.ctl-button`'s `white-space: nowrap` —
   // which between them are what keep every button in this console one height.
+  //
+  // Practice is in this row too. It had a row of its own above the question,
+  // and that row was 40px of the panel the scoring grid gives way to: one grid
+  // row at 1512×828. It is still on the game, beside the controls that run it;
+  // it fits on the one line at 1280.
   h("div", { class: "field-actions" }, [
     closeEarly.el,
     suddenDeath.el,
     triviaAutoControl.el,
+    triviaPractice.el,
     triviaSpeedRow,
   ]),
   triviaPace,
@@ -4016,12 +3950,6 @@ const arcadeBacking = h("ul", { class: "a-backing" });
 const arcadeItem = h("p", { class: "a-item" });
 const arcadeNote = h("p", { class: "pb-note a-note", attrs: { hidden: true } });
 
-const arcadeEnd = control({
-  label: "End the round",
-  className: "ctl-secondary",
-  title: "Stops play now. This happens on its own when the clock runs out.",
-  onFire: (c) => issue({ name: "arcade.end" }, c),
-});
 const arcadeNext = control({
   label: "Skip to the next item",
   className: "ctl-secondary",
@@ -4073,6 +4001,15 @@ const arcadeNextPrompt = control({
   onFire: (c) => issue({ name: "arcade.nextPrompt" }, c),
 });
 
+/** Which round each of the strip's round-specific controls belongs to. */
+const arcadeRoundControls: readonly (readonly [Control, ArcadeRoundKind])[] = [
+  [arcadeNext, "recruitment"],
+  [arcadeNextPull, "tug_of_raft"],
+  [arcadeNextPrompt, "gganbu"],
+  [arcadeNextStep, "glass_bridge"],
+  [arcadeNextWave, "glass_bridge"],
+];
+
 /**
  * Gganbu, as the host reads it out: the six prompts, the answers, and the
  * VERIFY flags.
@@ -4094,23 +4031,29 @@ const bodyArcade = h("section", { class: "pb pb-arcade" }, [
   arcadeAlt,
   arcadeItem,
   arcadeNote,
-  arcadeBridge,
-  arcadeGganbu,
-  arcadeSplit,
-  arcadeFloorList,
-  // Above the Backing list, not below it. The list grows by a row for every
-  // person the round drains, and a control that walks away down a scrolling
-  // panel as the round goes on is a control the host cannot press at the
-  // moment they need it — which on this bridge is eighteen times.
+  // Above every list, not just the Backing list. Each list grows as the round
+  // goes on — a row per person drained, a row per prompt — and a control that
+  // walks away down a scrolling panel is a control the host cannot press at
+  // the moment they need it. It was above the Backing list only, which left it
+  // under the Gganbu prompt list and the bridge panel: at 1512×828 "Settle the
+  // prompt" and "End the round" sat at 379–451px in a 340px panel body,
+  // enabled and out of sight.
+  //
+  // Only the current round's controls are shown; see `arcadeRoundControls`.
+  // The panel's own "End the round" is gone: it issued `arcade.end`, which is
+  // what the foot's primary does on Space during play.
   h("div", { class: "field-actions" }, [
     arcadePractice.el,
-    arcadeEnd.el,
     arcadeNext.el,
     arcadeNextPull.el,
     arcadeNextPrompt.el,
     arcadeNextStep.el,
     arcadeNextWave.el,
   ]),
+  arcadeBridge,
+  arcadeGganbu,
+  arcadeSplit,
+  arcadeFloorList,
   h("p", {
     class: "label",
     text: "Backing: players who are out pick someone to root for",
@@ -4272,12 +4215,14 @@ function renderArcade(s: RenderState): void {
     replace(arcadeBacking, []);
     arcadeBridge.hidden = true;
     arcadeGganbu.hidden = true;
-    arcadeEnd.setDisabled(true);
     arcadeNext.setDisabled(true);
     arcadeNextPull.setDisabled(true);
     arcadeNextPrompt.setDisabled(true);
     arcadeNextStep.setDisabled(true);
     arcadeNextWave.setDisabled(true);
+    // Not in the arcade yet, so no round, so none of the round's controls —
+    // the same rule as below, for the state before there is a round to ask.
+    for (const [control] of arcadeRoundControls) control.el.hidden = true;
     // The running order is still live: the host can still change it, and the
     // line above says which round entering leads to.
     return;
@@ -4680,7 +4625,15 @@ function renderArcade(s: RenderState): void {
     ),
   );
 
-  arcadeEnd.setDisabled(a.phase !== "running");
+  // Each round's own controls, and nobody else's. They were all seven on screen
+  // in every round, five of them disabled at any moment (66–82 of 88 samples
+  // across a scripted run), so the host scanned seven boxes for the one or
+  // two that were live. Within a round the set is fixed and keeps its
+  // positions — that is the span muscle memory needs — and the enabled state
+  // still says what the engine will accept right now.
+  for (const [control, round] of arcadeRoundControls) {
+    control.el.hidden = a.round !== round;
+  }
   arcadeNext.setDisabled(a.phase !== "running" || a.round !== "recruitment");
   const bridging = a.phase === "running" && a.round === "glass_bridge";
   const g = a.glass;
@@ -4956,6 +4909,13 @@ function render(s: RenderState): void {
 
   /* status bar */
   setText(elTitle, s.title);
+  {
+    const here = currentEntry(s);
+    setText(elGlanceStep, here === null ? SEGMENT_LABEL[s.segment] : entryName(here));
+    const on = s.roster.filter((r) => r.conn === "on").length;
+    const away = s.roster.filter((r) => r.conn === "away").length;
+    setText(elGlanceRest, glanceRest(elGlanceStep.textContent ?? "", s.phase, on, away));
+  }
   const code = s.hostExtras?.joinCode ?? "————";
   setText(elScoreboard, SCOREBOARD_STATE[s.seal]);
   setAttr(elScoreboard, "data-seal", s.seal);
@@ -5191,6 +5151,8 @@ function renderPreflight(s: RenderState): void {
   runbookSetup.hidden = !setup;
   // Setup gets the whole panel; see `.panel.is-setup` in host.css.
   panel.classList.toggle("is-setup", setup);
+  // No grid in setup, so the shortcut to it has nowhere to go and says so.
+  setDisabled(cpGrid, setup);
   if (!setup) return;
 
   /* The holding steps, and whether each of them has a card to show. This is
@@ -5862,8 +5824,9 @@ function setDriving(on: boolean): void {
   if (on === driving) return;
   driving = on;
   // Driving mode hides the whole console, and a half-armed wipe that is
-  // off-screen is a half-armed wipe nobody can see to cancel.
-  setRestartArmed(false);
+  // off-screen is a half-armed wipe nobody can see to cancel. Folding the
+  // session's danger block disarms the wipe and Close with it.
+  setDangerOpen(false);
   document.body.classList.toggle("driving", on);
   // The control panel's own copy of the toggle. Off-screen while driving mode
   // is on — the tray is hidden with the rest of the console — but it has to be
@@ -5930,7 +5893,13 @@ bindEscape(() => [
  */
 document.addEventListener("keydown", (ev) => {
   if (ev.key !== "Escape") return;
-  setRestartArmed(false);
+  // Where the key came from, read off the event's path rather than off
+  // `document.activeElement`: `bindEscape` runs first and disarms Close, which
+  // replaces the Yes/No the cursor was on, so by now focus has already dropped
+  // to the body. The path was fixed at dispatch and still says it was here.
+  const fromRegion = ev.composedPath().includes(dangerRegion);
+  setDangerOpen(false);
+  if (fromRegion) dangerToggle.focus();
 });
 
 /**
@@ -5946,10 +5915,7 @@ document.addEventListener("keydown", (ev) => {
   if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
   if (el?.isContentEditable) return;
   ev.preventDefault();
-  // The grid is on the console, and driving mode is the console put away.
-  // Asking for the grid is asking for the console back.
-  setDriving(false);
-  scoring.focusFirst();
+  focusGrid();
 });
 
 client.start();

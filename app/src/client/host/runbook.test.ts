@@ -13,11 +13,8 @@ import type { Segment } from "../../engine/types.ts";
 import {
   HOLDING_STEPS_MAX,
   RUNBOOK_MOVABLE,
-  TRAY_MAX,
-  TRAY_MIN,
   addHoldingStep,
   anchorHoldingCards,
-  clampTray,
   defaultRunbook,
   dropRunbook,
   entryById,
@@ -29,13 +26,13 @@ import {
   nextEntryAfter,
   nextInRunbook,
   parseRunbook,
-  parseTrayWidth,
   removeStep,
   runbookIncluded,
   runbookIncludedEntries,
   runbookOrder,
   runbookRail,
   runbookSummary,
+  glanceRest,
   setEntryCard,
   toggleRunbook,
   type Runbook,
@@ -479,20 +476,14 @@ describe("a runbook stored by the build that had one holding card", () => {
   });
 });
 
-describe("the preview column's width", () => {
-  it("clamps to something the preview and the grid can both live with", () => {
-    assert.equal(clampTray(10), TRAY_MIN);
-    assert.equal(clampTray(9999), TRAY_MAX);
-    assert.equal(clampTray(320), 320);
-    assert.equal(clampTray(Number.NaN), TRAY_MIN);
+describe("the header's glance line", () => {
+  it("says the phase and the room after the step", () => {
+    assert.equal(glanceRest("Trivia", "running", 15, 1), " · Running · 15 on · 1 away");
   });
-
-  it("reads a stored width, and ignores junk", () => {
-    assert.equal(parseTrayWidth("360"), 360);
-    assert.equal(parseTrayWidth("9999"), TRAY_MAX);
-    assert.equal(parseTrayWidth("nope"), null);
-    assert.equal(parseTrayWidth(""), null);
-    assert.equal(parseTrayWidth(null), null);
-    assert.equal(parseTrayWidth("-5"), null);
+  it("uses the panel head's words for a draft session", () => {
+    assert.equal(glanceRest("Lobby", "draft", 0, 0), " · Not open yet · 0 on · 0 away");
+  });
+  it("does not say Lobby twice", () => {
+    assert.equal(glanceRest("Lobby", "lobby", 6, 0), " · 6 on · 0 away");
   });
 });

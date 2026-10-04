@@ -109,8 +109,9 @@
  * 32px buttons in a 64px block with 80px of inline padding reserved for it, on
  * a field that is 112px wide — the gutter alone would be 80px of a 112px box,
  * leaving 16px of lead-in and 16px for the digits. The arcade's three-across
- * rows are three such fields in a row that is 157px wide at the splitter's far
- * end. Nothing about the twelve needs a mouse-only ±1: a number field steps
+ * rows are three such fields in a row that was 157px wide when the tray's
+ * splitter could take the centre to its narrowest; the UI Shell's fixed
+ * panels leave it wider. Nothing about the twelve needs a mouse-only ±1: a number field steps
  * with the arrow keys, which is what the host's hands are already on, and the
  * clamps bound the stepping either way. `carbon.ts` carries the figures and
  * the one consequence of switching them off that is not free.
@@ -152,7 +153,7 @@ body {
  * than no preview.
  *
  * --muted, unchanged: #8b8a9c on --ground #0a0a0f is 5.84:1 dark, #656a76 on
- * #ffffff 5.38:1 light; on --panel 5.41:1 / 5.19:1. AA at any size.
+ * #ffffff 5.42:1 light; on --panel 5.41:1 / 5.19:1. AA at any size.
  */
 .rail .label,
 .panel .label,
@@ -197,6 +198,15 @@ body {
   height: 100dvh;
   display: flex;
   flex-direction: column;
+  /* `cds-header` is fixed and 3rem tall; everything in flow starts under it. */
+  padding-top: 3rem;
+  box-sizing: border-box;
+}
+
+/* The mock badge is `tokens.css`'s, fixed at the bottom right, and the UI
+   Shell's header panel is fixed over that corner at Carbon's z-index 8000. */
+.mock-badge {
+  z-index: 9000;
 }
 
 /* ---------------------------------------------------------------------
@@ -206,15 +216,13 @@ body {
 
 /* ----------------------------------------------------------- status -- */
 
+/* `cds-header` since the UI Shell: Carbon's position, 3rem height, ground and
+   hairline are its own, on `:host`. What is set here is the row's rhythm and
+   the type of the things in it. */
 .statusbar {
-  flex: none;
-  display: flex;
-  align-items: center;
   gap: 16px;
-  padding: 0 14px;
-  height: 40px;
-  background: var(--panel);
-  border-bottom: 1px solid var(--line);
+  padding-inline-end: 14px;
+  color: var(--ink);
   font-size: var(--cds-body-compact-01-font-size);
   letter-spacing: var(--cds-body-compact-01-letter-spacing);
   line-height: var(--cds-body-compact-01-line-height);
@@ -227,11 +235,26 @@ body {
    in the lobby panel with a copy button on it. What is left leads with whose
    session it is. 16px, Helios display 16, up from a 15 that is not on the
    scale; --ink on --panel is 16.80:1 dark and 18.72:1 light. */
-.sb-title {
-  font-size: var(--cds-heading-compact-02-font-size);
-  letter-spacing: var(--cds-heading-compact-02-letter-spacing);
-  line-height: var(--cds-heading-compact-02-line-height);
-  font-weight: var(--cds-heading-compact-02-font-weight);
+/* The title is the header's `cds-header-name` now, and takes Carbon's header
+   name type from the `<a>` it is slotted into: 14px, 600. The colour is the
+   console's ink; Carbon's is `--cds-text-primary`, which the bridge points at
+   the same token. */
+.sb-name {
+  color: var(--ink);
+}
+/* The glance line after the title — the step in the console's ink, then the
+   phase and the room in --muted (5.84:1 on --ground dark, 5.42:1 light). It
+   gives way before anything else in the header does: the seal and the theme
+   toggle are pushed right by `.sb-seal`'s auto margin and never shrink. */
+.sb-glance {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--muted);
+}
+.sb-glance-step {
+  color: var(--ink);
+  font-weight: var(--cds-heading-compact-01-font-weight);
 }
 .sb-counts,
 .sb-phase {
@@ -333,6 +356,9 @@ body {
    non-text UI at a 3:1 floor and it clears. */
 .sb-stale {
   flex: none;
+  /* Between the side nav and the header panel, which are fixed over the
+     page's left and right 16rem. */
+  margin-inline: 16rem;
   display: flex;
   align-items: center;
   gap: 12px;
@@ -378,84 +404,46 @@ body {
 /* ------------------------------------------------------------ layout -- */
 
 /*
- * Three columns: run of show and the roster | the activity | the preview.
+ * Three columns, on Carbon's UI Shell: the side nav (run of show and the
+ * roster) | the activity | the header panel (preview and session).
  *
- * The rail stays at 300px. It looks empty with six people in the room and it
- * is not: thirty people is fifteen rows of a two-column roster, and every
- * pixel taken off this column takes characters off a nickname the host is
- * about to read out.
+ * The side nav and the header panel are fixed boxes Carbon positions at the
+ * page's left and right edge under the header, 16rem each, so the activity
+ * panel is the only thing in flow, between 16rem margins.
  *
- * The tray is the column that grows, and only where there is room to grow.
- * Below 1400px the panel needs every pixel it has — the scoring grid is
- * ~700px wide and horizontal scrolling in a grid is the worst thing that can
- * happen to it — so the tray takes 248px and the preview is small. At 1400px
- * and up there is genuine surplus, and it goes to the preview, which is the
- * one thing on this console that is worth more the bigger it is.
- */
-/*
- * Four tracks: the rail, the activity, the splitter, the preview.
- *
- * `--tray-w` is the default for this window width; the host's own width, once
- * they have set one, arrives as an inline custom property on this element and
- * beats both rules. runbook.ts clamps it to 216–560px: narrower and the
- * preview stops being worth looking at, wider and the scoring grid loses its
- * ~700px on a 1280px laptop.
+ * What the move cost, recorded rather than rediscovered:
+ *   - The rail was 300px and held thirty people in a two-column roster with
+ *     no scrolling. At 16rem the roster is one column and scrolls — the host
+ *     chose that over a wider nav. Sixteen rows show at 1512×828 with the
+ *     default runbook above them.
+ *   - The tray was resizable, 216–560px, with a remembered width. Carbon's
+ *     header panel is a fixed 16rem, so the splitter went. That also removed
+ *     the case where a host dragged the tray wide enough to push the grid off
+ *     its frame.
+ *   - The preview is 16rem less padding wide, about 231px against 351px.
  */
 .cols {
-  --tray-w: 248px;
   flex: 1;
   min-height: 0;
-  display: grid;
-  grid-template-columns: 300px minmax(0, 1fr) 6px var(--tray-w);
-}
-
-@media (min-width: 1400px) {
-  .cols {
-    --tray-w: 376px;
-  }
-}
-
-/*
- * The splitter. Six pixels of hit area, one pixel of line, and a focus ring
- * that is loud because this is a control a keyboard reaches: it is in the tab
- * order between the panel and the preview, and the arrow keys move it.
- */
-.tray-grip {
-  position: relative;
-  cursor: col-resize;
-  background: var(--line);
-  border: 0;
-  padding: 0;
-}
-.tray-grip::after {
-  /* A short handle mark, so the column edge reads as something to take hold
-     of rather than as a border that happens to be there. */
-  content: "";
-  position: absolute;
-  top: 50%;
-  left: 1px;
-  width: 4px;
-  height: 36px;
-  margin-top: -18px;
-  border-radius: 2px;
-  background: var(--dim);
-}
-.tray-grip:hover,
-.tray-grip.is-dragging {
-  background: var(--muted);
-}
-.tray-grip:focus-visible {
-  outline: 2px solid var(--ibm-blue);
-  outline-offset: 0;
-}
-
-.rail {
-  border-right: 1px solid var(--line);
-  padding: 12px;
   display: flex;
-  flex-direction: column;
-  gap: 16px;
-  min-height: 0;
+  padding-inline: 16rem;
+}
+.cols > .panel {
+  flex: 1;
+  min-width: 0;
+  border-inline: 1px solid var(--line);
+}
+
+/* `cds-side-nav`. Its box is in its shadow root — fixed, a flex column, and
+   painted `--cds-text-secondary` — so the layout and the ink are set on the
+   console's own children, which are slotted straight into that column. */
+.rail > .rail-block,
+.rail > .rail-keys {
+  padding: 12px 12px 0;
+  color: var(--ink);
+}
+.rail > .rail-keys {
+  padding-bottom: 12px;
 }
 .rail-block {
   display: flex;
@@ -463,8 +451,10 @@ body {
   gap: 8px;
   min-height: 0;
 }
+/* The roster takes what the runbook and the key line leave, and scrolls. */
 .rail-grow {
   flex: 1;
+  min-height: 0;
 }
 .rail-count {
   color: var(--muted);
@@ -527,7 +517,7 @@ body {
 /* Out of the runbook: not on the space bar, still one click away. Said twice
    and neither time in colour — a dashed edge and the word "out" — because
    nothing on this console is carried by colour alone. --muted on --ground is
-   5.84:1 dark and 5.38:1 light. */
+   5.84:1 dark and 5.42:1 light. */
 .seg.is-out {
   border: 1px dashed var(--line);
   color: var(--muted);
@@ -536,7 +526,8 @@ body {
   font-style: italic;
 }
 
-/* Two columns, so sixty people fit without scrolling at 1440px. */
+/* One column since the UI Shell's 16rem side nav, and it scrolls: the host
+   chose a scrolling roster over a nav wider than Carbon's. */
 .roster {
   list-style: none;
   margin: 0;
@@ -544,8 +535,13 @@ body {
   min-height: 0;
   overflow-y: auto;
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(132px, 1fr));
+  grid-template-columns: minmax(0, 1fr);
   align-content: start;
+  /* Room for the scrollbar. The numbers are right-aligned at the column's
+     edge, and an overlay scrollbar's thumb sat on top of "001…" once thirty
+     people made the list scroll. */
+  scrollbar-gutter: stable;
+  padding-inline-end: 8px;
   gap: 0 8px;
 }
 .r-row {
@@ -574,7 +570,7 @@ body {
 }
 .r-num {
   margin-left: auto;
-  color: var(--dim);
+  color: var(--muted);
   font-size: var(--cds-label-01-font-size);
   letter-spacing: var(--cds-label-01-letter-spacing);
   line-height: var(--cds-label-01-line-height);
@@ -623,7 +619,7 @@ body {
    on screen twice in every segment; and once a holding step is called by the
    card it shows, the two copies could not even agree on the word. What is
    left is the half nothing else says: the phase.
-   --muted on --ground is 5.84:1 dark and 5.38:1 light. */
+   --muted on --ground is 5.84:1 dark and 5.42:1 light. */
 .panel-sub {
   color: var(--muted);
   font-size: var(--cds-label-01-font-size);
@@ -641,8 +637,19 @@ body {
  * `lobby` the panel takes what it needs and the grid falls back to its floor,
  * and from the moment the session is running the ceiling is back on.
  */
+/* And no scoring grid at all: in `draft` and `lobby` it was an empty table
+   under a scroll box holding the whole of setup, taking ~130px of the box for
+   a grid with nothing in it. It comes back the moment the session runs. */
+.panel.is-setup .scoring {
+  display: none;
+}
 .panel.is-setup .panel-body {
   max-height: none;
+  /* Setup shrinks to what the panel leaves and scrolls inside itself. The
+     running panel is `0 0 auto` under a 340px cap; with no cap here, not
+     shrinking would make the body as tall as all of setup — 2,236px — and
+     push the foot and its primary off the screen. */
+  flex: 0 1 auto;
 }
 
 /*
@@ -676,14 +683,22 @@ body {
  * the primary button off the screen.
  *
  * The 340px ceiling is the other half of the bargain, and every digit in it
- * was measured rather than guessed:
+ * was measured rather than guessed. Re-measured after #28's Carbon type scale
+ * and the move to the UI Shell, over a scripted run at 1512×828 and 1280×800,
+ * as the deepest *enabled* control from the body's top:
  *
- *   315px  the Glass Bridge, the deepest panel in the product, whole — its
- *          last round control sits at 256px, 272px with the Out-this-round
- *          line wrapped to two
- *   226px  trivia's tallest state, question and four answers and the counts
- *   334px  what the lobby's own panel gets today, so the pre-flight list and
- *          the running order are not given less room than they have now
+ *   278px  trivia, a question open with the "Waiting on…" line at its longest
+ *          (269 on the host's 1512 screen)
+ *   307px  the send-off's Back and Skip, with `.so-next` refitted to 185px
+ *   240px  the arcade, any round, any phase (221 at 1512) — the round's
+ *          controls sit above its lists since the Gganbu prompts left them at
+ *          379–451px in this box, enabled and out of sight
+ *
+ * The 315 / 226 / 334 this note carried were measured at the console's old
+ * 13px and went stale with Carbon's 14px; what made them true again was moving
+ * the controls, not raising the cap. A 420px cap was measured and rejected: it
+ * cost trivia one grid row and the deep arcade rounds three, and left Gganbu's
+ * controls cut anyway, because what is deep in those panels is lists.
  *
  * Everything a host reads or presses *during* something therefore sits under
  * it whole, and nothing live is ever cut. What does not fit is the long
@@ -694,9 +709,15 @@ body {
  * entry goes on while the standings are in front of the room.
  */
 .panel-body {
-  flex: 0 1 auto;
+  /* `0 0 auto`, not `0 1 auto`: flex-shrink is weighted by basis, so even
+     against the grid's 30 the body still absorbed a sliver of any shortfall
+     and scrolled by 3–4px in trivia and two arcade rounds. The window floor
+     moved into the cap instead — on a window too short for 340px plus the
+     header, the scoring block's floor and the foot, the body gives way and
+     the primary button stays on screen. */
+  flex: 0 0 auto;
   min-height: 0;
-  max-height: 340px;
+  max-height: min(340px, calc(100vh - 338px));
   overflow: auto;
 }
 .pb {
@@ -740,7 +761,7 @@ body {
  * wanted from this row.
  *
  * --ink on --ground is 18.13:1 dark, 19.54:1 light; --muted 5.84:1 and
- * 5.38:1. Both unchanged — only the size moved, and at 14px both clear the
+ * 5.42:1. Both unchanged — only the size moved, and at 14px both clear the
  * 4.5:1 floor comfortably. 600 on the code keeps it the heavier of the pair
  * without making it a different size from the link.
  *
@@ -1040,10 +1061,14 @@ cds-number-input.field {
   align-items: baseline;
   gap: 12px;
 }
+/* --muted, not --dim: DESIGN.md keeps --dim for decoration, and these three
+   are read — the grid's keys, and the player numbers the arcade reads aloud.
+   --dim at 12px was 3.07:1 on --ground dark and 3.19:1 light, under AA;
+   --muted is 5.84:1 and 5.42:1. Same change on `.sc-num` and `.r-num`. */
 .sc-hint {
   font-size: var(--cds-label-01-font-size);
   line-height: var(--cds-label-01-line-height);
-  color: var(--dim);
+  color: var(--muted);
   letter-spacing: var(--cds-label-01-letter-spacing);
 }
 
@@ -1184,6 +1209,12 @@ cds-number-input.field {
 .sc-cell-name {
   min-width: 150px;
   width: 100%;
+  /* An auto-layout table sizes a column to its longest min-content, and
+     `.sc-name`'s ellipsis does not bound that: one long nickname widened the
+     table from 692px to 705px and took Rank off the frame. `max-width: 0`
+     takes the column's contents out of the sizing, so Name gets the slack
+     and only the slack, and a long name ellipsises instead. */
+  max-width: 0;
 }
 /* An activity column was as wide as its *title* — "Agentic Security TTX" set
    a 182px column over a 110px cell — and three of those pushed the table past
@@ -1242,7 +1273,7 @@ cds-number-input.field {
   vertical-align: middle;
 }
 .sc-num {
-  color: var(--dim);
+  color: var(--muted);
   font-size: var(--cds-label-01-font-size);
   letter-spacing: var(--cds-label-01-letter-spacing);
   line-height: var(--cds-label-01-line-height);
@@ -1302,14 +1333,21 @@ cds-number-input.field {
   color: var(--nomad-ink);
   font-weight: 600;
 }
+/* Hidden by `visibility`, not `display`, so the clear button's width is
+   always reserved. It was `display: none` until the cell was focused, which
+   widened every activity column 104 → 126px on focus, re-wrapped the header
+   from three lines to two and shifted the whole table 20px on every Tab —
+   then back on blur. Reserved, the columns are 126px and the header two
+   lines in every state. */
 .sc-acts {
-  display: none;
+  display: inline-flex;
+  visibility: hidden;
   gap: 2px;
   margin-left: 4px;
 }
 .sc-cell:hover .sc-acts,
 .sc-cell:focus-within .sc-acts {
-  display: inline-flex;
+  visibility: visible;
 }
 .sc-mini {
   background: transparent;
@@ -1520,7 +1558,8 @@ cds-number-input.field {
  * This console runs at Carbon's `condensed`, which is Carbon's own named
  * density and not a number invented here: 0.5rem, so 7px / 39px, 48px of
  * chrome. The arcade row is back to two lines and every control panel button
- * fits the splitter's narrowest column. The asymmetry stays and is visible —
+ * fits the header panel's 232px of content (it was measured at the old tray's
+ * 191px minimum, which was narrower). The asymmetry stays and is visible —
  * it is what the gutter is, and a console with no icons pays for it.
  */
 
@@ -1564,6 +1603,19 @@ cds-button {
   --cds-layout-density-padding-inline: var(
     --cds-layout-density-padding-inline-condensed
   );
+  /* Neutral, in both themes. Carbon's white theme makes a tertiary #0f62fe and
+     a ghost's label `--cds-link-primary` blue, while g100 makes the tertiary
+     white — so the light console's tray read blue, red, gold and green: a
+     fifth colour in a four-colour grammar where green, gold and red each mean
+     something. The ink is the console's; hover and focus fill with it and take
+     `--cds-text-inverse` for the label, which is legible in both themes. The
+     seal's gold and the danger kinds have their own tokens and are unaffected
+     — `.ctl-seal .ctl-button` outranks this rule. */
+  --cds-button-tertiary: var(--ink);
+  --cds-button-tertiary-hover: var(--ink);
+  --cds-button-tertiary-active: var(--muted);
+  --cds-link-primary: var(--ink);
+  --cds-link-primary-hover: var(--ink);
   --cds-button-disabled: var(--line);
   --cds-text-disabled: var(--muted);
   --cds-text-on-color-disabled: var(--muted);
@@ -1665,8 +1717,8 @@ cds-button {
  * Carbon's own form is a 12px label stacked above the box with 8px under it:
  * ~20px of header per field. The console's fields sit in a `.field-row` with a
  * 90px label column beside them, which is what makes a panel of six settings
- * six rows instead of twelve, and what keeps the control panel usable at the
- * splitter's narrowest. The wipe's label is not a field label at all — it is
+ * six rows instead of twelve, and what keeps the control panel usable in the
+ * header panel's fixed 16rem. The wipe's label is not a field label at all — it is
  * the sentence "Type restart to switch the button on", which Carbon's 12px
  * label cannot hold and which has to stay beside the field it is instructing.
  *
@@ -2131,13 +2183,17 @@ cds-number-input {
 
 /* --------------------------------------------------------------- tray -- */
 
+/* `cds-header-panel`, held open. Its geometry is Carbon's, on `:host` — fixed,
+   16rem, `overflow-y: auto` — which is why the layout can be set here on the
+   host itself. Carbon paints it `--cds-layer` (the bridge's `--panel`) and
+   `--cds-text-secondary`; the ink comes back to the console's. */
 .tray {
-  border-left: 1px solid var(--line);
+  box-sizing: border-box;
   padding: 12px;
   display: flex;
   flex-direction: column;
   gap: 16px;
-  min-height: 0;
+  color: var(--ink);
 }
 .tray-preview {
   display: flex;
@@ -2159,8 +2215,8 @@ cds-number-input {
  * rules the same way a real 1280px window does.
  *
  * It fills its column and keeps the laptop's proportions, and the scale is
- * recomputed from the measured width every time that column changes — by the
- * window resizing, or by the host dragging the splitter. The number in the
+ * recomputed from the measured width every time the frame changes. The header
+ * panel is a fixed 16rem, so that is the first layout and nothing after it. The number in the
  * stylesheet is only what it looks like for the one frame before the first
  * measurement lands.
  */
@@ -2195,10 +2251,8 @@ cds-number-input {
  *
  * The preview is pinned, because a preview that scrolls away is not a
  * preview. Everything else shares what the column has left and scrolls when
- * it does not fit — which on a 1280 x 800 window with the tray dragged wide
- * it does not, because a wider tray is a taller preview. Scrolling is the
- * only answer that keeps every control reachable without giving the tray a
- * minimum height that would fight the splitter.
+ * it does not fit. Scrolling is the only answer that keeps every control
+ * reachable on a short window without giving the panel a minimum height.
  */
 .tray-preview {
   flex: none;
@@ -2506,11 +2560,14 @@ cds-number-input {
   border-left: 3px solid var(--sealed);
   background: var(--panel-2);
   /* `.panel-body` is 340px and scrolls. Everything else in this panel — the
-     position line, the two buttons, the hint — comes to about 110, so this is
-     what is left: the box takes the rest and the *panel* never scrolls, which
-     is what keeps Back and Skip where the host last saw them. A kudo longer
-     than even the 13px step below can hold gets a scrollbar of its own. */
-  max-height: 228px;
+     position line, the pace row, Back and Skip, the hint — comes to 151px
+     since Carbon's type scale (it was about 110 at 13px), so this is what is
+     left: the box takes the rest and the *panel* never scrolls, which is what
+     keeps Back and Skip where the host last saw them. At the old 228px the
+     panel needed 379 of its 340 and Back and Skip sat at 318–350px, cut
+     through by the panel's edge. A kudo longer than this holds gets a
+     scrollbar of its own. */
+  max-height: 185px;
   overflow-y: auto;
 }
 .so-next.is-empty {
@@ -2959,7 +3016,7 @@ cds-number-input {
    driving mode, where the rail is not on screen. --muted, not --dim: --dim
    never carries text that has to be read. Measured 5.41:1 dark (#8b8a9c on
    #14141d) and 5.19:1 light (#656a76 on HDS surface-faint #fafafa); on the
-   rail's own background, --ground, it is 5.84:1 dark and 5.38:1 light.
+   rail's own background, --ground, it is 5.84:1 dark and 5.42:1 light.
    `label-01`, 12px, up from 11px and 10px before that: this is the list the host reads when they have forgotten
    which key does what, so it is the last thing that should be hard to read. */
 .rail-keys {
@@ -3477,7 +3534,7 @@ cds-number-input {
  * It gives up the 11px mono caps, which was the console's chrome idiom for a
  * quiet control; the quiet is the grey and the absent box. #28 step 5 retired
  * that idiom across the whole surface.
- * --muted on --ground is 5.84:1 dark and 5.38:1 light.
+ * --muted on --ground is 5.84:1 dark and 5.42:1 light.
  */
 .a-alt-toggle {
   align-self: flex-start;
@@ -3525,7 +3582,7 @@ cds-number-input {
  *
  * Measured on --ground, both themes:
  *   --ink   #f6f5f3 on #0a0a0f  18.13:1   #0c0c0e on #ffffff  19.54:1
- *   --muted #8b8a9c on #0a0a0f   5.84:1   #656a76 on #ffffff   5.38:1
+ *   --muted #8b8a9c on #0a0a0f   5.84:1   #656a76 on #ffffff   5.42:1
  */
 body.driving .cols {
   display: none;
@@ -3787,14 +3844,13 @@ cds-text-input.rs-field {
  * is for the one button pressed constantly and this is the opposite of that.
  * Three groups: the session, the scoreboard, and the three keys as buttons.
  *
- * It has to stay usable at the splitter's narrowest. 216px of tray is 192px
- * of content, so nothing in here is laid out in columns that can run out:
+ * It has to stay usable in the header panel's fixed 16rem — 232px of
+ * content — so nothing in here is laid out in columns that can run out:
  * rows wrap, buttons wrap their own labels rather than overflowing, the
  * inline confirm puts its question on a line above its Yes and No, and the
  * whole block scrolls before anything in it goes out of reach. A control off
- * the bottom of the tray is a control that does not exist — so the tray is
- * given no minimum that would fight the splitter, and the panel adapts
- * instead.
+ * the bottom of the tray is a control that does not exist — so the panel is
+ * given no minimum height, and its contents adapt instead.
  *
  * Contrast, measured on the surfaces these actually sit on, dark then light:
  *
@@ -3811,8 +3867,11 @@ cds-text-input.rs-field {
  */
 
 .cp {
-  /* Its natural height. `.tray-body` around it is what scrolls. */
-  flex: none;
+  /* At least its natural height, and the rest of `.tray-body` when there is
+     more: the fold for Close and Restart sits at the foot on an auto margin,
+     which needs space below the last group to push into. `.tray-body` around
+     it is still what scrolls when the panel is short. */
+  flex: 1 0 auto;
   display: flex;
   flex-direction: column;
   gap: 12px;
@@ -3835,8 +3894,8 @@ cds-text-input.rs-field {
  * running — Open the lobby, then Start the session. The same element, so the
  * same colours (#062a20 on --nomad, 7.68:1 in both themes, because --nomad is
  * a brand fill and does not move); only the size is the tray's. The panel
- * foot's 18px and 260px floor do not fit a 216px column, and a button whose
- * label is cut off is a button the host cannot read.
+ * foot's 18px and 260px floor do not fit the header panel's 232px of content,
+ * and a button whose label is cut off is a button the host cannot read.
  *
  * Hidden, not empty, the rest of the time: an 0-height flex row would still
  * spend the group's 6px gap on nothing.
@@ -3903,8 +3962,8 @@ cds-text-input.rs-field {
  * Carbon's inner button is `inline-size: max-content` with `white-space`
  * inherited, and `:host(cds-button)` is `display: flex`. Give the host a width
  * and the inner takes it and the label wraps, exactly as the hand-built button
- * did. Measured at the splitter's narrowest, 216px of tray and 191px of
- * content: every control fits, and `Open the lobby   (space)` — the longest
+ * did. Measured at the old tray's narrowest, 216px of tray and 191px of
+ * content — narrower than the header panel's 232px — every control fits, and `Open the lobby   (space)` — the longest
  * label the console has, 166px of Carbon-rendered text — takes two lines and
  * 50px, which is what this rule has always asked for.
  *
@@ -3943,6 +4002,52 @@ cds-text-input.rs-field {
  * Yes or No and fires the primary instead, and a text field swallows the key
  * outright. That is a property of the keydown decision, not of the markup.
  */
+/* The fold for Close and Restart, at the foot of the header panel — see
+   `dangerToggle` in main.ts. Pushed to the bottom by an auto margin, so it is
+   the last thing in the panel and as far from Lock joining as the panel
+   allows. Quiet until opened: the same transparent box and Carbon ghost
+   washes as `.a-alt-toggle`, the console's other in-flow disclosure, with a
+   caret that turns when it is open. --muted on --panel is 5.41:1 dark and
+   5.19:1 light. */
+.cp-group-danger {
+  margin-top: auto;
+  padding-top: 8px;
+  border-top: 1px solid var(--line);
+}
+.cp-danger-toggle {
+  align-self: stretch;
+  min-height: 32px;
+  padding: 6px 7px;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 0;
+  color: var(--muted);
+  font-size: var(--cds-body-compact-01-font-size);
+  line-height: var(--cds-body-compact-01-line-height);
+  letter-spacing: var(--cds-body-compact-01-letter-spacing);
+  text-align: start;
+  cursor: pointer;
+}
+.cp-danger-toggle::before {
+  /* Empty alt text after the slash: the caret is drawn, not read. Without it
+     the button's accessible name began "▸ End or restart…". */
+  content: "\25b8\00a0" / "";
+  display: inline-block;
+}
+.cp-danger-toggle[aria-expanded="true"]::before {
+  content: "\25be\00a0" / "";
+}
+.cp-danger-toggle:hover {
+  background: hsla(0, 0%, 55.3%, 0.12);
+  color: var(--ink);
+}
+.cp-danger-toggle:active {
+  background: hsla(0, 0%, 55.3%, 0.5);
+  color: var(--ink);
+}
+.cp-danger[hidden] {
+  display: none;
+}
 .cp-danger {
   display: flex;
   flex-direction: column;

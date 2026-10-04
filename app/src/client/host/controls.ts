@@ -26,6 +26,10 @@ import { carbonButton, type CarbonKind } from "./carbon.ts";
  *   `.ctl-primary`  `kind="primary"`, `size="lg"` — 48px, Carbon's own default
  *                   size, against everything else's 32px. See `host.css`.
  *   `.ctl-danger`   `kind="danger-tertiary"`.
+ *   `.ctl-quiet`    `kind="ghost"`, `size="sm"` — settings and toggles
+ *                   (Practice, Auto, Sudden death, Lock joining, Clear the
+ *                   card), so the round's actions are the boxes the eye finds.
+ *                   Same 32px as a tertiary: the height is the size token.
  *   `.ctl-row`      not Carbon. A 22px roster row, 11px mono — see below.
  *   anything else   `kind="tertiary"`, `size="sm"` — 32px, fixed: Carbon pins
  *                   a button's min and max block size to the same token per
@@ -52,6 +56,7 @@ import { carbonButton, type CarbonKind } from "./carbon.ts";
 export const KIND_DEFAULT: CarbonKind = "tertiary";
 export const KIND_DANGER: CarbonKind = "danger-tertiary";
 export const KIND_PRIMARY: CarbonKind = "primary";
+export const KIND_QUIET: CarbonKind = "ghost";
 
 /**
  * The micro-buttons the migration stops at, and the measurement that decided
@@ -328,6 +333,7 @@ export function control(opts: Opts): Control {
   const classes = classesOf(el);
   const danger = classes.includes("ctl-danger");
   const primary = classes.includes("ctl-primary");
+  const quiet = classes.includes("ctl-quiet");
   const plain = classes.includes(PLAIN_CLASS);
   const size = primary ? "lg" : "sm";
   let label = opts.label;
@@ -479,7 +485,13 @@ export function control(opts: Opts): Control {
     // button is Carbon's way of saying a state is on, and a tertiary cannot be
     // filled from outside its shadow root.
     const kind =
-      on || primary ? KIND_PRIMARY : danger ? KIND_DANGER : KIND_DEFAULT;
+      on || primary
+        ? KIND_PRIMARY
+        : danger
+          ? KIND_DANGER
+          : quiet
+            ? KIND_QUIET
+            : KIND_DEFAULT;
     const control = button("ctl-button", label, kind, {
       disabled,
       ...(opts.title === undefined ? {} : { title: opts.title }),

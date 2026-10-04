@@ -168,6 +168,23 @@ Laptop, landscape, one person driving under time pressure with thirty people
 waiting. The design goal is **glanceable**: the host looks at it for two
 seconds between sentences and knows what is happening and what to press.
 
+**The screen it is designed for.** A MacBook Pro 14" running Chrome
+maximised — not full screen — with tabs, the address bar and the bookmarks
+bar showing: a **1512 × 828** viewport. That is the primary target, and
+every layout change is measured there. **1280 × 800** is the floor that must
+still work. Height is the scarce resource on both; width is not.
+
+**The layout** is Carbon's UI Shell, with the real components: a 48px
+`cds-header` (the session title, the glance line "Trivia · Running · 15 on ·
+1 away", the scoreboard tag, the theme toggle), a 256px `cds-side-nav` on the
+left (the run of show, a one-column roster that scrolls, the key line), a
+256px `cds-header-panel` on the right (the phone preview, the session and
+scoreboard controls, the shortcuts, and Close/Restart folded behind a
+disclosure), and the live panel between them. Two and three-column
+alternatives were measured against it at both sizes; see issue #28 and the
+layout review for the numbers. The sketch below is the original shape and is
+kept for the rules under it.
+
 ```
 ┌─────────────────────────────────────────────────────────────────────┐
 │ ⚠ DO NOT SHARE   Team Offsite · RAFT · 27 on · 2 away    ● LIVE     │  status bar (top)
@@ -209,7 +226,8 @@ seconds between sentences and knows what is happening and what to press.
   and returns.
 - **Dense and mono.** The console is the one surface that may look like a
   terminal. Counts, timers and points in Plex Mono, 13–14 px, tabular.
-  Sixty participants fit in the left rail without scrolling at 1440 px.
+  The roster is one column in the 256px side nav and scrolls; sixteen
+  people show at 1512 × 828 under the default runbook.
 - **Connection state is a dot per person**, green / amber (away) / grey
   (gone), and a total in the status bar. Nothing else about the network is
   shown unless it is wrong.
