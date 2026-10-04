@@ -224,6 +224,9 @@ export function timerFraction(trivia: TriviaView, now: number): number | null {
 
 /** `Q7 of 20`, the line every surface puts above the question. */
 export function questionLabel(trivia: TriviaView): string {
+  // A tiebreak is outside the set and is shown at no position in it, which
+  // read as "Q0 of 5" on every surface until it said what it is.
+  if (trivia.suddenDeath) return "Sudden death";
   return `Q${trivia.index + 1} of ${trivia.of}`;
 }
 

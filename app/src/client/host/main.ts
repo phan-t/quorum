@@ -4779,16 +4779,45 @@ function primaryPlan(): Plan {
   if (s.segment === "trivia" && s.trivia !== undefined) {
     const t = s.trivia;
     switch (t.phase) {
-      case "idle":
-        return cmdPlan(
-          `Open ${questionLabel(t)}${suddenDeathArmed ? " · sudden death" : ""}`,
-          { name: "trivia.open", suddenDeath: suddenDeathArmed },
-        );
+      case "idle": {
+        const tiebreak = suddenDeathArmed;
+        return {
+          label: tiebreak ? "Open sudden death" : `Open ${questionLabel(t)}`,
+          fire: (c) => {
+            issue({ name: "trivia.open", suddenDeath: tiebreak }, c);
+            // One tiebreak per arming, here as after the last question. It
+            // stayed armed, so the question the set came back to after the
+            // tiebreak opened as a second tiebreak and spent another pool
+            // question.
+            if (tiebreak) setSuddenDeathArmed(false);
+          },
+        };
+      }
       case "open":
         return cmdPlan("Close the question", { name: "trivia.close" });
       case "closed":
         return cmdPlan("Reveal the answer", { name: "trivia.reveal" });
       case "revealed": {
+        // A revealed tiebreak. Its index is `TIEBREAK_INDEX`, outside the set,
+        // so it is decided here and not by where the set stands. Re-armed, the
+        // press opens another (the engine accepts one over a revealed
+        // tiebreak and keeps the first one's hold on the set). Otherwise the
+        // press is `trivia.next`, which is how the engine puts a tiebreak
+        // away: the set comes back exactly where it was left — after the last
+        // question, that is the last question revealed — and from there the
+        // next press walks the runbook. It is labelled as what it does.
+        if (t.suddenDeath) {
+          if (suddenDeathArmed) {
+            return {
+              label: "Open sudden death",
+              fire: (c) => {
+                issue({ name: "trivia.open", suddenDeath: true }, c);
+                setSuddenDeathArmed(false);
+              },
+            };
+          }
+          return cmdPlan("Back to the question set", { name: "trivia.next" });
+        }
         if (t.index + 1 >= t.of) {
           // The set is done, and an armed sudden death is the tiebreak: the
           // one question still to open here. The engine accepts it over a
@@ -4797,9 +4826,8 @@ function primaryPlan(): Plan {
           // nothing and the next Space walked the room into whatever came
           // after trivia (#41).
           //
-          // One tiebreak per arming: opening it disarms the toggle, so once it
-          // is revealed the space bar walks the runbook again, and a room that
-          // is still tied is one more press of the toggle away.
+          // One tiebreak per arming: opening it disarms the toggle. See the
+          // branch above for what the press does once it is revealed.
           if (suddenDeathArmed) {
             return {
               label: "Open sudden death",
@@ -5435,9 +5463,9 @@ function renderTrivia(s: RenderState): void {
   setText(
     triviaHead,
     [
+      // "Sudden death" for a tiebreak, from `questionLabel` itself.
       questionLabel(t),
       sentenceCase(t.phase),
-      t.suddenDeath ? "Sudden death" : null,
       // On the head line and not only on the button, because driving mode
       // reads this line and nothing else: a host who has folded the console
       // down to four numbers still has to know the set is walking itself.

@@ -63,3 +63,17 @@ describe("trivia's commands on the wire", () => {
     });
   });
 });
+
+describe("a tap on a sudden death (#41)", () => {
+  const tap = (index: number): unknown =>
+    parseClientMessage(JSON.stringify({ t: "trivia.answer", cid: "c1", index, choice: 2 }));
+
+  test("carries the tiebreak's index and reaches the runtime", () => {
+    // The view shows a tiebreak at -1; the phone answers with what it was shown.
+    assert.deepEqual(tap(-1), { t: "trivia.answer", cid: "c1", index: -1, choice: 2 });
+  });
+  test("but no other negative index does", () => {
+    assert.equal(tap(-2), null);
+    assert.equal(tap(-0.5), null);
+  });
+});

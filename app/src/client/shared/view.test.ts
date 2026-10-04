@@ -1916,3 +1916,16 @@ describe("which view the seal and segment pick", () => {
     assert.equal(view("final", "sealed"), "sealed");
   });
 });
+
+describe("a question's label", () => {
+  it("names a tiebreak instead of giving it a position (#41)", () => {
+    assert.equal(
+      questionLabel({ index: -1, of: 5, suddenDeath: true } as unknown as TriviaView),
+      "Sudden death",
+    );
+    assert.equal(
+      questionLabel({ index: 2, of: 5, suddenDeath: false } as unknown as TriviaView),
+      "Q3 of 5",
+    );
+  });
+});
