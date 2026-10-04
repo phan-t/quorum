@@ -1595,6 +1595,19 @@ cds-button {
   --cds-layout-density-padding-inline: var(
     --cds-layout-density-padding-inline-condensed
   );
+  /* Neutral, in both themes. Carbon's white theme makes a tertiary #0f62fe and
+     a ghost's label `--cds-link-primary` blue, while g100 makes the tertiary
+     white — so the light console's tray read blue, red, gold and green: a
+     fifth colour in a four-colour grammar where green, gold and red each mean
+     something. The ink is the console's; hover and focus fill with it and take
+     `--cds-text-inverse` for the label, which is legible in both themes. The
+     seal's gold and the danger kinds have their own tokens and are unaffected
+     — `.ctl-seal .ctl-button` outranks this rule. */
+  --cds-button-tertiary: var(--ink);
+  --cds-button-tertiary-hover: var(--ink);
+  --cds-button-tertiary-active: var(--muted);
+  --cds-link-primary: var(--ink);
+  --cds-link-primary-hover: var(--ink);
   --cds-button-disabled: var(--line);
   --cds-text-disabled: var(--muted);
   --cds-text-on-color-disabled: var(--muted);

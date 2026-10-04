@@ -603,7 +603,7 @@ if (mock) document.body.appendChild(mockBadge());
 
 const lockControl = control({
   label: "Lock joining",
-  className: "ctl-secondary",
+  className: "ctl-secondary ctl-quiet",
   onFire: (c) => issue({ name: "lobby.lock", locked: !lastState?.joinsLocked }, c),
 });
 
@@ -658,7 +658,7 @@ const unsealControl = control({
 function practiceToggle(): Control {
   return control({
     label: "Practice: off",
-    className: "ctl-secondary ctl-practice",
+    className: "ctl-secondary ctl-quiet ctl-practice",
     title:
       "The game runs normally and nobody scores. Use it for a first run, then turn it off and play it for real.",
     question: () =>
@@ -2566,7 +2566,7 @@ const holdingMarks = new Map<string, { mark: HTMLElement; word: HTMLElement }>()
 
 const holdingClear = control({
   label: "Clear the card",
-  className: "ctl-secondary",
+  className: "ctl-secondary ctl-quiet",
   question: "Take the words off the room's screen?",
   onFire: (c) => {
     lastShownCardId = null;
@@ -2674,7 +2674,7 @@ const sendoffNote = h("p", { class: "pb-note so-hint" });
  */
 const sendoffAutoControl = control({
   label: "Auto",
-  className: "ctl-secondary",
+  className: "ctl-secondary ctl-quiet",
   title:
     "Play the run on a clock. The title card and the closing card still wait for you, and Manual takes it back at any point.",
   onFire: (c) => issue({ name: "sendoff.auto", auto: !(lastState?.sendoff?.auto ?? false) }, c),
@@ -2928,7 +2928,7 @@ const closeEarly = control({
 
 const suddenDeath = control({
   label: "Sudden death: off",
-  className: "ctl-secondary",
+  className: "ctl-secondary ctl-quiet",
   title:
     "First correct answer wins. No timer, and nobody's score changes. Takes effect on the next question you open.",
   onFire: (c) => {
@@ -2965,7 +2965,7 @@ const suddenDeath = control({
  */
 const triviaAutoControl = control({
   label: "Auto",
-  className: "ctl-secondary",
+  className: "ctl-secondary ctl-quiet",
   title:
     "Reveal each question and open the next one on a clock. It never opens the first question, never runs a sudden death, and stops at the end of the set. Manual takes it back at any point.",
   onFire: (c) =>
