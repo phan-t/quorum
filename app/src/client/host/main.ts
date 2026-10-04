@@ -63,6 +63,13 @@ import "@carbon/web-components/es/components/data-table/table-header-cell.js";
 import "@carbon/web-components/es/components/data-table/table-body.js";
 import "@carbon/web-components/es/components/data-table/table-row.js";
 import "@carbon/web-components/es/components/data-table/table-cell.js";
+// The UI Shell's four containers, for the three-column layout. Each by its own
+// module: `ui-shell/index.js` would bring the header menus, the switcher and
+// the side-nav menus and links, none of which the console renders.
+import "@carbon/web-components/es/components/ui-shell/header.js";
+import "@carbon/web-components/es/components/ui-shell/header-name.js";
+import "@carbon/web-components/es/components/ui-shell/side-nav.js";
+import "@carbon/web-components/es/components/ui-shell/header-panel.js";
 
 import type {
   ArcadePlanApplyView,
@@ -119,9 +126,13 @@ import {
   CARBON_SELECT_EVENT,
   blurField,
   carbonButton,
+  carbonHeader,
+  carbonHeaderName,
+  carbonHeaderPanel,
   carbonNumberInput,
   carbonSelect,
   carbonSelectItem,
+  carbonSideNav,
   carbonTag,
   carbonTextInput,
   fieldValue,
@@ -158,11 +169,8 @@ import {
 } from "./plan.ts";
 import {
   HOLDING_STEPS_MAX,
-  TRAY_MAX,
-  TRAY_MIN,
   addHoldingStep,
   anchorHoldingCards,
-  clampTray,
   defaultRunbook,
   dropRunbook,
   entryById,
@@ -172,7 +180,6 @@ import {
   moveRunbook,
   nextEntryAfter,
   parseRunbook,
-  parseTrayWidth,
   removeStep,
   runbookIncludedEntries,
   runbookRail,
@@ -294,8 +301,10 @@ const elTheme = themeToggle();
  * a bar the eye stops reading, and then it is not there for the one line that
  * is only here.
  */
-const statusBar = h("header", { class: "statusbar" }, [
-  elTitle,
+// Carbon's UI Shell header since the console moved onto it: 48px, fixed,
+// `role="banner"`. The session title is its `cds-header-name`.
+const statusBar = carbonHeader({ class: "statusbar", label: "Session" }, [
+  carbonHeaderName({ class: "sb-name" }, [elTitle]),
   elConn,
   elScoreboard,
   elTheme,
@@ -375,7 +384,9 @@ const railCount = h("span", { class: "mono rail-count" });
 const KEYS_HINT =
   "SPACE next \u00b7 G scoring grid \u00b7 SHIFT+H holding card \u00b7 SHIFT+D driving mode \u00b7 ESC cancel";
 
-const rail = h("aside", { class: "rail" }, [
+// Carbon's side nav: fixed at the left under the header, 256px, always
+// expanded. The roster is one column at this width and scrolls; see host.css.
+const rail = carbonSideNav({ class: "rail", label: "Runbook and participants" }, [
   h("section", { class: "rail-block" }, [
     h("p", { class: "label", text: "Runbook" }),
     railSegments,
@@ -495,7 +506,9 @@ const trayControls = h("section", {
  * of them to nothing. On a short window that means the Recent list is the
  * part you scroll to, which is the right way round: it is a log.
  */
-const tray = h("aside", { class: "tray" }, [
+// Carbon's header panel, held open: fixed at the right under the header,
+// 256px. It replaces the resizable tray — see host.css on the fixed width.
+const tray = carbonHeaderPanel({ class: "tray", label: "Preview and session" }, [
   previewBox,
   h("div", { class: "tray-body" }, [
     // The tray had a "Recent" list of the last five toasts under these
@@ -507,61 +520,19 @@ const tray = h("aside", { class: "tray" }, [
 ]);
 
 /* ------------------------------------------------------------------ */
-/* The preview column's width                                          */
+/* The preview's scale                                                 */
 /* ------------------------------------------------------------------ */
 
 /**
- * A splitter between the activity panel and the preview.
+ * The preview renders the participant surface at 1280 x 800 and scales it to
+ * the panel, so the participant view's own container queries still measure
+ * 1280px and resolve to the laptop layout the room is looking at.
  *
- * Wider is a better preview and a narrower scoring grid, and which of those
- * a host wants is not something this file can know — it depends on the room,
- * the laptop and whether they are scoring by hand. So it is theirs to set,
- * and it is remembered.
- *
- * `role="separator"` with a tabindex is the window-splitter pattern, and it
- * is in the tab order on purpose: this console is driven by keyboard, and a
- * resize that can only be dragged is a resize this host cannot do while they
- * are talking. Arrow keys move it, Shift+Arrow moves it faster, Home and End
- * go to the stops, and the widths are the ones runbook.ts clamps to.
- */
-const TRAY_KEY = "quorum.host.tray.v1";
-
-const trayGrip = h("div", {
-  class: "tray-grip",
-  attrs: {
-    role: "separator",
-    tabindex: "0",
-    "aria-orientation": "vertical",
-    "aria-label": "Preview column width",
-    "aria-valuemin": String(TRAY_MIN),
-    "aria-valuemax": String(TRAY_MAX),
-    title: "Drag to resize the preview, or focus it and use ← →",
-  },
-});
-
-/** `null` means "whatever the stylesheet says for this window width". */
-let trayWidth: number | null = null;
-
-try {
-  trayWidth = parseTrayWidth(localStorage.getItem(TRAY_KEY));
-} catch {
-  // Storage off. The stylesheet's default is a working console.
-}
-
-function saveTray(): void {
-  try {
-    if (trayWidth === null) localStorage.removeItem(TRAY_KEY);
-    else localStorage.setItem(TRAY_KEY, String(trayWidth));
-  } catch {
-    // See the runbook: it still works, it just will not survive a reload.
-  }
-}
-
-/**
- * The preview renders the participant surface at 1280 x 800 and scales it
- * down to whatever the column is. It is a transform, so the participant's
- * own container queries still measure 1280px and still resolve to the laptop
- * layout — which is the whole point of previewing at that size.
+ * The panel used to be a resizable column with a splitter, a remembered width
+ * and a ceiling worked out from the window. Carbon's header panel is a fixed
+ * 16rem, so all of that went with it: the preview is as wide as the panel
+ * allows, and the scoring grid never has to give way to a column a host
+ * dragged wider than the window could afford.
  */
 function sizePreview(): void {
   // Inside the 1px border on each side.
@@ -569,51 +540,7 @@ function sizePreview(): void {
   previewFrame.style.setProperty("--pv-scale", String(inner / 1280));
 }
 
-function applyTray(): void {
-  if (trayWidth === null) cols.style.removeProperty("--tray-w");
-  else cols.style.setProperty("--tray-w", `${trayWidth}px`);
-  setAttr(
-    trayGrip,
-    "aria-valuenow",
-    String(trayWidth ?? Math.round(tray.getBoundingClientRect().width)),
-  );
-  sizePreview();
-}
-
-/**
- * The widest this window can afford.
- *
- * runbook.ts clamps to 216-560px, which is about the preview; this is about
- * everything else. The rail is 300px and the splitter is 6, and the activity
- * panel needs 620 to keep the scoring grid's ~700px table close to fitting.
- * (It used to also have to hold the foot's four secondary controls on one
- * row; those are in the tray now, and the grid is what the number is for.)
- * On a 1512px window that leaves the
- * full 560; on a 1280px laptop it leaves 354, and 354 is the honest answer
- * there — the pixels are not available, and a splitter that let the host drag
- * past them would be a splitter that broke the grid.
- */
-const PANEL_FLOOR = 620;
-
-function maxTray(): number {
-  const room = window.innerWidth - 300 - 6 - PANEL_FLOOR;
-  return Math.max(TRAY_MIN, Math.min(TRAY_MAX, Math.round(room)));
-}
-
-function setTray(width: number): void {
-  const next = Math.min(clampTray(width), maxTray());
-  if (next === trayWidth) return;
-  trayWidth = next;
-  applyTray();
-}
-
-// A window that got narrower must not leave a preview column the panel cannot
-// live with. The stylesheet's own default follows the window already; a width
-// the host set does not, so it is re-clamped here.
-window.addEventListener("resize", () => {
-  if (trayWidth !== null) setTray(trayWidth);
-  sizePreview();
-});
+window.addEventListener("resize", () => sizePreview());
 
 /* ------------------------------------------------------------------ */
 /* Driving mode                                                        */
@@ -647,7 +574,7 @@ const drivingView = h("section", { class: "driving-view", attrs: { hidden: true 
   h("p", { class: "mono dv-keys", text: KEYS_HINT }),
 ]);
 
-const cols = h("div", { class: "cols" }, [rail, panel, trayGrip, tray]);
+const cols = h("div", { class: "cols" }, [rail, panel, tray]);
 
 // The stale bar sits directly under the status bar and above everything else,
 // which puts it on screen in driving mode too — driving mode hides `cols`, and
@@ -655,73 +582,8 @@ const cols = h("div", { class: "cols" }, [rail, panel, trayGrip, tray]);
 // would otherwise never see this.
 replace(app, [statusBar, staleBar, cols, drivingView]);
 
-/* ---- the splitter, by pointer and by key ---- */
-
-let trayDragging = false;
-
-trayGrip.addEventListener("pointerdown", (ev) => {
-  const e = ev as PointerEvent;
-  if (e.button !== 0) return;
-  trayDragging = true;
-  trayGrip.setPointerCapture(e.pointerId);
-  trayGrip.classList.add("is-dragging");
-  e.preventDefault();
-});
-trayGrip.addEventListener("pointermove", (ev) => {
-  if (!trayDragging) return;
-  const e = ev as PointerEvent;
-  // The splitter is 6px wide and sits to the left of the column it sizes.
-  setTray(window.innerWidth - e.clientX - 3);
-});
-const endTrayDrag = (ev: Event): void => {
-  if (!trayDragging) return;
-  trayDragging = false;
-  trayGrip.classList.remove("is-dragging");
-  const e = ev as PointerEvent;
-  if (trayGrip.hasPointerCapture(e.pointerId)) {
-    trayGrip.releasePointerCapture(e.pointerId);
-  }
-  saveTray();
-};
-trayGrip.addEventListener("pointerup", endTrayDrag);
-trayGrip.addEventListener("pointercancel", endTrayDrag);
-// Nudging it back to the stylesheet's default, which is the one width that
-// follows the window rather than a number the host once dragged to.
-trayGrip.addEventListener("dblclick", () => {
-  trayWidth = null;
-  applyTray();
-  saveTray();
-});
-
-trayGrip.addEventListener("keydown", (ev) => {
-  const e = ev as KeyboardEvent;
-  if (e.metaKey || e.ctrlKey || e.altKey) return;
-  const now = trayWidth ?? Math.round(tray.getBoundingClientRect().width);
-  const step = e.shiftKey ? 48 : 16;
-  switch (e.key) {
-    case "ArrowLeft":
-      setTray(now + step);
-      break;
-    case "ArrowRight":
-      setTray(now - step);
-      break;
-    case "Home":
-      setTray(TRAY_MAX);
-      break;
-    case "End":
-      setTray(TRAY_MIN);
-      break;
-    default:
-      return;
-  }
-  e.preventDefault();
-  saveTray();
-});
-
-if (trayWidth !== null) trayWidth = Math.min(trayWidth, maxTray());
-applyTray();
-// The column also changes width when the window does, and the preview's
-// scale is a function of the column. One observer covers both.
+// The preview's scale is a function of its frame, which is laid out after
+// the header panel's styles arrive; the observer catches that first layout.
 new ResizeObserver(() => sizePreview()).observe(previewFrame);
 if (mock) document.body.appendChild(mockBadge());
 

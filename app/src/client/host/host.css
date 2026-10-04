@@ -197,6 +197,15 @@ body {
   height: 100dvh;
   display: flex;
   flex-direction: column;
+  /* `cds-header` is fixed and 3rem tall; everything in flow starts under it. */
+  padding-top: 3rem;
+  box-sizing: border-box;
+}
+
+/* The mock badge is `tokens.css`'s, fixed at the bottom right, and the UI
+   Shell's header panel is fixed over that corner at Carbon's z-index 8000. */
+.mock-badge {
+  z-index: 9000;
 }
 
 /* ---------------------------------------------------------------------
@@ -206,15 +215,13 @@ body {
 
 /* ----------------------------------------------------------- status -- */
 
+/* `cds-header` since the UI Shell: Carbon's position, 3rem height, ground and
+   hairline are its own, on `:host`. What is set here is the row's rhythm and
+   the type of the things in it. */
 .statusbar {
-  flex: none;
-  display: flex;
-  align-items: center;
   gap: 16px;
-  padding: 0 14px;
-  height: 40px;
-  background: var(--panel);
-  border-bottom: 1px solid var(--line);
+  padding-inline-end: 14px;
+  color: var(--ink);
   font-size: var(--cds-body-compact-01-font-size);
   letter-spacing: var(--cds-body-compact-01-letter-spacing);
   line-height: var(--cds-body-compact-01-line-height);
@@ -227,11 +234,12 @@ body {
    in the lobby panel with a copy button on it. What is left leads with whose
    session it is. 16px, Helios display 16, up from a 15 that is not on the
    scale; --ink on --panel is 16.80:1 dark and 18.72:1 light. */
-.sb-title {
-  font-size: var(--cds-heading-compact-02-font-size);
-  letter-spacing: var(--cds-heading-compact-02-letter-spacing);
-  line-height: var(--cds-heading-compact-02-line-height);
-  font-weight: var(--cds-heading-compact-02-font-weight);
+/* The title is the header's `cds-header-name` now, and takes Carbon's header
+   name type from the `<a>` it is slotted into: 14px, 600. The colour is the
+   console's ink; Carbon's is `--cds-text-primary`, which the bridge points at
+   the same token. */
+.sb-name {
+  color: var(--ink);
 }
 .sb-counts,
 .sb-phase {
@@ -333,6 +341,9 @@ body {
    non-text UI at a 3:1 floor and it clears. */
 .sb-stale {
   flex: none;
+  /* Between the side nav and the header panel, which are fixed over the
+     page's left and right 16rem. */
+  margin-inline: 16rem;
   display: flex;
   align-items: center;
   gap: 12px;
@@ -378,84 +389,45 @@ body {
 /* ------------------------------------------------------------ layout -- */
 
 /*
- * Three columns: run of show and the roster | the activity | the preview.
+ * Three columns, on Carbon's UI Shell: the side nav (run of show and the
+ * roster) | the activity | the header panel (preview and session).
  *
- * The rail stays at 300px. It looks empty with six people in the room and it
- * is not: thirty people is fifteen rows of a two-column roster, and every
- * pixel taken off this column takes characters off a nickname the host is
- * about to read out.
+ * The side nav and the header panel are fixed boxes Carbon positions at the
+ * page's left and right edge under the header, 16rem each, so the activity
+ * panel is the only thing in flow, between 16rem margins.
  *
- * The tray is the column that grows, and only where there is room to grow.
- * Below 1400px the panel needs every pixel it has — the scoring grid is
- * ~700px wide and horizontal scrolling in a grid is the worst thing that can
- * happen to it — so the tray takes 248px and the preview is small. At 1400px
- * and up there is genuine surplus, and it goes to the preview, which is the
- * one thing on this console that is worth more the bigger it is.
- */
-/*
- * Four tracks: the rail, the activity, the splitter, the preview.
- *
- * `--tray-w` is the default for this window width; the host's own width, once
- * they have set one, arrives as an inline custom property on this element and
- * beats both rules. runbook.ts clamps it to 216–560px: narrower and the
- * preview stops being worth looking at, wider and the scoring grid loses its
- * ~700px on a 1280px laptop.
+ * What the move cost, recorded rather than rediscovered:
+ *   - The rail was 300px and held thirty people in a two-column roster with
+ *     no scrolling. At 16rem the roster is one column and scrolls — the host
+ *     chose that over a wider nav. Nineteen rows fit at 1512×828.
+ *   - The tray was resizable, 216–560px, with a remembered width. Carbon's
+ *     header panel is a fixed 16rem, so the splitter went. That also removed
+ *     the case where a host dragged the tray wide enough to push the grid off
+ *     its frame.
+ *   - The preview is 16rem less padding wide, about 231px against 351px.
  */
 .cols {
-  --tray-w: 248px;
   flex: 1;
   min-height: 0;
-  display: grid;
-  grid-template-columns: 300px minmax(0, 1fr) 6px var(--tray-w);
-}
-
-@media (min-width: 1400px) {
-  .cols {
-    --tray-w: 376px;
-  }
-}
-
-/*
- * The splitter. Six pixels of hit area, one pixel of line, and a focus ring
- * that is loud because this is a control a keyboard reaches: it is in the tab
- * order between the panel and the preview, and the arrow keys move it.
- */
-.tray-grip {
-  position: relative;
-  cursor: col-resize;
-  background: var(--line);
-  border: 0;
-  padding: 0;
-}
-.tray-grip::after {
-  /* A short handle mark, so the column edge reads as something to take hold
-     of rather than as a border that happens to be there. */
-  content: "";
-  position: absolute;
-  top: 50%;
-  left: 1px;
-  width: 4px;
-  height: 36px;
-  margin-top: -18px;
-  border-radius: 2px;
-  background: var(--dim);
-}
-.tray-grip:hover,
-.tray-grip.is-dragging {
-  background: var(--muted);
-}
-.tray-grip:focus-visible {
-  outline: 2px solid var(--ibm-blue);
-  outline-offset: 0;
-}
-
-.rail {
-  border-right: 1px solid var(--line);
-  padding: 12px;
   display: flex;
-  flex-direction: column;
-  gap: 16px;
-  min-height: 0;
+  padding-inline: 16rem;
+}
+.cols > .panel {
+  flex: 1;
+  min-width: 0;
+  border-inline: 1px solid var(--line);
+}
+
+/* `cds-side-nav`. Its box is in its shadow root — fixed, a flex column, and
+   painted `--cds-text-secondary` — so the layout and the ink are set on the
+   console's own children, which are slotted straight into that column. */
+.rail > .rail-block,
+.rail > .rail-keys {
+  padding: 12px 12px 0;
+  color: var(--ink);
+}
+.rail > .rail-keys {
+  padding-bottom: 12px;
 }
 .rail-block {
   display: flex;
@@ -463,8 +435,10 @@ body {
   gap: 8px;
   min-height: 0;
 }
+/* The roster takes what the runbook and the key line leave, and scrolls. */
 .rail-grow {
   flex: 1;
+  min-height: 0;
 }
 .rail-count {
   color: var(--muted);
@@ -536,7 +510,8 @@ body {
   font-style: italic;
 }
 
-/* Two columns, so sixty people fit without scrolling at 1440px. */
+/* One column since the UI Shell's 16rem side nav, and it scrolls: the host
+   chose a scrolling roster over a nav wider than Carbon's. */
 .roster {
   list-style: none;
   margin: 0;
@@ -544,7 +519,7 @@ body {
   min-height: 0;
   overflow-y: auto;
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(132px, 1fr));
+  grid-template-columns: minmax(0, 1fr);
   align-content: start;
   gap: 0 8px;
 }
@@ -2131,13 +2106,17 @@ cds-number-input {
 
 /* --------------------------------------------------------------- tray -- */
 
+/* `cds-header-panel`, held open. Its geometry is Carbon's, on `:host` — fixed,
+   16rem, `overflow-y: auto` — which is why the layout can be set here on the
+   host itself. Carbon paints it `--cds-layer` (the bridge's `--panel`) and
+   `--cds-text-secondary`; the ink comes back to the console's. */
 .tray {
-  border-left: 1px solid var(--line);
+  box-sizing: border-box;
   padding: 12px;
   display: flex;
   flex-direction: column;
   gap: 16px;
-  min-height: 0;
+  color: var(--ink);
 }
 .tray-preview {
   display: flex;

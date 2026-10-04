@@ -556,6 +556,10 @@ describe("the kinds and sizes the console asks Carbon for", () => {
       "cds-table-body",
       "cds-table-row",
       "cds-table-cell",
+      "cds-header",
+      "cds-header-name",
+      "cds-side-nav",
+      "cds-header-panel",
     ]) {
       // `hostSources()` has the comments blanked out, so a tag named in prose
       // — and `main.ts` names three of them, explaining what Carbon does with

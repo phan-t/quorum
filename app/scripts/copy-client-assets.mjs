@@ -106,6 +106,10 @@ const ENTRY_POINTS = [
   "@carbon/web-components/es/components/data-table/table-body.js",
   "@carbon/web-components/es/components/data-table/table-row.js",
   "@carbon/web-components/es/components/data-table/table-cell.js",
+  "@carbon/web-components/es/components/ui-shell/header.js",
+  "@carbon/web-components/es/components/ui-shell/header-name.js",
+  "@carbon/web-components/es/components/ui-shell/side-nav.js",
+  "@carbon/web-components/es/components/ui-shell/header-panel.js",
 ];
 
 /**

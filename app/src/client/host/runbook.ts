@@ -425,32 +425,3 @@ export function parseRunbook(raw: string | null): Runbook | null {
   }
   return book;
 }
-
-/* ------------------------------------------------------------------ */
-/* The tray's width                                                    */
-/* ------------------------------------------------------------------ */
-
-/**
- * How wide the preview column is, in pixels.
- *
- * The floor is the narrowest the preview is still worth looking at; the
- * ceiling is what leaves the scoring grid its ~700px without a sideways
- * scrollbar on a 1280px laptop, plus the rail. Both are clamped here rather
- * than at the drag site so the stored value and the dragged value cannot
- * disagree.
- */
-export const TRAY_MIN = 216;
-export const TRAY_MAX = 560;
-
-export function clampTray(width: number): number {
-  if (!Number.isFinite(width)) return TRAY_MIN;
-  return Math.round(Math.max(TRAY_MIN, Math.min(TRAY_MAX, width)));
-}
-
-/** `null` when nothing usable is stored, which means "use the default". */
-export function parseTrayWidth(raw: string | null): number | null {
-  if (raw === null || raw === "") return null;
-  const n = Number(raw);
-  if (!Number.isFinite(n) || n <= 0) return null;
-  return clampTray(n);
-}

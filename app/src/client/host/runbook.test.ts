@@ -13,11 +13,8 @@ import type { Segment } from "../../engine/types.ts";
 import {
   HOLDING_STEPS_MAX,
   RUNBOOK_MOVABLE,
-  TRAY_MAX,
-  TRAY_MIN,
   addHoldingStep,
   anchorHoldingCards,
-  clampTray,
   defaultRunbook,
   dropRunbook,
   entryById,
@@ -29,7 +26,6 @@ import {
   nextEntryAfter,
   nextInRunbook,
   parseRunbook,
-  parseTrayWidth,
   removeStep,
   runbookIncluded,
   runbookIncludedEntries,
@@ -476,23 +472,5 @@ describe("a runbook stored by the build that had one holding card", () => {
     assert.ok(book);
     assert.equal(book.filter((e) => e.id === "step-5").length, 1);
     assert.equal(entryById(book, "step-5")?.card, "card-1");
-  });
-});
-
-describe("the preview column's width", () => {
-  it("clamps to something the preview and the grid can both live with", () => {
-    assert.equal(clampTray(10), TRAY_MIN);
-    assert.equal(clampTray(9999), TRAY_MAX);
-    assert.equal(clampTray(320), 320);
-    assert.equal(clampTray(Number.NaN), TRAY_MIN);
-  });
-
-  it("reads a stored width, and ignores junk", () => {
-    assert.equal(parseTrayWidth("360"), 360);
-    assert.equal(parseTrayWidth("9999"), TRAY_MAX);
-    assert.equal(parseTrayWidth("nope"), null);
-    assert.equal(parseTrayWidth(""), null);
-    assert.equal(parseTrayWidth(null), null);
-    assert.equal(parseTrayWidth("-5"), null);
   });
 });
