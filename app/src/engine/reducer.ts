@@ -684,8 +684,9 @@ export function reduce(
           phase: "closed",
           segment: "final",
           seal: "revealed",
-          // Closing a sealed board is a reveal; closing a revealed one isn't.
-          ...(state.seal === "revealed" ? {} : { reveals: (state.reveals ?? 0) + 1 }),
+          // Closing a sealed board is a reveal. Closing one the room can already
+          // see, live or revealed, isn't, and mustn't replay the climb.
+          ...(state.seal === "sealed" ? { reveals: (state.reveals ?? 0) + 1 } : {}),
           joinsLocked: true,
         },
         [BROADCAST_STATE, ...BROADCAST_STANDINGS, PERSIST],

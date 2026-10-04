@@ -3640,7 +3640,7 @@ class MockHub {
         }
         s.phase = "closed";
         s.segment = "final";
-        if (s.seal !== "revealed") s.reveals += 1;
+        if (s.seal === "sealed") s.reveals += 1;
         s.seal = "revealed";
         s.joinsLocked = true;
         // And the clocks, which the freeze above only covers for a *press*.

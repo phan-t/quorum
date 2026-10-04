@@ -4509,7 +4509,9 @@ function renderArcade(s: RenderState): void {
       .filter(([pid, other]) => pid < other)
       .map(
         ([pid, other]) =>
-          `${numbers.get(pid) ?? "???"}\u2194${numbers.get(other) ?? "???"}`,
+          // A released name has no roster tag; "—" rather than "???", which
+          // read as an error. The "house" part of the line says who's away.
+          `${numbers.get(pid) ?? "\u2014"}\u2194${numbers.get(other) ?? "\u2014"}`,
       );
     replace(arcadeGganbu, [
       ...rows.map((row) =>

@@ -716,6 +716,8 @@ describe("seal", () => {
     assert.equal(again.reveals, 2);
     // Closing a board that is already revealed isn't another reveal.
     assert.equal(run(again, { type: "close" }).state.reveals, 2);
+    // Nor is closing a live one: the room is already looking at it.
+    assert.equal(run(running(), { type: "close" }).state.reveals ?? 0, 0);
     // Closing a sealed one is.
     const sealed = accept(running(), [{ type: "setSeal", seal: "sealed" }]);
     assert.equal(run(sealed, { type: "close" }).state.reveals, 1);
