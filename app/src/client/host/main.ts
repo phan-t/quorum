@@ -3575,7 +3575,15 @@ const TIMING_FIELDS: readonly (readonly [HTMLElement, string])[] = [
   [arcadeGganbuTokens, "gganbuTokens"],
 ];
 
+/**
+ * Round names the staged running order gave that this build does not know.
+ * The preflight says so, by name, until the host sets the order here — a
+ * saved order is the console's own and has nothing unknown in it.
+ */
+let stagedUnknownRounds: readonly string[] = [];
+
 function saveSetup(): void {
+  stagedUnknownRounds = [];
   const timings: Record<string, number> = {};
   for (const [field, key] of TIMING_FIELDS) {
     const v = Number(fieldValue(field));
@@ -3771,6 +3779,7 @@ function loadSetup(): void {
   const stored = parseSetup(raw);
   if (stored === null) return;
   arcadePlan = stored.plan;
+  stagedUnknownRounds = stored.unknownNames;
   for (const [field, key] of TIMING_FIELDS) {
     const v = stored.timings[key];
     if (v !== undefined) setFieldValue(field, String(v));
@@ -5252,12 +5261,23 @@ function renderPreflight(s: RenderState): void {
   );
 
   const order = planIncluded(arcadePlan);
-  pfArcade.set(
-    order.length > 0 ? "ready" : "not",
-    order.length > 0
-      ? `Arcade rounds: ${planSummary(arcadePlan, ARCADE_ROUND_LABEL)}.`
-      : "No arcade rounds chosen.",
-  );
+  if (stagedUnknownRounds.length > 0) {
+    // Not Ready. A misspelled round in session.json is a round the event
+    // planned and will not play, and an all-misspelled list falls back to all
+    // six — both of which this line used to call Ready.
+    const names = stagedUnknownRounds.map((n) => `"${n}"`).join(", ");
+    pfArcade.set(
+      "not",
+      `The event's running order names ${stagedUnknownRounds.length === 1 ? "a round" : "rounds"} this console does not know: ${names}. Playing ${planSummary(arcadePlan, ARCADE_ROUND_LABEL)} instead. Set the order below, or fix the event's session.json.`,
+    );
+  } else {
+    pfArcade.set(
+      order.length > 0 ? "ready" : "not",
+      order.length > 0
+        ? `Arcade rounds: ${planSummary(arcadePlan, ARCADE_ROUND_LABEL)}.`
+        : "No arcade rounds chosen.",
+    );
+  }
 
   const joined = s.roster.length;
   const on = s.roster.filter((r) => r.conn === "on").length;
@@ -5522,7 +5542,16 @@ function renderTrivia(s: RenderState): void {
 
   const answered = t.answered ?? 0;
   const eligible = t.eligible ?? 0;
-  setText(triviaCounts, `${answered} of ${eligible} answered`);
+  // A revealed tiebreak says who took it, which is the one fact the host is
+  // about to read out. The Desktop and every phone named the winner and the
+  // console did not, so the host read it off the shared screen.
+  const tiebreakResult =
+    t.suddenDeath && t.phase === "revealed"
+      ? t.suddenDeathWinner !== null
+        ? `${t.suddenDeathWinner} took it · `
+        : "Nobody got it · "
+      : "";
+  setText(triviaCounts, `${tiebreakResult}${answered} of ${eligible} answered`);
   triviaCounts.classList.toggle("all-in", eligible > 0 && answered >= eligible);
 
   const note = t.note ?? "";

@@ -1932,3 +1932,13 @@ describe("sudden death after the last question (#41)", () => {
     assert.match(branch, /if \(tiebreak\) setSuddenDeathArmed\(false\)/);
   });
 });
+
+describe("the console names the tiebreak's winner", () => {
+  const main = stripComments(
+    readFileSync(join(import.meta.dirname, "main.ts"), "utf8"),
+  );
+  test("at a revealed sudden death, next to the count", () => {
+    assert.match(main, /t\.suddenDeath && t\.phase === "revealed"[\s\S]{0,120}t\.suddenDeathWinner/);
+    assert.match(main, /setText\(triviaCounts, `\$\{tiebreakResult\}/);
+  });
+});

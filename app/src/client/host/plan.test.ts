@@ -245,6 +245,25 @@ describe("the order, across a refresh", () => {
     assert.deepEqual(planIncluded(back?.plan ?? []), example.console.arcade.plan);
   });
 
+  it("reports names it does not know, so the preflight can say so", () => {
+    const back = parseSetup(
+      JSON.stringify({ plan: ["recrutment", "plan_apply", "glass_bridge", "recrutment"] }),
+    );
+    assert.deepEqual(back?.unknownNames, ["recrutment"]);
+    assert.deepEqual(planIncluded(back?.plan ?? []), ["plan_apply", "glass_bridge"]);
+  });
+
+  it("reports every name when none is known, and still never comes back empty", () => {
+    const back = parseSetup(JSON.stringify({ plan: ["recrutment", "glas_bridge"] }));
+    assert.deepEqual(back?.unknownNames, ["recrutment", "glas_bridge"]);
+    assert.equal(planIncluded(back?.plan ?? []).length, ARCADE_PLAYABLE.length);
+  });
+
+  it("reports nothing for the console's own shape", () => {
+    const back = parseSetup(JSON.stringify({ plan: [{ kind: "marbles", included: true }] }));
+    assert.deepEqual(back?.unknownNames, []);
+  });
+
   it("ignores a timing that is not a positive number", () => {
     const back = parseSetup(
       JSON.stringify({ plan: [], timings: { a: -1, b: "20", c: 0, d: 12 } }),

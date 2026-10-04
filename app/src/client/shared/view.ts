@@ -612,6 +612,54 @@ export const FINAL_DWELL_MS = 4_000;
 export const FINAL_EMPTY_FIRST_HOLD_MS = 7_000;
 
 /**
+ * Whether this surface has already shown the room this result's climb.
+ *
+ * A reveal is a surprise once. Revealing the scoreboard on Standings runs the
+ * climb, and the Final segment runs it again when the host gets there — after
+ * the send-off, say — so the room watched the winner announced twice. Each
+ * surface remembers the results whose climb it has *finished* (an
+ * interrupted climb is not remembered, and plays again) and shows a
+ * remembered one straight away: all five rows and the winner.
+ *
+ * Keyed on the session and the result, so a result that changes — a late
+ * score — climbs again, as it always did. Kept in `sessionStorage`, so it
+ * survives a reload of the same tab and is forgotten with it; a surface that
+ * cannot store it climbs, which is the behaviour this replaced and never
+ * worse than a spoiled reveal.
+ */
+const CLIMBS_SHOWN_KEY = "quorum.climbs-shown.v1";
+
+export function climbKey(state: RenderState): string {
+  return `${state.sid}|${state.standings
+    .map((r) => `${r.rank}:${r.nickname}:${r.total}`)
+    .join("|")}`;
+}
+
+function climbsShown(): string[] {
+  try {
+    const raw = sessionStorage.getItem(CLIMBS_SHOWN_KEY);
+    const v: unknown = raw === null ? [] : JSON.parse(raw);
+    return Array.isArray(v) ? v.filter((x): x is string => typeof x === "string") : [];
+  } catch {
+    return [];
+  }
+}
+
+export function climbAlreadyShown(key: string): boolean {
+  return climbsShown().includes(key);
+}
+
+export function markClimbShown(key: string): void {
+  try {
+    const list = climbsShown().filter((k) => k !== key);
+    list.push(key);
+    sessionStorage.setItem(CLIMBS_SHOWN_KEY, JSON.stringify(list.slice(-8)));
+  } catch {
+    /* storage off: the next arrival climbs again, which is the old behaviour */
+  }
+}
+
+/**
  * When the winner lands, in milliseconds after the final standings arrive.
  *
  * Zero for an empty result: there is no climb to pace, and both surfaces say

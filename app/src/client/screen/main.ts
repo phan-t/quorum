@@ -38,7 +38,10 @@ import {
   activityHue,
   answerTiles,
   bridgeSteps,
+  climbAlreadyShown,
+  climbKey,
   finalRevealMs,
+  markClimbShown,
   formatCountdown,
   gganbuQuestion,
   gganbuStanding,
@@ -3162,7 +3165,12 @@ function sceneFinal(): Scene {
   const play = (
     rows: readonly StandingRow[],
     activities: readonly ActivitySummary[],
+    key: string,
   ): void => {
+    // A result whose climb this screen has already finished is shown whole:
+    // the room has seen the winner, and a second climb announces them twice.
+    // See `climbAlreadyShown`.
+    const instant = climbAlreadyShown(key);
     for (const t of timers) clearTimeout(t);
     timers = [];
     replace(list, []);
@@ -3178,38 +3186,36 @@ function sceneFinal(): Scene {
     // Bottom to top: 5th first, 1st last.
     const climb = [...rows].reverse().filter((r) => r.rank > 1);
     climb.forEach((row, i) => {
-      timers.push(
-        setTimeout(() => {
-          list.insertBefore(standingRow(row, top, activities), list.firstChild);
-        }, i * FINAL_DWELL_MS),
-      );
+      const add = (): void => {
+        list.insertBefore(standingRow(row, top, activities), list.firstChild);
+      };
+      if (instant) add();
+      else timers.push(setTimeout(add, i * FINAL_DWELL_MS));
     });
     const first = rows.find((r) => r.rank === 1);
     if (!first) return;
-    timers.push(
-      setTimeout(
-        () => {
-          setText(winnerName, first.nickname);
-          setText(winnerTotal, String(first.total));
-          // The winner gets the breakdown too: how they got there is the
-          // thing the host talks over while it is on screen.
-          replace(
-            winnerBar,
-            stackedBar(first, activities, top).map((seg) =>
-              h("div", {
-                class: "s-seg",
-                attrs: {
-                  style: `flex-basis:${seg.percent}%;background-color:${seg.hue}`,
-                  "data-activity": seg.key,
-                },
-              }),
-            ),
-          );
-          winner.hidden = false;
-        },
-        finalRevealMs(rows),
-      ),
-    );
+    const land = (): void => {
+      setText(winnerName, first.nickname);
+      setText(winnerTotal, String(first.total));
+      // The winner gets the breakdown too: how they got there is the
+      // thing the host talks over while it is on screen.
+      replace(
+        winnerBar,
+        stackedBar(first, activities, top).map((seg) =>
+          h("div", {
+            class: "s-seg",
+            attrs: {
+              style: `flex-basis:${seg.percent}%;background-color:${seg.hue}`,
+              "data-activity": seg.key,
+            },
+          }),
+        ),
+      );
+      winner.hidden = false;
+      markClimbShown(key);
+    };
+    if (instant) land();
+    else timers.push(setTimeout(land, finalRevealMs(rows)));
   };
 
   return {
@@ -3221,7 +3227,7 @@ function sceneFinal(): Scene {
         .join("|");
       if (sig === signature) return;
       signature = sig;
-      play(state.standings, state.activities);
+      play(state.standings, state.activities, climbKey(state));
     },
     stop() {
       for (const t of timers) clearTimeout(t);

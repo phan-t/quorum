@@ -164,6 +164,12 @@ export function planSummary(
 export interface StoredSetup {
   plan: ArcadePlan;
   timings: Readonly<Record<string, number>>;
+  /**
+   * Names in a staged list this build does not know — a typo, or a round a
+   * newer build has. Each is a round the event meant to play and will not, so
+   * the console's preflight says so rather than reading Ready.
+   */
+  unknownNames: readonly string[];
 }
 
 export function parseSetup(raw: string | null): StoredSetup | null {
@@ -192,6 +198,7 @@ export function parseSetup(raw: string | null): StoredSetup | null {
    * appending unseen rounds as in, for the reason below.
    */
   let named = false;
+  const unknownNames: string[] = [];
   if (Array.isArray(o["plan"])) {
     for (const item of o["plan"] as unknown[]) {
       let kind: unknown;
@@ -199,6 +206,9 @@ export function parseSetup(raw: string | null): StoredSetup | null {
       if (typeof item === "string") {
         kind = item;
         named = true;
+        if (!ARCADE_PLAYABLE.includes(item as ArcadePick) && !unknownNames.includes(item)) {
+          unknownNames.push(item);
+        }
       } else if (typeof item === "object" && item !== null) {
         const e = item as Record<string, unknown>;
         kind = e["kind"];
@@ -229,7 +239,11 @@ export function parseSetup(raw: string | null): StoredSetup | null {
     }
   }
   if (planIncluded(plan).length === 0) {
-    return { plan: plan.map((e) => ({ kind: e.kind, included: true })), timings };
+    return {
+      plan: plan.map((e) => ({ kind: e.kind, included: true })),
+      timings,
+      unknownNames,
+    };
   }
-  return { plan, timings };
+  return { plan, timings, unknownNames };
 }

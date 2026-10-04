@@ -37,7 +37,10 @@ import {
   backedProgress,
   bridgeSteps,
   clipName,
+  climbAlreadyShown,
+  climbKey,
   finalRevealMs,
+  markClimbShown,
   floorEntries,
   formatCountdown,
   GGANBU_MAX_STAKE,
@@ -1656,12 +1659,18 @@ function sceneStandings(final: boolean): Scene {
     signature = sig;
     if (timer !== null) clearTimeout(timer);
     timer = null;
-    const wait = finalRevealMs(state.standings);
+    // A result whose climb this phone has already waited out — revealed on
+    // Standings, then the Final reached after the send-off — is shown now:
+    // the room has seen the winner, and the Desktop does not climb it again.
+    // See `climbAlreadyShown`.
+    const key = climbKey(state);
+    const wait = climbAlreadyShown(key) ? 0 : finalRevealMs(state.standings);
     holding = wait > 0;
     if (!holding) return;
     timer = setTimeout(() => {
       timer = null;
       holding = false;
+      markClimbShown(key);
       paint();
     }, wait);
   };
