@@ -2906,7 +2906,13 @@ function sceneArcade(): Scene {
       setText(title, "");
       setText(cue, "");
       setText(recruitCount, "");
-      recap.hidden = arcade.phase !== "reveal";
+      // Hidden in every phase. `recap` is Recruitment's list — the emoji items
+      // and their notes — and nothing ever fills it with Plan / Apply's. This
+      // read `arcade.phase !== "reveal"`, which showed the list at this round's
+      // reveal with the previous round's answers still in it: in the default
+      // running order, the room read Recruitment's answer key while the host
+      // read out Plan / Apply (#40).
+      recap.hidden = true;
       paintLight(arcade);
       if (arcade.phase === "reveal") {
         setText(title, HOUSE.roundEnd);
