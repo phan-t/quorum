@@ -241,6 +241,20 @@ body {
 .sb-name {
   color: var(--ink);
 }
+/* The glance line after the title — the step in the console's ink, then the
+   phase and the room in --muted (5.84:1 on --ground dark, 5.38:1 light). It
+   gives way before anything else in the header does: the seal and the theme
+   toggle are pushed right by `.sb-seal`'s auto margin and never shrink. */
+.sb-glance {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--muted);
+}
+.sb-glance-step {
+  color: var(--ink);
+  font-weight: var(--cds-heading-compact-01-font-weight);
+}
 .sb-counts,
 .sb-phase {
   color: var(--muted);

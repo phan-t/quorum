@@ -287,24 +287,34 @@ const SCOREBOARD_STATE: Readonly<Record<Seal, string>> = {
 
 const elConn = h("span", { class: "sb-conn mono", attrs: { hidden: true } });
 
+/** The glance line: the step, the phase, who is on and who is away. */
+const elGlanceStep = h("span", { class: "sb-glance-step" });
+const elGlanceRest = h("span", { class: "sb-glance-rest" });
+const elGlance = h("span", { class: "sb-glance" }, [elGlanceStep, elGlanceRest]);
+
 const elTheme = themeToggle();
 
 /**
- * Whose session, whether it is connected, whether the room can see the scores.
+ * Whose session, what is happening, who is in the room, whether it is
+ * connected, whether the room can see the scores.
  *
- * Four things have left this bar and none of them is lost. A red DO NOT SHARE
- * chip and the join code went first: the code is in the lobby panel beside the
- * join link with a copy button on each, which is where a host reaches for it.
- * The head count and the phase followed, because both were second copies — the
- * rail counts the roster two inches to the left, and the panel head says the
- * phase directly above the controls the phase governs. A bar of duplicates is
- * a bar the eye stops reading, and then it is not there for the one line that
- * is only here.
+ * The head of `host.css` says a host glancing at this console for two seconds
+ * knows the phase, the seal, the headcount and what Space will do, and
+ * DESIGN.md's wireframe of it puts "Team Offsite · RAFT · 27 on · 2 away" in
+ * this bar. The phase and the headcount left it once, as second copies — the rail
+ * counts the roster and the panel head said the phase — and the result was the
+ * four glance facts in three corners of the screen. They are back as one line
+ * after the title: "Trivia · Running · 15 on · 1 away", which is the line
+ * driving mode already proves out, in 800px of a header that was empty. The
+ * rail keeps its own copy, because the rail is navigation.
+ *
+ * A red DO NOT SHARE chip and the join code left for good: the tab title
+ * carries the warning, and the code is in the lobby panel beside the join link
+ * with a copy button on each.
  */
-// Carbon's UI Shell header since the console moved onto it: 48px, fixed,
-// `role="banner"`. The session title is its `cds-header-name`.
 const statusBar = carbonHeader({ class: "statusbar", label: "Session" }, [
   carbonHeaderName({ class: "sb-name" }, [elTitle]),
+  elGlance,
   elConn,
   elScoreboard,
   elTheme,
@@ -4837,6 +4847,13 @@ function render(s: RenderState): void {
 
   /* status bar */
   setText(elTitle, s.title);
+  {
+    const here = currentEntry(s);
+    setText(elGlanceStep, here === null ? SEGMENT_LABEL[s.segment] : entryName(here));
+    const on = s.roster.filter((r) => r.conn === "on").length;
+    const away = s.roster.filter((r) => r.conn === "away").length;
+    setText(elGlanceRest, ` · ${sentenceCase(s.phase)} · ${on} on · ${away} away`);
+  }
   const code = s.hostExtras?.joinCode ?? "————";
   setText(elScoreboard, SCOREBOARD_STATE[s.seal]);
   setAttr(elScoreboard, "data-seal", s.seal);
