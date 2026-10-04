@@ -196,6 +196,16 @@ class Conn {
   }
 }
 
+/**
+ * The participant client's ping interval (`PING_EVERY_MS` in net.ts).
+ *
+ * The server only counts a socket as present when a frame arrives on it
+ * (`lastSeen`), and a bot with nothing to press sends nothing. Without a
+ * ping, a console watching the swarm showed every bot as away after 30 s,
+ * which made a swarm rehearsal with a real console lie about the room (#48).
+ */
+const PING_EVERY_MS = 10_000;
+
 function percentile(values: readonly number[], p: number): number {
   if (values.length === 0) return 0;
   const sorted = [...values].sort((a, b) => a - b);
@@ -565,6 +575,7 @@ function connect(
     conn.ws = ws;
     conn.openedAt = Date.now();
     let settled = false;
+    let pinger: ReturnType<typeof setInterval> | null = null;
     const settle = (): void => {
       if (!settled) {
         settled = true;
@@ -576,9 +587,6 @@ function connect(
 
     ws.on("message", (raw: Buffer | string) => {
       const text = typeof raw === "string" ? raw : raw.toString("utf8");
-      conn.frames += 1;
-      conn.bytes += Buffer.byteLength(text, "utf8");
-      conn.largestFrame = Math.max(conn.largestFrame, Buffer.byteLength(text, "utf8"));
       let msg: ServerMessage;
       try {
         msg = JSON.parse(text) as ServerMessage;
@@ -586,12 +594,26 @@ function connect(
         conn.error = "a frame was not JSON";
         return;
       }
+      // Our own keep-alive's answer, which isn't traffic the room caused and
+      // would only pad the per-socket frame counts.
+      if (msg.t === "pong") return;
+      conn.frames += 1;
+      conn.bytes += Buffer.byteLength(text, "utf8");
+      conn.largestFrame = Math.max(conn.largestFrame, Buffer.byteLength(text, "utf8"));
 
       switch (msg.t) {
         case "welcome":
           conn.joinedAt = Date.now();
           conn.pid = msg.pid ?? null;
           conn.rejoinToken = msg.rejoinToken ?? null;
+          if (pinger === null) {
+            pinger = setInterval(() => {
+              if (ws.readyState === WebSocket.OPEN) {
+                ws.send(JSON.stringify({ t: "ping", t0: Date.now() } satisfies ClientMessage));
+              }
+            }, PING_EVERY_MS);
+            pinger.unref?.();
+          }
           settle();
           return;
         case "refused":
@@ -659,6 +681,8 @@ function connect(
     });
 
     ws.on("close", (code: number) => {
+      if (pinger !== null) clearInterval(pinger);
+      pinger = null;
       conn.closedWith = code;
       settle();
     });
@@ -1130,6 +1154,19 @@ function report(
   }
   line();
 
+  // What the console's head line says, read off the host's own last frame:
+  // the swarm's frame counts can't see presence, and presence is what a
+  // facilitator reads out (#48).
+  const roster = host.state?.roster ?? [];
+  const open = joined.filter((c) => c.ws?.readyState === WebSocket.OPEN && c.pid !== null);
+  const awayOpen = open.filter((c) => roster.find((r) => r.pid === c.pid)?.conn === "away");
+  line("  Presence, as the console sees it");
+  line(
+    `    room         ${roster.filter((r) => r.conn === "on").length} on · ${roster.filter((r) => r.conn === "away").length} away`,
+  );
+  line(`    open bots    ${open.length}, of which the console shows ${awayOpen.length} away`);
+  line();
+
   line("  Play");
   line(`    sent         ${conns.reduce((n, c) => n + c.sent, 0)}`);
   line(`    applied      ${conns.reduce((n, c) => n + c.acked, 0)}`);
@@ -1297,6 +1334,13 @@ function report(
         ? `nobody sat longer than ${IDLE_ALARM_MS / 1000}s with nothing to press`
         : `${played.filter((b) => b.longestIdleMs >= IDLE_ALARM_MS).length} bot(s) sat over ` +
           `${IDLE_ALARM_MS / 1000}s with nothing to press — the failure the arcade exists to avoid`,
+    },
+    {
+      ok: awayOpen.length === 0,
+      text:
+        awayOpen.length === 0
+          ? "the console shows every open bot as on"
+          : `the console shows ${awayOpen.length} open bot(s) as away — presence is wrong`,
     },
     {
       ok: conns.every((c) => c.error === null),
