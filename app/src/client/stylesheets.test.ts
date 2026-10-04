@@ -88,9 +88,17 @@ const KNOWN_SHARED: Readonly<Record<string, string>> = {
     "`min-width` to the participant's rule, which happens to want the same " +
     "thing a row in a list wants.",
   "t-note":
-    "The console draws this as `pb-note t-note` and sizes `.pb-note` at 13px. " +
-    "It beats the participant's 14px only because `host.css` loads later. " +
-    "Drop the companion class and the note silently grows.",
+    "The console draws this as `pb-note t-note` and sizes `.pb-note` with " +
+    "Carbon's `body-compact-01` — 14px, the participant's size too, since " +
+    "#28 step 5 — and wins the line height and tracking only because " +
+    "`host.css` loads later. Drop the companion class and the note takes " +
+    "the phone's.",
+  "theme-toggle":
+    "The theme switch is `tokens.css`'s, drawn on every surface. #28 step 5 " +
+    "restyles the console's copy as Carbon's `label-01`, scoped under " +
+    "`.statusbar`, which only the console has; the participant's rule is " +
+    "scoped under `.v-splash-foot-row`, which only the phone has, so " +
+    "neither reaches the other.",
 };
 
 describe("the two client stylesheets share a namespace", () => {

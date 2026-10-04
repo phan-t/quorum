@@ -22,8 +22,11 @@
  *   heading-03          20px  what was 24px: the question, the gate
  *   heading-07          54px  driving mode's count, read from arm's length
  *
- * Each sets size, line height and tracking together, and the weight where the
- * token has one. The mapping was mechanical — nearest token, the heading
+ * Each sets size and tracking, and the line height and weight where the rule
+ * had none of its own. Nineteen rules keep a line height of their own — a
+ * button's `1`, a paragraph's 1.35 or 1.4 — because those are layout, not
+ * type; fifteen keep a `600` on a 400-weight token for the same reason. The
+ * mapping was mechanical — nearest token, the heading
  * variant where the old rule was bold, and 24px down to 20 rather than up to
  * 28, to keep the panels inside 1280×800. Uppercase and em tracking went with
  * the old chrome idiom: Carbon has no caps style. `code-01` is not listed
@@ -31,11 +34,15 @@
  * the face stays the console's own `--mono` wherever a rule or a `.mono`
  * class asks for it; Carbon's Plex Mono is not loaded.
  *
- * Measured against step 4 at 1280×800 over a three-minute scripted session,
- * and again with the tray dragged to 560px: nothing new is clipped,
- * ellipsised or pushed off the page. The scoring grid keeps its 25px rows; its
- * header grows from 49.5px to 70.5px, because the activity titles wrap to
- * three lines at Carbon's 14px semibold table header.
+ * Measured against step 4 over three-minute scripted sessions at 1280×800,
+ * at 1024×768, and with the tray at 354px — the widest `maxTray()` allows at
+ * 1280: nothing new is clipped, ellipsised or pushed off the page. What it
+ * costs is height. The scoring grid keeps its 25px rows, but its header grows
+ * from 49.5px to 70.5px, because the activity titles wrap to three lines at
+ * Carbon's 14px semibold table header, and every chrome line above it grows a
+ * few pixels — at 1024×768 the grid shows one row fewer above the fold.
+ * Driving mode's count goes from 700 to 300, because `heading-07` is Carbon's
+ * light display weight; it is the largest visible change on the surface.
  *
  * The join code has come off this list entirely. It was 34px with 0.26em of
  * tracking because it was once a four-letter word read aloud to a room; it is
@@ -151,17 +158,39 @@ body {
 .panel .label,
 .tray-preview > .label,
 .cp .label {
-  /* #28 step 5: Carbon's `label-01`, whole. `tokens.css` gives `.label` the
-     console's mono caps — mono, 600, uppercase, 0.18em — and that idiom goes
-     with the console's own scale. The face, weight and case come back to
-     Carbon's here, in the console's regions only, so the phone's labels in the
-     preview keep theirs. */
-  font-family: var(--body);
-  font-weight: var(--cds-label-01-font-weight);
-  text-transform: none;
   font-size: var(--cds-label-01-font-size);
   letter-spacing: var(--cds-label-01-letter-spacing);
   line-height: var(--cds-label-01-line-height);
+}
+
+/*
+ * #28 step 5: every console label is Carbon's `label-01` in face, weight,
+ * case and tracking. `tokens.css` gives `.label` the console's mono caps —
+ * mono, 600, uppercase, 0.18em — and that idiom went with the console's own
+ * scale. Every label but the preview's, rather than a list of regions: the
+ * first version listed four, and driving mode's "Driving mode" and the gate's
+ * "Quorum host" sat outside all of them and stayed in mono caps. The preview
+ * is excluded because it is the phone's look, and its labels keep theirs.
+ * The sizes stay with the region rules above, which this does not touch.
+ */
+.label:not(.preview-frame .label) {
+  font-family: var(--body);
+  font-weight: var(--cds-label-01-font-weight);
+  text-transform: none;
+  letter-spacing: var(--cds-label-01-letter-spacing);
+}
+
+/*
+ * The theme toggle is `tokens.css`'s, shared with the phone and the Desktop,
+ * and it draws itself in the old chrome idiom: 11px mono, uppercase, 0.1em.
+ * The console's copy is Carbon's `label-01` like every other label in its
+ * status bar; `tokens.css` is untouched and the other surfaces keep theirs.
+ */
+.statusbar .theme-toggle {
+  font-family: var(--body);
+  font-size: var(--cds-label-01-font-size);
+  letter-spacing: var(--cds-label-01-letter-spacing);
+  text-transform: none;
 }
 
 #app {
@@ -1084,6 +1113,8 @@ cds-number-input.field {
   color: inherit;
   background-color: transparent;
 }
+/* The header cells' `--muted` went with the mono caps: Carbon's table header
+   is the primary text colour, so the column names are `--ink` now, at 600. */
 
 /*
  * `cds-table`'s two wrapper boxes, taken out of the box tree.
@@ -1962,7 +1993,7 @@ cds-number-input {
  *                                               only, --cds-support-error
  *   fill               none                     --cds-background-inverse
  *   dismiss            three seconds            a 48 × 48 close button
- *   structure          one line of 11px mono    title + subtitle + an icon
+ *   structure          one line of 12px mono    title + subtitle + an icon
  *
  * The console's rule is that a refusal appears *in the control that caused
  * it*: `control()` replaces the button's own contents with the sentence and
@@ -2002,7 +2033,7 @@ cds-number-input {
  * `.ctl-row` — the 22px roster micro-buttons, and the one place the migration
  * stops.
  *
- * `free` and `kick` live in an opened roster row: 22px tall, 11px mono, two of
+ * `free` and `kick` live in an opened roster row: 22px tall, 12px mono, two of
  * them side by side in a column that holds sixty people without scrolling.
  * Carbon reaches 22px — `--cds-layout-size-height-xs` is declared on
  * `:host(cds-button)` and a document rule on a host beats a `:host` rule, so
@@ -2039,8 +2070,8 @@ cds-number-input {
  * plus 2 × 1px of padding plus 2 × 1px of border — and it is stated as a floor below
  * rather than left to arithmetic, so a label that ever wraps grows the box
  * instead of being clipped and two buttons side by side are one height.
- * Centred in 22px it leaves 2.5px top and bottom, and for the first time the
- * pair sits inside its own row.
+ * Centred in 22px the 20px box leaves 1px top and bottom (2.5px before #28
+ * step 5 grew the label to 12px), and the pair still sits inside its own row.
  *
  * The target-size figure, since it is the one thing 17px is worse at: 42 × 17
  * is under WCAG 2.5.8's 24 × 24 and `main`'s 42 × 31 was not. It passes on
@@ -2188,8 +2219,8 @@ cds-number-input {
   max-width: 560px;
   padding: 48px 24px;
 }
-/* Helios display 30. The gate is a full page with one sentence on it; 40px
-   was off the scale and bought nothing a 30 does not. */
+/* Carbon's `heading-03` since #28 step 5; it was Helios display 30, and 40px
+   before that. The gate is a full page with one sentence on it. */
 .gate h1 {
   font-size: var(--cds-heading-03-font-size);
   font-weight: var(--cds-heading-03-font-weight);
@@ -2255,8 +2286,8 @@ cds-number-input {
 }
 
 /* The one thing in front of the room, and the one thing the host says out
-   loud. Helios display 24 against a 14px panel, up from a 22 that is not on
-   the scale. --ink: 16.80:1 dark, 18.72:1 light. */
+   loud. Carbon's `heading-03`, 20px, against a 14px panel, since #28 step 5;
+   it was Helios display 24. --ink: 16.80:1 dark, 18.72:1 light. */
 .t-q {
   margin: 0;
   font-size: var(--cds-heading-03-font-size);
@@ -2351,7 +2382,7 @@ cds-number-input {
   color: var(--hit);
 }
 
-/* 13px, Helios' floor: this is a list of names the host reads to decide
+/* Body size, `body-compact-01`: this is a list of names the host reads to decide
    whether to wait or close, which makes it a sentence rather than chrome. */
 .t-waiting {
   margin: 0;
@@ -2438,13 +2469,13 @@ cds-number-input {
  * The panel is one thing with a border around it: the message the room has
  * not seen yet.
  *
- * It is set at 16px rather than at the console's 13px body, which is the only
+ * It is set at 16px, `body-compact-02`, rather than at the 14px body, which is the only
  * place on this console that a *paragraph* is above body size. The reason is
  * what it is for: a host reads it while the room is reading the one before,
  * decides in a couple of seconds whether it survives being read out at a
  * farewell, and does that without looking like they are studying the screen.
- * A 145-word kudo at 13px is a wall the eye has to work at. 16 is the panel
- * heading step of the scale, so nothing new was invented for it.
+ * A 145-word kudo at body size is a wall the eye has to work at. 16 is the
+ * next step on Carbon's scale, so nothing new was invented for it.
  *
  * Contrast, both themes:
  *   --ink   on --panel-2   15.31:1 dark · 17.44:1 light   the message
@@ -2928,8 +2959,8 @@ cds-number-input {
    driving mode, where the rail is not on screen. --muted, not --dim: --dim
    never carries text that has to be read. Measured 5.41:1 dark (#8b8a9c on
    #14141d) and 5.19:1 light (#656a76 on HDS surface-faint #fafafa); on the
-   rail's own background, --ground, it is 5.84:1 dark and 5.38:1 light. 11px,
-   up from 10px: this is the list the host reads when they have forgotten
+   rail's own background, --ground, it is 5.84:1 dark and 5.38:1 light.
+   `label-01`, 12px, up from 11px and 10px before that: this is the list the host reads when they have forgotten
    which key does what, so it is the last thing that should be hard to read. */
 .rail-keys {
   margin: 0;
@@ -3298,7 +3329,10 @@ cds-number-input {
   color: var(--ink);
   font-size: var(--cds-body-compact-01-font-size);
   letter-spacing: var(--cds-body-compact-01-letter-spacing);
-  line-height: 1;
+  /* The In/Out toggle beside it is `label-01`, a 16px line box. The arrows
+     take the same 16px so the pair is one height — 28px — as it was one
+     height at 25px before #28 step 5 moved both onto Carbon's scale. */
+  line-height: 1rem;
   padding: 5px 8px;
 }
 .a-setup-move:hover:not(:disabled) {
@@ -3341,7 +3375,7 @@ cds-number-input {
  * `copy-client-assets.mjs`'s table, so the build refuses it rather than
  * shipping a chip that 404s.
  *
- * So: 11px mono, square, `--panel` on `--line`, `--nomad` on the edge when in.
+ * So: 12px mono, square, `--panel` on `--line`, `--nomad` on the edge when in.
  * --ink on --panel is 16.80:1 dark and 18.72:1 light.
  */
 .a-setup-in {
@@ -3557,16 +3591,17 @@ body.driving .cols {
 .driving-view .ctl-primary {
   margin-left: 0;
 }
-/* 24px through Carbon's own type token, because font-size does not inherit
-   into the button — `.cds--btn` sets it from `--cds-body-compact-01-font-size`
-   and that property does. The height follows: Carbon's padding-block is
-   `min(…, .5 * (size - 1lh))`, so a 24px label inside a 48px `lg` fills it
-   rather than overflowing, and the `--cds-layout-size-height-lg` override puts
-   the box back to the 64px this reads from arm's length — Carbon's own `xl`
-   step, which is what makes it a legal value to hand it.
+/* A larger label through Carbon's own type token, because font-size does not
+   inherit into the button — `.cds--btn` sets it from
+   `--cds-body-compact-01-font-size` and that property does. The height
+   follows: Carbon's padding-block is `min(…, .5 * (size - 1lh))`, so a 20px
+   label inside a 48px `lg` fills it rather than overflowing, and the
+   `--cds-layout-size-height-lg` override puts the box back to the 64px this
+   reads from arm's length — Carbon's own `xl` step, which is what makes it a
+   legal value to hand it. Measured: 64px tall, 20px label.
    The gutter goes back to `normal` here. This is one button on an otherwise
    empty screen; it is the one place on the console with the width to spare,
-   and at 24px the condensed 7px start padding is visibly tight. */
+   and at this size the condensed 7px start padding is visibly tight. */
 .driving-view .ctl-primary .ctl-button {
   /* Carbon's `heading-03`, 20px, since #28 step 5 — the step on Carbon's
      scale nearest the 24px this was, and the larger of the two that fit. */

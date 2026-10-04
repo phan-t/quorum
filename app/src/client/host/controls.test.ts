@@ -1647,20 +1647,42 @@ describe("the console's type is Carbon's", () => {
     "utf8",
   );
 
-  test("every size in host.css is a Carbon token, but the preview's", () => {
-    const raw: string[] = [];
+  /** Every declaration in host.css, as `[selector, property, value]`. */
+  const declarations = (): readonly (readonly [string, string, string])[] => {
+    const out: (readonly [string, string, string])[] = [];
     for (const rule of hostCss.matchAll(/([^{}]+)\{([^{}]*)\}/g)) {
       const sel = (rule[1] ?? "").trim().replace(/\s+/g, " ");
-      for (const fs of (rule[2] ?? "").matchAll(/font-size:\s*([^;]+);/g)) {
-        const v = (fs[1] ?? "").trim();
-        if (/^var\(--cds-[a-z0-9-]+-font-size\)$/.test(v) || v === "inherit") {
-          continue;
-        }
-        // The one exemption, argued at the rule: the phone preview keeps the
-        // 13px it inherited before step 5, because it is the phone's look.
-        if (sel === ".preview-frame" && v === "13px") continue;
-        raw.push(`${sel} { font-size: ${v} }`);
+      // Split on `;` rather than matching `prop: value;`, so a last
+      // declaration with no semicolon is still read.
+      for (const decl of (rule[2] ?? "").split(";")) {
+        const at = decl.indexOf(":");
+        if (at === -1) continue;
+        out.push([
+          sel,
+          decl.slice(0, at).trim().toLowerCase(),
+          decl.slice(at + 1).trim(),
+        ]);
       }
+    }
+    return out;
+  };
+
+  test("every size in host.css is a Carbon token, but the preview's", () => {
+    const raw: string[] = [];
+    for (const [sel, prop, v] of declarations()) {
+      if (prop === "font") {
+        // The shorthand carries a size, and nothing here uses it.
+        raw.push(`${sel} { font: ${v} }`);
+        continue;
+      }
+      if (prop !== "font-size") continue;
+      if (/^var\(--cds-[a-z0-9-]+-font-size\)$/.test(v) || v === "inherit") {
+        continue;
+      }
+      // The one exemption, argued at the rule: the phone preview keeps the
+      // 13px it inherited before step 5, because it is the phone's look.
+      if (sel === ".preview-frame" && v === "13px") continue;
+      raw.push(`${sel} { font-size: ${v} }`);
     }
     assert.deepEqual(
       raw,
@@ -1670,15 +1692,34 @@ describe("the console's type is Carbon's", () => {
     );
   });
 
+  test("and the old chrome idiom is gone: no caps, no em tracking", () => {
+    const idiom: string[] = [];
+    for (const [sel, prop, v] of declarations()) {
+      if (prop === "text-transform" && /uppercase/i.test(v)) {
+        idiom.push(`${sel} { text-transform: ${v} }`);
+      }
+      if (prop === "letter-spacing" && /em\b/.test(v)) {
+        idiom.push(`${sel} { letter-spacing: ${v} }`);
+      }
+    }
+    assert.deepEqual(
+      idiom,
+      [],
+      "Carbon has no caps style and tracks in px. Write the text in the case " +
+        "it reads in, and take the token's letter-spacing.",
+    );
+  });
+
   test("and every token a rule names is one carbon-tokens.css declares", () => {
     const used = new Set(
       [...hostCss.matchAll(/var\((--cds-[a-z0-9-]+-(?:font-size|font-weight|line-height|letter-spacing))\)/g)]
         .map((m) => m[1] as string),
     );
     assert.ok(used.size >= 20, `found only ${used.size} type tokens in use`);
+    const declared = blank(tokensCss);
     for (const name of used) {
       assert.ok(
-        tokensCss.includes(`${name}:`),
+        new RegExp(`${name}\\s*:`).test(declared),
         `${name} is read in host.css and declared nowhere, so it resolves to ` +
           "the initial value — 16px medium, for a font-size — with no error.",
       );
@@ -1690,10 +1731,13 @@ describe("the console's type is Carbon's", () => {
       string,
       { fontSize: string; fontWeight?: number; lineHeight: number; letterSpacing: string | number }
     >;
+    const live = blank(tokensCss);
     const declared = [
-      ...tokensCss.matchAll(/(--cds-([a-z0-9-]+)-font-size):\s*([^;]+);/g),
+      ...live.matchAll(/(--cds-([a-z0-9-]+)-font-size):\s*([^;]+);/g),
     ];
-    assert.ok(declared.length >= 7);
+    // Every token the generator lists, so one commented out is a failure here
+    // and not only a missing size somewhere on the page.
+    assert.equal(declared.length, 7, "carbon-tokens.css declares the seven type tokens");
     for (const [, , token, size] of declared) {
       const key = (token as string).replace(/-([a-z0-9])/g, (_, c: string) =>
         c.toUpperCase(),
@@ -1706,7 +1750,7 @@ describe("the console's type is Carbon's", () => {
         ["line-height", String(t.lineHeight)],
         ["letter-spacing", t.letterSpacing === 0 ? "0" : String(t.letterSpacing)],
       ] as const) {
-        const m = new RegExp(`--cds-${token}-${prop}:\\s*([^;]+);`).exec(tokensCss);
+        const m = new RegExp(`--cds-${token}-${prop}:\\s*([^;]+);`).exec(live);
         assert.equal(m?.[1], want, `${token} ${prop}`);
       }
     }

@@ -3141,10 +3141,10 @@ const ARCADE_ROUND_WHAT: Readonly<Record<ArcadeRoundKind, string>> = {
 
 /** The round's state, as the thing that is happening in the room. */
 const ARCADE_PHASE_WORD: Readonly<Record<ArcadePhase, string>> = {
-  idle: "NOT STARTED",
-  card: "CARD ON SCREEN",
-  running: "PLAYING",
-  reveal: "RESULTS ON SCREEN",
+  idle: "Not started",
+  card: "Card on screen",
+  running: "Playing",
+  reveal: "Results on screen",
 };
 
 const ARCADE_BUILT: Readonly<Record<ArcadeRoundKind, boolean>> = {
@@ -3235,7 +3235,7 @@ for (const kind of ARCADE_ROUNDS) {
   }, [
     h("span", { class: "a-pick-name", text: ARCADE_ROUND_LABEL[kind] }),
     h("span", { class: "a-pick-what", text: ARCADE_ROUND_WHAT[kind] }),
-    built ? null : h("span", { class: "mono a-pick-todo", text: "not built yet" }),
+    built ? null : h("span", { class: "mono a-pick-todo", text: "Not built yet" }),
   ]) as HTMLButtonElement;
   if (built) {
     handsBackSpace(button);
@@ -4226,7 +4226,7 @@ function renderArcade(s: RenderState): void {
   );
 
   if (a === undefined) {
-    setText(arcadeState, "NOT IN THE ARCADE YET");
+    setText(arcadeState, "Not in the arcade yet");
     setText(
       arcadeItem,
       "Entering hands out the player numbers; everyone keeps theirs for the whole arcade. The room calls the players still going in a round the Floor, and the ones who are out the Lounge.",
@@ -4261,8 +4261,8 @@ function renderArcade(s: RenderState): void {
       // while the card in front of the room read *Game 1 — Plan / Apply* —
       // and the host reads the console out loud. SPEC.md numbers Recruitment
       // 0; the host picks the order, so the position is not the number.
-      a.round ? `ROUND ${ARCADE_ROUND_NUMBER[a.round]}` : null,
-      roundLabel.toUpperCase(),
+      a.round ? `Round ${ARCADE_ROUND_NUMBER[a.round]}` : null,
+      roundLabel,
       phaseWord,
       a.phase === "running" && left !== null ? formatCountdown(left) : null,
     ]
@@ -4523,7 +4523,7 @@ function renderArcade(s: RenderState): void {
               row.verify
                 ? carbonTag(
                     { class: "mono a-gganbu-verify", size: "sm", type: "gray" },
-                    ["VERIFY"],
+                    ["Verify"],
                   )
                 : null,
               // No note. Six notes is six paragraphs of prose on a panel a
@@ -4596,7 +4596,7 @@ function renderArcade(s: RenderState): void {
             }, [
               h("span", {
                 class: "mono a-bridge-mark",
-                text: answer === undefined ? "·" : answer.real === side ? "REAL" : "FAKE",
+                text: answer === undefined ? "·" : answer.real === side ? "Real" : "Fake",
               }),
               h("span", { class: "a-bridge-answer-label", text: pane.labels[side] ?? "" }),
             ]),
@@ -5314,7 +5314,7 @@ function drivingContext(s: RenderState): string {
   // at, rather than HOLDING CARD, which is what the console calls it.
   const here = currentEntry(s);
   const name = here === null ? SEGMENT_LABEL[s.segment] : entryFullName(here);
-  return `${name.toUpperCase()} · ${s.phase.toUpperCase()}`;
+  return `${name} · ${sentenceCase(s.phase)}`;
 }
 
 function drivingCounts(s: RenderState): { big: string; sub: string } {
@@ -5415,15 +5415,15 @@ function renderTrivia(s: RenderState): void {
   setText(
     triviaHead,
     [
-      questionLabel(t).toUpperCase(),
-      t.phase.toUpperCase(),
-      t.suddenDeath ? "SUDDEN DEATH" : null,
+      questionLabel(t),
+      sentenceCase(t.phase),
+      t.suddenDeath ? "Sudden death" : null,
       // On the head line and not only on the button, because driving mode
       // reads this line and nothing else: a host who has folded the console
       // down to four numbers still has to know the set is walking itself.
-      (s.hostExtras?.trivia?.auto?.on ?? false) ? "AUTO" : null,
+      (s.hostExtras?.trivia?.auto?.on ?? false) ? "Auto" : null,
       t.phase === "open" && left !== null ? formatCountdown(left) : null,
-      t.basePoints === 0 ? "WARM-UP · 0 POINTS" : `${t.basePoints} POINTS`,
+      t.basePoints === 0 ? "Warm-up · 0 points" : `${t.basePoints} points`,
     ]
       .filter((x) => x !== null)
       .join(" · "),
@@ -5489,8 +5489,8 @@ function renderTrivia(s: RenderState): void {
   setText(
     triviaWaiting,
     waiting.length <= 6
-      ? `waiting on ${waiting.join(", ")}`
-      : `waiting on ${waiting.length} people`,
+      ? `Waiting on ${waiting.join(", ")}`
+      : `Waiting on ${waiting.length} people`,
   );
 
   closeEarly.setDisabled(t.phase !== "open");
