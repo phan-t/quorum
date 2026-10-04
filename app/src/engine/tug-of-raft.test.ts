@@ -260,6 +260,32 @@ describe("two clusters", () => {
     assert.equal(rope(s).onBeats["p9"], 1);
   });
 
+  test("a dropped phone is not dealt onto a side, so neither side pulls one short", () => {
+    let s = entered(6);
+    s = accept(s, { type: "disconnect", pid: "p3" }, 600);
+    s = accept(
+      s,
+      { type: "startRound", round: "tug_of_raft", config: tugOfRaftRound(SEED) },
+      T0 - 1,
+    );
+    s = accept(s, { type: "beginPlay" }, T0);
+    const sides = rope(s).sides;
+    assert.equal(sides["p3"], undefined, "away, so on neither end of the rope");
+    assert.deepEqual(sides, tugSides(["p1", "p2", "p4", "p5", "p6"], SEED));
+    // Back mid-pull: a side on the first tap, as anyone arriving gets.
+    s = accept(s, { type: "reconnect", pid: "p3" }, beat(1));
+    s = tapBeats(s, "p3", [2]);
+    assert.equal(rope(s).sides["p3"], lateSide(SEED, "p3"));
+    assert.equal(rope(s).onBeats["p3"], 1);
+  });
+
+  test("and the next pull deals only who is in the room then", () => {
+    let s = pulling(6);
+    s = accept(s, { type: "disconnect", pid: "p2" }, T0 + 24_000);
+    s = accept(s, { type: "nextPull", seed: 4_242 }, T0 + 25_000);
+    assert.deepEqual(rope(s).sides, tugSides(["p1", "p3", "p4", "p5", "p6"], 4_242));
+  });
+
   test("the sides are re-dealt for every pull", () => {
     let s = pulling(6);
     const first = rope(s).sides;

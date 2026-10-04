@@ -29,6 +29,7 @@ import {
   tugLeader,
   unsealFloorView,
   unsealMeView,
+  lateSide,
 } from "../engine/arcade.ts";
 import {
   autoFiresAt,
@@ -1192,10 +1193,11 @@ export function arcadeMineFor(
   let tug: ArcadeMineTug | undefined;
   if (play?.kind === "tug_of_raft") {
     tug = {
-      // Somebody who joined after the sides were dealt has no entry until
-      // their first tap deals them one. Side 0 until then, rather than a
-      // phone with no rope to pull.
-      side: play.sides[pid] ?? 0,
+      // Somebody who joined, or came back, after the sides were dealt has no
+      // entry until their first tap deals them one. Shown the side that tap
+      // will deal (`lateSide`), not side 0, or the first tap could move the
+      // phone to the other end of the rope.
+      side: play.sides[pid] ?? lateSide(play.seed, pid),
       onBeats: play.onBeats[pid] ?? 0,
       lastBeat: play.lastBeat[pid] ?? -1,
     };

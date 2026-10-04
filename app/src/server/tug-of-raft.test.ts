@@ -32,7 +32,7 @@ import assert from "node:assert/strict";
 
 import { newSession, replay } from "../engine/reducer.ts";
 import type { Activity, Event, SessionState } from "../engine/types.ts";
-import { TUG_BEAT_TOLERANCE, resolveBeat } from "../engine/arcade.ts";
+import { TUG_BEAT_TOLERANCE, lateSide, resolveBeat } from "../engine/arcade.ts";
 import { tugBeatAt, tugElectionAt, tugRope } from "../client/shared/view.ts";
 import { renderStateFor } from "./views.ts";
 import type { ArcadeTugView, RenderState } from "../protocol.ts";
@@ -320,6 +320,16 @@ describe("a phone gets its own rope end and nobody else's count", () => {
     for (const pid of ["p1", "p2", "p3", "p4"]) {
       assert.equal(view(mid, "participant", pid).arcadeMine?.tug?.side, sides[pid]);
     }
+  });
+
+  it("tells a phone with no side yet the side its first tap will deal", () => {
+    // Away when the pull was dealt, so on neither end until they tap. Side 0
+    // would be wrong half the time and move them on the first tap.
+    const mid = replay(pulling(), [
+      { event: { type: "join", pid: "p9", nickname: "Late" }, at: T0 + 1_000 },
+    ]);
+    const seed = mid.arcade?.play?.kind === "tug_of_raft" ? mid.arcade.play.seed : -1;
+    assert.equal(view(mid, "participant", "p9").arcadeMine?.tug?.side, lateSide(seed, "p9"));
   });
 
   it("drains nobody, which is the round's one hard promise", () => {

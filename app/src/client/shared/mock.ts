@@ -2236,7 +2236,7 @@ class MockSession {
       ...(play?.kind === "tug_of_raft"
         ? {
             tug: {
-              side: play.sides[pid] ?? 0,
+              side: play.sides[pid] ?? mockLateSide(play.seed, pid),
               onBeats: play.onBeats[pid] ?? 0,
               lastBeat: play.lastBeat[pid] ?? -1,
             } satisfies ArcadeMineTug,
@@ -4714,8 +4714,10 @@ class MockHub {
         // `inTheRoom()`, because the reducer deals them from `rosterOrder`:
         // somebody who has left is not on either end of the rope, and dealing
         // them a side would shift everybody after them to the other one.
+        // Present only, as the reducer's `tugDealable`: a dropped phone is
+        // dead weight on a rope won by total taps.
         sides: mockTugSides(
-          s.inTheRoom().map((p) => p.pid),
+          s.inTheRoom().filter((p) => p.conn === "on").map((p) => p.pid),
           seed,
         ),
         // The heartbeat starts at `beginPlay`, not here.
@@ -5154,7 +5156,7 @@ class MockHub {
     // Reshuffled, so nobody is stuck on a losing side. From the room, as the
     // round card's deal was and as the reducer's `nextPull` is.
     play.sides = mockTugSides(
-      s.inTheRoom().map((p) => p.pid),
+      s.inTheRoom().filter((p) => p.conn === "on").map((p) => p.pid),
       play.seed,
     );
     play.pullStartedAt = now;

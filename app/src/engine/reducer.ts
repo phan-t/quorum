@@ -331,6 +331,23 @@ function houseThePairOf(
   };
 }
 
+/**
+ * Who Tug of Raft deals onto a side: the players in the room right now.
+ *
+ * A pull is won on the total of on-beat taps per side, so somebody whose phone
+ * has dropped was dead weight: dealt onto a side, tapping nothing, and the
+ * side they were dealt to pulled one short. Dealing only the people who are
+ * here keeps the two sides level with each other. Anyone who comes back, or
+ * arrives, mid-pull gets a side on their first tap (`lateSide`), so nobody
+ * sits out for having been away. A drop *during* a pull still leaves that
+ * side one short until the next pull deals again.
+ */
+function tugDealable(state: SessionState): readonly ParticipantId[] {
+  return rosterOrder(state)
+    .filter((p) => p.connected)
+    .map((p) => p.pid);
+}
+
 /** In the room under their own name: what a rival has to be to play one. */
 function present(state: SessionState, pid: ParticipantId): boolean {
   const p = state.participants[pid];
@@ -2035,11 +2052,9 @@ export function reduce(
           seed: config.seed,
           // Dealt from the roster that is in the room now, so the big screen
           // can put the two sides on the round card. Anyone who arrives after
-          // this gets a side on their first tap — see `tapBeat`.
-          sides: tugSides(
-            rosterOrder(state).map((p) => p.pid),
-            config.seed,
-          ),
+          // this, or comes back, gets a side on their first tap — see
+          // `tapBeat`.
+          sides: tugSides(tugDealable(state), config.seed),
           // The heartbeat starts at `beginPlay`, not here.
           pullStartedAt: 0,
           pullEndsAt: 0,
@@ -3029,10 +3044,7 @@ export function reduce(
               pull,
               seed: event.seed,
               // Reshuffled, so nobody is stuck on a losing side.
-              sides: tugSides(
-                rosterOrder(state).map((rp) => rp.pid),
-                event.seed,
-              ),
+              sides: tugSides(tugDealable(state), event.seed),
               pullStartedAt: now,
               pullEndsAt,
               // Every one of these is per pull: a new heartbeat, a new rope,
