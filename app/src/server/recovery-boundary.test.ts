@@ -755,9 +755,14 @@ describe("the socket entry points are guarded too", () => {
     const src = mainSrc();
     assert.match(src, /if \(runtime\.faulted\) return quarantined\(\);/);
     const joinAt = src.indexOf("registry.byJoinCode(msg.joinCode)");
-    const applyAt = src.indexOf('{ type: "join", pid, nickname: msg.nickname }');
+    const applyAt = src.indexOf('type: "join",', joinAt);
     const guardAt = src.indexOf("if (runtime.faulted) return quarantined();", joinAt);
+    assert.ok(applyAt > joinAt, "found the join");
     assert.ok(guardAt > joinAt && guardAt < applyAt, "guard sits between lookup and join");
+    // Reclaiming a released name reads the roster, which is the state a
+    // faulted session cannot be trusted to have; it comes after the guard too.
+    const reclaimAt = src.indexOf("runtime.releasedPidFor(msg.nickname)", joinAt);
+    assert.ok(reclaimAt > guardAt && reclaimAt < applyAt, "the reclaim lookup is behind the guard");
   });
 });
 

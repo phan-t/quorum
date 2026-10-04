@@ -18,6 +18,7 @@ import {
   UNSEAL_SHAPE_SCORE,
   TUG_ELECTION_MS,
   TUG_MISSES_TO_ELECTION,
+  assignPlayerNumbers,
   beatToleranceMs,
   checkpointsFor,
   gganbuFloorView,
@@ -89,22 +90,48 @@ export function rosterOf(
   lastSeen: ReadonlyMap<ParticipantId, number>,
   now: number,
 ): RosterEntry[] {
+  const displayNumber = numberer(state);
   return Object.values(state.participants)
     // Kicked, or released: released clears the collision key, and until the
     // person rejoins they are not in the room. Their score is kept on the
     // record so a phone swap does not cost them anything.
     .filter((p) => !p.kicked && p.nicknameKey !== "")
-    .sort((a, b) => a.playerNumber - b.playerNumber)
+    .sort((a, b) => displayNumber(a.pid) - displayNumber(b.pid))
     .map((p) => {
       const seen = lastSeen.get(p.pid) ?? 0;
       const away = !p.connected || now - seen > AWAY_AFTER_MS;
       return {
         pid: p.pid,
         nickname: p.nickname,
-        playerNumber: p.playerNumber,
+        playerNumber: displayNumber(p.pid),
         conn: away ? ("away" as const) : ("on" as const),
       };
     });
+}
+
+/**
+ * The one number a participant goes by, on every surface.
+ *
+ * Two numbers existed. `Participant.playerNumber` is the join slot, and a
+ * kicked or released person keeps theirs, so the slots have holes. The arcade
+ * assigns its own on entry — three digits, roster order, no holes — and the
+ * Desktop, the phones and the announcer use that one. The console's rail and
+ * scoring grid used the join slot, so after one kick or release "Player 012
+ * drained" named somebody the console listed as 026 (#38).
+ *
+ * Before the arcade, the join slot: nobody but the host is shown a number
+ * then. Once it is entered, the arcade's number — and for someone it has not
+ * numbered yet, the number it *will* give them, which is what
+ * `assignPlayerNumbers` computes: append-only, in roster order, so it is
+ * unique against every number already handed out and is the one the next
+ * round confirms. Falling back to the join slot instead collided: a person
+ * released before the arcade and reclaimed after it kept a low slot that an
+ * arcade number already used, and the rail showed two "006" rows.
+ */
+function numberer(state: SessionState): (pid: ParticipantId) => number {
+  if (!state.arcade) return (pid) => state.participants[pid]?.playerNumber ?? 0;
+  const numbers = assignPlayerNumbers(state, state.arcade.playerNumbers);
+  return (pid) => numbers[pid] ?? state.participants[pid]?.playerNumber ?? 0;
 }
 
 export interface ViewOptions {
@@ -129,6 +156,7 @@ function toRow(state: SessionState, s: Standing): StandingRow {
 
 /** The console's grid: raw, status, points and totals for everyone. */
 function scoreRows(state: SessionState, all: readonly Standing[]): ScoreRow[] {
+  const displayNumber = numberer(state);
   return all.map((s) => {
     const raw: Record<string, number | null> = {};
     const status: Record<string, "played" | "unset"> = {};
@@ -142,7 +170,7 @@ function scoreRows(state: SessionState, all: readonly Standing[]): ScoreRow[] {
     return {
       pid: s.pid,
       nickname: s.nickname,
-      playerNumber: state.participants[s.pid]?.playerNumber ?? 0,
+      playerNumber: displayNumber(s.pid),
       raw,
       status,
       points,
@@ -417,15 +445,17 @@ export function arcadeGrid(state: SessionState, arcade: ArcadeState): ArcadeCell
     if (seat.backing === null) continue;
     backers[seat.backing] = (backers[seat.backing] ?? 0) + 1;
   }
+  const number = numberer(state);
   return Object.values(state.participants)
     .filter((p) => !p.kicked && p.nicknameKey !== "")
     .map((p) => {
       const standing = arcade.standing[p.pid] ?? "floor";
       return {
         pid: p.pid,
-        // The arcade's own number, which is gapless; `playerNumber` is join
-        // order and has a hole in it for everyone who was ever kicked.
-        playerNumber: arcade.playerNumbers[p.pid] ?? p.playerNumber,
+        // The arcade's own number, which is gapless, or the one it will hand
+        // out — never the join slot, which has holes and collides. See
+        // `numberer`, which every surface's number comes through.
+        playerNumber: number(p.pid),
         standing,
         backers: backers[p.pid] ?? 0,
         struck: standing === "drained",
@@ -453,9 +483,8 @@ function numbersOf(
   state: SessionState,
   pids: readonly ParticipantId[],
 ): number[] {
-  return pids.map(
-    (pid) => arcade.playerNumbers[pid] ?? state.participants[pid]?.playerNumber ?? 0,
-  );
+  const number = numberer(state);
+  return pids.map((pid) => number(pid));
 }
 
 /**
@@ -621,7 +650,7 @@ function planApplyLeaders(
     const p = state.participants[pid];
     if (!p || p.kicked || p.nicknameKey === "") continue;
     rows.push({
-      playerNumber: arcade.playerNumbers[pid] ?? p.playerNumber,
+      playerNumber: numberer(state)(pid),
       resources,
     });
   }
@@ -1042,10 +1071,7 @@ export function arcadeGlassFor(
     // and could not be: `position` already says who is across.
     extra.crossed = numbersOf(arcade, state, floor.crossed);
     if (floor.fastest !== null) {
-      extra.fastest =
-        arcade.playerNumbers[floor.fastest] ??
-        state.participants[floor.fastest]?.playerNumber ??
-        0;
+      extra.fastest = numberer(state)(floor.fastest);
     }
   }
   if (isHost) extra.elapsedMs = floor.elapsedMs;
@@ -1218,8 +1244,7 @@ export function arcadeMineFor(
   }
 
   return {
-    playerNumber:
-      arcade.playerNumbers[pid] ?? state.participants[pid]?.playerNumber ?? 0,
+    playerNumber: numberer(state)(pid),
     standing: arcade.standing[pid] ?? "floor",
     banked: arcade.banked[pid] ?? 0,
     total: arcade.totals[pid] ?? 0,

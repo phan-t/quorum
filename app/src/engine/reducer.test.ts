@@ -406,6 +406,37 @@ describe("releaseNickname", () => {
     assert.equal(participant(r.state, "kenji2").nickname, "Kenji");
   });
 
+  test("is reclaimed by a join flagged reclaim: the same person, name, number and score (#37)", () => {
+    const s = accept(running(["p1"]), [
+      join("kenji", "Kenji"),
+      { type: "setScore", activityId: "ttx", pid: "kenji", raw: 12 },
+      { type: "releaseNickname", pid: "kenji" },
+    ]);
+    const before = participant(s, "kenji");
+    const r = run(s, { type: "join", pid: "kenji", nickname: "kenji", reclaim: true });
+    assert.deepEqual(rejectCodes(r.effects), []);
+    const back = participant(r.state, "kenji");
+    assert.equal(back.nickname, "Kenji", "the stored name, not the text box");
+    assert.equal(back.nicknameKey, nicknameKey("Kenji"));
+    assert.equal(back.connected, true);
+    assert.equal(back.playerNumber, before.playerNumber);
+    assert.equal(r.state.scores["ttx"]?.["kenji"]?.raw, 12);
+    // And the name collides again, so nobody else can take it now.
+    assertRefused(r.state, run(r.state, join("other", "Kenji")), "nickname_taken");
+  });
+
+  test("but a rejoin without the flag leaves the name released, as a log from before reclaim ran", () => {
+    const s = accept(running(["p1"]), [join("kenji", "Kenji"), { type: "releaseNickname", pid: "kenji" }]);
+    const r = run(s, join("kenji", "Kenji"));
+    assert.equal(participant(r.state, "kenji").nicknameKey, "");
+  });
+
+  test("and the flag cannot reclaim under a different name", () => {
+    const s = accept(running(["p1"]), [join("kenji", "Kenji"), { type: "releaseNickname", pid: "kenji" }]);
+    const r = run(s, { type: "join", pid: "kenji", nickname: "Mallory", reclaim: true });
+    assert.equal(participant(r.state, "kenji").nicknameKey, "");
+  });
+
   test("of an unknown pid is a no-op", () => {
     const s = running();
     assertNoOp(s, run(s, { type: "releaseNickname", pid: "ghost" }));
