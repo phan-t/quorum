@@ -1159,6 +1159,12 @@ cds-number-input.field {
 .sc-cell-name {
   min-width: 150px;
   width: 100%;
+  /* An auto-layout table sizes a column to its longest min-content, and
+     `.sc-name`'s ellipsis does not bound that: one long nickname widened the
+     table from 692px to 705px and took Rank off the frame. `max-width: 0`
+     takes the column's contents out of the sizing, so Name gets the slack
+     and only the slack, and a long name ellipsises instead. */
+  max-width: 0;
 }
 /* An activity column was as wide as its *title* — "Agentic Security TTX" set
    a 182px column over a 110px cell — and three of those pushed the table past
@@ -1277,14 +1283,21 @@ cds-number-input.field {
   color: var(--nomad-ink);
   font-weight: 600;
 }
+/* Hidden by `visibility`, not `display`, so the clear button's width is
+   always reserved. It was `display: none` until the cell was focused, which
+   widened every activity column 104 → 126px on focus, re-wrapped the header
+   from three lines to two and shifted the whole table 20px on every Tab —
+   then back on blur. Reserved, the columns are 126px and the header two
+   lines in every state. */
 .sc-acts {
-  display: none;
+  display: inline-flex;
+  visibility: hidden;
   gap: 2px;
   margin-left: 4px;
 }
 .sc-cell:hover .sc-acts,
 .sc-cell:focus-within .sc-acts {
-  display: inline-flex;
+  visibility: visible;
 }
 .sc-mini {
   background: transparent;
