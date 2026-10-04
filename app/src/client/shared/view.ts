@@ -56,8 +56,17 @@ export function resolveView(state: RenderState): ViewKind {
     return state.seal === "sealed" ? "sealed" : "final";
   }
   switch (state.segment) {
+    // A revealed seal is the 5 → 1 climb wherever the standings are on show,
+    // which is what SPEC's seal table says it is and what the console's
+    // "Reveal the winners, 5 to 1" promises. This read `standings` on the
+    // Standings segment, so revealing from there unhid the whole top five in
+    // one frame and the winner was out a segment early (#39).
     case "standings":
-      return state.seal === "sealed" ? "sealed" : "standings";
+      return state.seal === "sealed"
+        ? "sealed"
+        : state.seal === "revealed"
+          ? "final"
+          : "standings";
     case "final":
       return state.seal === "sealed" ? "sealed" : "final";
     default:

@@ -82,6 +82,7 @@ import {
   UNSEAL_NOTHING_SAID,
   type RaftEntry,
   type RaftPlan,
+  resolveView,
 } from "./view.ts";
 // The round's content, imported here and nowhere in the client itself: the
 // tins never reach a browser, but the number of them is what the reveal
@@ -95,6 +96,7 @@ import type {
   RosterEntry,
   StandingRow,
   TriviaView,
+  RenderState,
 } from "../../protocol.ts";
 
 const ACTIVITIES: readonly ActivitySummary[] = [
@@ -1894,5 +1896,23 @@ describe("the rule on Gganbu's own screen", () => {
     // The rule's job is the thing a player cannot see by looking at the
     // controls. Who your gganbu is and what they hold is a panel.
     assert.ok(!/gganbu|rival/i.test(PLAY_RULE.gganbu ?? ""));
+  });
+});
+
+describe("which view the seal and segment pick", () => {
+  const view = (segment: string, seal: string, phase = "running"): string =>
+    resolveView({ phase, segment, seal } as unknown as RenderState);
+
+  it("counts down 5 to 1 when the scoreboard is revealed on Standings (#39)", () => {
+    assert.equal(view("standings", "revealed"), "final");
+  });
+  it("shows the live top five on Standings, and nothing while sealed", () => {
+    assert.equal(view("standings", "live"), "standings");
+    assert.equal(view("standings", "sealed"), "sealed");
+  });
+  it("climbs on Final unless sealed", () => {
+    assert.equal(view("final", "revealed"), "final");
+    assert.equal(view("final", "live"), "final");
+    assert.equal(view("final", "sealed"), "sealed");
   });
 });
