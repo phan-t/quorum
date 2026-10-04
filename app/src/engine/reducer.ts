@@ -314,7 +314,6 @@ function withActivityTotals(
 function houseThePairOf(
   state: SessionState,
   pid: ParticipantId,
-  cause: "release" | "gone" = "gone",
 ): ArcadeState | null {
   const arcade = state.arcade;
   const play = arcade?.play;
@@ -322,42 +321,46 @@ function houseThePairOf(
   if (arcade.phase !== "card" && arcade.phase !== "running") return arcade;
   const rival = play.rivals[pid];
   if (rival === undefined) return arcade;
-  const byRelease = play.housedByRelease ?? {};
-  if (play.housed[rival] && play.housed[pid]) {
-    // Already housed. A second reason means a reclaim can no longer undo it:
-    // the pair stays housed for the drop, the kick or the other release.
-    if (!byRelease[pid] && !byRelease[rival]) return arcade;
-    const { [pid]: _a, [rival]: _b, ...rest } = byRelease;
-    return { ...arcade, play: { ...play, housedByRelease: rest } };
-  }
+  if (play.housed[rival] && play.housed[pid]) return arcade;
   return {
     ...arcade,
     play: {
       ...play,
       housed: { ...play.housed, [rival]: true, [pid]: true },
-      ...(cause === "release" ? { housedByRelease: { ...byRelease, [pid]: true } } : {}),
     },
   };
 }
 
+/** In the room under their own name: what a rival has to be to play one. */
+function present(state: SessionState, pid: ParticipantId): boolean {
+  const p = state.participants[pid];
+  return p !== undefined && p.connected && !p.kicked && p.nicknameKey !== "";
+}
+
 /**
- * A reclaim undoes the release that housed a pair, and only that (#51).
+ * Somebody came back. If both halves of their pair are in the room again, the
+ * pair is restored and the house steps aside (#51).
  *
- * The rival has to still be in the room, playing under their own name.
- * Otherwise the pair would be restored around somebody who isn't there.
+ * The house stands in only while somebody is gone. It used to stay for the
+ * rest of the round, so a phone swap (the old phone drops, the host frees the
+ * name, the person reclaims it on the new one) cost two people their rivalry.
+ * Nothing is lost by restoring it: tokens never move between a pair, so the
+ * house only ever changed who the +10 is measured against. The cost is the
+ * one `houseThePairOf` names. A phone that is away at the buzzer is compared
+ * against the house, so the moment it drops can matter.
+ *
+ * `state` is the state *after* the return.
  */
-function unhouseOnReclaim(state: SessionState, pid: ParticipantId): ArcadeState | null {
+function restorePairOf(state: SessionState, pid: ParticipantId): ArcadeState | null {
   const arcade = state.arcade;
   const play = arcade?.play;
   if (!arcade || play?.kind !== "gganbu") return arcade ?? null;
   if (arcade.phase !== "card" && arcade.phase !== "running") return arcade;
-  if (!play.housedByRelease?.[pid]) return arcade;
   const rival = play.rivals[pid];
-  const r = rival === undefined ? undefined : state.participants[rival];
-  if (rival === undefined || !r || r.kicked || !r.connected || r.nicknameKey === "") return arcade;
+  if (rival === undefined || !play.housed[pid]) return arcade;
+  if (!present(state, pid) || !present(state, rival)) return arcade;
   const { [pid]: _p, [rival]: _r, ...housed } = play.housed;
-  const { [pid]: _q, ...byRelease } = play.housedByRelease;
-  return { ...arcade, play: { ...play, housed, housedByRelease: byRelease } };
+  return { ...arcade, play: { ...play, housed } };
 }
 
 export function reduce(
@@ -520,10 +523,12 @@ export function reduce(
         ...state,
         participants: { ...state.participants, [event.pid]: participant },
       };
+      // A rejoin or a reclaim is somebody coming back, and may restore their
+      // pair, as a reconnect does.
       return applied(
         {
           ...joined,
-          ...(reclaiming ? { arcade: unhouseOnReclaim(joined, event.pid) } : {}),
+          ...(existing !== undefined ? { arcade: restorePairOf(joined, event.pid) } : {}),
           nextPlayerNumber: existing
             ? state.nextPlayerNumber
             : state.nextPlayerNumber + 1,
@@ -543,18 +548,24 @@ export function reduce(
       if (p.connected === connected) return unchanged();
       // "A rival who disconnects is replaced by the house." Recorded at the
       // instant it happens, because the engine has no clock and could not
-      // otherwise say *when* a rival stopped being one; and kept if they come
-      // back, because their gganbu has spent two prompts playing a house.
-      const arcade = connected ? state.arcade : houseThePairOf(state, event.pid);
+      // otherwise say *when* a rival stopped being one; and undone when both
+      // are back (#51), because the house stands in only while somebody is
+      // gone. See restorePairOf().
+      const after: SessionState = {
+        ...state,
+        participants: { ...state.participants, [event.pid]: { ...p, connected } },
+      };
+      const arcade = connected ? restorePairOf(after, event.pid) : houseThePairOf(state, event.pid);
+      // The pair dissolved or came back together.
       const housed = arcade !== state.arcade;
       const rival =
         housed && state.arcade?.play?.kind === "gganbu"
           ? state.arcade.play.rivals[event.pid]
           : undefined;
       return applied(
-        { ...state, participants: { ...state.participants, [event.pid]: { ...p, connected } }, arcade },
+        { ...after, arcade },
         // A connection blip is not news to anyone but the host — but a pair
-        // dissolving is not a blip. It changes who two people are playing and
+        // dissolving or coming back together is not a blip. It changes who two people are playing and
         // what their +10 is measured against, so when it happens the two of
         // them are told and it is **written down**: the runtime persists only
         // when the engine asks, and it deliberately never persists a bare
@@ -563,6 +574,8 @@ export function reduce(
         housed
           ? [
               { kind: "broadcast", to: "host", what: "state" },
+              // The Desktop's pair board says HOUSE in a dissolved pair's seat.
+              { kind: "broadcast", to: "screen", what: "state" },
               { kind: "broadcast", to: { pid: event.pid }, what: "state" },
               ...(rival === undefined
                 ? []
@@ -611,7 +624,7 @@ export function reduce(
           // Releasing a nickname takes somebody out of the roster, which is
           // leaving the room by another door. Their gganbu plays the house for
           // the same reason a kick's does, until a reclaim brings them back.
-          arcade: houseThePairOf(state, event.pid, "release"),
+          arcade: houseThePairOf(state, event.pid),
         },
         // The whole room, as a kick is, and for the same reason: leaving the
         // roster changes the roster every surface draws and the "of 27" beside

@@ -963,27 +963,17 @@ export type ArcadePlay =
        */
       readonly rivals: Readonly<Record<ParticipantId, ParticipantId>>;
       /**
-       * Players who are playing the house because their pair dissolved.
+       * Players who are playing the house because half of their pair is away.
        *
        * SPEC.md: "a rival who disconnects is replaced by the house". Recorded
        * at the instant it happens rather than derived at settlement, because
-       * the engine has no clock and a rival who dropped and came back is still
-       * a rival who dropped. **Both** halves of the pair are marked, or the
-       * two comparisons the +10 is made from can disagree with each other —
-       * see `houseThePairOf` in reducer.ts.
+       * the engine has no clock. Cleared when both halves are back, by a
+       * reconnect or a reclaim (#51): the house stands in only while somebody
+       * is gone. **Both** halves of the pair are marked, or the two
+       * comparisons the +10 is made from can disagree with each other — see
+       * `houseThePairOf` in reducer.ts.
        */
       readonly housed: Readonly<Record<ParticipantId, true>>;
-      /**
-       * Pairs housed *only* because a name was released, keyed by whose (#51).
-       *
-       * Since #37 the owner of a released name can reclaim it and come back as
-       * themselves, and a release on its own shouldn't cost the pair their
-       * rivalry once it's undone. A pair that was housed for any other reason —
-       * a drop, a kick, before or after the release — has no entry and stays
-       * housed, as it does when somebody reconnects. Optional because a session
-       * persisted before it existed has no such pairs.
-       */
-      readonly housedByRelease?: Readonly<Record<ParticipantId, true>>;
       /**
        * Wagers on the **current prompt only**, cleared when it settles.
        *
