@@ -7,7 +7,7 @@
  */
 
 import type { WebSocket } from "ws";
-import { reduce } from "../engine/reducer.ts";
+import { nicknameKey, reduce, sanitiseNickname } from "../engine/reducer.ts";
 import { lockInForceAt } from "../engine/arcade.ts";
 import { slideMs } from "../engine/sendoff.ts";
 import { autoBeat, autoFiresAt } from "../engine/trivia.ts";
@@ -424,6 +424,45 @@ export class SessionRuntime {
 
   pidForRejoin(token: string): ParticipantId | undefined {
     return this.rejoin.get(hashToken(token));
+  }
+
+  /**
+   * Forget every rejoin token a participant holds.
+   *
+   * Called when the host releases their name. Release is "free this name for
+   * whoever types it next" — a phone swap, a lost tab — so the device that
+   * held it must not slip back in on its old token as a nameless copy of the
+   * same person. It comes back the way the new device does: by joining with
+   * the name, which reclaims the identity (see {@link releasedPidFor}).
+   */
+  revokeRejoinTokens(pid: ParticipantId): void {
+    for (const hash of this.rejoinByPid.get(pid) ?? []) this.rejoin.delete(hash);
+    this.rejoinByPid.set(pid, []);
+    this.persistParticipant(pid);
+  }
+
+  /**
+   * The released participant a join under `nickname` reclaims, if any.
+   *
+   * Releasing a name keeps the participant — their scores, their player
+   * number — and clears only the key that makes the name collide. A fresh join
+   * minted a new participant for whoever typed the name next, so the person
+   * who lost their tab came back as a stranger with no points and a new
+   * number, and the console and the export carried both (#37). SPEC's release
+   * exists so "the new one can claim the name": claiming it is claiming that
+   * person.
+   *
+   * Matched on the stored nickname's key, the same key every name collision
+   * uses. Kicked participants are excluded: a kick is not a release, and SPEC
+   * has a kicked person rejoin under a different name. If an older build left
+   * more than one released record under a name, the most recent joiner wins.
+   */
+  releasedPidFor(nickname: string): ParticipantId | undefined {
+    const key = nicknameKey(sanitiseNickname(nickname));
+    if (key === "") return undefined;
+    return Object.values(this.state.participants)
+      .filter((p) => !p.kicked && p.nicknameKey === "" && nicknameKey(p.nickname) === key)
+      .sort((a, b) => b.joinedAt - a.joinedAt)[0]?.pid;
   }
 
   /** Reinstate the tokens a restart loaded, so phones come back as themselves. */

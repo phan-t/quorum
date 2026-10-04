@@ -458,10 +458,22 @@ export function reduce(
       // host-only, and a phone reconnecting with whatever is in its text box
       // would otherwise be a rename anyone could perform on themselves —
       // including undoing a rename the host just made.
+      // A reclaim restores a released name to the person it belonged to: the
+      // stored nickname, not the text box, by the same rule as any rejoin. The
+      // typed name has to be that name — the server matched on it — and is
+      // checked again here, because an engine that trusted the flag alone
+      // would hand a released identity to whoever sent it.
+      const reclaiming =
+        event.reclaim === true &&
+        existing !== undefined &&
+        !existing.kicked &&
+        existing.nicknameKey === "" &&
+        nicknameKey(existing.nickname) === key;
       const participant: Participant = existing
         ? {
             ...existing,
             ...(existing.kicked ? { nickname, nicknameKey: key } : {}),
+            ...(reclaiming ? { nicknameKey: key } : {}),
             connected: true,
             kicked: false,
           }

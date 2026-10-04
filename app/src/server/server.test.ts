@@ -1598,6 +1598,41 @@ describe("kick and release", () => {
     await old.conn.close();
     await fresh.conn.close();
   });
+
+  it("claiming a released name is claiming that person: same pid, number and score (#37)", async () => {
+    const s = makeSession("running");
+    const host = await connectHost(s);
+    const old = await join(s.joinCode, "Kenji");
+    applyEvent(s, { type: "setScore", activityId: DEFAULT_ACTIVITIES[0]!.id, pid: old.pid, raw: 7 });
+    const before = s.runtime.state.participants[old.pid]!;
+    await ackOk(host, { name: "participant.release", pid: old.pid });
+    await old.conn.waitClosed(1500);
+
+    // A new device, typed in a different case: the name is the same name.
+    const fresh = await join(s.joinCode, "kenji");
+    assert.equal(fresh.pid, old.pid, "the released participant, not a new one");
+    const back = s.runtime.state.participants[old.pid]!;
+    assert.equal(back.nickname, "Kenji");
+    assert.equal(back.playerNumber, before.playerNumber);
+    assert.equal(s.runtime.state.scores[DEFAULT_ACTIVITIES[0]!.id]?.[old.pid]?.raw, 7);
+    assert.equal(Object.keys(s.runtime.state.participants).length, 1, "no second record");
+    await host.close();
+    await fresh.conn.close();
+  });
+
+  it("and the released device's old token cannot take the name back from its new owner", async () => {
+    const s = makeSession("running");
+    const host = await connectHost(s);
+    const old = await join(s.joinCode, "Kenji");
+    await ackOk(host, { name: "participant.release", pid: old.pid });
+    await old.conn.waitClosed(1500);
+    const fresh = await join(s.joinCode, "Kenji");
+    const refusal = await refusedJoin(s.joinCode, "Kenji", old.rejoinToken);
+    assert.equal(refusal.msg.reason, "nickname_taken");
+    assert.equal(s.runtime.state.participants[fresh.pid]?.connected, true);
+    await host.close();
+    await fresh.conn.close();
+  });
 });
 
 /* ------------------------------------------------------------------ */

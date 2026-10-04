@@ -1489,6 +1489,9 @@ wss.on("connection", (socket: WebSocket, req: IncomingMessage) => {
             (cmd_pid(msg.cmd) !== null)
           ) {
             const pid = cmd_pid(msg.cmd)!;
+            // A released name is reclaimed by joining with it, so the old
+            // device's tokens go: it comes back the way the new one does.
+            if (msg.cmd?.name === "participant.release") runtime.revokeRejoinTokens(pid);
             for (const c of [...runtime.clients]) {
               if (c.pid !== pid) continue;
               runtime.clients.delete(c);
@@ -1604,12 +1607,19 @@ function handleHello(
   if (runtime.faulted) return quarantined();
 
   // A rejoin reuses the original pid, so the player keeps their number and score.
-  const pid: ParticipantId =
-    (msg.rejoinToken ? runtime.pidForRejoin(msg.rejoinToken) : undefined) ??
-    newId("p");
+  // So does joining under a name the host released: that is the person who
+  // lost their tab or swapped phones claiming themselves back (#37).
+  const rejoined = msg.rejoinToken ? runtime.pidForRejoin(msg.rejoinToken) : undefined;
+  const reclaimed = rejoined === undefined ? runtime.releasedPidFor(msg.nickname) : undefined;
+  const pid: ParticipantId = rejoined ?? reclaimed ?? newId("p");
 
   const out = runtime.apply(
-    { type: "join", pid, nickname: msg.nickname },
+    {
+      type: "join",
+      pid,
+      nickname: msg.nickname,
+      ...(reclaimed !== undefined ? { reclaim: true } : {}),
+    },
     now,
   );
   if (out.rejection) {

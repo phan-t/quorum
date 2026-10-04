@@ -1056,7 +1056,18 @@ export type ArcadePlay =
 
 export type Event =
   // participant
-  | { type: "join"; pid: ParticipantId; nickname: string }
+  | {
+      type: "join";
+      pid: ParticipantId;
+      nickname: string;
+      /**
+       * The server chose `pid` because the host had released this name: the
+       * join is that person claiming themselves back, and the engine restores
+       * the name to them (#37). Explicit rather than inferred so a log written
+       * before reclaim existed replays exactly as it ran.
+       */
+      reclaim?: boolean;
+    }
   | { type: "disconnect"; pid: ParticipantId }
   | { type: "reconnect"; pid: ParticipantId }
   // host — lifecycle
