@@ -606,6 +606,55 @@ describe("the house", () => {
     assert.equal(rivalOf(pot(s), "p1"), null);
   });
 
+  // #51: since #37 the owner of a released name can reclaim it. A release on
+  // its own is undone by the reclaim; a pair housed for anything else stays
+  // housed, as it does when somebody reconnects.
+  const reclaim = (s: SessionState, pid: ParticipantId, at: number): SessionState =>
+    accept(s, { type: "join", pid, nickname: s.participants[pid]!.nickname, reclaim: true }, at);
+
+  test("a reclaim restores a pair the release alone had housed (#51)", () => {
+    let s = wagering(4);
+    const rival = rivalOf(pot(s), "p1");
+    assert.ok(rival !== null);
+    s = accept(s, { type: "releaseNickname", pid: rival }, T0 + 100);
+    assert.equal(rivalOf(pot(s), "p1"), null);
+    s = reclaim(s, rival, T0 + 200);
+    assert.equal(rivalOf(pot(s), "p1"), rival);
+    assert.equal(rivalOf(pot(s), rival), "p1");
+    assert.deepEqual(pot(s).housedByRelease, {});
+  });
+
+  test("a pair housed by a drop before the release stays housed after the reclaim", () => {
+    let s = wagering(4);
+    const rival = rivalOf(pot(s), "p1");
+    assert.ok(rival !== null);
+    s = accept(s, { type: "disconnect", pid: rival }, T0 + 100);
+    s = accept(s, { type: "releaseNickname", pid: rival }, T0 + 150);
+    s = reclaim(s, rival, T0 + 200);
+    assert.equal(rivalOf(pot(s), "p1"), null);
+  });
+
+  test("and so does one whose other half dropped in between", () => {
+    let s = wagering(4);
+    const rival = rivalOf(pot(s), "p1");
+    assert.ok(rival !== null);
+    s = accept(s, { type: "releaseNickname", pid: rival }, T0 + 100);
+    s = accept(s, { type: "disconnect", pid: "p1" }, T0 + 150);
+    s = accept(s, { type: "reconnect", pid: "p1" }, T0 + 175);
+    s = reclaim(s, rival, T0 + 200);
+    assert.equal(rivalOf(pot(s), "p1"), null);
+  });
+
+  test("a reclaim while the rival is away leaves the pair housed", () => {
+    let s = wagering(4);
+    const rival = rivalOf(pot(s), "p1");
+    assert.ok(rival !== null);
+    s = accept(s, { type: "releaseNickname", pid: rival }, T0 + 100);
+    s = { ...s, participants: { ...s.participants, p1: { ...s.participants["p1"]!, connected: false } } };
+    s = reclaim(s, rival, T0 + 200);
+    assert.equal(rivalOf(pot(s), "p1"), null);
+  });
+
   test("a latecomer who wagers is dealt in and converts", () => {
     let s = wagering(3);
     s = accept(s, { type: "join", pid: "p9", nickname: "Late" }, T0 + 500);

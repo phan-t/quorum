@@ -314,6 +314,7 @@ function withActivityTotals(
 function houseThePairOf(
   state: SessionState,
   pid: ParticipantId,
+  cause: "release" | "gone" = "gone",
 ): ArcadeState | null {
   const arcade = state.arcade;
   const play = arcade?.play;
@@ -321,14 +322,42 @@ function houseThePairOf(
   if (arcade.phase !== "card" && arcade.phase !== "running") return arcade;
   const rival = play.rivals[pid];
   if (rival === undefined) return arcade;
-  if (play.housed[rival] && play.housed[pid]) return arcade;
+  const byRelease = play.housedByRelease ?? {};
+  if (play.housed[rival] && play.housed[pid]) {
+    // Already housed. A second reason means a reclaim can no longer undo it:
+    // the pair stays housed for the drop, the kick or the other release.
+    if (!byRelease[pid] && !byRelease[rival]) return arcade;
+    const { [pid]: _a, [rival]: _b, ...rest } = byRelease;
+    return { ...arcade, play: { ...play, housedByRelease: rest } };
+  }
   return {
     ...arcade,
     play: {
       ...play,
       housed: { ...play.housed, [rival]: true, [pid]: true },
+      ...(cause === "release" ? { housedByRelease: { ...byRelease, [pid]: true } } : {}),
     },
   };
+}
+
+/**
+ * A reclaim undoes the release that housed a pair, and only that (#51).
+ *
+ * The rival has to still be in the room, playing under their own name.
+ * Otherwise the pair would be restored around somebody who isn't there.
+ */
+function unhouseOnReclaim(state: SessionState, pid: ParticipantId): ArcadeState | null {
+  const arcade = state.arcade;
+  const play = arcade?.play;
+  if (!arcade || play?.kind !== "gganbu") return arcade ?? null;
+  if (arcade.phase !== "card" && arcade.phase !== "running") return arcade;
+  if (!play.housedByRelease?.[pid]) return arcade;
+  const rival = play.rivals[pid];
+  const r = rival === undefined ? undefined : state.participants[rival];
+  if (rival === undefined || !r || r.kicked || !r.connected || r.nicknameKey === "") return arcade;
+  const { [pid]: _p, [rival]: _r, ...housed } = play.housed;
+  const { [pid]: _q, ...byRelease } = play.housedByRelease;
+  return { ...arcade, play: { ...play, housed, housedByRelease: byRelease } };
 }
 
 export function reduce(
@@ -487,10 +516,14 @@ export function reduce(
             kicked: false,
           };
 
+      const joined: SessionState = {
+        ...state,
+        participants: { ...state.participants, [event.pid]: participant },
+      };
       return applied(
         {
-          ...state,
-          participants: { ...state.participants, [event.pid]: participant },
+          ...joined,
+          ...(reclaiming ? { arcade: unhouseOnReclaim(joined, event.pid) } : {}),
           nextPlayerNumber: existing
             ? state.nextPlayerNumber
             : state.nextPlayerNumber + 1,
@@ -577,8 +610,8 @@ export function reduce(
           },
           // Releasing a nickname takes somebody out of the roster, which is
           // leaving the room by another door. Their gganbu plays the house for
-          // the same reason a kick's does.
-          arcade: houseThePairOf(state, event.pid),
+          // the same reason a kick's does, until a reclaim brings them back.
+          arcade: houseThePairOf(state, event.pid, "release"),
         },
         // The whole room, as a kick is, and for the same reason: leaving the
         // roster changes the roster every surface draws and the "of 27" beside

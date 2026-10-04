@@ -974,6 +974,17 @@ export type ArcadePlay =
        */
       readonly housed: Readonly<Record<ParticipantId, true>>;
       /**
+       * Pairs housed *only* because a name was released, keyed by whose (#51).
+       *
+       * Since #37 the owner of a released name can reclaim it and come back as
+       * themselves, and a release on its own shouldn't cost the pair their
+       * rivalry once it's undone. A pair that was housed for any other reason —
+       * a drop, a kick, before or after the release — has no entry and stays
+       * housed, as it does when somebody reconnects. Optional because a session
+       * persisted before it existed has no such pairs.
+       */
+      readonly housedByRelease?: Readonly<Record<ParticipantId, true>>;
+      /**
        * Wagers on the **current prompt only**, cleared when it settles.
        *
        * This is the field the round is built around. Both halves of a pair
