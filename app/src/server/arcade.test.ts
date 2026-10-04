@@ -1325,3 +1325,41 @@ describe("the arcade's frames", () => {
     assert.equal(zero?.t === "host.cmd" ? zero.cmd : "?", null);
   });
 });
+
+describe("one number per person, on every surface (#38)", () => {
+  it("the console's roster and scoring grid use the arcade's number once there is one", () => {
+    // p2 is kicked before the arcade: their join slot leaves a hole the
+    // arcade's numbering closes, which is exactly where the two numbers parted.
+    const state = session([
+      { type: "open" },
+      { type: "join", pid: "p1", nickname: "Priya" },
+      { type: "join", pid: "p2", nickname: "Kenji" },
+      { type: "join", pid: "p3", nickname: "Ade" },
+      { type: "join", pid: "p4", nickname: "Lena" },
+      { type: "start" },
+      { type: "kick", pid: "p2" },
+      { type: "setSegment", segment: "arcade" },
+      { type: "enterArcade", activityId: "arcade" },
+    ]);
+    const host = view(state, "host");
+    const grid = new Map((host.arcade?.grid ?? []).map((c) => [c.pid, c.playerNumber]));
+    assert.ok(grid.size >= 3);
+    for (const r of host.roster) {
+      assert.equal(r.playerNumber, grid.get(r.pid), `${r.nickname}: rail and arcade disagree`);
+    }
+    for (const row of host.hostExtras?.scores ?? []) {
+      if (!grid.has(row.pid)) continue;
+      assert.equal(row.playerNumber, grid.get(row.pid), `${row.nickname}: grid and arcade disagree`);
+    }
+    // And the join slot is still what shows before the arcade.
+    const lobby = view(
+      session([
+        { type: "open" },
+        { type: "join", pid: "p1", nickname: "Priya" },
+        { type: "join", pid: "p2", nickname: "Kenji" },
+      ]),
+      "host",
+    );
+    assert.deepEqual(lobby.roster.map((r) => r.playerNumber), [1, 2]);
+  });
+});

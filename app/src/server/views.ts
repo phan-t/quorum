@@ -94,17 +94,35 @@ export function rosterOf(
     // person rejoins they are not in the room. Their score is kept on the
     // record so a phone swap does not cost them anything.
     .filter((p) => !p.kicked && p.nicknameKey !== "")
-    .sort((a, b) => a.playerNumber - b.playerNumber)
+    .sort((a, b) => displayNumber(state, a.pid) - displayNumber(state, b.pid))
     .map((p) => {
       const seen = lastSeen.get(p.pid) ?? 0;
       const away = !p.connected || now - seen > AWAY_AFTER_MS;
       return {
         pid: p.pid,
         nickname: p.nickname,
-        playerNumber: p.playerNumber,
+        playerNumber: displayNumber(state, p.pid),
         conn: away ? ("away" as const) : ("on" as const),
       };
     });
+}
+
+/**
+ * The one number a participant goes by, on every surface.
+ *
+ * Two numbers existed. `Participant.playerNumber` is the join slot, and a
+ * kicked or released person keeps theirs, so the slots have holes. The arcade
+ * assigns its own on entry — three digits, roster order, no holes — and the
+ * Desktop, the phones and the announcer use that one. The console's rail and
+ * scoring grid used the join slot, so after one kick or release "Player 012
+ * drained" named somebody the console listed as 026 (#38).
+ *
+ * The arcade's number once it exists, the join slot before. Nobody is shown a
+ * number before the arcade except the host, so the switch is invisible to the
+ * room, and from then on there is one number per person everywhere.
+ */
+function displayNumber(state: SessionState, pid: ParticipantId): number {
+  return state.arcade?.playerNumbers[pid] ?? state.participants[pid]?.playerNumber ?? 0;
 }
 
 export interface ViewOptions {
@@ -142,7 +160,7 @@ function scoreRows(state: SessionState, all: readonly Standing[]): ScoreRow[] {
     return {
       pid: s.pid,
       nickname: s.nickname,
-      playerNumber: state.participants[s.pid]?.playerNumber ?? 0,
+      playerNumber: displayNumber(state, s.pid),
       raw,
       status,
       points,
