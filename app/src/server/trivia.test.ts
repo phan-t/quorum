@@ -40,7 +40,7 @@ import {
   roundAt,
   triviaPodium,
 } from "./views.ts";
-import type { RenderState } from "../protocol.ts";
+import { TIEBREAK_INDEX, type RenderState } from "../protocol.ts";
 
 /* ------------------------------------------------------------------ */
 /* Fixtures                                                             */
@@ -542,6 +542,28 @@ describe("the socket boundary", () => {
     assert.equal(stale.applied, false);
     assert.equal(stale.rejection?.code, "question_not_open");
     assert.equal(runtime.state.trivia?.answers["p1"], undefined);
+  });
+
+  it("counts a tap on a sudden death, which is shown at the tiebreak's index (#41)", () => {
+    const registry = new SessionRegistry();
+    const { runtime } = registry.add(loaded(), T0);
+    runtime.apply({ type: "openQuestion", suddenDeath: true }, T0);
+    const client = fakeClient("p1", []);
+    runtime.clients.add(client);
+    const out = runtime.answer(client, TIEBREAK_INDEX, 1, T0 + 1_000);
+    assert.equal(out.applied, true, out.rejection?.message);
+    assert.equal(runtime.state.trivia?.answers["p1"]?.choice, 1);
+  });
+
+  it("but refuses the tiebreak's index when no tiebreak is open", () => {
+    const registry = new SessionRegistry();
+    const { runtime } = registry.add(loaded(), T0);
+    runtime.apply({ type: "openQuestion", suddenDeath: false }, T0);
+    const client = fakeClient("p1", []);
+    runtime.clients.add(client);
+    const out = runtime.answer(client, TIEBREAK_INDEX, 1, T0 + 1_000);
+    assert.equal(out.applied, false);
+    assert.equal(out.rejection?.code, "question_not_open");
   });
 
   it("leaves 'already answered' to the engine", () => {

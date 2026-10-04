@@ -35,6 +35,7 @@ import {
   currentQuestion,
 } from "../engine/trivia.ts";
 import { longestSlide, partsOf, slideMs } from "../engine/sendoff.ts";
+import { TIEBREAK_INDEX } from "../protocol.ts";
 import type {
   ArcadeState,
   GganbuPrompt,
@@ -296,7 +297,7 @@ export function triviaViewFor(
     activityId: trivia.activityId,
     // A tiebreaker is not "question 4 of 20". It is outside the set, and the
     // surfaces say so by being given no position in it.
-    index: trivia.suddenDeath ? -1 : trivia.at,
+    index: trivia.suddenDeath ? TIEBREAK_INDEX : trivia.at,
     of: trivia.questions.length,
     phase: trivia.phase,
     text: visible ? question.text : "",

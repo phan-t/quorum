@@ -8,6 +8,8 @@
 
 import { strict as assert } from "node:assert";
 import { describe, it } from "node:test";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 
 import {
   ARCADE_PLAYABLE,
@@ -206,6 +208,60 @@ describe("the order, across a refresh", () => {
       planIncluded(back?.plan ?? []).length,
       ARCADE_PLAYABLE.length,
     );
+  });
+
+  it("reads a staged list of round names as the rounds to play, in that order (#36)", () => {
+    // The shape session.json, the example and docs/event-config.md all use.
+    const back = parseSetup(
+      JSON.stringify({ plan: ["recruitment", "plan_apply", "glass_bridge"], timings: {} }),
+    );
+    assert.deepEqual(planIncluded(back?.plan ?? []), [
+      "recruitment",
+      "plan_apply",
+      "glass_bridge",
+    ]);
+    // The other three are still in the order, out, so the host can add one.
+    assert.deepEqual(
+      back?.plan.filter((e) => !e.included).map((e) => e.kind),
+      ["unseal", "tug_of_raft", "gganbu"],
+    );
+  });
+
+  it("skips an unknown or repeated name in a staged list", () => {
+    const back = parseSetup(
+      JSON.stringify({ plan: ["glass_bridge", "marbles", "glass_bridge", "unseal"] }),
+    );
+    assert.deepEqual(planIncluded(back?.plan ?? []), ["glass_bridge", "unseal"]);
+  });
+
+  it("matches the example event's staged plan", () => {
+    const example = JSON.parse(
+      readFileSync(
+        join(import.meta.dirname, "..", "..", "..", "..", "config", "event.example", "session.json"),
+        "utf8",
+      ),
+    ) as { console: { arcade: { plan: string[] } } };
+    const back = parseSetup(JSON.stringify(example.console.arcade));
+    assert.deepEqual(planIncluded(back?.plan ?? []), example.console.arcade.plan);
+  });
+
+  it("reports names it does not know, so the preflight can say so", () => {
+    const back = parseSetup(
+      JSON.stringify({ plan: ["recrutment", "plan_apply", "glass_bridge", "recrutment"] }),
+    );
+    assert.deepEqual(back?.unknownNames, ["recrutment"]);
+    assert.deepEqual(planIncluded(back?.plan ?? []), ["plan_apply", "glass_bridge"]);
+  });
+
+  it("reports every name when none is known, and still never comes back empty", () => {
+    const back = parseSetup(JSON.stringify({ plan: ["recrutment", "glas_bridge"] }));
+    assert.deepEqual(back?.unknownNames, ["recrutment", "glas_bridge"]);
+    assert.equal(planIncluded(back?.plan ?? []).length, ARCADE_PLAYABLE.length);
+  });
+
+  it("reports nothing for the console's own shape", () => {
+    const back = parseSetup(JSON.stringify({ plan: [{ kind: "marbles", included: true }] }));
+    assert.deepEqual(back?.unknownNames, []);
   });
 
   it("ignores a timing that is not a positive number", () => {

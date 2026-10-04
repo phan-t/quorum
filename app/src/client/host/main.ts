@@ -2938,14 +2938,16 @@ const suddenDeath = control({
   label: "Sudden death: off",
   className: "ctl-secondary ctl-quiet",
   title:
-    "First correct answer wins. No timer, and nobody's score changes. Takes effect on the next question you open.",
-  onFire: (c) => {
-    suddenDeathArmed = !suddenDeathArmed;
-    c.setLabel(`Sudden death: ${suddenDeathArmed ? "on" : "off"}`);
-    c.setOn(suddenDeathArmed);
-    if (lastState) render(lastState);
-  },
+    "First correct answer wins. No timer, and nobody's score changes. Takes effect on the next question you open — after the last question, Space opens it.",
+  onFire: () => setSuddenDeathArmed(!suddenDeathArmed),
 });
+
+function setSuddenDeathArmed(on: boolean): void {
+  suddenDeathArmed = on;
+  suddenDeath.setLabel(`Sudden death: ${on ? "on" : "off"}`);
+  suddenDeath.setOn(on);
+  if (lastState) render(lastState);
+}
 
 /**
  * Auto / Manual for the question set, and how long its beats are.
@@ -3573,7 +3575,15 @@ const TIMING_FIELDS: readonly (readonly [HTMLElement, string])[] = [
   [arcadeGganbuTokens, "gganbuTokens"],
 ];
 
+/**
+ * Round names the staged running order gave that this build does not know.
+ * The preflight says so, by name, until the host sets the order here — a
+ * saved order is the console's own and has nothing unknown in it.
+ */
+let stagedUnknownRounds: readonly string[] = [];
+
 function saveSetup(): void {
+  stagedUnknownRounds = [];
   const timings: Record<string, number> = {};
   for (const [field, key] of TIMING_FIELDS) {
     const v = Number(fieldValue(field));
@@ -3769,6 +3779,7 @@ function loadSetup(): void {
   const stored = parseSetup(raw);
   if (stored === null) return;
   arcadePlan = stored.plan;
+  stagedUnknownRounds = stored.unknownNames;
   for (const [field, key] of TIMING_FIELDS) {
     const v = stored.timings[key];
     if (v !== undefined) setFieldValue(field, String(v));
@@ -4777,17 +4788,66 @@ function primaryPlan(): Plan {
   if (s.segment === "trivia" && s.trivia !== undefined) {
     const t = s.trivia;
     switch (t.phase) {
-      case "idle":
-        return cmdPlan(
-          `Open ${questionLabel(t)}${suddenDeathArmed ? " · sudden death" : ""}`,
-          { name: "trivia.open", suddenDeath: suddenDeathArmed },
-        );
+      case "idle": {
+        const tiebreak = suddenDeathArmed;
+        return {
+          label: tiebreak ? "Open sudden death" : `Open ${questionLabel(t)}`,
+          fire: (c) => {
+            issue({ name: "trivia.open", suddenDeath: tiebreak }, c);
+            // One tiebreak per arming, here as after the last question. It
+            // stayed armed, so the question the set came back to after the
+            // tiebreak opened as a second tiebreak and spent another pool
+            // question.
+            if (tiebreak) setSuddenDeathArmed(false);
+          },
+        };
+      }
       case "open":
         return cmdPlan("Close the question", { name: "trivia.close" });
       case "closed":
         return cmdPlan("Reveal the answer", { name: "trivia.reveal" });
       case "revealed": {
-        if (t.index + 1 >= t.of) return advanceFromHere(s);
+        // A revealed tiebreak. Its index is `TIEBREAK_INDEX`, outside the set,
+        // so it is decided here and not by where the set stands. Re-armed, the
+        // press opens another (the engine accepts one over a revealed
+        // tiebreak and keeps the first one's hold on the set). Otherwise the
+        // press is `trivia.next`, which is how the engine puts a tiebreak
+        // away: the set comes back exactly where it was left — after the last
+        // question, that is the last question revealed — and from there the
+        // next press walks the runbook. It is labelled as what it does.
+        if (t.suddenDeath) {
+          if (suddenDeathArmed) {
+            return {
+              label: "Open sudden death",
+              fire: (c) => {
+                issue({ name: "trivia.open", suddenDeath: true }, c);
+                setSuddenDeathArmed(false);
+              },
+            };
+          }
+          return cmdPlan("Back to the question set", { name: "trivia.next" });
+        }
+        if (t.index + 1 >= t.of) {
+          // The set is done, and an armed sudden death is the tiebreak: the
+          // one question still to open here. The engine accepts it over a
+          // revealed question for exactly this case. This returned the next
+          // runbook step regardless, so arming it after the last question did
+          // nothing and the next Space walked the room into whatever came
+          // after trivia (#41).
+          //
+          // One tiebreak per arming: opening it disarms the toggle. See the
+          // branch above for what the press does once it is revealed.
+          if (suddenDeathArmed) {
+            return {
+              label: "Open sudden death",
+              fire: (c) => {
+                issue({ name: "trivia.open", suddenDeath: true }, c);
+                setSuddenDeathArmed(false);
+              },
+            };
+          }
+          return advanceFromHere(s);
+        }
         // Under Auto the press does exactly what the clock was about to do,
         // which is the send-off's answer to a host pressing mid-interval: the
         // step happens now and the run carries on from there.
@@ -5201,12 +5261,23 @@ function renderPreflight(s: RenderState): void {
   );
 
   const order = planIncluded(arcadePlan);
-  pfArcade.set(
-    order.length > 0 ? "ready" : "not",
-    order.length > 0
-      ? `Arcade rounds: ${planSummary(arcadePlan, ARCADE_ROUND_LABEL)}.`
-      : "No arcade rounds chosen.",
-  );
+  if (stagedUnknownRounds.length > 0) {
+    // Not Ready. A misspelled round in session.json is a round the event
+    // planned and will not play, and an all-misspelled list falls back to all
+    // six — both of which this line used to call Ready.
+    const names = stagedUnknownRounds.map((n) => `"${n}"`).join(", ");
+    pfArcade.set(
+      "not",
+      `The event's running order names ${stagedUnknownRounds.length === 1 ? "a round" : "rounds"} this console does not know: ${names}. Playing ${planSummary(arcadePlan, ARCADE_ROUND_LABEL)} instead. Set the order below, or fix the event's session.json.`,
+    );
+  } else {
+    pfArcade.set(
+      order.length > 0 ? "ready" : "not",
+      order.length > 0
+        ? `Arcade rounds: ${planSummary(arcadePlan, ARCADE_ROUND_LABEL)}.`
+        : "No arcade rounds chosen.",
+    );
+  }
 
   const joined = s.roster.length;
   const on = s.roster.filter((r) => r.conn === "on").length;
@@ -5412,9 +5483,9 @@ function renderTrivia(s: RenderState): void {
   setText(
     triviaHead,
     [
+      // "Sudden death" for a tiebreak, from `questionLabel` itself.
       questionLabel(t),
       sentenceCase(t.phase),
-      t.suddenDeath ? "Sudden death" : null,
       // On the head line and not only on the button, because driving mode
       // reads this line and nothing else: a host who has folded the console
       // down to four numbers still has to know the set is walking itself.
@@ -5471,7 +5542,16 @@ function renderTrivia(s: RenderState): void {
 
   const answered = t.answered ?? 0;
   const eligible = t.eligible ?? 0;
-  setText(triviaCounts, `${answered} of ${eligible} answered`);
+  // A revealed tiebreak says who took it, which is the one fact the host is
+  // about to read out. The Desktop and every phone named the winner and the
+  // console did not, so the host read it off the shared screen.
+  const tiebreakResult =
+    t.suddenDeath && t.phase === "revealed"
+      ? t.suddenDeathWinner !== null
+        ? `${t.suddenDeathWinner} took it · `
+        : "Nobody got it · "
+      : "";
+  setText(triviaCounts, `${tiebreakResult}${answered} of ${eligible} answered`);
   triviaCounts.classList.toggle("all-in", eligible > 0 && answered >= eligible);
 
   const note = t.note ?? "";

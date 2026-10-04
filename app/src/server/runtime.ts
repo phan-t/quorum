@@ -37,6 +37,7 @@ import {
   triviaStateOf,
   type PreparedViews,
 } from "./views.ts";
+import { TIEBREAK_INDEX } from "../protocol.ts";
 import { hashToken, newToken } from "./tokens.ts";
 import {
   NO_PERSISTENCE,
@@ -1956,7 +1957,12 @@ export class SessionRuntime {
         rejection: { code: "no_questions_loaded", message: "No questions loaded." },
       };
     }
-    if (index !== trivia.at) {
+    // A tap on a sudden death carries `TIEBREAK_INDEX`, the position every
+    // surface is shown for one; it means the tiebreak open now, and nothing
+    // when none is. Any other index has to be the question in play.
+    const current =
+      index === TIEBREAK_INDEX ? trivia.suddenDeath : index === trivia.at;
+    if (!current) {
       return {
         applied: false,
         rejection: {

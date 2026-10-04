@@ -1908,3 +1908,37 @@ describe("the UI Shell layout keeps its promises", () => {
     for (const a of autos) assert.match(a, /ctl-quiet/);
   });
 });
+
+describe("sudden death after the last question (#41)", () => {
+  const main = stripComments(
+    readFileSync(join(import.meta.dirname, "main.ts"), "utf8"),
+  );
+  test("opens the tiebreak instead of walking the runbook when it is armed", () => {
+    const branch = /if \(t\.index \+ 1 >= t\.of\) \{([\s\S]*?)return advanceFromHere\(s\);\s*\}/.exec(main)?.[1] ?? "";
+    assert.match(branch, /if \(suddenDeathArmed\)/, "the end of the set must check the armed tiebreak");
+    assert.match(branch, /name: "trivia\.open", suddenDeath: true/);
+    assert.match(branch, /setSuddenDeathArmed\(false\)/, "opening it must disarm, or Space loops on it");
+  });
+
+  test("a revealed tiebreak re-opens when re-armed, and otherwise goes back to the set", () => {
+    const branch = /case "revealed": \{\s*if \(t\.suddenDeath\) \{([\s\S]*?)\n        \}/.exec(main)?.[1] ?? "";
+    assert.match(branch, /if \(suddenDeathArmed\)/);
+    assert.match(branch, /name: "trivia\.open", suddenDeath: true/);
+    assert.match(branch, /"Back to the question set", \{ name: "trivia\.next" \}/);
+  });
+
+  test("opening a tiebreak mid-set disarms it too", () => {
+    const branch = /case "idle": \{([\s\S]*?)\n      \}/.exec(main)?.[1] ?? "";
+    assert.match(branch, /if \(tiebreak\) setSuddenDeathArmed\(false\)/);
+  });
+});
+
+describe("the console names the tiebreak's winner", () => {
+  const main = stripComments(
+    readFileSync(join(import.meta.dirname, "main.ts"), "utf8"),
+  );
+  test("at a revealed sudden death, next to the count", () => {
+    assert.match(main, /t\.suddenDeath && t\.phase === "revealed"[\s\S]{0,120}t\.suddenDeathWinner/);
+    assert.match(main, /setText\(triviaCounts, `\$\{tiebreakResult\}/);
+  });
+});

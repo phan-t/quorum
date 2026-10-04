@@ -66,6 +66,19 @@ import type {
  */
 export const PROTOCOL_VERSION = 2;
 
+/**
+ * A sudden death's position, as every surface is given it: outside the set.
+ *
+ * `TriviaView.index` is the question's place in the scored set, and a
+ * tiebreak has none, so the view says -1. A participant answers with the
+ * index it was shown, so a tap on a tiebreak carries -1 — which the boundary
+ * below and the runtime's "has this question moved on" check both have to
+ * know means "the tiebreak that is open now". Until they did, every answer to
+ * a sudden death was dropped without a refusal while the phone said LOCKED
+ * IN, and no tiebreak could be won (#41).
+ */
+export const TIEBREAK_INDEX = -1;
+
 export type Role = "participant" | "host" | "screen";
 
 /** Why a socket was refused. Distinct from engine RejectCodes on purpose: */
@@ -1732,14 +1745,15 @@ export function parseClientMessage(raw: string): ClientMessage | null {
       const cid = str("cid");
       const index = m["index"];
       const choice = m["choice"];
-      // Non-negative integers or nothing. The engine refuses an out-of-range
+      // Non-negative integers or nothing — and `TIEBREAK_INDEX`, which is the
+      // index a sudden death is shown with. The engine refuses an out-of-range
       // choice as well, but a fractional index that reached the boundary's
       // `===` comparison would simply never match, which is a silent drop.
       if (
         cid === null ||
         typeof index !== "number" ||
         !Number.isInteger(index) ||
-        index < 0 ||
+        (index < 0 && index !== TIEBREAK_INDEX) ||
         typeof choice !== "number" ||
         !Number.isInteger(choice) ||
         choice < 0

@@ -82,6 +82,10 @@ import {
   UNSEAL_NOTHING_SAID,
   type RaftEntry,
   type RaftPlan,
+  climbAlreadyShown,
+  climbKey,
+  markClimbShown,
+  resolveView,
 } from "./view.ts";
 // The round's content, imported here and nowhere in the client itself: the
 // tins never reach a browser, but the number of them is what the reveal
@@ -95,6 +99,7 @@ import type {
   RosterEntry,
   StandingRow,
   TriviaView,
+  RenderState,
 } from "../../protocol.ts";
 
 const ACTIVITIES: readonly ActivitySummary[] = [
@@ -1894,5 +1899,89 @@ describe("the rule on Gganbu's own screen", () => {
     // The rule's job is the thing a player cannot see by looking at the
     // controls. Who your gganbu is and what they hold is a panel.
     assert.ok(!/gganbu|rival/i.test(PLAY_RULE.gganbu ?? ""));
+  });
+});
+
+describe("which view the seal and segment pick", () => {
+  const view = (segment: string, seal: string, phase = "running"): string =>
+    resolveView({ phase, segment, seal } as unknown as RenderState);
+
+  it("counts down 5 to 1 when the scoreboard is revealed on Standings (#39)", () => {
+    assert.equal(view("standings", "revealed"), "final");
+  });
+  it("shows the live top five on Standings, and nothing while sealed", () => {
+    assert.equal(view("standings", "live"), "standings");
+    assert.equal(view("standings", "sealed"), "sealed");
+  });
+  it("climbs on Final unless sealed", () => {
+    assert.equal(view("final", "revealed"), "final");
+    assert.equal(view("final", "live"), "final");
+    assert.equal(view("final", "sealed"), "sealed");
+  });
+});
+
+describe("a question's label", () => {
+  it("names a tiebreak instead of giving it a position (#41)", () => {
+    assert.equal(
+      questionLabel({ index: -1, of: 5, suddenDeath: true } as unknown as TriviaView),
+      "Sudden death",
+    );
+    assert.equal(
+      questionLabel({ index: 2, of: 5, suddenDeath: false } as unknown as TriviaView),
+      "Q3 of 5",
+    );
+  });
+});
+
+describe("a climb the room has already seen", () => {
+  const state = (sid: string, totals: number[]): RenderState =>
+    ({
+      sid,
+      standings: totals.map((total, i) => ({ rank: i + 1, nickname: `p${i}`, total })),
+    }) as unknown as RenderState;
+
+  function withStorage(run: () => void): void {
+    const store = new Map<string, string>();
+    const g = globalThis as { sessionStorage?: unknown };
+    const before = g.sessionStorage;
+    g.sessionStorage = {
+      getItem: (k: string) => store.get(k) ?? null,
+      setItem: (k: string, v: string) => void store.set(k, v),
+    };
+    try {
+      run();
+    } finally {
+      g.sessionStorage = before;
+    }
+  }
+
+  it("is remembered once finished, so the Final does not announce the winner twice", () => {
+    withStorage(() => {
+      const key = climbKey(state("s1", [300, 200, 100]));
+      assert.equal(climbAlreadyShown(key), false);
+      markClimbShown(key);
+      assert.equal(climbAlreadyShown(key), true);
+    });
+  });
+
+  it("climbs again when the result changes, or in another session", () => {
+    withStorage(() => {
+      markClimbShown(climbKey(state("s1", [300, 200, 100])));
+      assert.equal(climbAlreadyShown(climbKey(state("s1", [300, 250, 100]))), false);
+      assert.equal(climbAlreadyShown(climbKey(state("s2", [300, 200, 100]))), false);
+    });
+  });
+
+  it("climbs when nothing can be stored, which is never worse than before", () => {
+    const g = globalThis as { sessionStorage?: unknown };
+    const before = g.sessionStorage;
+    delete g.sessionStorage;
+    try {
+      const key = climbKey(state("s1", [1]));
+      markClimbShown(key);
+      assert.equal(climbAlreadyShown(key), false);
+    } finally {
+      g.sessionStorage = before;
+    }
   });
 });

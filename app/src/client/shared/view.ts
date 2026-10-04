@@ -56,8 +56,17 @@ export function resolveView(state: RenderState): ViewKind {
     return state.seal === "sealed" ? "sealed" : "final";
   }
   switch (state.segment) {
+    // A revealed seal is the 5 → 1 climb wherever the standings are on show,
+    // which is what SPEC's seal table says it is and what the console's
+    // "Reveal the winners, 5 to 1" promises. This read `standings` on the
+    // Standings segment, so revealing from there unhid the whole top five in
+    // one frame and the winner was out a segment early (#39).
     case "standings":
-      return state.seal === "sealed" ? "sealed" : "standings";
+      return state.seal === "sealed"
+        ? "sealed"
+        : state.seal === "revealed"
+          ? "final"
+          : "standings";
     case "final":
       return state.seal === "sealed" ? "sealed" : "final";
     default:
@@ -215,6 +224,9 @@ export function timerFraction(trivia: TriviaView, now: number): number | null {
 
 /** `Q7 of 20`, the line every surface puts above the question. */
 export function questionLabel(trivia: TriviaView): string {
+  // A tiebreak is outside the set and is shown at no position in it, which
+  // read as "Q0 of 5" on every surface until it said what it is.
+  if (trivia.suddenDeath) return "Sudden death";
   return `Q${trivia.index + 1} of ${trivia.of}`;
 }
 
@@ -598,6 +610,54 @@ export const SEALED_LINE = "Revealed at the end.";
  */
 export const FINAL_DWELL_MS = 4_000;
 export const FINAL_EMPTY_FIRST_HOLD_MS = 7_000;
+
+/**
+ * Whether this surface has already shown the room this result's climb.
+ *
+ * A reveal is a surprise once. Revealing the scoreboard on Standings runs the
+ * climb, and the Final segment runs it again when the host gets there — after
+ * the send-off, say — so the room watched the winner announced twice. Each
+ * surface remembers the results whose climb it has *finished* (an
+ * interrupted climb is not remembered, and plays again) and shows a
+ * remembered one straight away: all five rows and the winner.
+ *
+ * Keyed on the session and the result, so a result that changes — a late
+ * score — climbs again, as it always did. Kept in `sessionStorage`, so it
+ * survives a reload of the same tab and is forgotten with it; a surface that
+ * cannot store it climbs, which is the behaviour this replaced and never
+ * worse than a spoiled reveal.
+ */
+const CLIMBS_SHOWN_KEY = "quorum.climbs-shown.v1";
+
+export function climbKey(state: RenderState): string {
+  return `${state.sid}|${state.standings
+    .map((r) => `${r.rank}:${r.nickname}:${r.total}`)
+    .join("|")}`;
+}
+
+function climbsShown(): string[] {
+  try {
+    const raw = sessionStorage.getItem(CLIMBS_SHOWN_KEY);
+    const v: unknown = raw === null ? [] : JSON.parse(raw);
+    return Array.isArray(v) ? v.filter((x): x is string => typeof x === "string") : [];
+  } catch {
+    return [];
+  }
+}
+
+export function climbAlreadyShown(key: string): boolean {
+  return climbsShown().includes(key);
+}
+
+export function markClimbShown(key: string): void {
+  try {
+    const list = climbsShown().filter((k) => k !== key);
+    list.push(key);
+    sessionStorage.setItem(CLIMBS_SHOWN_KEY, JSON.stringify(list.slice(-8)));
+  } catch {
+    /* storage off: the next arrival climbs again, which is the old behaviour */
+  }
+}
 
 /**
  * When the winner lands, in milliseconds after the final standings arrive.

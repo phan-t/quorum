@@ -164,6 +164,12 @@ export function planSummary(
 export interface StoredSetup {
   plan: ArcadePlan;
   timings: Readonly<Record<string, number>>;
+  /**
+   * Names in a staged list this build does not know — a typo, or a round a
+   * newer build has. Each is a round the event meant to play and will not, so
+   * the console's preflight says so rather than reading Ready.
+   */
+  unknownNames: readonly string[];
 }
 
 export function parseSetup(raw: string | null): StoredSetup | null {
@@ -177,21 +183,51 @@ export function parseSetup(raw: string | null): StoredSetup | null {
   if (typeof v !== "object" || v === null || Array.isArray(v)) return null;
   const o = v as Record<string, unknown>;
   const plan: PlanEntry[] = [];
+  /*
+   * Two shapes arrive here. The console stores `[{kind, included}]`. A staged
+   * event — `session.json`'s `console.arcade.plan`, the example, the docs —
+   * writes the shorthand: a list of the rounds to play, `["recruitment",
+   * "plan_apply", "glass_bridge"]`. This read only the first shape, so every
+   * name in a staged list was skipped, every round was then appended as
+   * included, and an event staged with three rounds played all six while the
+   * preflight said Ready (#36).
+   *
+   * A name is a round to play. A list written as names is also a complete
+   * list: the rounds it does not name are the rounds the event is not playing,
+   * so they are appended *out* rather than in. The console's own shape keeps
+   * appending unseen rounds as in, for the reason below.
+   */
+  let named = false;
+  const unknownNames: string[] = [];
   if (Array.isArray(o["plan"])) {
     for (const item of o["plan"] as unknown[]) {
-      if (typeof item !== "object" || item === null) continue;
-      const e = item as Record<string, unknown>;
-      const kind = e["kind"];
+      let kind: unknown;
+      let included = true;
+      if (typeof item === "string") {
+        kind = item;
+        named = true;
+        if (!ARCADE_PLAYABLE.includes(item as ArcadePick) && !unknownNames.includes(item)) {
+          unknownNames.push(item);
+        }
+      } else if (typeof item === "object" && item !== null) {
+        const e = item as Record<string, unknown>;
+        kind = e["kind"];
+        included = e["included"] !== false;
+      } else {
+        continue;
+      }
       if (typeof kind !== "string") continue;
       if (!ARCADE_PLAYABLE.includes(kind as ArcadePick)) continue;
       if (plan.some((p) => p.kind === kind)) continue;
-      plan.push({ kind: kind as ArcadePick, included: e["included"] !== false });
+      plan.push({ kind: kind as ArcadePick, included });
     }
   }
   // Anything the stored order left out is appended, so a build that adds a
-  // round does not leave it unreachable behind a stale entry in storage.
+  // round does not leave it unreachable behind a stale entry in storage —
+  // included for the console's own shape, excluded for a list of names, which
+  // says what to play by what it names.
   for (const kind of ARCADE_PLAYABLE) {
-    if (!plan.some((p) => p.kind === kind)) plan.push({ kind, included: true });
+    if (!plan.some((p) => p.kind === kind)) plan.push({ kind, included: !named });
   }
   const timings: Record<string, number> = {};
   const t = o["timings"];
@@ -203,7 +239,11 @@ export function parseSetup(raw: string | null): StoredSetup | null {
     }
   }
   if (planIncluded(plan).length === 0) {
-    return { plan: plan.map((e) => ({ kind: e.kind, included: true })), timings };
+    return {
+      plan: plan.map((e) => ({ kind: e.kind, included: true })),
+      timings,
+      unknownNames,
+    };
   }
-  return { plan, timings };
+  return { plan, timings, unknownNames };
 }
