@@ -3834,8 +3834,11 @@ cds-text-input.rs-field {
  */
 
 .cp {
-  /* Its natural height. `.tray-body` around it is what scrolls. */
-  flex: none;
+  /* At least its natural height, and the rest of `.tray-body` when there is
+     more: the fold for Close and Restart sits at the foot on an auto margin,
+     which needs space below the last group to push into. `.tray-body` around
+     it is still what scrolls when the panel is short. */
+  flex: 1 0 auto;
   display: flex;
   flex-direction: column;
   gap: 12px;
@@ -3966,6 +3969,52 @@ cds-text-input.rs-field {
  * Yes or No and fires the primary instead, and a text field swallows the key
  * outright. That is a property of the keydown decision, not of the markup.
  */
+/* The fold for Close and Restart, at the foot of the header panel — see
+   `dangerToggle` in main.ts. Pushed to the bottom by an auto margin, so it is
+   the last thing in the panel and as far from Lock joining as the panel
+   allows. Quiet until opened: the same transparent box and Carbon ghost
+   washes as `.a-alt-toggle`, the console's other in-flow disclosure, with a
+   caret that turns when it is open. --muted on --panel is 5.41:1 dark and
+   5.19:1 light. */
+.cp-group-danger {
+  margin-top: auto;
+  padding-top: 8px;
+  border-top: 1px solid var(--line);
+}
+.cp-danger-toggle {
+  align-self: stretch;
+  min-height: 32px;
+  padding: 6px 7px;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 0;
+  color: var(--muted);
+  font-size: var(--cds-body-compact-01-font-size);
+  line-height: var(--cds-body-compact-01-line-height);
+  letter-spacing: var(--cds-body-compact-01-letter-spacing);
+  text-align: start;
+  cursor: pointer;
+}
+.cp-danger-toggle::before {
+  /* Empty alt text after the slash: the caret is drawn, not read. Without it
+     the button's accessible name began "▸ End or restart…". */
+  content: "\25b8\00a0" / "";
+  display: inline-block;
+}
+.cp-danger-toggle[aria-expanded="true"]::before {
+  content: "\25be\00a0" / "";
+}
+.cp-danger-toggle:hover {
+  background: hsla(0, 0%, 55.3%, 0.12);
+  color: var(--ink);
+}
+.cp-danger-toggle:active {
+  background: hsla(0, 0%, 55.3%, 0.5);
+  color: var(--ink);
+}
+.cp-danger[hidden] {
+  display: none;
+}
 .cp-danger {
   display: flex;
   flex-direction: column;

@@ -1333,10 +1333,11 @@ describe("the arcade's twelve setup fields are Carbon's number input", () => {
  * that broke it was a one-line change that nothing could see — and the next
  * step of #28 is twelve more buttons.
  */
-describe("the two disclosures announce their state", () => {
+describe("the three disclosures announce their state", () => {
   const DISCLOSURES: readonly (readonly [string, string])[] = [
     ["the wipe's arm button", "rs-arm"],
     ["the arcade's way off the running order", "a-alt-toggle"],
+    ["the fold over Close and Restart", "cp-danger-toggle"],
   ];
 
   const main = readFileSync(join(import.meta.dirname, "main.ts"), "utf8");

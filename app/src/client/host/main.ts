@@ -1034,6 +1034,53 @@ const cpGrid = shortcutButton("Scoring grid", "G", () => {
 });
 setAttr(cpDriving, "aria-pressed", "false");
 
+/*
+ * Close and Restart, folded behind a disclosure at the foot of the panel.
+ *
+ * They were a red-bordered block directly under Lock joining, always open:
+ * the loudest thing on the console after the primary, for two controls a host
+ * presses once an afternoon at most, with Close session sixteen pixels under
+ * a button they press when somebody joins late. Folded, the block keeps every
+ * guard it had — Close still arms and asks, Restart still wants the word
+ * typed — and gains a step in front of both.
+ *
+ * In flow, not a pop-out. `setDriving` already holds the rule that a
+ * half-armed wipe must never be somewhere the host cannot see it, and a
+ * pop-out that light-dismisses breaks that by design. So this is a real
+ * `<button aria-expanded>` over a region that is hidden or not, the same
+ * pattern as `rs-arm` and for the reason given there; it hands Space back to
+ * the primary like every control near the wipe. Folding it — by its own
+ * button, by Escape or by driving mode — disarms both.
+ */
+const dangerToggle = handsBackSpace(
+  h("button", {
+    class: "cp-danger-toggle",
+    type: "button",
+    text: "End or restart the session\u2026",
+    attrs: { "aria-expanded": "false", "aria-controls": "session-danger" },
+  }),
+);
+const dangerRegion = h(
+  "div",
+  { class: "cp-danger", attrs: { id: "session-danger", hidden: true } },
+  [
+    h("p", { class: "label cp-danger-label", text: "Cannot be undone" }),
+    h("div", { class: "cp-row" }, [closeControl.el, restartArm]),
+    restartPanel,
+  ],
+);
+let dangerOpen = false;
+function setDangerOpen(open: boolean): void {
+  if (!open) {
+    closeControl.disarm();
+    setRestartArmed(false);
+  }
+  dangerOpen = open;
+  dangerRegion.hidden = !open;
+  setAttr(dangerToggle, "aria-expanded", open ? "true" : "false");
+}
+dangerToggle.addEventListener("click", () => setDangerOpen(!dangerOpen));
+
 replace(trayControls, [
   h("section", { class: "cp-group" }, [
     h("p", { class: "label", text: "Session" }),
@@ -1041,11 +1088,6 @@ replace(trayControls, [
     // borrowed until the session is running. See `placePrimary`.
     cpLifecycle,
     h("div", { class: "cp-row" }, [lockControl.el, reopenControl.el]),
-    h("div", { class: "cp-danger" }, [
-      h("p", { class: "label cp-danger-label", text: "Cannot be undone" }),
-      h("div", { class: "cp-row" }, [closeControl.el, restartArm]),
-      restartPanel,
-    ]),
   ]),
   h("section", { class: "cp-group" }, [
     h("p", { class: "label", text: "Scoreboard" }),
@@ -1055,6 +1097,7 @@ replace(trayControls, [
     h("p", { class: "label", text: "Shortcuts" }),
     h("div", { class: "cp-row cp-row-keys" }, [cpHolding, cpDriving, cpGrid]),
   ]),
+  h("section", { class: "cp-group cp-group-danger" }, [dangerToggle, dangerRegion]),
 ]);
 
 /* ------------------------------------------------------------------ */
@@ -5760,8 +5803,9 @@ function setDriving(on: boolean): void {
   if (on === driving) return;
   driving = on;
   // Driving mode hides the whole console, and a half-armed wipe that is
-  // off-screen is a half-armed wipe nobody can see to cancel.
-  setRestartArmed(false);
+  // off-screen is a half-armed wipe nobody can see to cancel. Folding the
+  // session's danger block disarms the wipe and Close with it.
+  setDangerOpen(false);
   document.body.classList.toggle("driving", on);
   // The control panel's own copy of the toggle. Off-screen while driving mode
   // is on — the tray is hidden with the rest of the console — but it has to be
@@ -5828,7 +5872,7 @@ bindEscape(() => [
  */
 document.addEventListener("keydown", (ev) => {
   if (ev.key !== "Escape") return;
-  setRestartArmed(false);
+  setDangerOpen(false);
 });
 
 /**
