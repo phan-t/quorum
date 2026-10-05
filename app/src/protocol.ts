@@ -1545,6 +1545,8 @@ export interface RenderState {
   readonly phase: SessionPhase;
   readonly segment: Segment;
   readonly seal: Seal;
+  /** How many reveals the board has had; part of the climb memory's key (#50). */
+  readonly reveals: number;
   /**
    * Practice: the games run and nothing they score reaches the board.
    *

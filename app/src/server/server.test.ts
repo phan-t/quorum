@@ -1620,6 +1620,25 @@ describe("kick and release", () => {
     await fresh.conn.close();
   });
 
+  it("a dead old device closing after the reclaim does not disconnect the new one (#51)", async () => {
+    const s = makeSession("running");
+    const host = await connectHost(s);
+    const old = await join(s.joinCode, "Kenji");
+    // A phone in a drawer: the socket is open but nothing reads it, so the
+    // server's graceful close after the release is never answered.
+    (old.conn.ws as unknown as { _socket: { pause(): void } })._socket.pause();
+    await ackOk(host, { name: "participant.release", pid: old.pid });
+    const fresh = await join(s.joinCode, "Kenji");
+    assert.equal(fresh.pid, old.pid);
+    // The dead device finally goes, after the person is back on a new phone.
+    old.conn.ws.terminate();
+    await old.conn.waitClosed(1500);
+    await sleep(150);
+    assert.equal(s.runtime.state.participants[old.pid]?.connected, true, "the new phone is still here");
+    await host.close();
+    await fresh.conn.close();
+  });
+
   it("and the released device's old token cannot take the name back from its new owner", async () => {
     const s = makeSession("running");
     const host = await connectHost(s);

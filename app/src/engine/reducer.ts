@@ -331,6 +331,55 @@ function houseThePairOf(
   };
 }
 
+/**
+ * Who Tug of Raft deals onto a side: the players in the room right now.
+ *
+ * A pull is won on the total of on-beat taps per side, so somebody whose phone
+ * has dropped was dead weight: dealt onto a side, tapping nothing, and the
+ * side they were dealt to pulled one short. Dealing only the people who are
+ * here keeps the two sides level with each other. Anyone who comes back, or
+ * arrives, mid-pull gets a side on their first tap (`lateSide`), so nobody
+ * sits out for having been away. A drop *during* a pull still leaves that
+ * side one short until the next pull deals again.
+ */
+function tugDealable(state: SessionState): readonly ParticipantId[] {
+  return rosterOrder(state)
+    .filter((p) => p.connected)
+    .map((p) => p.pid);
+}
+
+/** In the room under their own name: what a rival has to be to play one. */
+function present(state: SessionState, pid: ParticipantId): boolean {
+  const p = state.participants[pid];
+  return p !== undefined && p.connected && !p.kicked && p.nicknameKey !== "";
+}
+
+/**
+ * Somebody came back. If both halves of their pair are in the room again, the
+ * pair is restored and the house steps aside (#51).
+ *
+ * The house stands in only while somebody is gone. It used to stay for the
+ * rest of the round, so a phone swap (the old phone drops, the host frees the
+ * name, the person reclaims it on the new one) cost two people their rivalry.
+ * Nothing is lost by restoring it: tokens never move between a pair, so the
+ * house only ever changed who the +10 is measured against. The cost is the
+ * one `houseThePairOf` names. A phone that is away at the buzzer is compared
+ * against the house, so the moment it drops can matter.
+ *
+ * `state` is the state *after* the return.
+ */
+function restorePairOf(state: SessionState, pid: ParticipantId): ArcadeState | null {
+  const arcade = state.arcade;
+  const play = arcade?.play;
+  if (!arcade || play?.kind !== "gganbu") return arcade ?? null;
+  if (arcade.phase !== "card" && arcade.phase !== "running") return arcade;
+  const rival = play.rivals[pid];
+  if (rival === undefined || !play.housed[pid]) return arcade;
+  if (!present(state, pid) || !present(state, rival)) return arcade;
+  const { [pid]: _p, [rival]: _r, ...housed } = play.housed;
+  return { ...arcade, play: { ...play, housed } };
+}
+
 export function reduce(
   state: SessionState,
   event: Event,
@@ -487,10 +536,16 @@ export function reduce(
             kicked: false,
           };
 
+      const joined: SessionState = {
+        ...state,
+        participants: { ...state.participants, [event.pid]: participant },
+      };
+      // A rejoin or a reclaim is somebody coming back, and may restore their
+      // pair, as a reconnect does.
       return applied(
         {
-          ...state,
-          participants: { ...state.participants, [event.pid]: participant },
+          ...joined,
+          ...(existing !== undefined ? { arcade: restorePairOf(joined, event.pid) } : {}),
           nextPlayerNumber: existing
             ? state.nextPlayerNumber
             : state.nextPlayerNumber + 1,
@@ -510,18 +565,24 @@ export function reduce(
       if (p.connected === connected) return unchanged();
       // "A rival who disconnects is replaced by the house." Recorded at the
       // instant it happens, because the engine has no clock and could not
-      // otherwise say *when* a rival stopped being one; and kept if they come
-      // back, because their gganbu has spent two prompts playing a house.
-      const arcade = connected ? state.arcade : houseThePairOf(state, event.pid);
+      // otherwise say *when* a rival stopped being one; and undone when both
+      // are back (#51), because the house stands in only while somebody is
+      // gone. See restorePairOf().
+      const after: SessionState = {
+        ...state,
+        participants: { ...state.participants, [event.pid]: { ...p, connected } },
+      };
+      const arcade = connected ? restorePairOf(after, event.pid) : houseThePairOf(state, event.pid);
+      // The pair dissolved or came back together.
       const housed = arcade !== state.arcade;
       const rival =
         housed && state.arcade?.play?.kind === "gganbu"
           ? state.arcade.play.rivals[event.pid]
           : undefined;
       return applied(
-        { ...state, participants: { ...state.participants, [event.pid]: { ...p, connected } }, arcade },
+        { ...after, arcade },
         // A connection blip is not news to anyone but the host — but a pair
-        // dissolving is not a blip. It changes who two people are playing and
+        // dissolving or coming back together is not a blip. It changes who two people are playing and
         // what their +10 is measured against, so when it happens the two of
         // them are told and it is **written down**: the runtime persists only
         // when the engine asks, and it deliberately never persists a bare
@@ -530,6 +591,8 @@ export function reduce(
         housed
           ? [
               { kind: "broadcast", to: "host", what: "state" },
+              // The Desktop's pair board says HOUSE in a dissolved pair's seat.
+              { kind: "broadcast", to: "screen", what: "state" },
               { kind: "broadcast", to: { pid: event.pid }, what: "state" },
               ...(rival === undefined
                 ? []
@@ -577,7 +640,7 @@ export function reduce(
           },
           // Releasing a nickname takes somebody out of the roster, which is
           // leaving the room by another door. Their gganbu plays the house for
-          // the same reason a kick's does.
+          // the same reason a kick's does, until a reclaim brings them back.
           arcade: houseThePairOf(state, event.pid),
         },
         // The whole room, as a kick is, and for the same reason: leaving the
@@ -638,6 +701,9 @@ export function reduce(
           phase: "closed",
           segment: "final",
           seal: "revealed",
+          // Closing a sealed board is a reveal. Closing one the room can already
+          // see, live or revealed, isn't, and mustn't replay the climb.
+          ...(state.seal === "sealed" ? { reveals: (state.reveals ?? 0) + 1 } : {}),
           joinsLocked: true,
         },
         [BROADCAST_STATE, ...BROADCAST_STANDINGS, PERSIST],
@@ -954,11 +1020,14 @@ export function reduce(
     case "setSeal": {
       if (state.seal === event.seal) return unchanged();
       // Sealing changes what every surface may show, so standings go with it.
-      return applied({ ...state, seal: event.seal }, [
-        BROADCAST_STATE,
-        ...BROADCAST_STANDINGS,
-        PERSIST,
-      ]);
+      return applied(
+        {
+          ...state,
+          seal: event.seal,
+          ...(event.seal === "revealed" ? { reveals: (state.reveals ?? 0) + 1 } : {}),
+        },
+        [BROADCAST_STATE, ...BROADCAST_STANDINGS, PERSIST],
+      );
     }
 
     case "setHolding": {
@@ -1983,11 +2052,9 @@ export function reduce(
           seed: config.seed,
           // Dealt from the roster that is in the room now, so the big screen
           // can put the two sides on the round card. Anyone who arrives after
-          // this gets a side on their first tap — see `tapBeat`.
-          sides: tugSides(
-            rosterOrder(state).map((p) => p.pid),
-            config.seed,
-          ),
+          // this, or comes back, gets a side on their first tap — see
+          // `tapBeat`.
+          sides: tugSides(tugDealable(state), config.seed),
           // The heartbeat starts at `beginPlay`, not here.
           pullStartedAt: 0,
           pullEndsAt: 0,
@@ -2977,10 +3044,7 @@ export function reduce(
               pull,
               seed: event.seed,
               // Reshuffled, so nobody is stuck on a losing side.
-              sides: tugSides(
-                rosterOrder(state).map((rp) => rp.pid),
-                event.seed,
-              ),
+              sides: tugSides(tugDealable(state), event.seed),
               pullStartedAt: now,
               pullEndsAt,
               // Every one of these is per pull: a new heartbeat, a new rope,

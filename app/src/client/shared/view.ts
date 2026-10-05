@@ -621,8 +621,10 @@ export const FINAL_EMPTY_FIRST_HOLD_MS = 7_000;
  * interrupted climb is not remembered, and plays again) and shows a
  * remembered one straight away: all five rows and the winner.
  *
- * Keyed on the session and the result, so a result that changes — a late
- * score — climbs again, as it always did. Kept in `sessionStorage`, so it
+ * Keyed on the session, the reveal and the result, so a result that changes
+ * — a late score — climbs again, as it always did, and so does a second
+ * reveal the host asked for: hiding the board and revealing it again is an
+ * encore, and the console's confirm promises "Count down 5 to 1" (#50). Kept in `sessionStorage`, so it
  * survives a reload of the same tab and is forgotten with it; a surface that
  * cannot store it climbs, which is the behaviour this replaced and never
  * worse than a spoiled reveal.
@@ -630,7 +632,7 @@ export const FINAL_EMPTY_FIRST_HOLD_MS = 7_000;
 const CLIMBS_SHOWN_KEY = "quorum.climbs-shown.v1";
 
 export function climbKey(state: RenderState): string {
-  return `${state.sid}|${state.standings
+  return `${state.sid}|r${state.reveals}|${state.standings
     .map((r) => `${r.rank}:${r.nickname}:${r.total}`)
     .join("|")}`;
 }

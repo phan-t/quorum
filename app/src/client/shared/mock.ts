@@ -1455,6 +1455,8 @@ class MockSession {
   phase: SessionPhase = "draft";
   segment: Segment = "lobby";
   seal: Seal = "live";
+  /** `SessionState.reveals`: never reset, so a restart can't reuse a key. */
+  reveals = 0;
   practice = false;
   holding: { title: string; line: string } | null = null;
   joinsLocked = false;
@@ -2234,7 +2236,7 @@ class MockSession {
       ...(play?.kind === "tug_of_raft"
         ? {
             tug: {
-              side: play.sides[pid] ?? 0,
+              side: play.sides[pid] ?? mockLateSide(play.seed, pid),
               onBeats: play.onBeats[pid] ?? 0,
               lastBeat: play.lastBeat[pid] ?? -1,
             } satisfies ArcadeMineTug,
@@ -3083,6 +3085,7 @@ class MockSession {
       phase: this.phase,
       segment: this.segment,
       seal: this.seal,
+      reveals: this.reveals,
       practice: this.practice,
       holding: this.holding,
       roster: this.roster(),
@@ -3637,6 +3640,7 @@ class MockHub {
         }
         s.phase = "closed";
         s.segment = "final";
+        if (s.seal === "sealed") s.reveals += 1;
         s.seal = "revealed";
         s.joinsLocked = true;
         // And the clocks, which the freeze above only covers for a *press*.
@@ -3754,6 +3758,7 @@ class MockHub {
        */
       case "seal":
         if (s.seal === cmd.state) return noop();
+        if (cmd.state === "revealed") s.reveals += 1;
         s.seal = cmd.state;
         break;
       /**
@@ -4709,8 +4714,10 @@ class MockHub {
         // `inTheRoom()`, because the reducer deals them from `rosterOrder`:
         // somebody who has left is not on either end of the rope, and dealing
         // them a side would shift everybody after them to the other one.
+        // Present only, as the reducer's `tugDealable`: a dropped phone is
+        // dead weight on a rope won by total taps.
         sides: mockTugSides(
-          s.inTheRoom().map((p) => p.pid),
+          s.inTheRoom().filter((p) => p.conn === "on").map((p) => p.pid),
           seed,
         ),
         // The heartbeat starts at `beginPlay`, not here.
@@ -5149,7 +5156,7 @@ class MockHub {
     // Reshuffled, so nobody is stuck on a losing side. From the room, as the
     // round card's deal was and as the reducer's `nextPull` is.
     play.sides = mockTugSides(
-      s.inTheRoom().map((p) => p.pid),
+      s.inTheRoom().filter((p) => p.conn === "on").map((p) => p.pid),
       play.seed,
     );
     play.pullStartedAt = now;
@@ -7031,6 +7038,7 @@ class MockHub {
     const SENDOFF_STEP_S = 5;
 
     this.#at(FINAL_AT_S, () => {
+      this.session.reveals += 1;
       this.session.seal = "revealed";
       this.session.segment = "final";
       this.#broadcastState();

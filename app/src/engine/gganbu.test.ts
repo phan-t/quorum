@@ -557,16 +557,17 @@ describe("the house", () => {
     s = accept(s, { type: "disconnect", pid: rival }, T0 + PROMPT + 100);
     assert.equal(rivalOf(pot(s), "p1"), null, "they are playing the house now");
     assert.equal(rivalTokens(pot(s), "p1"), 10, "which holds the opening stake");
-    // And it stays that way if they come back: their gganbu has spent the
-    // round playing somebody else.
-    s = accept(s, { type: "reconnect", pid: rival }, T0 + PROMPT + 200);
-    assert.equal(rivalOf(pot(s), "p1"), null);
     // The pair dissolves for both of them. One-sided housing lets the two
     // halves' comparisons disagree — on twelve against eleven it pays both
     // the +10, and on eight against nine it pays neither — so the rule is
     // "if your gganbu leaves, you both play the house".
     assert.equal(rivalOf(pot(s), rival), null);
     assert.equal(rivalTokens(pot(s), rival), 10);
+    // Only while they are gone (#51): back, and the pair is restored with the
+    // lead they had, because tokens never moved between the two of them.
+    s = accept(s, { type: "reconnect", pid: rival }, T0 + PROMPT + 200);
+    assert.equal(rivalOf(pot(s), "p1"), rival);
+    assert.equal(rivalTokens(pot(s), "p1"), 15);
   });
 
   test("housing a pair is written down, not just broadcast", () => {
@@ -604,6 +605,74 @@ describe("the house", () => {
     assert.ok(rival !== null);
     s = accept(s, { type: "releaseNickname", pid: rival }, T0 + 100);
     assert.equal(rivalOf(pot(s), "p1"), null);
+  });
+
+  // #51: the house stands in only while somebody is gone. A reconnect or a
+  // reclaim (#37) restores the pair once both halves are back.
+  const reclaim = (s: SessionState, pid: ParticipantId, at: number): SessionState =>
+    accept(s, { type: "join", pid, nickname: s.participants[pid]!.nickname, reclaim: true }, at);
+
+  test("a reconnect restores the pair once both are back (#51)", () => {
+    let s = wagering(4);
+    const rival = rivalOf(pot(s), "p1");
+    assert.ok(rival !== null);
+    s = accept(s, { type: "disconnect", pid: rival }, T0 + 100);
+    assert.equal(rivalOf(pot(s), "p1"), null);
+    const r = run(s, { type: "reconnect", pid: rival }, T0 + 200);
+    assert.equal(rivalOf(pot(r.state), "p1"), rival);
+    assert.equal(rivalOf(pot(r.state), rival), "p1");
+    // Written down and told to both of them and the Desktop, as the house was.
+    assert.ok(r.effects.some((e) => e.kind === "persist"));
+    for (const to of [{ pid: "p1" }, { pid: rival }, "screen"] as const) {
+      assert.ok(
+        r.effects.some((e) => e.kind === "broadcast" && JSON.stringify(e.to) === JSON.stringify(to)),
+        `tells ${JSON.stringify(to)}`,
+      );
+    }
+  });
+
+  test("the phone swap: a drop, a release, a reclaim, and the pair is back", () => {
+    let s = wagering(4);
+    const rival = rivalOf(pot(s), "p1");
+    assert.ok(rival !== null);
+    s = accept(s, { type: "disconnect", pid: rival }, T0 + 100);
+    s = accept(s, { type: "releaseNickname", pid: rival }, T0 + 150);
+    assert.equal(rivalOf(pot(s), "p1"), null);
+    s = reclaim(s, rival, T0 + 200);
+    assert.equal(rivalOf(pot(s), "p1"), rival);
+  });
+
+  test("one half back while the other is away keeps the house, until both are", () => {
+    let s = wagering(4);
+    const rival = rivalOf(pot(s), "p1");
+    assert.ok(rival !== null);
+    s = accept(s, { type: "disconnect", pid: rival }, T0 + 100);
+    s = accept(s, { type: "disconnect", pid: "p1" }, T0 + 120);
+    s = accept(s, { type: "reconnect", pid: rival }, T0 + 150);
+    assert.equal(rivalOf(pot(s), rival), null);
+    s = accept(s, { type: "reconnect", pid: "p1" }, T0 + 200);
+    assert.equal(rivalOf(pot(s), rival), "p1");
+  });
+
+  test("a released name nobody has reclaimed is still away", () => {
+    let s = wagering(4);
+    const rival = rivalOf(pot(s), "p1");
+    assert.ok(rival !== null);
+    s = accept(s, { type: "releaseNickname", pid: rival }, T0 + 100);
+    s = accept(s, { type: "disconnect", pid: "p1" }, T0 + 150);
+    s = accept(s, { type: "reconnect", pid: "p1" }, T0 + 175);
+    assert.equal(rivalOf(pot(s), "p1"), null);
+  });
+
+  test("after the round, a return changes nothing", () => {
+    let s = wagering(4);
+    const rival = rivalOf(pot(s), "p1");
+    assert.ok(rival !== null);
+    s = accept(s, { type: "disconnect", pid: rival }, T0 + 100);
+    s = accept(s, { type: "endRound" }, T0 + 6 * PROMPT);
+    const housedAtEnd = pot(s).housed;
+    s = accept(s, { type: "reconnect", pid: rival }, T0 + 6 * PROMPT + 10);
+    assert.deepEqual(pot(s).housed, housedAtEnd);
   });
 
   test("a latecomer who wagers is dealt in and converts", () => {

@@ -1531,8 +1531,18 @@ wss.on("connection", (socket: WebSocket, req: IncomingMessage) => {
       if (!joined) return;
       const { runtime, client } = joined;
       runtime.clients.delete(client);
-      if (client.pid) {
-        // Still a participant, just not connected. Their score does not move.
+      // Still a participant, just not connected. Their score does not move.
+      //
+      // Unless another socket holds them now. A released or kicked device is
+      // refused with a graceful close, and a dead one (a phone in a drawer)
+      // never answers it, so `ws` fires this up to 30 s later: after the person
+      // has reclaimed their name on a new phone. Disconnecting them then would
+      // mark the live phone away and put their Gganbu pair back on the house
+      // for good, because the new phone never reconnects to undo it (#51).
+      const held =
+        client.pid !== undefined &&
+        [...runtime.clients].some((c) => c.pid === client.pid);
+      if (client.pid && !held) {
         runtime.apply({ type: "disconnect", pid: client.pid }, Date.now());
       }
       runtime.broadcastRoster(Date.now());

@@ -381,6 +381,17 @@ export interface SessionState {
   readonly segment: Segment;
   readonly seal: Seal;
   /**
+   * How many times the board has gone to `revealed` (#50).
+   *
+   * A surface remembers a climb it has finished, so the Final doesn't count
+   * down a result the room watched counted down on Standings. But a host who
+   * hides the board and reveals it again has asked for the countdown again,
+   * and the console's confirm promises one. This is what tells the two apart:
+   * the same reveal seen twice, or a second reveal. Optional because a session
+   * persisted before it existed has had at most the reveals its seal shows.
+   */
+  readonly reveals?: number;
+  /**
    * Practice: the games run, and nothing they score reaches the board.
    *
    * SPEC assumes a room that knows the rules. A room meeting Red Light, Green
@@ -952,14 +963,15 @@ export type ArcadePlay =
        */
       readonly rivals: Readonly<Record<ParticipantId, ParticipantId>>;
       /**
-       * Players who are playing the house because their pair dissolved.
+       * Players who are playing the house because half of their pair is away.
        *
        * SPEC.md: "a rival who disconnects is replaced by the house". Recorded
        * at the instant it happens rather than derived at settlement, because
-       * the engine has no clock and a rival who dropped and came back is still
-       * a rival who dropped. **Both** halves of the pair are marked, or the
-       * two comparisons the +10 is made from can disagree with each other —
-       * see `houseThePairOf` in reducer.ts.
+       * the engine has no clock. Cleared when both halves are back, by a
+       * reconnect or a reclaim (#51): the house stands in only while somebody
+       * is gone. **Both** halves of the pair are marked, or the two
+       * comparisons the +10 is made from can disagree with each other — see
+       * `houseThePairOf` in reducer.ts.
        */
       readonly housed: Readonly<Record<ParticipantId, true>>;
       /**
