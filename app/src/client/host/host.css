@@ -4128,3 +4128,35 @@ cds-text-input.rs-field {
   border-radius: 0;
   padding: 1px 4px;
 }
+
+/* ------------------------------------------------ preview, popped out -- */
+
+/*
+ * The preview's label row, with the button that moves the preview into a
+ * window of its own for a host with a screen to spare. See `popOutPreview`.
+ */
+.preview-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.preview-away {
+  color: var(--muted);
+  font-size: var(--cds-label-01-font-size);
+  line-height: var(--cds-label-01-line-height);
+}
+/* The window the preview is moved into: the frame, centred and letterboxed. */
+body.preview-window {
+  margin: 0;
+  height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  background: #000;
+}
+body.preview-window .preview-frame {
+  border: 0;
+  border-radius: 0;
+}

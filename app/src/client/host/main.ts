@@ -484,10 +484,116 @@ const preview = createParticipantView({
   now: () => client?.now() ?? Date.now(),
 });
 const previewFrame = h("div", { class: "preview-frame" }, [preview.root]);
+const previewPopButton = carbonButton({
+  class: "preview-pop",
+  text: "Pop out",
+  kind: "ghost",
+  size: "sm",
+  tooltipText: "Open the participant preview in its own window",
+  on: { click: () => popOutPreview() },
+});
+const previewAway = h("p", {
+  class: "preview-away",
+  text: "In its own window. Close that window to bring it back.",
+  attrs: { hidden: true },
+});
 const previewBox = h("div", { class: "tray-preview" }, [
-  h("p", { class: "label", text: "Participant preview" }),
+  h("div", { class: "preview-head" }, [
+    h("p", { class: "label", text: "Participant preview" }),
+    previewPopButton,
+  ]),
   previewFrame,
+  previewAway,
 ]);
+
+/**
+ * The preview, moved into a window of its own — for a host with a screen
+ * spare who wants the room's view at full size beside the console.
+ *
+ * Moved, not copied. The frame and the participant view inside it are the
+ * same nodes `preview.update` already feeds, so the popped-out view cannot
+ * drift from the tray's and it carries nothing the tray did not: it is still
+ * `roomView`, with no answer key in it, and it opens no socket and holds no
+ * token. The window is a same-origin `about:blank` that this page writes, so
+ * the console's stylesheets are linked into it by their absolute URLs.
+ *
+ * Closing the window — or the console — puts the frame back in the tray.
+ */
+let previewWin: Window | null = null;
+
+function popOutPreview(): void {
+  if (previewWin && !previewWin.closed) {
+    previewWin.focus();
+    return;
+  }
+  const win = window.open(
+    "",
+    "quorum-participant-preview",
+    "popup,width=1280,height=800",
+  );
+  // A popup blocker hands back null. The preview stays where it is.
+  if (!win) return;
+  previewWin = win;
+  const doc = win.document;
+  doc.title = "Quorum participant preview";
+  for (const attr of ["data-theme", "lang"]) {
+    const v = document.documentElement.getAttribute(attr);
+    if (v !== null) doc.documentElement.setAttribute(attr, v);
+  }
+  for (const link of Array.from(
+    document.querySelectorAll<HTMLLinkElement>('link[rel="stylesheet"]'),
+  )) {
+    const copy = doc.createElement("link");
+    copy.rel = "stylesheet";
+    copy.href = link.href;
+    doc.head.appendChild(copy);
+  }
+  doc.body.className = "preview-window";
+  doc.body.appendChild(previewFrame);
+  previewAway.hidden = false;
+  previewPopButton.hidden = true;
+
+  // The theme toggle is on the console; the window follows it.
+  const themeSync = new MutationObserver(() => {
+    const v = document.documentElement.getAttribute("data-theme");
+    if (v === null) doc.documentElement.removeAttribute("data-theme");
+    else doc.documentElement.setAttribute("data-theme", v);
+  });
+  themeSync.observe(document.documentElement, {
+    attributes: true,
+    attributeFilter: ["data-theme"],
+  });
+
+  const fit = (): void => {
+    // Letterboxed: the largest 1280 x 800 that fits the window.
+    const w = Math.min(win.innerWidth, (win.innerHeight * 1280) / 800);
+    previewFrame.style.width = `${Math.floor(w)}px`;
+    sizePreview();
+  };
+  win.addEventListener("resize", fit);
+  fit();
+
+  let back = false;
+  const bringBack = (): void => {
+    if (back) return;
+    back = true;
+    window.clearInterval(watch);
+    themeSync.disconnect();
+    previewFrame.style.width = "";
+    previewBox.insertBefore(previewFrame, previewAway);
+    previewAway.hidden = true;
+    previewPopButton.hidden = false;
+    previewWin = null;
+    sizePreview();
+  };
+  win.addEventListener("pagehide", bringBack);
+  // `pagehide` is the prompt answer; this is the one that cannot be missed.
+  const watch = window.setInterval(() => {
+    if (win.closed) bringBack();
+  }, 1000);
+}
+
+window.addEventListener("pagehide", () => previewWin?.close());
 /**
  * The control panel: everything the host presses once, or never.
  *
