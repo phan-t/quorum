@@ -127,6 +127,7 @@ function cellControl(refs: () => CellRefs): Control {
     setDisabled() {},
     setOn() {},
     disarm() {},
+    setSize() {},
   };
 }
 

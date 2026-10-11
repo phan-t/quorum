@@ -5500,6 +5500,9 @@ function placePrimary(): void {
     releaseFocus();
   }
   const borrowed = primary.el.parentElement === cpLifecycle;
+  // The tray's size while it is borrowed, so it matches Lock joining and the
+  // rest of the Session group; the foot's and driving mode's 48px otherwise.
+  primary.setSize(borrowed ? "sm" : "lg");
   cpLifecycle.hidden = !borrowed;
   footNote.hidden = !borrowed;
 }

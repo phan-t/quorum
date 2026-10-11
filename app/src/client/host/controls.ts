@@ -14,7 +14,7 @@
  */
 
 import { h, isDisabled, replace } from "../shared/dom.ts";
-import { carbonButton, type CarbonKind } from "./carbon.ts";
+import { carbonButton, type CarbonKind, type CarbonSize } from "./carbon.ts";
 
 /**
  * The armed controls are Carbon buttons. Issue #28 steps 1 and 2.
@@ -179,6 +179,13 @@ export interface Control {
   setOn(on: boolean): void;
   /** Drop out of a half-pressed confirm, e.g. when the state changed under it. */
   disarm(): void;
+  /**
+   * Carbon's size, for a control that moves between homes. The primary button
+   * is `lg` in the panel foot and `sm` while the Session group borrows it, so
+   * it matches the buttons beside it there. Re-renders, so a flash or a
+   * confirm drawn afterwards is the new size too.
+   */
+  setSize(size: CarbonSize): void;
 }
 
 interface Opts {
@@ -335,7 +342,7 @@ export function control(opts: Opts): Control {
   const primary = classes.includes("ctl-primary");
   const quiet = classes.includes("ctl-quiet");
   const plain = classes.includes(PLAIN_CLASS);
-  const size = primary ? "lg" : "sm";
+  let size: CarbonSize = primary ? "lg" : "sm";
   let label = opts.label;
   let disabled = false;
   let armed = false;
@@ -375,6 +382,11 @@ export function control(opts: Opts): Control {
       if (!armed) return;
       armed = false;
       render();
+    },
+    setSize(next) {
+      if (next === size) return;
+      size = next;
+      if (flashTimer === null) render();
     },
   };
 
