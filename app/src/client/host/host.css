@@ -4132,14 +4132,18 @@ cds-text-input.rs-field {
 /* ------------------------------------------------ preview, popped out -- */
 
 /*
- * The preview's label row, with the button that moves the preview into a
- * window of its own for a host with a screen to spare. See `popOutPreview`.
+ * The preview in the tray is the control that moves it into a window of its
+ * own for a host with a screen to spare. See `popOutPreview`.
  */
-.preview-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
+.tray-preview .preview-frame {
+  cursor: zoom-in;
+}
+.tray-preview .preview-frame:hover {
+  border-color: var(--muted);
+}
+.tray-preview .preview-frame:focus-visible {
+  outline: 2px solid var(--cds-focus, currentColor);
+  outline-offset: 2px;
 }
 .preview-away {
   color: var(--muted);

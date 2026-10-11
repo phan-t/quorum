@@ -483,25 +483,35 @@ const preview = createParticipantView({
   // one. It must not be able to answer the question the host is running.
   now: () => client?.now() ?? Date.now(),
 });
-const previewFrame = h("div", { class: "preview-frame" }, [preview.root]);
-const previewPopButton = carbonButton({
-  class: "preview-pop",
-  text: "Pop out",
-  kind: "ghost",
-  size: "sm",
-  tooltipText: "Open the participant preview in its own window",
-  on: { click: () => popOutPreview() },
-});
+// The preview is its own pop-out control: it has no `onAnswer`, so a click
+// on it has nothing else to do. Enter only — Space is the console's Next, and
+// a focused preview must not swallow it.
+const previewFrame = h(
+  "div",
+  {
+    class: "preview-frame",
+    title: "Open in its own window",
+    attrs: {
+      role: "button",
+      tabindex: 0,
+      "aria-label": "Participant preview. Open in its own window.",
+    },
+    on: {
+      click: () => popOutPreview(),
+      keydown: (ev) => {
+        if ((ev as KeyboardEvent).key === "Enter") popOutPreview();
+      },
+    },
+  },
+  [preview.root],
+);
 const previewAway = h("p", {
   class: "preview-away",
   text: "In its own window. Close that window to bring it back.",
   attrs: { hidden: true },
 });
 const previewBox = h("div", { class: "tray-preview" }, [
-  h("div", { class: "preview-head" }, [
-    h("p", { class: "label", text: "Participant preview" }),
-    previewPopButton,
-  ]),
+  h("p", { class: "label", text: "Participant preview" }),
   previewFrame,
   previewAway,
 ]);
@@ -551,7 +561,6 @@ function popOutPreview(): void {
   doc.body.className = "preview-window";
   doc.body.appendChild(previewFrame);
   previewAway.hidden = false;
-  previewPopButton.hidden = true;
 
   // The theme toggle is on the console; the window follows it.
   const themeSync = new MutationObserver(() => {
@@ -582,7 +591,6 @@ function popOutPreview(): void {
     previewFrame.style.width = "";
     previewBox.insertBefore(previewFrame, previewAway);
     previewAway.hidden = true;
-    previewPopButton.hidden = false;
     previewWin = null;
     sizePreview();
   };
