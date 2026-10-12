@@ -647,8 +647,10 @@ on the phone under the button and on the Lounge card, sliding toward the
 finish as their count rises. A drained runner explodes where it stood and
 stays there as a wreck; a runner across the line wears a ring; a struck runner
 wears a dashed one. On a phone your own runner is green and tagged `YOU`. Up
-to 16 players every runner carries its player number; past 16 the tags are
-dropped so the lanes stay legible. The phone's track moves only on the frames
+to 16 players every runner carries its player number; past 16 only the three
+runners furthest ahead still in the race keep theirs (and `YOU` on a phone), so
+a big room can still say who is leading, and the strike rings thin with the
+dots. The phone's track moves only on the frames
 it already receives; the Desktop's is sent each ordinary step.
 
 Checkpoints at 30, 60 and 90 resources bank **5** each. Crossing the line

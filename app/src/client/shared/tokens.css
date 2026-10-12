@@ -806,17 +806,32 @@ button {
   text-decoration: line-through;
 }
 
-/* Many lanes: smaller dots and no tags, except your own. The left pad stays,
-   so every lane keeps the same start and finish as the marks drawn across
-   them. */
+/* Many lanes: smaller dots and no tags, except your own and the three
+   leaders'. The left pad stays, so every lane keeps the same start and finish
+   as the marks drawn across them. A leader's tag sits over its neighbours'
+   dots, so it gets the ground behind it. */
 .pt[data-dense="yes"] {
   --pt-dot: 7px;
 }
 .pt[data-dense="yes"] .pt-tag {
   display: none;
 }
-.pt[data-dense="yes"] .pt-lane[data-you="yes"] .pt-tag {
+.pt[data-dense="yes"] .pt-lane[data-you="yes"] .pt-tag,
+.pt[data-dense="yes"] .pt-lane[data-lead="yes"] .pt-tag {
   display: block;
+}
+.pt[data-dense="yes"] .pt-lane[data-lead="yes"] .pt-runner {
+  z-index: 2;
+}
+.pt[data-dense="yes"] .pt-lane[data-lead="yes"] .pt-tag {
+  padding: 1px 3px;
+  border-radius: 3px;
+  background: var(--pt-tag-ground, var(--ground));
+}
+/* The strike ring thins with the dot, or sixty of them are a smudge. */
+.pt[data-dense="yes"] .pt-lane[data-struck="yes"] .pt-runner[data-state="running"] .pt-dot {
+  outline-width: 1px;
+  outline-offset: 1px;
 }
 
 @media (prefers-reduced-motion: reduce) {

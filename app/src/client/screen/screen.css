@@ -1866,6 +1866,7 @@ body {
   --pt-mark: var(--light-ink, var(--on-fill-dark));
   --pt-out: var(--light-ink, var(--on-fill-dark));
   --pt-warn: var(--light-ink, var(--on-fill-dark));
+  --pt-tag-ground: var(--light, var(--nomad));
   --pt-dot: 20px;
   --pt-height: 38vh;
   --pt-lane-h: 34px;

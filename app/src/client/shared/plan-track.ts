@@ -40,6 +40,27 @@ const BOOM_MS = 700;
 /** Lanes past this count draw dots without player tags, so they stay legible. */
 const DENSE_AT = 16;
 
+/**
+ * How many leaders keep their tag past {@link DENSE_AT}. Without them a big
+ * room can see a dot pulling ahead and not say whose it is.
+ */
+const LEADERS = 3;
+
+/**
+ * The runners still in the race furthest along, ties to the lower number so a
+ * tag does not hop between two runners on the same count. A runner on nothing
+ * is not leading anything.
+ */
+function leadersOf(runners: readonly ArcadePlanApplyTrackRunner[]): Set<number> {
+  return new Set(
+    runners
+      .filter((r) => !r.out && r.resources > 0)
+      .sort((a, b) => b.resources - a.resources || a.playerNumber - b.playerNumber)
+      .slice(0, LEADERS)
+      .map((r) => r.playerNumber),
+  );
+}
+
 interface Lane {
   readonly node: HTMLElement;
   readonly runner: HTMLElement;
@@ -49,6 +70,48 @@ interface Lane {
 }
 
 const tag3 = (n: number): string => String(n).padStart(3, "0");
+
+/**
+ * Nudge the tags that are showing apart, top to bottom, so two leaders in
+ * neighbouring lanes — two or three pixels apart on a phone with sixty
+ * players — read as two numbers and not one smudge. Measured, because the
+ * lane pitch is the track's height over the lane count and only layout knows
+ * both. Three or four tags, so the cost is nothing.
+ */
+function spreadTags(tags: HTMLElement[], dense: boolean, within: HTMLElement): void {
+  for (const t of tags) t.style.removeProperty("margin-top");
+  if (!dense || tags.length < 2) return;
+  const placed = tags
+    .map((t) => ({ t, r: t.getBoundingClientRect() }))
+    .filter(({ r }) => r.height > 0)
+    .sort((a, b) => a.r.top - b.r.top);
+  const done: { t: HTMLElement; left: number; right: number; push: number; bottom: number }[] = [];
+  for (const { t, r } of placed) {
+    // Only a tag it would actually sit on: two leaders at opposite ends of
+    // the track can share a height.
+    const floor = Math.max(
+      -Infinity,
+      ...done.filter((d) => d.left < r.right && r.left < d.right).map((d) => d.bottom),
+    );
+    const push = Math.max(0, floor - r.top);
+    if (push > 0) t.style.setProperty("margin-top", `${push}px`);
+    done.push({ t, left: r.left, right: r.right, push, bottom: r.top + push + r.height + 1 });
+  }
+  // A stack pushed off the bottom of the track is lifted back inside it, as a
+  // stack: every tag it would sit on moves up by the same amount.
+  const limit = within.getBoundingClientRect().bottom;
+  for (const last of done) {
+    const over = last.bottom - 1 - limit;
+    if (over <= 0) continue;
+    for (const d of done) {
+      if (d.left < last.right && last.left < d.right) {
+        d.push -= over;
+        d.bottom -= over;
+        d.t.style.setProperty("margin-top", `${d.push}px`);
+      }
+    }
+  }
+}
 
 export function createPlanTrack(): PlanTrack {
   const marks = h("div", {
@@ -112,6 +175,8 @@ export function createPlanTrack(): PlanTrack {
         );
       }
 
+      const dense = runners.length > DENSE_AT;
+      const leaders = dense ? leadersOf(runners) : new Set<number>();
       const seen = new Set<number>();
       let order = 0;
       for (const r of runners) {
@@ -129,6 +194,7 @@ export function createPlanTrack(): PlanTrack {
         l.runner.style.setProperty("--x", x.toFixed(4));
         setAttr(l.node, "data-you", r.playerNumber === you ? "yes" : "no");
         setAttr(l.node, "data-struck", r.struck ? "yes" : "no");
+        setAttr(l.node, "data-lead", leaders.has(r.playerNumber) ? "yes" : "no");
         setText(l.tag, r.playerNumber === you ? "YOU" : tag3(r.playerNumber));
 
         if (r.out && !l.out) {
@@ -154,7 +220,14 @@ export function createPlanTrack(): PlanTrack {
         lanes.delete(n);
       }
 
-      setAttr(root, "data-dense", runners.length > DENSE_AT ? "yes" : "no");
+      setAttr(root, "data-dense", dense ? "yes" : "no");
+      spreadTags(
+        [...lanes.entries()]
+          .filter(([n]) => leaders.has(n) || n === you)
+          .map(([, l]) => l.tag),
+        dense,
+        lanesNode,
+      );
       root.style.setProperty("--pt-lanes", String(Math.max(1, runners.length)));
       const out = runners.filter((r) => r.out).length;
       const crossed = runners.filter((r) => r.across).length;
