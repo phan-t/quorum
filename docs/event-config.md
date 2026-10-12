@@ -21,7 +21,7 @@ to happen before 2:00pm.
 ```
 config/events/2026-03-12-example-offsite/
   session.json            title, what the session scores, the console's setup
-  trivia-questions.json   the question set
+  additional-trivia-questions.json   optional: extra questions for this event, shuffled in
   arcade-content.json     optional: the arcade rounds' content for this event
   promo-card.html         optional: the poster shown in the Desktop's lobby
   sendoff.json            optional: the send-off's messages and photo names
@@ -41,7 +41,6 @@ content about the people in the room and this repository is public. See
 {
   "title": "Example Team Offsite",
   "subtitle": "Thursday 12 March 2026",
-  "questions": "trivia-questions.json",
   "arcadeContent": "arcade-content.json",
   "promo": "promo-card.html",
   "sendoff": "sendoff.json",
@@ -57,9 +56,36 @@ content about the people in the room and this repository is public. See
 }
 ```
 
-`title`, `subtitle`, `questions`, `arcadeContent`, `promo`, `sendoff` and
-`activities` are the server's. Everything under `console` is the console's, and
+`title`, `subtitle`, `questionCount`, `additionalQuestions`, `arcadeContent`,
+`promo`, `sendoff` and `activities` are the server's. Everything under `console` is the console's, and
 the server never looks inside it.
+
+**Trivia is drawn from the shared bank, fresh each time an event is staged.**
+Every event plays 20 questions drawn at random from
+[`config/event.example/trivia-questions.json`](../config/event.example/trivia-questions.json),
+the set that is verified and kept up to date, so two events staged from it do
+not ask the same 20. `questionCount` changes the 20.
+
+An event's own questions are extras. Put them in
+`additional-trivia-questions.json` in the event's directory — a few about the
+team, a farewell — and every one of them plays on top of the 20, shuffled in
+with them rather than added at the end. Name a different file with
+`additionalQuestions`. An event with no such file plays the 20 alone.
+
+Three things follow from the shuffle:
+
+- **Round labels are dropped.** A `round` puts a round card on the Desktop
+  where the label changes, and a shuffled set would change it before nearly
+  every question. Questions play without round cards.
+- **Tiebreakers stay out of it.** Questions flagged `"tiebreak": true`, from the
+  bank or the extras, only feed sudden death, so they always come along and are
+  never drawn or counted in the 20.
+- **An upload error numbers the questions as drawn**, not as written in either
+  file. Staging names both files when it reports one.
+
+`session.json`'s old `questions` key is refused with a message saying where the
+questions went, and a leftover `trivia-questions.json` in an event's directory
+is not read; staging says so if it finds one.
 
 `subtitle` is the second line under the name — a date, a time, a place. Optional
 and null by default; a session without one shows nothing in its place.
@@ -126,10 +152,9 @@ in step, and the one that gets forgotten is the one nobody looks at until there
 is a tie on the screen.
 
 **A question set is loaded into the `trivia` activity.** Staging uploads
-`trivia-questions.json` to whichever activity has `"kind": "trivia"`, so an
+the drawn questions to whichever activity has `"kind": "trivia"`, so an
 `activities` list with no trivia activity is one that cannot take a question
-file — leave `questions` pointing at a file that exists and include a trivia
-activity, or expect staging to stop at step 2.
+file — include a trivia activity, or expect staging to stop at step 2.
 
 ### It is validated when the session is created, all or nothing
 

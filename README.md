@@ -38,10 +38,10 @@ is sealed, no surface shows cumulative standings. Not the Desktop, not a
 phone, not a running total, until the host reveals them.
 
 **The content** is the material these sessions already used. A question set
-is a JSON file per event. The committed example is
+is drawn at random from the shared bank,
 [`config/event.example/trivia-questions.json`](config/event.example/trivia-questions.json),
-and a real event's questions live in its own gitignored directory under
-`config/events/`. The arcade's existing items became rounds 0, 2 and 5,
+20 questions per event, and an event's own extra questions live in its
+gitignored directory under `config/events/` and are shuffled in. The arcade's existing items became rounds 0, 2 and 5,
 which are Recruitment, Unseal and The Glass Bridge.
 
 ## The one new idea

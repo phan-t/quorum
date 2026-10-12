@@ -136,7 +136,7 @@ who cannot is finding out at the same moment as the person it is about.
 ```
 
 The entries in `photos` — both lists — and `music` are filenames resolved
-against the event directory, the same convention `questions` and `promo`
+against the event directory, the same convention `additionalQuestions` and `promo`
 already use in `session.json`.
 
 **`for` is required**; everything else is optional, with one floor. A send-off

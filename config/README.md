@@ -22,7 +22,7 @@ So the example is the thing that ships, and the events stay on the machine.
 ```
 config/events/2026-03-12-example-offsite/
   session.json              the title, what the event scores, the console's setup
-  trivia-questions.json     the set uploaded to the session
+  additional-trivia-questions.json   extra questions, shuffled in with 20 drawn from the shared bank
   arcade-content.json       the arcade rounds' content, if this event stages any
   promo-card.html           the poster the Desktop shows in the lobby, if there is one
   sendoff.json              the send-off's messages, and the photos it names
@@ -34,7 +34,7 @@ config/events/2026-03-12-example-offsite/
   roster.md
 ```
 
-`session.json`, `trivia-questions.json`, `arcade-content.json`,
+`session.json`, `additional-trivia-questions.json`, `arcade-content.json`,
 `promo-card.html`, `sendoff.json` and the photos are the files in here the
 service *does* read, by being staged or uploaded to it.
 
@@ -135,8 +135,11 @@ and running order, prints the tokens. See [docs/event-config.md](../docs/event-c
 ```bash
 curl -s -X POST "$QUORUM_URL/api/sessions/$SID/content/trivia" \
   -H "Authorization: Bearer $HOST_TOKEN" -H 'content-type: application/json' \
-  --data-binary @config/events/<event>/trivia-questions.json
+  --data-binary @config/event.example/trivia-questions.json
 ```
+
+By hand, the file goes up exactly as it is: the whole bank, in its own order,
+with no draw and no extras. The draw is staging's.
 
 The format is in [SPEC.md](../SPEC.md#question-file) and the question bank is
 in [docs/question-bank.md](../docs/question-bank.md). The short version: name

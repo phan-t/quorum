@@ -62,7 +62,7 @@ HT=$(echo  "$R" | sed 's/.*"hostToken":"\([^"]*\)".*/\1/')
 
 curl -s -X POST "$QUORUM_URL/api/sessions/$SID/content/trivia" \
   -H "Authorization: Bearer $HT" -H 'content-type: application/json' \
-  --data-binary @config/events/$EVENT/trivia-questions.json
+  --data-binary @config/event.example/trivia-questions.json
 ```
 
 That first `echo` is the only time you will ever see the four things it prints.
@@ -89,10 +89,13 @@ Re-uploading works right up until the first question opens. After that the
 service refuses with `trivia_already_started`, which is deliberate: swapping
 the set mid-quiz would rewrite questions people have already been scored on.
 
-The file itself is the private one, `config/events/<event>/trivia-questions.json`.
-Everything under `config/events/` is gitignored and therefore in no repository
+By hand, that uploads the whole shared bank in its own order. `make stage` is
+what draws 20 at random and shuffles in the event's
+`config/events/<event>/additional-trivia-questions.json`.
+
+That extras file is the private one. Everything under `config/events/` is gitignored and therefore in no repository
 and no backup — note the directory, because only that directory is ignored: a
-question set left at `config/trivia-questions.json` would be **committed**, and
+question file left at `config/additional-trivia-questions.json` would be **committed**, and
 this repository is public. See
 [`config/README.md`](../config/README.md), which is also where the format is,
 and [`docs/question-bank.md`](question-bank.md) for the questions to draw on.

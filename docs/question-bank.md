@@ -4,8 +4,9 @@
 **20 to 24**. Suggested set at the bottom.
 
 This is the writing surface; it is not what the service reads. Quorum loads
-JSON — `config/events/<event>/trivia-questions.json`, with the committed worked
-example in `config/event.example/trivia-questions.json` and the format
+JSON: every event draws 20 questions at random from the shared bank,
+`config/event.example/trivia-questions.json`, and shuffles in any extras from
+`config/events/<event>/additional-trivia-questions.json`. The format is
 documented in
 [`config/README.md`](../config/README.md) and
 [SPEC.md](../SPEC.md#question-file). Swapping a question in means editing the
@@ -337,16 +338,20 @@ last activity.
 
 ### Into the question file
 
-Add the five to `config/events/<event>/trivia-questions.json`, each with the same `round`
-value, so Quorum puts a round card up before the first one:
+Add the five to `config/events/<event>/additional-trivia-questions.json`. Staging
+shuffles them in with the 20 drawn from the shared bank, so they turn up through
+the game rather than as a block, and with no round card: round labels are
+dropped from a shuffled set. Introduce the round out loud before trivia starts
+instead.
+
+Each question looks like any other:
 
 ```json
 {
   "text": "Which city did Sam live in before joining HashiCorp?",
   "answers": ["Melbourne", "Singapore", "Taipei", "Auckland"],
   "correct": "B",
-  "timeLimitSec": 20,
-  "round": "Round S — Sam"
+  "timeLimitSec": 20
 }
 ```
 

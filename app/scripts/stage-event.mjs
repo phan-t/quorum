@@ -13,6 +13,7 @@
 
 import { readFileSync } from "node:fs";
 import { join, dirname, resolve, sep } from "node:path";
+import { drawQuestions, QUESTION_COUNT, readBank } from "./draw-questions.mjs";
 
 const REPO = resolve(dirname(new URL(import.meta.url).pathname), "..", "..");
 
@@ -62,12 +63,57 @@ if (!title) die("session.json needs a \"title\".");
 // is a second copy to keep in step. Absent means the server's default set.
 const activities = session.activities;
 
-// The questions travel in their own file, because that is the file people edit
-// and because the importer's errors are about questions, not about setup.
-const questionsFile =
-  typeof session.questions === "string" ? session.questions : "trivia-questions.json";
-const questionsRaw = read(questionsFile);
-if (questionsRaw === null) die(`No config/events/${event}/${questionsFile}`);
+// Every event plays the shared bank, which is the set that is verified and
+// kept up to date: a random `questionCount` of its questions, 20 unless
+// session.json says otherwise. An event's own questions — a few about the team,
+// a farewell — go in `additionalQuestions`, every one of them plays, and they
+// are shuffled in with the draw. See draw-questions.mjs.
+const SHARED_BANK = "config/event.example/trivia-questions.json";
+if (session.questions !== undefined) {
+  die(
+    `session.json's "questions" is gone. Every event now draws from the shared\n` +
+      `  bank, ${SHARED_BANK}.\n` +
+      `  An event's own questions are extras: put them in\n` +
+      `  additional-trivia-questions.json, or name the file in "additionalQuestions".`,
+  );
+}
+const additionalFile =
+  typeof session.additionalQuestions === "string"
+    ? session.additionalQuestions
+    : "additional-trivia-questions.json";
+const additionalFrom = `config/events/${event}/${additionalFile}`;
+const additionalRaw = read(additionalFile);
+// Named but missing is a typo; left at the default and missing is an event
+// with no extras, which is most of them.
+if (additionalRaw === null && typeof session.additionalQuestions === "string") {
+  die(`No ${additionalFrom}`);
+}
+// The old name. A directory that still has one is somebody who expects it to
+// be played — say so rather than leave them to notice from the screen.
+if (read("trivia-questions.json") !== null) {
+  process.stderr.write(
+    `\n  Note: config/events/${event}/trivia-questions.json is not used any more.\n` +
+      `  Questions for this event alone go in additional-trivia-questions.json.\n`,
+  );
+}
+const questionCount =
+  session.questionCount === undefined ? QUESTION_COUNT : session.questionCount;
+if (!Number.isInteger(questionCount) || questionCount < 1) {
+  die(`session.json's "questionCount" must be a whole number of 1 or more.`);
+}
+let sharedRaw;
+try {
+  sharedRaw = readFileSync(join(REPO, SHARED_BANK), "utf8");
+} catch {
+  die(`No ${SHARED_BANK}`);
+}
+const shared = readBank(sharedRaw, SHARED_BANK);
+if (!shared.ok) die(shared.error);
+const additional =
+  additionalRaw === null ? null : readBank(additionalRaw, additionalFrom);
+if (additional !== null && !additional.ok) die(additional.error);
+const draw = drawQuestions(shared, additional?.questions ?? [], questionCount);
+const questionsRaw = draw.raw;
 
 /** The bytes of a file in the event directory, or null if it is not there. */
 const readBinary = (name) => {
@@ -166,7 +212,9 @@ if (!loaded.ok) {
   const errors = loaded.body?.errors ?? [loaded.text];
   process.stderr.write(
     `\n  The session was created but the questions were not loaded.\n` +
-      `  Nothing was half-loaded — fix ${questionsFile} and re-run the upload.\n\n` +
+      `  Nothing was half-loaded — fix ${additionalRaw === null ? SHARED_BANK : `${SHARED_BANK} or ${additionalFrom}`}\n` +
+      `  and stage again. Errors number the questions as drawn, not as written.\n` +
+      `  The session below has no questions; leave it unopened and use the new one.\n\n` +
       errors.map((e) => `    ${e}\n`).join("") +
       `\n  sid        ${sid}\n  hostToken  ${hostToken}\n\n`,
   );
@@ -464,7 +512,9 @@ const line = "─".repeat(72);
 process.stdout.write(
   `\n${line}\n` +
     `  ${title}\n` +
-    `  ${loaded.body.questions} questions loaded\n` +
+    `  ${loaded.body.questions} questions loaded: ${draw.drawn} drawn at random from the ${draw.of} in the shared bank${
+      draw.additional > 0 ? `, ${draw.additional} from ${additionalFile}` : ""
+    }, shuffled together${draw.tiebreakers > 0 ? `; plus ${draw.tiebreakers} tiebreakers` : ""}\n` +
     arcadeLine +
     promoLine +
     sendoffLine +
