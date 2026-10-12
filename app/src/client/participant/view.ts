@@ -2901,7 +2901,7 @@ function sceneArcade(ctx: SceneCtx): Scene {
 
   /** The shape this phone has asked for, held until the server agrees. */
   let shapeSent: UnsealShape | null = null;
-  /** The cue the tiles are drawn from, so a burst of frames does not rebuild them. */
+  /** The cue the tile row was built from. The row is rebuilt only for a new tin. */
   let tileSignature = "";
   /** Set while a key is doing the work, so the synthetic click is not a second tap. */
   let swallowLetterClick = false;
@@ -3074,26 +3074,21 @@ function sceneArcade(ctx: SceneCtx): Scene {
         );
       }
 
+      // Built once per tin and updated in place after that. Rebuilding the row
+      // on every accepted letter dropped taps: the reply to one letter could
+      // land while a finger was down on the next tile, and a button replaced
+      // between press and release gets no click. The browser says nothing, the
+      // letter never leaves the phone, and the next correct letter is judged
+      // against the lost one — a cracked tin from a word the player knew.
       const tiles = unsealTiles(cue, solved);
-      const signature = `${cue}|${solved}|${unsealOpen}`;
-      if (signature !== tileSignature) {
-        tileSignature = signature;
+      if (cue !== tileSignature) {
+        tileSignature = cue;
         replace(
           unsealTileRow,
           tiles.map((tile) => {
             const button = h(
               "button",
-              {
-                class: "a-tile",
-                type: "button",
-                disabled: !unsealOpen || tile.used,
-                attrs: {
-                  "data-used": tile.used ? "yes" : "no",
-                  "aria-label": tile.used
-                    ? `${tile.letter}, already used`
-                    : tile.letter,
-                },
-              },
+              { class: "a-tile", type: "button" },
               [h("span", { class: "a-tile-letter", text: tile.letter })],
             ) as HTMLButtonElement;
             button.addEventListener("click", () => {
@@ -3110,6 +3105,19 @@ function sceneArcade(ctx: SceneCtx): Scene {
           }),
         );
       }
+      // The tiles come from the cue alone, so the row and `tiles` line up.
+      tiles.forEach((tile, i) => {
+        const button = unsealTileRow.children[i] as HTMLButtonElement | undefined;
+        if (!button) return;
+        const disabled = !unsealOpen || tile.used;
+        if (button.disabled !== disabled) button.disabled = disabled;
+        setAttr(button, "data-used", tile.used ? "yes" : "no");
+        setAttr(
+          button,
+          "aria-label",
+          tile.used ? `${tile.letter}, already used` : tile.letter,
+        );
+      });
     }
 
     // The docs button: its price, and what it says once it has been pressed.
