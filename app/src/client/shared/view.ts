@@ -822,6 +822,8 @@ export const HOUSE = {
     `${resources} resources applied. Progress banked.`,
   crossed: (target: number) =>
     `Apply complete. Resources: ${target} added, 0 changed, 0 destroyed.`,
+  /** The free strike: a tap during a lock that warned rather than drained. */
+  struck: "Warning: state lock held by another process. That one was free. The next lock drains you.",
   drained: (n: number) => `${playerName(n)} drained.`,
   /**
    * DESIGN.md: `> Pane 4 was not tempered. Player 017 drained.`

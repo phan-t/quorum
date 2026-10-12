@@ -462,7 +462,17 @@ export interface SessionState {
  */
 export type ArcadeRoundConfig =
   | { readonly kind: "recruitment"; readonly items: readonly EmojiItem[]; readonly secondsPerItem: number }
-  | { readonly kind: "plan_apply"; readonly target: number; readonly seconds: number }
+  | {
+      readonly kind: "plan_apply";
+      readonly target: number;
+      readonly seconds: number;
+      /**
+       * Whether a player's first tap during a lock warns rather than drains.
+       * Absent is off: the engine's default is the round as SPEC.md first
+       * wrote it, and the server turns it on for every round a host starts.
+       */
+      readonly freeStrike?: boolean;
+    }
   | {
       readonly kind: "unseal";
       /** The tins. Carries the answers — see {@link UnsealItem}. */
@@ -856,6 +866,22 @@ export type ArcadePlay =
        * was already across is not a bet. See `betStands` in arcade.ts.
        */
       readonly finishedAt: Readonly<Record<ParticipantId, number>>;
+      /**
+       * Who has used their one free strike, and the lock they used it in — the
+       * start of that APPLY window.
+       *
+       * The first tap a player makes during a lock is a warning, not a drain:
+       * the round's opening drained people who were tapping in good faith with
+       * taps already in flight. Every other tap they make in that same lock is
+       * ignored — a fast thumb has several in the air, and they are the same
+       * mistake — and any tap in a later lock drains them as SPEC.md wrote it.
+       *
+       * Optional so that a snapshot written before strikes existed still reads:
+       * absent is nobody struck.
+       */
+      readonly strikes?: Readonly<Record<ParticipantId, number>>;
+      /** Whether the free strike is in play this round. See `strikes`. */
+      readonly freeStrike?: boolean;
     }
   | {
       readonly kind: "unseal";

@@ -562,6 +562,15 @@ interface MockPlanPlay {
    * the same reason. See {@link mockBetStands}.
    */
   finishedAt: Record<string, number>;
+  /**
+   * The free strike: who has spent theirs, and in which lock. A first tap on
+   * red warns rather than drains; the rest of that lock is ignored, because a
+   * fast tapper has several taps in flight; a tap in any later lock drains.
+   * The engine's `PlanApplyPlay.strikes`, the same shape.
+   */
+  strikes: Record<string, number>;
+  /** When each APPLY of the round began: the first two get the opening grace. */
+  locks: number[];
 }
 
 /**
@@ -1342,6 +1351,12 @@ const LIGHT_MAX_MS = 6_000;
 const TELEGRAPH_MS = 400;
 /** SPEC.md: "a 250 ms grace after the lock for network latency". */
 const LOCK_GRACE_MS = 250;
+/** SPEC.md: the round opens on a PLAN of 8–10 seconds. */
+const OPENING_PLAN_MIN_MS = 8_000;
+const OPENING_PLAN_MAX_MS = 10_000;
+/** SPEC.md: the first two locks of a round give 600 ms of grace. */
+const OPENING_LOCKS = 2;
+const OPENING_GRACE_MS = 600;
 /** As many runners as the corner of the light has room for. See views.ts. */
 const MOCK_TICKER_ROWS = 5;
 
@@ -2154,6 +2169,17 @@ class MockSession {
           lightChangedAt: play.lightChangedAt,
           target: play.target,
           checkpoints: mockCheckpoints(play.target),
+          // The race track: every runner in the room, every role. Written
+          // again rather than borrowed from views.ts, like the ticker below.
+          track: this.inTheRoom()
+            .map((p) => ({
+              playerNumber: this.arcadeNumber(p.pid),
+              resources: play.resources[p.pid] ?? 0,
+              out: this.arcadeStanding[p.pid] === "drained",
+              across: play.finishOrder.includes(p.pid),
+              struck: play.strikes[p.pid] !== undefined,
+            }))
+            .sort((a, b) => a.playerNumber - b.playerNumber),
           ...(privileged
             ? {
                 nextChangeAt: play.nextChangeAt,
@@ -2223,6 +2249,7 @@ class MockSession {
             planApply: {
               resources: play.resources[pid] ?? 0,
               ...(place === -1 ? {} : { place: place + 1 }),
+              ...(play.strikes[pid] === undefined ? {} : { struck: true as const }),
               // The one number about somebody else a phone is ever sent: the
               // count of the runner it has already bet on, for the line under
               // the Lounge card's chip. One runner, not a board.
@@ -4793,6 +4820,8 @@ class MockHub {
       seconds: cmd.seconds,
       finishOrder: [],
       finishedAt: {},
+      strikes: {},
+      locks: [],
     };
   }
 
@@ -4847,8 +4876,12 @@ class MockHub {
       play.light = "plan";
       play.lightChangedAt = now;
       // The first light gets a duration here for the same reason the server
-      // does it: the engine has no randomness, so the boundary draws it.
-      play.nextChangeAt = now + this.#lightMs();
+      // does it: the engine has no randomness, so the boundary draws it. The
+      // opening PLAN is the long one, so the room learns the button first.
+      play.nextChangeAt =
+        now +
+        OPENING_PLAN_MIN_MS +
+        Math.floor(Math.random() * (OPENING_PLAN_MAX_MS - OPENING_PLAN_MIN_MS + 1));
       s.arcadeEndsAt = now + play.seconds * 1000;
       this.#armLightTimer();
       this.#startBotTaps();
@@ -4876,6 +4909,7 @@ class MockHub {
         p.light = p.light === "plan" ? "apply" : "plan";
         p.lightChangedAt = this.#now();
         p.nextChangeAt = p.lightChangedAt + this.#lightMs();
+        if (p.light === "apply") p.locks.push(p.lightChangedAt);
         this.#armLightTimer();
         this.#broadcastState();
       },
@@ -5555,7 +5589,8 @@ class MockHub {
   /**
    * One tap, judged against the light at the instant it happened.
    *
-   * The grace is one-directional: a tap inside 250 ms of the lock is pulled
+   * The grace is one-directional: a tap inside 250 ms of the lock (600 ms in
+   * the round's first two locks) is pulled
    * back to the last instant of the PLAN before it, and nothing is ever
    * pushed the other way. Subtracting it unconditionally would slide a
    * legitimate tap at the start of a PLAN back into the APPLY before it.
@@ -5563,7 +5598,9 @@ class MockHub {
   #tapInstant(receivedAt: number, play: MockPlanPlay): number {
     if (play.light !== "apply") return receivedAt;
     const since = play.lightChangedAt;
-    if (receivedAt >= since && receivedAt - since < LOCK_GRACE_MS) return since - 1;
+    const n = play.locks.indexOf(since);
+    const grace = n !== -1 && n < OPENING_LOCKS ? OPENING_GRACE_MS : LOCK_GRACE_MS;
+    if (receivedAt >= since && receivedAt - since < grace) return since - 1;
     return receivedAt;
   }
 
@@ -5646,6 +5683,14 @@ class MockHub {
     if (play?.kind !== "plan_apply") return;
     if (play.finishOrder.includes(pid)) return;
     if (play.light === "apply" && at >= play.lightChangedAt) {
+      const struck = play.strikes[pid];
+      // The free strike: warned, not drained, and the rest of this lock is
+      // the same strike.
+      if (struck === undefined) {
+        play.strikes[pid] = play.lightChangedAt;
+        return;
+      }
+      if (struck === play.lightChangedAt) return;
       // `Error: state lock held by another process`. Drained, not out.
       s.drain(pid, this.#now());
       return;

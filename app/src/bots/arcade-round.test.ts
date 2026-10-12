@@ -1735,7 +1735,21 @@ describe("sixty bots play Recruitment and Plan / Apply", () => {
     assert.equal(w.participant.roster, after.participantRoster);
     assert.equal(w.host.state, after.hostState);
     assert.equal(w.host.roster, 0, "the host is never sent a roster delta");
-    assert.equal(w.screen.state, after.screenState);
+    // The big screen draws the race track, so it is also owed a picture of
+    // ordinary steps: held on the beat tick and sent with the next frame that
+    // goes anywhere, or on the tick itself. It is one socket, so the cost is
+    // bounded by the steps themselves — never more than one extra frame per
+    // accepted tap — and never reaches a phone, which is what the numbers above
+    // are for.
+    const steps = played.tapOutcomes.filter((o) => o.applied).length;
+    assert.ok(
+      w.screen.state > after.screenState,
+      `the race track on the screen was never sent a step (${w.screen.state})`,
+    );
+    assert.ok(
+      w.screen.state <= after.screenState + steps,
+      `the screen was sent ${w.screen.state} frames for ${steps} steps`,
+    );
     assert.equal(w.screen.roster, after.participantRoster);
 
     // Every phone still hears every room-wide broadcast: the saving is in what

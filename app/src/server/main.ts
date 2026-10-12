@@ -1906,6 +1906,9 @@ function commandToEvent(cmd: HostCommand, runtime: SessionRuntime): Event | null
             kind: "plan_apply",
             target: cmd.target,
             seconds: cmd.seconds,
+            // Every round a host starts gives each player one free strike:
+            // their first tap during a lock warns rather than drains.
+            freeStrike: true,
           },
         };
       }

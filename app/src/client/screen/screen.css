@@ -1849,64 +1849,35 @@ body {
   opacity: 0.85;
 }
 /*
- * The runner ticker, top right.
+ * The race track, across the foot of the light. See plan-track.ts and the
+ * `.pt` rules in tokens.css.
  *
- * Top right and absolute, for three reasons at once: the sign row is centred
- * and 96 px tall and must not be crowded, the drain log takes the bottom 5% of
- * the light whenever somebody is caught, and the wipe travels left to right —
- * so the corner the wipe reaches last is the corner that spends least of the
- * 400 ms straddling two colours.
+ * Drawn on the light itself, so every colour is the light's own ink: the
+ * page's ink and its red would not read on green or on pink. The wreck is a
+ * cross in that ink, and the burst before it too. No background, no panel —
+ * the wipe passes underneath, as it did under the ticker this replaced.
  *
- * No background, no panel, no scrim. The wipe passes underneath it and both
- * light faces use the same `--on-fill-dark` ink, so the rows read on green and
- * on pink without a box that would punch a hole in the one animation in the
- * product that must not be a fade.
- *
- * 34 px, above DESIGN.md's 32 px floor for the Desktop at 1080p, with the
- * count at 36 px because the count is the thing being read.
+ * Type at 22 px for a tag read off a screen share; the dots are big enough to
+ * see moving from the back of a meeting.
  */
-.s-ticker {
-  position: absolute;
-  top: 4%;
-  right: 4%;
-  z-index: 1;
-  list-style: none;
-  margin: 0;
-  padding: 0;
-  display: grid;
-  gap: 0.5rem;
-  font-size: 34px;
-  letter-spacing: 0.04em;
+.s-race {
+  --pt-ink: var(--light-ink, var(--on-fill-dark));
+  --pt-rail: rgba(10, 10, 15, 0.22);
+  --pt-mark: var(--light-ink, var(--on-fill-dark));
+  --pt-out: var(--light-ink, var(--on-fill-dark));
+  --pt-warn: var(--light-ink, var(--on-fill-dark));
+  --pt-dot: 20px;
+  --pt-height: 38vh;
+  --pt-lane-h: 34px;
+  --pt-slide: 300ms;
+  --pt-pad-l: 4em;
+  --pt-pad-r: 1.4em;
+  position: relative;
+  width: 90%;
+  font-size: 22px;
 }
-.s-ticker-row {
-  display: grid;
-  grid-template-columns: auto 200px auto;
-  align-items: center;
-  gap: 0.9rem;
-}
-.s-ticker-num {
-  font-weight: 600;
-  opacity: 0.9;
-}
-/* The track is the ink at low alpha rather than a colour of its own, so it
-   cannot fight either light face. */
-.s-ticker-bar {
-  height: 14px;
-  border-radius: 999px;
-  background: rgba(10, 10, 15, 0.22);
-  overflow: hidden;
-}
-.s-ticker-fill {
-  display: block;
-  height: 100%;
-  background: currentColor;
-}
-.s-ticker-count {
-  font-size: 36px;
-  font-weight: 600;
-  font-variant-numeric: tabular-nums;
-  min-width: 3ch;
-  text-align: right;
+.s-race[data-dense="yes"] {
+  --pt-dot: 12px;
 }
 
 /* ---- the reveal ------------------------------------------------------ */

@@ -2022,6 +2022,7 @@ export function reduce(
           seconds: config.seconds,
           finishOrder: [],
           finishedAt: {},
+          ...(config.freeStrike === true ? { freeStrike: true, strikes: {} } : {}),
         };
       } else if (config.kind === "unseal") {
         // The word is separated from the letters once, here, and never put
@@ -2482,7 +2483,35 @@ export function reduce(
       // 1.9 s into a lock over a 400 ms link lands after the flip back to
       // green, and the phone it was made on was plainly pink; judging it
       // against the current light forgives it. See {@link lockInForceAt}.
-      if (lockInForceAt(play, event.at) !== null) {
+      const lockedSince = lockInForceAt(play, event.at);
+      if (lockedSince !== null) {
+        const struck = play.strikes?.[event.pid];
+        // The free strike: the first tap in a lock is a warning. See
+        // `strikes` in types.ts. Only the struck player's own phone, the
+        // console and the screen move — the track rings their runner.
+        if (play.freeStrike === true && struck === undefined) {
+          return applied(
+            {
+              ...state,
+              arcade: {
+                ...arcade,
+                play: {
+                  ...play,
+                  strikes: { ...play.strikes, [event.pid]: lockedSince },
+                },
+              },
+            },
+            [
+              { kind: "broadcast", to: { pid: event.pid }, what: "state" },
+              { kind: "broadcast", to: "host", what: "state" },
+              { kind: "broadcast", to: "screen", what: "state" },
+              PERSIST,
+            ],
+          );
+        }
+        // The rest of the taps already in the air in the lock they were
+        // warned in: the same mistake, not a second one.
+        if (struck === lockedSince) return unchanged();
         // `Error: state lock held by another process`. Drained, not out:
         // everything banked stays banked and the Lounge opens.
         return applied(

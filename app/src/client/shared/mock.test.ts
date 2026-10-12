@@ -617,6 +617,23 @@ function untilTheLightIs(r: Room, want: "plan" | "apply"): void {
   assert.fail(`the light never turned to ${want}`);
 }
 
+/**
+ * Hold the room inside a lock that will drain these phones.
+ *
+ * The demo's rounds have the console's free strike, so the first tap on red
+ * only warns: the phones spend it in one lock, and this returns 700 ms into
+ * the next, past the 600 ms grace the round's first two locks give. The engine
+ * side of a comparison runs without the strike, so its drain is one tap.
+ */
+function intoADrainingLock(r: Room, phones: readonly (Wire | undefined)[], round: number): void {
+  untilTheLightIs(r, "apply");
+  r.advance(700);
+  phones.forEach((w, i) => w?.send({ t: "arcade.tap", cid: `strike-${i}`, round }));
+  untilTheLightIs(r, "plan");
+  untilTheLightIs(r, "apply");
+  r.advance(700);
+}
+
 /* ------------------------------------------------------------------ */
 /* The engine, driven through the same sequence                        */
 /* ------------------------------------------------------------------ */
@@ -2955,14 +2972,12 @@ describe("a bet placed after the result it names pays nothing", () => {
       engine = replay(engine, [{ event: { type: "tap", pid, at }, at }]);
     };
 
-    // The light turns pink. Three hundred milliseconds past the turn before
-    // anybody taps, because `#tapInstant` pulls a tap inside 250 ms of the lock
-    // back to the last instant of the PLAN before it — SPEC.md's grace for
-    // network latency — and a tap inside it is forgiven rather than drained.
-    // `untilTheLightIs` finds the turn within 100 ms of it happening, so this
-    // is the first instant at which a drain is the thing being tested.
-    untilTheLightIs(r, "apply");
-    r.advance(300);
+    // The light turns pink, in a lock that drains: p3 and p4 have spent their
+    // free strike, and the opening grace is behind them. `#tapInstant` pulls a
+    // tap inside the grace back to the last instant of the PLAN before it, so
+    // a tap inside it would be forgiven rather than drained. See
+    // {@link intoADrainingLock}.
+    intoADrainingLock(r, [r.phones[2], r.phones[3]], round);
     apply(T0 + 10_000, T0 + 16_000);
 
     // p3 and p4 tap into the lock and are drained. Not p1, who is the runner.
@@ -4448,10 +4463,9 @@ describe("a bet is refused in the reducer's order and in the reducer's words", (
     const round = r.host.state().arcade?.roundIndex ?? -1;
 
     // Two people into the Lounge, the only way this round produces one: the light
-    // turns pink and they tap. Three hundred milliseconds past the turn, because
-    // `#tapInstant` forgives a tap inside the 250 ms grace.
-    untilTheLightIs(r, "apply");
-    r.advance(300);
+    // turns pink and they tap, in a lock that drains: their free strike is
+    // spent and the grace is behind them. See {@link intoADrainingLock}.
+    intoADrainingLock(r, [p3, p4], round);
     engine = replay(engine, [
       {
         event: { type: "setLight", light: "apply", until: T0 + 16_000 },

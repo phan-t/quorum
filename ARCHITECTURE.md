@@ -495,7 +495,8 @@ server's own recent measurement of that socket. The cap matters: without it a
 client on a bad connection could be *advantaged* by a large correction, and
 with it the worst case is a quarter-second gift that applies equally to
 everyone on a poor link. The red-light grace in `plan_apply` is the same
-number for the same reason.
+number for the same reason, except in a round's first two locks, which give
+600 ms so the opening is forgiving while the room learns the light.
 
 ### Keepalive
 

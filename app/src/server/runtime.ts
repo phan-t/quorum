@@ -177,6 +177,25 @@ export function latencyCorrection(rttMs: number | null): number {
 export const LOCK_GRACE_MS = 250;
 
 /**
+ * The opening of a Plan / Apply round is gentler than the rest of it.
+ *
+ * The first light used to be an ordinary 2–6 s PLAN, so a room still reading
+ * the rules could be locked two seconds after the Floor opened, and the
+ * first locks drained people who were tapping in good faith with taps already
+ * in flight. So the first PLAN lasts 8–10 s, and the first
+ * {@link OPENING_LOCKS} locks of the round give {@link OPENING_GRACE_MS} of
+ * grace instead of {@link LOCK_GRACE_MS}. Every later lock is the round as
+ * SPEC.md wrote it.
+ *
+ * The first light is drawn, not fixed: a first lock at exactly eight seconds
+ * every round is one the room learns to count to.
+ */
+export const OPENING_PLAN_MIN_MS = 8_000;
+export const OPENING_PLAN_MAX_MS = 10_000;
+export const OPENING_LOCKS = 2;
+export const OPENING_GRACE_MS = 600;
+
+/**
  * How long the boundary may hold Tug of Raft's frames before sending them.
  *
  * The rope is the one round where the engine emits a broadcast per accepted
@@ -207,6 +226,15 @@ export const LIGHT_MAX_MS = 6_000;
 export function pickLightMs(rng: () => number): number {
   const r = Math.min(0.999_999, Math.max(0, rng()));
   return LIGHT_MIN_MS + Math.floor(r * (LIGHT_MAX_MS - LIGHT_MIN_MS + 1));
+}
+
+/** The round's first PLAN. See {@link OPENING_PLAN_MIN_MS}. */
+export function pickOpeningPlanMs(rng: () => number): number {
+  const r = Math.min(0.999_999, Math.max(0, rng()));
+  return (
+    OPENING_PLAN_MIN_MS +
+    Math.floor(r * (OPENING_PLAN_MAX_MS - OPENING_PLAN_MIN_MS + 1))
+  );
 }
 
 /**
@@ -247,10 +275,11 @@ export function correctedTapAt(
   receivedAt: number,
   rttMs: number | null,
   lockedSince: number | null,
+  graceMs: number = LOCK_GRACE_MS,
 ): number {
   const at = receivedAt - latencyCorrection(rttMs);
   if (lockedSince === null) return at;
-  if (at >= lockedSince && at - lockedSince < LOCK_GRACE_MS) {
+  if (at >= lockedSince && at - lockedSince < graceMs) {
     return lockedSince - 1;
   }
   return at;
@@ -626,6 +655,22 @@ export class SessionRuntime {
       // worth delaying, and delaying anything else would be a lie about when
       // it happened.
       this.#markDirty(stateTo);
+    } else if (
+      event.type === "tap" &&
+      result.applied &&
+      arcadeStateOf(this.state)?.play?.kind === "plan_apply" &&
+      stateTo.length === 0
+    ) {
+      // An ordinary Plan / Apply step emits nothing from the engine, but the
+      // big screen draws the race track, so it is owed a live picture of it.
+      // The screen only, coalesced on the same tick as the rope's beats: one
+      // socket at eight frames a second. The phones draw the track too, and
+      // are deliberately not added here — sixty phones at that rate is the
+      // fan-out "what a broadcast costs" in the tests exists to refuse. Their
+      // lanes move on the frames they already get: every light, every drain,
+      // their own milestones. Milestones and drains carry their own audiences
+      // and take the branch below, immediately, as they always have.
+      this.#markDirty(["screen"]);
     } else if (stateTo.length > 0 || this.heldFrames > 0) {
       // Anything that is not a beat sends what the beats are holding along
       // with its own frame. That is what makes a round ending immediate:
@@ -1098,7 +1143,29 @@ export class SessionRuntime {
     }
     const scheduled = play.nextChangeAt > play.lightChangedAt;
     const light = scheduled ? (play.light === "plan" ? "apply" : "plan") : play.light;
-    this.apply({ type: "setLight", light, until: now + pickLightMs(this.rng) }, now);
+    const ms = scheduled ? pickLightMs(this.rng) : pickOpeningPlanMs(this.rng);
+    this.apply({ type: "setLight", light, until: now + ms }, now);
+    if (light === "apply") {
+      if (this.#locks.round !== arcade.roundIndex) {
+        this.#locks = { round: arcade.roundIndex, at: [] };
+      }
+      this.#locks.at.push(now);
+    }
+  }
+
+  /**
+   * When each lock of the current round began, in order — so a tap can be
+   * given the opening's grace if the lock it fell in was one of the first
+   * {@link OPENING_LOCKS}. In memory only: after a restart the count starts
+   * again, and every lock that is not on the list gets the ordinary grace.
+   */
+  #locks: { round: number; at: number[] } = { round: -1, at: [] };
+
+  /** The grace a tap gets for the lock it fell in. */
+  graceFor(round: number, lockedSince: number | null): number {
+    if (lockedSince === null || this.#locks.round !== round) return LOCK_GRACE_MS;
+    const n = this.#locks.at.indexOf(lockedSince);
+    return n !== -1 && n < OPENING_LOCKS ? OPENING_GRACE_MS : LOCK_GRACE_MS;
   }
 
   #clearLightTimer(): void {
@@ -1638,7 +1705,12 @@ export class SessionRuntime {
     const corrected = receivedAt - latencyCorrection(rtt);
     const lockedSince =
       play?.kind === "plan_apply" ? lockInForceAt(play, corrected) : null;
-    const at = correctedTapAt(receivedAt, rtt, lockedSince);
+    const at = correctedTapAt(
+      receivedAt,
+      rtt,
+      lockedSince,
+      this.graceFor(arcade.roundIndex, lockedSince),
+    );
     // The grace is a fiction about the *light*, not about the clock, and it
     // must never carry a tap back across the Floor's close. A round that
     // happens to end within 250 ms of a lock would otherwise accept taps whose

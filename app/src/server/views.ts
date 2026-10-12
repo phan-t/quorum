@@ -63,6 +63,7 @@ import type {
   ArcadeMineTug,
   ArcadeMineUnseal,
   ArcadePlanApplyRunner,
+  ArcadePlanApplyTrackRunner,
   ArcadePlanApplyView,
   ArcadeRecruitmentView,
   ArcadeTugView,
@@ -604,6 +605,7 @@ export function arcadePlanApplyFor(
     lightChangedAt: play.lightChangedAt,
     target: play.target,
     checkpoints: checkpointsFor(play.target),
+    track: planApplyTrack(state, arcade, play),
   };
   if (!privileged) return base;
   return {
@@ -659,6 +661,39 @@ function planApplyLeaders(
     b.resources - a.resources || a.playerNumber - b.playerNumber,
   );
   return rows.slice(0, PLAN_APPLY_TICKER_ROWS);
+}
+
+/**
+ * The race track: every player in the round, by player number.
+ *
+ * Unlike the ticker this keeps the drained, at the count they were caught on
+ * and marked `out`: the track draws them as a wreck where they fell, which is
+ * the truth about a frozen 90 rather than a lie about who is about to cross.
+ * The house and the kicked are left off, as they are everywhere players are
+ * listed.
+ */
+export function planApplyTrack(
+  state: SessionState,
+  arcade: ArcadeState,
+  play: Extract<NonNullable<ArcadeState["play"]>, { kind: "plan_apply" }>,
+): ArcadePlanApplyTrackRunner[] {
+  const number = numberer(state);
+  const crossed = new Set(play.finishOrder);
+  const rows: ArcadePlanApplyTrackRunner[] = [];
+  for (const [pid, p] of Object.entries(state.participants)) {
+    if (p.kicked || p.nicknameKey === "") continue;
+    const resources = play.resources[pid] ?? 0;
+    const out = (arcade.standing[pid] ?? "floor") === "drained";
+    rows.push({
+      playerNumber: number(pid),
+      resources,
+      out,
+      across: crossed.has(pid),
+      struck: play.strikes?.[pid] !== undefined,
+    });
+  }
+  rows.sort((a, b) => a.playerNumber - b.playerNumber);
+  return rows;
 }
 
 /**
@@ -1163,6 +1198,7 @@ export function arcadeMineFor(
       // your runner has not moved and is the whole reason the Lounge card was
       // silent before this.
       ...(backed === null ? {} : { backedResources: play.resources[backed] ?? 0 }),
+      ...(play.strikes?.[pid] === undefined ? {} : { struck: true }),
     };
   }
 

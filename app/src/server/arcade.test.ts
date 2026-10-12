@@ -32,10 +32,16 @@ import {
   LIGHT_MIN_MS,
   LOCK_GRACE_MS,
   MAX_LATENCY_CORRECTION_MS,
+  OPENING_GRACE_MS,
+  OPENING_LOCKS,
+  OPENING_PLAN_MAX_MS,
+  OPENING_PLAN_MIN_MS,
   SessionRegistry,
   correctedTapAt,
   pickLightMs,
+  pickOpeningPlanMs,
   type Client,
+  type SessionRuntime,
 } from "./runtime.ts";
 import {
   AWAY_AFTER_MS,
@@ -257,8 +263,46 @@ describe("the light's runner ticker", () => {
     const frame = wire(s, "participant", "p1");
     assert.equal(view(s, "participant", "p1").arcade?.planApply?.leaders, undefined);
     assert.ok(!frame.includes('"leaders"'), `the ticker reached a phone: ${frame}`);
-    // And not by another name: nobody else's count is in those bytes at all.
-    assert.ok(!frame.includes('"resources":30'), frame);
+  });
+});
+
+describe("the race track", () => {
+  it("puts every player on it, in player-number order, on every surface", () => {
+    let s = planning();
+    s = tapped(s, "p2", 30);
+    const screen = view(s, "screen").arcade?.planApply?.track;
+    assert.ok(screen && screen.length > 0);
+    assert.deepEqual(
+      screen.map((r) => r.playerNumber),
+      [...screen.map((r) => r.playerNumber)].sort((a, b) => a - b),
+    );
+    assert.equal(screen.find((r) => r.resources === 30)?.out, false);
+    // A phone sees the same race the screen shows the room.
+    assert.deepEqual(view(s, "participant", "p1").arcade?.planApply?.track, screen);
+  });
+
+  it("keeps a drained runner where the lock caught them, marked out", () => {
+    let s = planning();
+    s = tapped(s, "p1", 20);
+    s = replay(s, [
+      { event: { type: "setLight", light: "apply", until: T0 + 9_000 }, at: T0 + 3_000 },
+      { event: { type: "tap", pid: "p1", at: T0 + 4_000 }, at: T0 + 4_000 },
+    ]);
+    assert.equal(s.arcade?.standing["p1"], "drained");
+    const track = view(s, "participant", "p2").arcade?.planApply?.track ?? [];
+    const p1 = track.find((r) => r.out);
+    assert.ok(p1, "the drained runner left the track");
+    assert.equal(p1.resources, 20);
+    assert.equal(p1.across, false);
+  });
+
+  it("still sends a phone nothing that predicts the light", () => {
+    let s = planning();
+    s = tapped(s, "p2", 30);
+    const frame = wire(s, "participant", "p1");
+    assert.ok(!frame.includes("nextChangeAt"), frame);
+    assert.ok(!frame.includes("headTurnsAt"), frame);
+    assert.ok(!frame.includes('"finishOrder"'), frame);
   });
 
   it("leaves nobody on it who has nothing to show", () => {
@@ -712,17 +756,19 @@ describe("the light's duration", () => {
     runtime.flipLight(T0);
     const play = runtime.state.arcade?.play;
     assert.equal(play?.kind === "plan_apply" ? play.light : null, "plan");
-    // 2000 + floor(0.25 * 4001) = 3000.
-    assert.equal(play?.kind === "plan_apply" ? play.nextChangeAt : null, T0 + 3_000);
+    // The opening PLAN: 8000 + floor(0.25 * 2001) = 8500.
+    assert.equal(play?.kind === "plan_apply" ? play.nextChangeAt : null, T0 + 8_500);
 
-    // The next one flips, because the light now has a schedule to flip at.
-    runtime.flipLight(T0 + 3_000);
+    // The next one flips, because the light now has a schedule to flip at, and
+    // from here on it is the ordinary 2–6 s: 2000 + floor(0.25 * 4001) = 3000.
+    runtime.flipLight(T0 + 8_500);
     const next = runtime.state.arcade?.play;
     assert.equal(next?.kind === "plan_apply" ? next.light : null, "apply");
     assert.equal(
       next?.kind === "plan_apply" ? next.lightChangedAt : null,
-      T0 + 3_000,
+      T0 + 8_500,
     );
+    assert.equal(next?.kind === "plan_apply" ? next.nextChangeAt : null, T0 + 11_500);
   });
 
   it("gives the first light a duration rather than locking the room instantly", () => {
@@ -749,7 +795,56 @@ describe("the light's duration", () => {
     runtime.flipLight(T0);
     const after = runtime.state.arcade?.play;
     assert.equal(after?.kind === "plan_apply" ? after.light : null, "plan");
-    assert.equal(after?.kind === "plan_apply" ? after.nextChangeAt : null, T0 + 2_000);
+    assert.equal(after?.kind === "plan_apply" ? after.nextChangeAt : null, T0 + 8_000);
+  });
+
+  it("opens on a longer PLAN, 8 to 10 seconds inclusive", () => {
+    assert.equal(OPENING_PLAN_MIN_MS, 8_000);
+    assert.equal(OPENING_PLAN_MAX_MS, 10_000);
+    assert.equal(pickOpeningPlanMs(() => 0), 8_000);
+    assert.equal(pickOpeningPlanMs(() => 0.999_999_9), 10_000);
+  });
+});
+
+describe("the opening locks' grace", () => {
+  /** A round whose first two locks are at +8 s and +12 s, and third at +16 s. */
+  function opened(): SessionRuntime {
+    const registry = new SessionRegistry();
+    const { runtime } = registry.add(entered(), T0);
+    runtime.rng = () => 0;
+    runtime.apply(
+      {
+        type: "startRound",
+        round: "plan_apply",
+        config: { kind: "plan_apply", target: 120, seconds: 75 },
+      },
+      T0,
+    );
+    runtime.apply({ type: "beginPlay" }, T0);
+    runtime.flipLight(T0); // PLAN until +8 s
+    return runtime;
+  }
+
+  it("is 600 ms for the first two locks of a round and 250 ms after that", () => {
+    assert.equal(OPENING_LOCKS, 2);
+    assert.equal(OPENING_GRACE_MS, 600);
+    const runtime = opened();
+    const round = runtime.state.arcade?.roundIndex ?? -1;
+    runtime.flipLight(T0 + 8_000); // lock 1
+    assert.equal(runtime.graceFor(round, T0 + 8_000), OPENING_GRACE_MS);
+    runtime.flipLight(T0 + 10_000); // PLAN
+    runtime.flipLight(T0 + 12_000); // lock 2
+    assert.equal(runtime.graceFor(round, T0 + 12_000), OPENING_GRACE_MS);
+    runtime.flipLight(T0 + 14_000); // PLAN
+    runtime.flipLight(T0 + 16_000); // lock 3
+    assert.equal(runtime.graceFor(round, T0 + 16_000), LOCK_GRACE_MS);
+    assert.equal(runtime.graceFor(round, null), LOCK_GRACE_MS);
+    runtime.clearArcadeTimers();
+  });
+
+  it("forgives a tap 500 ms into the first lock, and not into the third", () => {
+    assert.equal(correctedTapAt(T0 + 8_500, null, T0 + 8_000, OPENING_GRACE_MS), T0 + 7_999);
+    assert.equal(correctedTapAt(T0 + 16_500, null, T0 + 16_000), T0 + 16_500);
   });
 });
 
@@ -1236,7 +1331,7 @@ describe("what a broadcast costs", () => {
     for (let i = 0; i < 29; i += 1) {
       runtime.apply({ type: "tap", pid: "p1", at: T0 + 100 + i }, T0 + 100 + i);
     }
-    assert.equal(p1.state, 0, "an ordinary tap is worth no frames at all");
+    assert.equal(p1.state, 0, "an ordinary tap is worth no frames to a phone");
     runtime.apply({ type: "tap", pid: "p1", at: T0 + 200 }, T0 + 200);
     assert.equal(runtime.state.arcade?.banked["p1"], 5);
     assert.equal(p1.state, 1);
@@ -1247,6 +1342,18 @@ describe("what a broadcast costs", () => {
     assert.equal(phones[1]?.state, 0, "nobody else's phone draws p1's count");
     assert.equal(phones[2]?.state, 0);
     for (const p of phones) assert.equal(p.roster, 0);
+    runtime.clearArcadeTimers();
+  });
+
+  it("holds an ordinary step for the screen's race track, and never for a phone", () => {
+    const { runtime, phones, host, screen } = room();
+    runtime.apply({ type: "tap", pid: "p1", at: T0 + 100 }, T0 + 100);
+    assert.equal(screen.state, 0, "held for the tick, not sent at once");
+    assert.equal(runtime.heldFrames, 1);
+    runtime.flushFrames(T0 + 220);
+    assert.equal(screen.state, 1, "the tick sends the screen the race");
+    assert.equal(host.state, 0);
+    for (const p of phones) assert.equal(p.state, 0, "a phone is sent no step");
     runtime.clearArcadeTimers();
   });
 
@@ -1391,5 +1498,75 @@ describe("one number per person, on every surface (#38)", () => {
       "host",
     );
     assert.deepEqual(lobby.roster.map((r) => r.playerNumber), [1, 2]);
+  });
+});
+
+/* ------------------------------------------------------------------ */
+/* The free strike                                                     */
+/* ------------------------------------------------------------------ */
+
+describe("the free strike", () => {
+  /** A round with the strike on, PLAN until +3 s, then a lock until +9 s. */
+  function striking(): SessionState {
+    let s = entered([
+      {
+        type: "startRound",
+        round: "plan_apply",
+        config: { kind: "plan_apply", target: 120, seconds: 75, freeStrike: true },
+      },
+      { type: "beginPlay" },
+      { type: "setLight", light: "plan", until: T0 + 3_000 },
+    ]);
+    s = tapped(s, "p1", 20);
+    return replay(s, [
+      { event: { type: "setLight", light: "apply", until: T0 + 9_000 }, at: T0 + 3_000 },
+    ]);
+  }
+
+  it("warns on the first tap in a lock instead of draining", () => {
+    const s = replay(striking(), [
+      { event: { type: "tap", pid: "p1", at: T0 + 4_000 }, at: T0 + 4_000 },
+    ]);
+    assert.equal(s.arcade?.standing["p1"], "floor");
+    const play = s.arcade?.play;
+    assert.equal(play?.kind === "plan_apply" ? play.strikes?.["p1"] : null, T0 + 3_000);
+    assert.equal(play?.kind === "plan_apply" ? play.resources["p1"] : null, 20);
+    assert.equal(view(s, "participant", "p1").arcadeMine?.planApply?.struck, true);
+    assert.equal(
+      view(s, "screen").arcade?.planApply?.track?.find((r) => r.resources === 20)?.struck,
+      true,
+    );
+  });
+
+  it("ignores the rest of the taps in that same lock", () => {
+    const s = replay(striking(), [
+      { event: { type: "tap", pid: "p1", at: T0 + 4_000 }, at: T0 + 4_000 },
+      { event: { type: "tap", pid: "p1", at: T0 + 4_100 }, at: T0 + 4_100 },
+      { event: { type: "tap", pid: "p1", at: T0 + 5_000 }, at: T0 + 5_000 },
+    ]);
+    assert.equal(s.arcade?.standing["p1"], "floor");
+  });
+
+  it("drains a tap in any later lock", () => {
+    const s = replay(striking(), [
+      { event: { type: "tap", pid: "p1", at: T0 + 4_000 }, at: T0 + 4_000 },
+      { event: { type: "setLight", light: "plan", until: T0 + 12_000 }, at: T0 + 9_000 },
+      { event: { type: "tap", pid: "p1", at: T0 + 10_000 }, at: T0 + 10_000 },
+      { event: { type: "setLight", light: "apply", until: T0 + 15_000 }, at: T0 + 12_000 },
+      { event: { type: "tap", pid: "p1", at: T0 + 13_000 }, at: T0 + 13_000 },
+    ]);
+    assert.equal(s.arcade?.standing["p1"], "drained");
+    const play = s.arcade?.play;
+    assert.equal(play?.kind === "plan_apply" ? play.resources["p1"] : null, 21);
+  });
+
+  it("is off unless the round asks for it, so one tap drains as SPEC first wrote", () => {
+    let s = planning();
+    s = replay(s, [
+      { event: { type: "setLight", light: "apply", until: T0 + 9_000 }, at: T0 + 3_000 },
+      { event: { type: "tap", pid: "p1", at: T0 + 4_000 }, at: T0 + 4_000 },
+    ]);
+    assert.equal(s.arcade?.standing["p1"], "drained");
+    assert.equal(view(s, "participant", "p1").arcadeMine?.planApply?.struck, undefined);
   });
 });

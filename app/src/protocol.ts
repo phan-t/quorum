@@ -751,6 +751,24 @@ export interface ArcadePlanApplyRunner {
 }
 
 /**
+ * One lane of the Plan / Apply race track: where a player is against the
+ * finish line, and whether they are still running.
+ *
+ * `out` is a player the lock caught. Their count froze where they were, and
+ * the track keeps them there, wrecked, rather than dropping them: a lane that
+ * vanished would read as somebody leaving, and the wreck is what the room
+ * watches for. `across` is a player over the line.
+ */
+export interface ArcadePlanApplyTrackRunner {
+  readonly playerNumber: number;
+  readonly resources: number;
+  readonly out: boolean;
+  readonly across: boolean;
+  /** Has used their one free strike: the next tap in a lock drains them. */
+  readonly struck: boolean;
+}
+
+/**
  * Round 1, Plan / Apply.
  *
  * The two optional epochs are the point of the whole projection. A phone that
@@ -795,6 +813,15 @@ export interface ArcadePlanApplyView {
    * one runner they have already put their bet on; see `ArcadeMinePlanApply`.
    */
   readonly leaders?: readonly ArcadePlanApplyRunner[];
+  /**
+   * Every role: the whole race, one lane per player, by player number.
+   *
+   * Sent to phones as well as to the screen, because the race is the round and
+   * a phone that showed one person's bar left nobody able to see where anybody
+   * else was. It is no more than the screen already shows the room — the
+   * Desktop is screen-shared — and it carries no part of the light's schedule.
+   */
+  readonly track?: readonly ArcadePlanApplyTrackRunner[];
 }
 
 /**
@@ -1307,6 +1334,11 @@ export interface ArcadeMinePlanApply {
    * count on the big screen's ticker in the meantime.
    */
   readonly backedResources?: number;
+  /**
+   * Present once this player has used their one free strike: they tapped
+   * during a lock and were warned rather than drained. The next lock drains.
+   */
+  readonly struck?: true;
 }
 
 /**

@@ -631,6 +631,26 @@ phone vibrates on the turn. There is a 250 ms grace after the lock for
 network latency, because a fair game over a video call is one where the last
 tap before the light changed is not a loss.
 
+**A gentler opening.** The first PLAN of the round lasts 8–10 seconds, so the
+room learns the button before it learns the lock, and the round's first two
+locks give 600 ms of grace instead of 250. Later locks are unchanged.
+
+**One free strike.** Your first tap on red warns you instead of draining you:
+the phone buzzes and reads `Warning: state lock held by another process. That
+one was free. The next lock drains you.` The rest of that same lock is
+ignored, because a fast tapper has several taps already in flight. A tap in
+any later lock drains you. Every round the console starts has the strike; the
+engine's default is off.
+
+**The race track.** Every player in the room has a lane on the Desktop's light,
+on the phone under the button and on the Lounge card, sliding toward the
+finish as their count rises. A drained runner explodes where it stood and
+stays there as a wreck; a runner across the line wears a ring; a struck runner
+wears a dashed one. On a phone your own runner is green and tagged `YOU`. Up
+to 16 players every runner carries its player number; past 16 the tags are
+dropped so the lanes stay legible. The phone's track moves only on the frames
+it already receives; the Desktop's is sent each ordinary step.
+
 Checkpoints at 30, 60 and 90 resources bank **5** each. Crossing the line
 banks **+10**, and the first three across get **+15 / +10 / +5**. Drained
 players keep banked points and go to the Lounge to back a runner; backed

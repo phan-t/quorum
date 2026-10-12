@@ -587,3 +587,245 @@ button {
 [hidden] {
   display: none !important;
 }
+
+/* ---- the Plan / Apply race track --------------------------------------- */
+
+/*
+ * One lane per player, the start on the left and the finish on the right,
+ * drawn on the phone, in the Lounge and on the Desktop. See plan-track.ts.
+ *
+ * Every colour is a custom property so a surface can restyle it: the Desktop
+ * draws the track on the light itself, green or pink, where the page's ink and
+ * its red would not read, and points them all at the light's own ink.
+ *
+ * Geometry: a runner's dot sits at `--x` of the way between the lane's two
+ * pads. The left pad holds the player tag, which trails behind the dot so a
+ * runner on the start line still has room for its name.
+ */
+.pt {
+  --pt-ink: var(--ink);
+  --pt-rail: var(--line);
+  --pt-mark: var(--muted);
+  --pt-you: var(--hit);
+  --pt-out: var(--miss);
+  --pt-warn: var(--sealed);
+  --pt-pad-l: 3.6em;
+  --pt-pad-r: 1.2em;
+  --pt-dot: 12px;
+  --pt-height: 150px;
+  --pt-lane-h: 18px;
+  /* How long a lane takes to slide to its next count. A phone is sent the
+     race every few seconds, so its lanes glide; the Desktop overrides this,
+     because it is sent the race eight times a second. */
+  --pt-slide: 1200ms;
+  position: relative;
+  color: var(--pt-ink);
+  font-size: 11px;
+}
+/* As tall as its lanes need, up to `--pt-height`: a lane per player at
+   `--pt-lane-h` while they fit, then thinner lanes (and, past DENSE_AT in
+   plan-track.ts, no tags) rather than a track that pushes the screen apart. */
+.pt-lanes {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  height: min(var(--pt-height), calc(var(--pt-lanes, 8) * var(--pt-lane-h)));
+}
+.pt-lane {
+  position: relative;
+  flex: 1 1 0;
+  min-height: 2px;
+}
+.pt-rail {
+  position: absolute;
+  top: 50%;
+  left: var(--pt-pad-l);
+  right: var(--pt-pad-r);
+  height: 2px;
+  margin-top: -1px;
+  background: var(--pt-rail);
+}
+.pt-marks {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+.pt-mark,
+.pt-finish {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: calc(
+    var(--pt-pad-l) + var(--x) * (100% - var(--pt-pad-l) - var(--pt-pad-r))
+  );
+  border-left: 1px dashed var(--pt-mark);
+  opacity: 0.7;
+}
+/* The finish line, chequered in the ink so it reads on any face. */
+.pt-finish {
+  width: 6px;
+  margin-left: -3px;
+  border: 0;
+  opacity: 1;
+  background: repeating-linear-gradient(
+    to bottom,
+    var(--pt-ink) 0 4px,
+    transparent 4px 8px
+  );
+}
+.pt-runner {
+  position: absolute;
+  top: 50%;
+  left: calc(
+    var(--pt-pad-l) + var(--x, 0) * (100% - var(--pt-pad-l) - var(--pt-pad-r))
+  );
+  width: var(--pt-dot);
+  height: var(--pt-dot);
+  margin: calc(var(--pt-dot) / -2) 0 0 calc(var(--pt-dot) / -2);
+  transition: left var(--pt-slide) cubic-bezier(0.25, 0.8, 0.35, 1);
+}
+.pt-dot {
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  background: var(--pt-ink);
+}
+.pt-tag {
+  position: absolute;
+  right: calc(100% + 4px);
+  top: 50%;
+  transform: translateY(-50%);
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  white-space: nowrap;
+  line-height: 1;
+}
+/* Your own lane moves with your thumb, not with the room's frames. */
+.pt-lane[data-you="yes"] .pt-runner {
+  --pt-dot: 16px;
+  z-index: 1;
+  transition-duration: 150ms;
+}
+.pt-lane[data-you="yes"] .pt-dot {
+  background: var(--pt-you);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--pt-you) 35%, transparent);
+}
+.pt-lane[data-you="yes"] .pt-tag {
+  color: var(--pt-you);
+}
+/* Over the line: a ring, so it is not only a position that says so. */
+.pt-runner[data-state="crossed"] .pt-dot {
+  background: transparent;
+  border: 3px solid currentColor;
+}
+.pt-lane[data-you="yes"] .pt-runner[data-state="crossed"] .pt-dot {
+  border-color: var(--pt-you);
+}
+
+/* Used the free strike: a dashed ring, so the room can see who is on their
+   last life. Dashed as well as coloured, for the same reason the wrong pick in
+   trivia is. */
+.pt-lane[data-struck="yes"] .pt-runner[data-state="running"] .pt-dot {
+  outline: 2px dashed var(--pt-warn);
+  outline-offset: 3px;
+}
+
+/* Caught by the lock: a burst where it stood, then a wreck that stays. */
+.pt-runner[data-state="boom"],
+.pt-runner[data-state="wreck"] {
+  transition: none;
+}
+.pt-runner[data-state="boom"] .pt-dot {
+  background: var(--pt-out);
+  animation: pt-boom 700ms ease-out forwards;
+}
+.pt-runner[data-state="boom"]::before,
+.pt-runner[data-state="boom"]::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  pointer-events: none;
+}
+/* Shrapnel: eight specks flung outward on the box-shadow, then gone. */
+.pt-runner[data-state="boom"]::before {
+  animation: pt-shrapnel 700ms ease-out forwards;
+}
+.pt-runner[data-state="boom"]::after {
+  border: 2px solid var(--pt-out);
+  animation: pt-ring 700ms ease-out forwards;
+}
+@keyframes pt-boom {
+  0% { transform: scale(1); opacity: 1; }
+  25% { transform: scale(2.2); opacity: 1; }
+  100% { transform: scale(0.4); opacity: 0; }
+}
+@keyframes pt-ring {
+  0% { transform: scale(1); opacity: 1; }
+  100% { transform: scale(4); opacity: 0; }
+}
+@keyframes pt-shrapnel {
+  0% {
+    box-shadow:
+      0 0 0 -2px var(--pt-out), 0 0 0 -2px var(--pt-out),
+      0 0 0 -2px var(--pt-out), 0 0 0 -2px var(--pt-out),
+      0 0 0 -2px var(--pt-out), 0 0 0 -2px var(--pt-out),
+      0 0 0 -2px var(--pt-out), 0 0 0 -2px var(--pt-out);
+  }
+  100% {
+    box-shadow:
+      0 -22px 0 -3px var(--pt-out), 16px -16px 0 -3px var(--pt-out),
+      22px 0 0 -3px var(--pt-out), 16px 16px 0 -3px var(--pt-out),
+      0 22px 0 -3px var(--pt-out), -16px 16px 0 -3px var(--pt-out),
+      -22px 0 0 -3px var(--pt-out), -16px -16px 0 -3px var(--pt-out);
+    opacity: 0;
+  }
+}
+/* The wreck: a cross in the out colour, where the runner fell. */
+.pt-runner[data-state="wreck"] .pt-dot {
+  background: transparent;
+  border-radius: 0;
+}
+.pt-runner[data-state="wreck"] .pt-dot::before,
+.pt-runner[data-state="wreck"] .pt-dot::after {
+  content: "";
+  position: absolute;
+  left: 50%;
+  top: -15%;
+  width: 3px;
+  height: 130%;
+  margin-left: -1.5px;
+  background: var(--pt-out);
+  transform: rotate(45deg);
+}
+.pt-runner[data-state="wreck"] .pt-dot::after {
+  transform: rotate(-45deg);
+}
+.pt-runner[data-state="wreck"] .pt-tag {
+  color: var(--pt-out);
+  text-decoration: line-through;
+}
+
+/* Many lanes: smaller dots and no tags, except your own. The left pad stays,
+   so every lane keeps the same start and finish as the marks drawn across
+   them. */
+.pt[data-dense="yes"] {
+  --pt-dot: 7px;
+}
+.pt[data-dense="yes"] .pt-tag {
+  display: none;
+}
+.pt[data-dense="yes"] .pt-lane[data-you="yes"] .pt-tag {
+  display: block;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .pt-runner {
+    transition: none;
+  }
+  .pt-runner[data-state="boom"] .pt-dot,
+  .pt-runner[data-state="boom"]::before,
+  .pt-runner[data-state="boom"]::after {
+    animation: none;
+  }
+}

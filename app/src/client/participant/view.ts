@@ -19,6 +19,7 @@ import type {
 } from "../../protocol.ts";
 import type { OverUnder, UnsealShape } from "../../engine/types.ts";
 import { append, h, replace, setAttr, setClass, setText } from "../shared/dom.ts";
+import { createPlanTrack } from "../shared/plan-track.ts";
 import {
   roundCardLines,
   howToPlayLines,
@@ -2197,6 +2198,8 @@ function sceneArcade(ctx: SceneCtx): Scene {
   let lastCheckpoint: number | null = null;
   /** Latches the crossing line so a later frame does not re-announce it. */
   let lastPlace: number | null = null;
+  /** Whether this round's free strike has already been said. */
+  let lastStruck = false;
   /** True once a round has actually started: the welcome has been read. */
   let welcomed = false;
   /** Set for one paint when the live region holds something a mount must not eat. */
@@ -2308,6 +2311,14 @@ function sceneArcade(ctx: SceneCtx): Scene {
   }, [bigGlyph, bigWord, bigCount]) as HTMLButtonElement;
   const planHouse = houseSlot("a-plan-house");
   planHouse.node.hidden = true;
+  /**
+   * The race: everyone's position against the finish line. One on the Floor,
+   * under your own bar, and one in the Lounge, so a player the lock caught can
+   * still watch the runner they backed — and their own wreck where they fell.
+   */
+  const planTrack = createPlanTrack();
+  const loungeTrack = createPlanTrack();
+  loungeTrack.root.hidden = true;
   /** A new round has a fresh bridge: last round's commitment must not stick. */
   const resetBridge = (): void => {
     stepSent = null;
@@ -2323,7 +2334,10 @@ function sceneArcade(ctx: SceneCtx): Scene {
   const resetCheckpointLine = (): void => {
     lastCheckpoint = null;
     lastPlace = null;
+    lastStruck = false;
     planHouse.node.hidden = true;
+    planTrack.reset();
+    loungeTrack.reset();
   };
 
   /** A new round is a new tin, and last round's shape must not stick. */
@@ -2350,6 +2364,7 @@ function sceneArcade(ctx: SceneCtx): Scene {
   };
   const planNode = h("div", { class: "a-plan" }, [
     bar,
+    planTrack.root,
     // Above the button, not under it: the button fills the rest of the screen
     // and the rule has to be readable before the first light, not after it.
     playRule(PLAY_RULE.plan_apply),
@@ -2369,7 +2384,9 @@ function sceneArcade(ctx: SceneCtx): Scene {
     if (bigButton.disabled) return;
     const round = Number(bigButton.dataset["round"] ?? "-1");
     if (round < 0) return;
-    optimistic += 1;
+    // A tap on pink earns nothing, whether it warns or drains, so the count on
+    // the button must not run ahead of the server on it.
+    if (bigButton.dataset["light"] !== "apply") optimistic += 1;
     setText(bigCount, String(optimistic));
     ctx.arcadeTap(round);
   };
@@ -3876,6 +3893,7 @@ function sceneArcade(ctx: SceneCtx): Scene {
       h("span", { class: "label", text: "VIP Lounge" }),
     ]),
     h("p", { class: "a-lounge-line", text: "Your allocations have been rescheduled." }),
+    loungeTrack.root,
     loungeBacked,
     h("p", { class: "label a-lounge-prompt", text: "Back a player" }),
     loungeList,
@@ -3993,6 +4011,9 @@ function sceneArcade(ctx: SceneCtx): Scene {
 
     const face = LIGHT_FACE[pa.light];
     const server = mine.planApply?.resources ?? 0;
+    // A strike means some taps this phone counted landed in the lock and
+    // earned nothing: the server's count is the true one from here.
+    if (mine.planApply?.struck === true && !lastStruck) optimistic = server;
     if (server > optimistic) optimistic = server;
     const shown = Math.max(server, optimistic);
 
@@ -4034,6 +4055,18 @@ function sceneArcade(ctx: SceneCtx): Scene {
     }
     setAttr(bar, "aria-label", `${shown} of ${pa.target} resources`);
 
+    // Your own lane takes the count this phone is showing, not the last one
+    // the server sent: the room's lanes move at the server's pace, but yours
+    // has to move when your thumb does.
+    planTrack.update(
+      (pa.track ?? []).map((r) =>
+        r.playerNumber === mine.playerNumber ? { ...r, resources: shown } : r,
+      ),
+      pa.target,
+      pa.checkpoints,
+      mine.playerNumber,
+    );
+
     // The checkpoint, in the announcer's voice. DESIGN.md's register asks for
     // it and nothing said it: you banked five points three times in a round
     // and the phone never mentioned it.
@@ -4050,6 +4083,18 @@ function sceneArcade(ctx: SceneCtx): Scene {
         setText(announce, HOUSE.checkpoint(banked));
       }
     }
+
+    // The free strike: the lock caught them and let them go, once. Said in the
+    // error's own words, buzzed hard, and left on the screen — it is the one
+    // thing they need to remember for the rest of the round.
+    const struck = mine.planApply?.struck === true;
+    if (struck && !lastStruck) {
+      planHouse.node.hidden = false;
+      planHouse.set(HOUSE.struck);
+      setText(announce, HOUSE.struck);
+      buzz([120, 60, 120]);
+    }
+    lastStruck = struck;
 
     // Crossing the line, which is the biggest thing that happens to anyone in
     // this round and went unmentioned: you tap a hundred and twenty times and
@@ -4075,6 +4120,11 @@ function sceneArcade(ctx: SceneCtx): Scene {
 
   const paintLounge = (state: RenderState, arcade: ArcadeView, mine: ArcadeMine): void => {
     mount("lounge", [drainNode, loungeNode]);
+    const race = arcade.planApply;
+    loungeTrack.root.hidden = race?.track === undefined;
+    if (race?.track !== undefined) {
+      loungeTrack.update(race.track, race.target, race.checkpoints, mine.playerNumber);
+    }
     // `glassExit` is latched at the transition, because the frame that
     // carries a fall is the only one that can tell a fall from a timeout —
     // see paint(). Null outside the bridge, and cleared by the next round.
