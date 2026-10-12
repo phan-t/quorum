@@ -549,8 +549,13 @@ body {
   font-weight: 600;
 }
 
+/* Muted, not faded, for the reason the phone's `.t-tile.dim` gives: at 0.38
+   opacity the words faded with the fill and fell under 2.5:1. The fill keeps
+   a quarter of its hue and the words take the page's ink. */
 .s-answer.dim {
-  opacity: 0.38;
+  background: var(--panel-2);
+  background: color-mix(in srgb, var(--tile) 25%, var(--ground));
+  color: var(--ink);
 }
 .s-answer.hit {
   box-shadow: inset 0 0 0 6px var(--ink);

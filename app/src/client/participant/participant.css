@@ -923,7 +923,9 @@ body.phone #app {
   font-size: clamp(15px, 4.4vw, 19px);
   text-align: left;
   cursor: pointer;
-  transition: opacity var(--pop-ms) var(--pop);
+  transition:
+    background-color var(--pop-ms) var(--pop),
+    color var(--pop-ms) var(--pop);
 }
 .t-tile:focus-visible {
   outline: 3px solid var(--ink);
@@ -975,13 +977,25 @@ body.phone #app {
   }
 }
 
-/* Locked in: the chosen tile outlined, the others dimmed. No colour change
-   and no tick — nothing on this screen may say whether it was right. */
+/* Locked in: the chosen tile outlined, the others muted. No tick — nothing on
+   this screen may say whether it was right.
+ *
+ * Muted, not faded. These were `opacity: 0.32`, which faded the words with the
+ * fill: dark ink on a faded Consul tile measured 1.42:1 on the dark page and
+ * 1.35:1 on the light one, and players could not read the answers they had not
+ * picked. The fill now keeps a quarter of its hue over the page and the words
+ * take the page's own ink — 10.1:1 or better on every hue, both themes. */
 .t-tile.dim {
-  opacity: 0.32;
+  background: var(--panel-2);
+  background: color-mix(in srgb, var(--tile) 25%, var(--ground));
+  color: var(--ink);
 }
+/* Outside the tile, so it is measured against the page and not the hue: a
+   2px border in --ink was close to invisible on the purple tile in the light
+   theme and on the green and yellow ones in the dark. */
 .t-tile.chosen {
-  border-color: var(--ink);
+  outline: 4px solid var(--ink);
+  outline-offset: 3px;
 }
 /* Reveal, and only reveal.
  *
@@ -991,10 +1005,14 @@ body.phone #app {
  * questions in the launch set. --ink reads on every hue. The big screen
  * already did this; the phone did not. */
 .t-tile.hit {
-  box-shadow: inset 0 0 0 3px var(--ink);
+  box-shadow: inset 0 0 0 4px var(--ink);
 }
+/* The wrong pick. Dashed as well as red, so it does not rest on colour alone,
+   and outside the tile like `.chosen`: a red border on the Consul tile was red
+   on pink. */
 .t-tile.miss {
-  border-color: var(--miss);
+  outline: 4px dashed var(--miss);
+  outline-offset: 3px;
 }
 
 .t-status {
