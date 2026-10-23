@@ -26,6 +26,11 @@ npm run swarm -- 6 --url http://localhost:3000 \
 # against the deployed service, before an event
 make up && make stage EVENT=<event>
 npm run swarm -- 60 --url https://quorum.example.com --code … --host-token …
+
+# a third of the room in Europe, and a deploy in the middle of trivia
+npm run swarm -- 30 --url https://quorum.example.com --code … --host-token … \
+  --far 10 --latency 140 --jitter 80 \
+  --restart-after 40 --restart-cmd 'aws ecs stop-task --cluster quorum --task …'
 ```
 
 | Flag | |
@@ -37,6 +42,11 @@ npm run swarm -- 60 --url https://quorum.example.com --code … --host-token …
 | `--churn N` | N bots drop and rejoin on their token |
 | `--stagger MS` | space the joins, to get past the join limit |
 | `--seed N` | fixes each bot's choices, not the wall clock |
+| `--latency MS` | one-way delay each direction for the far bots |
+| `--jitter MS` | up to this much more, per frame, in order |
+| `--far N` | how many bots are far (the last N); all of them if omitted |
+| `--restart-after S` | run `--restart-cmd` this many seconds in |
+| `--restart-cmd CMD` | whatever restarts the server: `aws ecs stop-task …`, or a local `pkill` |
 
 ## Why it exists
 
@@ -134,6 +144,19 @@ from the others, which is the shape a desync takes.
 A refusal is not a fault. The engine refusing a tap that arrived after a round
 closed is correct, and a run has dozens. Silence is the fault.
 
+**Distance**, when `--latency` or `--jitter` is given. Reply round trips and
+the share of frames refused, for far bots and near bots side by side. Far bots
+are refused a little more — a tap that lands after a lock is refused for them
+sooner — and a gap much wider than the near bots' is a grace that is not
+covering the distance.
+
+**The server went away**, when it did. Every bot, the host and the Desktop
+reconnect the way `net.ts` does — the same backoff, on the rejoin token — when
+the server closes a socket the run did not. The report gives how many sockets
+were dropped, how long they took to come back, any that never did, frames that
+were in flight and died with the process, and trivia answers sent again
+because the server came back without them.
+
 **Timing.** Round-trip from a play frame to its reply — an ack or a refusal,
 since both are replies — as p50 / p95 / slowest. This is the number that turns
 into a missed beat in Tug of Raft when the server's loop is busy.
@@ -165,6 +188,7 @@ The exit code is non-zero if any check fails, so this can gate a deploy. Checks
 are deliberately about the room rather than the code:
 
 - every bot joined, or the reason it did not is a reason the host chose
+- every socket the server dropped came back as itself
 - no bot saw a `seq` gap that stayed open — a gap counts as closed only when a
   *later* frame answers the resync, never the frame that revealed it
 - every bot ended on the same segment, and at least one bot joined
@@ -180,19 +204,14 @@ copy of a better test. If the swarm's scores are wrong and the bots' are right,
 the bug is in the wire or the projection, which is what the gap and desync
 checks are for.
 
-It does not open a Desktop socket, so the surface that receives the heaviest
-frames is unmeasured. It does not test reconnect: `rejoinToken` is captured and
-never used, so the restart storm — everyone coming back inside a second — is
-still untested by anything.
-
 It does not walk a whole session. The run of show plays three questions and
 four arcade rounds, which is enough to exercise every code path without taking
 twenty minutes.
 
-It does not survive a deploy, because it opens its sockets after one. Every bot
-here is a fresh client running the build it just connected with, so it can
-never be the thing that was left open across a release — which is the case that
-hurts. **After a deploy that changes a frame's shape, reload any Desktop or
+It survives a restart, but its bots are always the build they started with:
+they speak whatever frames this checkout's `protocol.ts` describes, so a run
+across a deploy says the room came back, not that an old tab can read the new
+server's frames — which is the case that hurts. **After a deploy that changes a frame's shape, reload any Desktop or
 console that was already open.** They reconnect without reloading, by design,
 so an open tab keeps running the old JavaScript against the new server's
 frames; when a frame narrowed, the old code reads a field that is no longer
@@ -210,6 +229,22 @@ thing stayed up and stayed consistent while sixty sockets used it.
 
 **Bot names are fixed by index**, so a second run against the *same* session is
 refused with `nickname_taken` for every bot. Stage a fresh session per run.
+
+## Rehearsing a restart locally
+
+The local store has to outlive the process, so this needs DynamoDB Local
+(`docker compose up -d`, or the same image under Podman with `-inMemory`) and
+something that starts the server again when it exits, as ECS does:
+
+```bash
+while true; do QUORUM_ENV=local QUORUM_ADMIN_KEY=localdev PORT=3000 \
+  node --experimental-strip-types src/server/main.ts; sleep 3; done
+```
+
+Then `--restart-cmd 'pkill -TERM -f src/server/main.ts'`. A first run of 20
+bots, 8 of them at 140 ms ± 80 ms, with the SIGTERM four seconds before a
+question's deadline: all 22 sockets back in 6–7 s, the question paused through
+the gap and resumed on the five-second floor, every check green.
 
 ## Running it against production
 
