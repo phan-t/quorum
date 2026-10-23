@@ -777,9 +777,10 @@ the only rehearsal a host can run alone.
 **The bots are not a load test and cannot be pointed at a deployment.** They
 have no network layer at all: events go straight into `reduce`, the clock is a
 counter, and the whole run is in one process. They prove the engine behaves at
-real headcount. Thirty concurrent WebSockets, thirty reconnects during a deploy,
-a tap flood arriving over a real link — none of that is exercised anywhere, and
-that gap is worth knowing about rather than assuming the harness covers it.
+real headcount. The socket path is the swarm's job (`npm run swarm`,
+[docs/smoke-test.md](docs/smoke-test.md)): real WebSockets against a running
+server, with far-away players on an added delay and jitter, and a restart in
+the middle that every socket has to come back from.
 
 ## Cost
 

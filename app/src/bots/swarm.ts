@@ -3,6 +3,7 @@
  *
  *     npm run swarm -- 20 --url http://localhost:3000 --code hvs.xxx --host-token XXX
  *     npm run swarm -- 60 --url https://quorum.example.com --code … --host-token … --seed 99
+ *     npm run swarm -- 30 … --far 10 --latency 140 --jitter 60 --restart-after 90 --restart-cmd '…'
  *
  * Unlike `simulate.ts`, which drives the reducer in memory, everything here
  * goes over the wire: one socket per bot, one for the host, the same frames
@@ -18,6 +19,8 @@
  * so the same `--seed` plays the same way. What it cannot make deterministic
  * is the network, which is the part under test.
  */
+
+import { exec } from "node:child_process";
 
 import { WebSocket } from "ws";
 
@@ -59,6 +62,17 @@ interface Opts {
   readonly churnCount: number;
   /** Play the staged event's own plan and timings, not the built-in sweep. */
   readonly fromSession: boolean;
+  /**
+   * Players a long way from the region: `far` bots get `latencyMs` of one-way
+   * delay, plus up to `jitterMs` more, in each direction. Sydney to London is
+   * about 140 one way; a hotel's Wi-Fi is the jitter.
+   */
+  readonly farCount: number;
+  readonly latencyMs: number;
+  readonly jitterMs: number;
+  /** Run `restartCmd` this many seconds in: a deploy, or a stopped task. */
+  readonly restartAfterS: number | null;
+  readonly restartCmd: string | null;
 }
 
 /** A progress line, so a long run is not silent. */
@@ -102,6 +116,27 @@ function parseArgs(argv: readonly string[]): Opts {
   if (!Number.isInteger(lateCount) || lateCount < 0) die("--late must be a whole number.");
   if (!Number.isInteger(churnCount) || churnCount < 0) die("--churn must be a whole number.");
   if (lateCount + churnCount > count) die("--late plus --churn cannot exceed the bot count.");
+  const latencyMs = Number(flag("latency") ?? 0);
+  const jitterMs = Number(flag("jitter") ?? 0);
+  if (!Number.isFinite(latencyMs) || latencyMs < 0) die("--latency must be a number of milliseconds.");
+  if (!Number.isFinite(jitterMs) || jitterMs < 0) die("--jitter must be a number of milliseconds.");
+  // Every bot is far when a delay is asked for and --far is not: one flag is
+  // enough for "what is this like from London".
+  const latent = latencyMs > 0 || jitterMs > 0;
+  const farCount = Number(flag("far") ?? (latent ? count : 0));
+  if (!Number.isInteger(farCount) || farCount < 0 || farCount > count) {
+    die("--far must be a whole number no larger than the bot count.");
+  }
+  if (farCount > 0 && !latent) die("--far needs --latency or --jitter.");
+  const rawRestart = flag("restart-after");
+  const restartAfterS = rawRestart === undefined ? null : Number(rawRestart);
+  if (restartAfterS !== null && (!Number.isFinite(restartAfterS) || restartAfterS < 0)) {
+    die("--restart-after must be a number of seconds.");
+  }
+  const restartCmd = flag("restart-cmd") ?? null;
+  if ((restartAfterS === null) !== (restartCmd === null)) {
+    die("--restart-after and --restart-cmd go together.");
+  }
   return {
     count, url, code, hostToken, seed,
     joinOnly: argv.includes("--join-only"),
@@ -111,6 +146,11 @@ function parseArgs(argv: readonly string[]): Opts {
     lateCount,
     churnCount,
     fromSession: argv.includes("--from-session"),
+    farCount,
+    latencyMs,
+    jitterMs,
+    restartAfterS,
+    restartCmd,
   };
 }
 
@@ -181,20 +221,122 @@ class Conn {
   closedWith: number | null = null;
   reconnects = 0;
   error: string | null = null;
+  /** `welcome`s received, so a bot can tell a reconnect from a broadcast. */
+  welcomes = 0;
+
+  /* ---- distance ---- */
+  /** One-way delay in each direction, or null for a bot next to the region. */
+  latency: { readonly baseMs: number; readonly jitterMs: number } | null = null;
+  /**
+   * When the last delayed frame each way is due. Frames are held in order, as
+   * TCP holds them: jitter that reordered them would be testing a network
+   * nobody has.
+   */
+  private outDue = 0;
+  private inDue = 0;
+
+  /* ---- coming back from a server that went away ---- */
+  /** Set before a close this run chose, so it is not mistaken for a drop. */
+  ownClose = false;
+  /** Dial again with the client's backoff. Set by {@link keepDialling}. */
+  redial: (() => Promise<void>) | null = null;
+  redialing = false;
+  /** Times the server closed this socket without being asked to. */
+  serverDrops = 0;
+  /** Milliseconds from each drop to the next `welcome`. */
+  readonly returnMs: number[] = [];
+  /** A drop this socket never came back from. */
+  stranded = false;
+  /** Frames in flight when the server went, which nobody was going to answer. */
+  lostInDrop = 0;
 
   constructor(label: string) {
     this.label = label;
   }
 
+  private delay(): number {
+    if (this.latency === null) return 0;
+    return this.latency.baseMs + Math.random() * this.latency.jitterMs;
+  }
+
+  /** Run `go` after this socket's one-way delay, behind anything already held. */
+  private hold(direction: "out" | "in", go: () => void): void {
+    if (this.latency === null) return go();
+    const now = Date.now();
+    const due = Math.max(direction === "out" ? this.outDue : this.inDue, now + this.delay());
+    if (direction === "out") this.outDue = due;
+    else this.inDue = due;
+    setTimeout(go, due - now);
+  }
+
+  /** A frame from the server, after it has crossed the distance. */
+  arrive(go: () => void): void {
+    this.hold("in", go);
+  }
+
   send(msg: ClientMessage): void {
-    if (this.ws === null || this.ws.readyState !== WebSocket.OPEN) return;
+    const ws = this.ws;
+    if (ws === null || ws.readyState !== WebSocket.OPEN) return;
     const cid = (msg as { cid?: string }).cid;
     if (cid !== undefined) {
+      // Timed from the press, so a far bot's round trip includes the distance
+      // its player would feel.
       this.pending.set(cid, Date.now());
       this.sent += 1;
     }
-    this.ws.send(JSON.stringify(msg));
+    const text = JSON.stringify(msg);
+    // The socket it was meant for. A frame still crossing when that socket
+    // dies is lost with it, as it would be from a phone.
+    this.hold("out", () => {
+      if (ws.readyState === WebSocket.OPEN) ws.send(text);
+    });
   }
+}
+
+/** The client's reconnect backoff (`BACKOFF_MS` in net.ts), jittered the same way. */
+const BACKOFF_MS = [300, 800, 1_600, 3_200, 6_400, 10_000] as const;
+
+/** How long a dropped socket keeps trying before the run calls it stranded. */
+const REDIAL_GIVE_UP_MS = 120_000;
+
+/**
+ * Reconnect when the server goes away, as `net.ts` does.
+ *
+ * Until this, a bot whose socket the server closed stayed closed, so a restart
+ * during a run ended the run for everyone and the restart storm — every phone
+ * coming back inside a few seconds on its rejoin token — was untested by
+ * anything.
+ */
+function keepDialling(conn: Conn, dial: () => Promise<void>): void {
+  conn.redial = async () => {
+    if (conn.redialing) return;
+    conn.redialing = true;
+    const droppedAt = Date.now();
+    conn.serverDrops += 1;
+    // Nobody is going to answer these: the process that would have is gone.
+    conn.lostInDrop += conn.pending.size;
+    conn.pending.clear();
+    for (let attempt = 0; ; attempt++) {
+      const base = BACKOFF_MS[Math.min(attempt, BACKOFF_MS.length - 1)] ?? 10_000;
+      // A held timer, unlike `sleep`: while the server is down every socket
+      // is closed, and this wait is the only thing keeping the run alive.
+      await new Promise((r) => setTimeout(r, Math.round(base * (0.8 + Math.random() * 0.4))));
+      if (conn.ownClose) break;
+      await dial();
+      if (conn.refused !== null) break; // terminal, as it is for a phone
+      if (conn.joinedAt !== null && conn.joinedAt > droppedAt) {
+        conn.returnMs.push(conn.joinedAt - droppedAt);
+        // The refused connections on the way back were the restart, not a fault.
+        conn.error = null;
+        break;
+      }
+      if (Date.now() - droppedAt > REDIAL_GIVE_UP_MS) {
+        conn.stranded = true;
+        break;
+      }
+    }
+    conn.redialing = false;
+  };
 }
 
 /**
@@ -414,9 +556,44 @@ class Bot {
   }
 
   /** Called on every `state` frame. */
+  /** The last trivia answer, kept until the server is seen holding it. */
+  private lastAnswer: { index: number; text: string; choice: number } | null = null;
+  private seenWelcomes = 0;
+  /** Answers sent again after a reconnect, as `net.ts` sends them. */
+  resent = 0;
+
   react(s: RenderState): void {
+    const reconnected = this.seenWelcomes > 0 && this.conn.welcomes > this.seenWelcomes;
+    this.seenWelcomes = this.conn.welcomes;
+    this.settleAnswer(s, reconnected);
     if (s.segment === "trivia") this.playTrivia(s);
     else if (s.segment === "arcade") this.playArcade(s);
+  }
+
+  /**
+   * The phone's half of a restart: an answer the server does not have, on a
+   * question it still has open, goes again on the first state after a
+   * reconnect. The same rule as `#settleAnswer` in net.ts, which these bots do
+   * not run.
+   */
+  private settleAnswer(s: RenderState, reconnected: boolean): void {
+    const a = this.lastAnswer;
+    if (a === null) return;
+    const t = s.trivia;
+    const pending =
+      t !== undefined &&
+      t.phase === "open" &&
+      t.index === a.index &&
+      t.text === a.text &&
+      s.triviaMine?.state === "unanswered";
+    if (!pending) {
+      this.lastAnswer = null;
+      return;
+    }
+    if (reconnected) {
+      this.resent += 1;
+      this.conn.send({ t: "trivia.answer", cid: this.cid(), index: a.index, choice: a.choice });
+    }
   }
 
   private playTrivia(s: RenderState): void {
@@ -439,6 +616,7 @@ class Bot {
       // anyway is what a real phone does, and the refusal is worth counting.
       if (now?.index !== t.index) return;
       this.done.add(`q${t.index}`);
+      this.lastAnswer = { index: t.index, text: t.text, choice };
       this.act({ t: "trivia.answer", cid: this.cid(), index: t.index, choice });
     });
   }
@@ -575,6 +753,9 @@ function connect(
     const ws = new WebSocket(wsUrl);
     conn.ws = ws;
     conn.openedAt = Date.now();
+    // The server numbers frames per socket from 1. Carrying the old socket's
+    // count over hid every gap on a reconnected one.
+    conn.lastSeq = 0;
     let settled = false;
     let pinger: ReturnType<typeof setInterval> | null = null;
     const settle = (): void => {
@@ -584,9 +765,12 @@ function connect(
       }
     };
 
-    ws.on("open", () => ws.send(JSON.stringify(hello)));
+    ws.on("open", () => conn.send(hello));
 
-    ws.on("message", (raw: Buffer | string) => {
+    ws.on("message", (raw: Buffer | string) => conn.arrive(() => {
+      // A frame still crossing when its socket was replaced belongs to the
+      // old one, and the new one's sequence must not see it.
+      if (conn.ws !== ws) return;
       const text = typeof raw === "string" ? raw : raw.toString("utf8");
       let msg: ServerMessage;
       try {
@@ -605,13 +789,12 @@ function connect(
       switch (msg.t) {
         case "welcome":
           conn.joinedAt = Date.now();
+          conn.welcomes += 1;
           conn.pid = msg.pid ?? null;
           conn.rejoinToken = msg.rejoinToken ?? null;
           if (pinger === null) {
             pinger = setInterval(() => {
-              if (ws.readyState === WebSocket.OPEN) {
-                ws.send(JSON.stringify({ t: "ping", t0: Date.now() } satisfies ClientMessage));
-              }
+              if (conn.ws === ws) conn.send({ t: "ping", t0: Date.now() });
             }, PING_EVERY_MS);
             pinger.unref?.();
           }
@@ -679,13 +862,26 @@ function connect(
         conn.state = msg.state;
         onState(msg.state);
       }
-    });
+    }));
 
     ws.on("close", (code: number) => {
       if (pinger !== null) clearInterval(pinger);
       pinger = null;
       conn.closedWith = code;
       settle();
+      // The server went away under a socket that had joined: come back. Not a
+      // close this run asked for, not a refusal, and not a failed attempt
+      // inside a redial that is already running.
+      if (
+        conn.ws === ws &&
+        conn.redial !== null &&
+        !conn.ownClose &&
+        !conn.redialing &&
+        conn.joinedAt !== null &&
+        conn.refused === null
+      ) {
+        void conn.redial();
+      }
     });
     ws.on("error", (err: Error) => {
       // `ws` reports ECONNREFUSED with an empty message, so the code is the
@@ -1196,6 +1392,51 @@ function report(
     line();
   }
 
+  /* ---- distance ---- */
+  const far = conns.filter((c) => c.latency !== null);
+  if (far.length > 0) {
+    const near = conns.filter((c) => c.latency === null);
+    const trip = (cs: readonly Conn[]): string => {
+      const ms = cs.flatMap((c) => c.ackMs);
+      return ms.length === 0
+        ? "no replies"
+        : `p50 ${percentile(ms, 50)}ms · p95 ${percentile(ms, 95)}ms · slowest ${Math.max(...ms)}ms`;
+    };
+    const refusedShare = (cs: readonly Conn[]): string => {
+      const sent = cs.reduce((n, c) => n + c.sent, 0);
+      const refusedN = cs.reduce((n, c) => n + c.refusedCmds.length, 0);
+      return sent === 0 ? "0%" : `${Math.round((refusedN / sent) * 100)}%`;
+    };
+    line("  Distance");
+    line(`    far bots   ${far.length}, ${opts.latencyMs}ms one way + up to ${opts.jitterMs}ms`);
+    line(`    far  reply ${trip(far)} · refused ${refusedShare(far)}`);
+    if (near.length > 0) line(`    near reply ${trip(near)} · refused ${refusedShare(near)}`);
+    // A refusal is not a fault, but a far player refused much more often than
+    // a near one is a player the graces are not covering.
+    line();
+  }
+
+  /* ---- the server going away ---- */
+  const everyConn = [...conns, host, ...(screen ? [screen] : [])];
+  const dropped = everyConn.filter((c) => c.serverDrops > 0);
+  const stranded = dropped.filter((c) => c.stranded || c.refused !== null);
+  if (dropped.length > 0) {
+    const back = dropped.flatMap((c) => c.returnMs);
+    const secs1 = (ms: number): string => `${(ms / 1000).toFixed(1)}s`;
+    line("  The server went away");
+    line(`    sockets dropped   ${dropped.length} (${dropped.filter((c) => c.label === "host").length > 0 ? "host included" : "host stayed up"})`);
+    if (back.length > 0) {
+      line(
+        `    back in           p50 ${secs1(percentile(back, 50))} · p95 ${secs1(percentile(back, 95))} · slowest ${secs1(Math.max(...back))}`,
+      );
+    }
+    line(`    never came back   ${stranded.length}`);
+    for (const c of stranded.slice(0, 6)) line(`      ${c.label}: ${c.refused ?? "gave up redialling"}`);
+    line(`    frames lost in it ${everyConn.reduce((n, c) => n + c.lostInDrop, 0)}   (in flight when the server went)`);
+    line(`    answers resent    ${bots.reduce((n, b) => n + b.resent, 0)}   (the server did not have them)`);
+    line();
+  }
+
   /* ---- the experience, as the bots had it ---- */
   const played = conns.length > 0 ? bots.filter((b) => b.conn.joinedAt !== null) : [];
   if (played.length > 0) {
@@ -1327,6 +1568,14 @@ function report(
           : `${reconnected.filter((c) => c.refused !== null).length} bot(s) could not rejoin`,
     },
     {
+      ok: stranded.length === 0,
+      text: dropped.length === 0
+        ? "the server never dropped a socket"
+        : stranded.length === 0
+          ? `all ${dropped.length} socket(s) the server dropped came back as themselves`
+          : `${stranded.length} socket(s) the server dropped never came back`,
+    },
+    {
       // Not a mechanical failure — the server can be perfect and the
       // afternoon still be dull. This is the only check about whether the
       // event was worth attending.
@@ -1399,9 +1648,12 @@ async function main(): Promise<void> {
   }
 
   const hostConn = new Conn("host");
-  await connect(wsUrl, hostConn, { t: "hello", role: "host", hostToken: opts.hostToken }, (st) => {
-    hostConn.state = st;
-  });
+  const dialHost = (): Promise<void> =>
+    connect(wsUrl, hostConn, { t: "hello", role: "host", hostToken: opts.hostToken }, (st) => {
+      hostConn.state = st;
+    });
+  keepDialling(hostConn, dialHost);
+  await dialHost();
   if (hostConn.joinedAt === null) {
     die(`  the host socket did not connect: ${hostConn.refused ?? hostConn.error ?? "silent"}`);
   }
@@ -1412,22 +1664,34 @@ async function main(): Promise<void> {
   // every roster change — and until now nothing measured it.
   let screen: Conn | null = null;
   if (opts.screenToken !== null) {
-    screen = new Conn("screen");
-    await connect(
-      wsUrl,
-      screen,
-      { t: "hello", role: "screen", screenToken: opts.screenToken },
-      (st) => {
-        if (screen !== null) screen.state = st;
-      },
-    );
+    const desk = new Conn("screen");
+    screen = desk;
+    const screenToken = opts.screenToken;
+    const dialScreen = (): Promise<void> =>
+      connect(wsUrl, desk, { t: "hello", role: "screen", screenToken }, (st) => {
+        desk.state = st;
+      });
+    keepDialling(desk, dialScreen);
+    await dialScreen();
     if (screen.joinedAt === null) log(`  the Desktop did not connect: ${screen.refused ?? screen.error ?? "silent"}`);
   }
 
   const bots = Array.from({ length: opts.count }, (_, i) => {
     const suffix = i >= NAMES.length ? `-${Math.floor(i / NAMES.length)}` : "";
-    return new Bot(i, `${NAMES[i % NAMES.length]}${suffix}`, opts.seed);
+    const bot = new Bot(i, `${NAMES[i % NAMES.length]}${suffix}`, opts.seed);
+    // The far bots are the last ones, so --late and --churn, which take from
+    // either end, do not quietly decide which players are far away.
+    if (i >= opts.count - opts.farCount) {
+      bot.conn.latency = { baseMs: opts.latencyMs, jitterMs: opts.jitterMs };
+    }
+    return bot;
   });
+  if (opts.farCount > 0) {
+    log(
+      `  ${opts.farCount} bot(s) far away: ${opts.latencyMs}ms one way` +
+        (opts.jitterMs > 0 ? ` + up to ${opts.jitterMs}ms jitter` : ""),
+    );
+  }
 
   const joinBot = async (b: Bot): Promise<void> => {
     await connect(
@@ -1443,6 +1707,7 @@ async function main(): Promise<void> {
       (st) => b.react(st),
     );
   };
+  for (const b of bots) keepDialling(b.conn, () => joinBot(b));
 
   // The staged plan, if asked for. The sid comes from `welcome`, which is why
   // this happens after the host socket is up rather than from the arguments.
@@ -1510,12 +1775,31 @@ async function main(): Promise<void> {
       const victims = bots.slice(0, opts.churnCount);
       log(`  ${victims.length} bot(s) dropping and reconnecting`);
       for (const b of victims) {
+        b.conn.ownClose = true;
         b.conn.ws?.close();
         b.conn.reconnects += 1;
         await sleep(1_500);
+        b.conn.ownClose = false;
         await joinBot(b);
         await sleep(400);
       }
+    })();
+  }
+
+  // A restart in the middle of the show: a deploy, or a task ECS replaced.
+  // The command is the operator's — `aws ecs stop-task …` against a deployed
+  // service, or whatever bounces a local one — and the run measures the room
+  // coming back, not the command.
+  if (opts.restartAfterS !== null && opts.restartCmd !== null) {
+    const restartCmd = opts.restartCmd;
+    void (async () => {
+      await sleep(opts.restartAfterS! * 1000);
+      log(`  restarting the server: ${restartCmd}`);
+      exec(restartCmd, (err, stdout, stderr) => {
+        const said = `${stdout}${stderr}`.trim();
+        if (said !== "") log(`  restart said: ${said.split("\n").slice(-3).join(" | ")}`);
+        if (err) log(`  restart command failed: ${err.message}`);
+      });
     })();
   }
 
@@ -1524,9 +1808,10 @@ async function main(): Promise<void> {
 
   clearInterval(sampler);
   const code = report(bots, hostConn, screen, opts, Date.now() - started);
-  for (const b of bots) b.conn.ws?.close();
-  hostConn.ws?.close();
-  screen?.ws?.close();
+  for (const c of [...bots.map((b) => b.conn), hostConn, ...(screen ? [screen] : [])]) {
+    c.ownClose = true;
+    c.ws?.close();
+  }
   process.exit(code);
 }
 
