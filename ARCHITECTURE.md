@@ -583,6 +583,18 @@ thought was present as `away`, and re-arms timers from the state: a `closesAt`
 in the past fires immediately, one in the future is scheduled. All of this
 happens before the port opens.
 
+**An open trivia question is the exception: its clock stops.** The process is
+up well before the ALB has seen it healthy, so a deadline re-armed at boot
+used to close the question before any phone could get back to it. Recovery
+instead applies `pauseQuestion` at the newest instant the rows prove the old
+process was alive (`lastAliveAt`: the snapshot's write time, or a later
+event's), which keeps the elapsed and remaining time and clears `closesAt`. The
+first participant to reconnect applies `resumeQuestion`, and the question
+carries on with the time it had left, never less than five seconds. A question
+whose deadline had already passed is not paused and closes as before. The
+arcade's clocks are not paused; a round in flight still re-arms from the
+state.
+
 **The snapshot says which shape it is.** `version` is the writer's
 `SNAPSHOT_VERSION` and `at` is the writer's clock, and recovery reads both. A
 field added to a round in flight arrives missing on every row written before the
@@ -612,8 +624,12 @@ through — and the rejoin token gets them back as themselves.
 (task stop, new task pull and start, health check) during which surfaces show
 the reconnect banner. Then everyone is back on the same segment. If a trivia
 question was open, the snapshot has the answers received before the process
-died and lost the ones sent during the gap. Nothing about the scoreboard is
-ever inconsistent, because scores are derived from persisted events.
+died, and the question waits, paused, until the room is back (above). A phone
+keeps its last trivia tap until a `state` shows the server holding it, and
+sends it again on the first `state` after a reconnect if the same question is
+still open with nothing from it — so a tap made into the gap, or accepted by a
+process that died before writing it, still counts. Nothing about the scoreboard is ever inconsistent, because scores
+are derived from persisted events.
 
 **There is no re-ask.** This paragraph used to promise one — a flag on the
 affected question and a button to ask it again — and none of it exists: no

@@ -139,6 +139,13 @@ export const MIN_NICKNAME_LENGTH = 2;
  */
 export const MAX_NICKNAME_LENGTH = 24;
 
+/**
+ * The least a question paused by a restart gets back when it resumes. It is
+ * resumed by the first phone to reconnect, and the others are a few seconds of
+ * backoff behind it. See `resumeQuestion`.
+ */
+export const RESUME_FLOOR_MS = 5_000;
+
 export interface NewSessionInput {
   readonly sid: string;
   readonly title: string;
@@ -1477,6 +1484,61 @@ export function reduce(
       );
     }
 
+    case "pauseQuestion": {
+      // `now` is when the last process was last known to be alive, not this
+      // boot: recovery passes the newest instant the rows carry. The gap
+      // between the two is the restart, and it is the part nobody played.
+      const trivia = state.trivia;
+      if (
+        !trivia ||
+        trivia.phase !== "open" ||
+        trivia.paused !== undefined ||
+        trivia.opensAt === null ||
+        trivia.closesAt === null
+      ) {
+        return unchanged();
+      }
+      const remainingMs = trivia.closesAt - now;
+      // Already over when the process went: the deadline passed and only the
+      // timer was missing. That is a question to close, not one to resume.
+      if (remainingMs <= 0) return unchanged();
+      return applied(
+        {
+          ...state,
+          trivia: {
+            ...trivia,
+            closesAt: null,
+            paused: { elapsedMs: Math.max(0, now - trivia.opensAt), remainingMs },
+          },
+        },
+        [PERSIST],
+      );
+    }
+
+    case "resumeQuestion": {
+      const trivia = state.trivia;
+      if (!trivia || trivia.phase !== "open" || trivia.paused === undefined) {
+        return unchanged();
+      }
+      const { paused, ...rest } = trivia;
+      return applied(
+        {
+          ...state,
+          trivia: {
+            ...rest,
+            // The clock carries on from where it stopped, so a response time
+            // counts the seconds the room had and not the restart. The floor
+            // is for the question that went with a second left on it: the
+            // first phone back is not the last, and the rest deserve a moment
+            // to find the button.
+            opensAt: now - paused.elapsedMs,
+            closesAt: now + Math.max(paused.remainingMs, RESUME_FLOOR_MS),
+          },
+        },
+        [BROADCAST_STATE, PERSIST],
+      );
+    }
+
     case "closeQuestion": {
       const trivia = state.trivia;
       if (!trivia) {
@@ -1490,8 +1552,11 @@ export function reduce(
         );
       }
       const settled = settleQuestion(trivia);
+      // A question the host closes while it is still paused takes its stopped
+      // clock with it; the next question starts with none.
+      const { paused: _paused, ...open } = trivia;
       const next: TriviaState = {
-        ...trivia,
+        ...open,
         phase: "closed",
         // types.ts: these are null unless the question is open. A closed
         // question has no instant left to count down to, and a sudden death

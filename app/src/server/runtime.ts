@@ -730,6 +730,18 @@ export class SessionRuntime {
    * state" and leaves the room on the reveal rather than on a question that
    * stopped counting down.
    */
+  /**
+   * Start the clock again on a question a restart paused, if there is one.
+   *
+   * Called for the first participant back rather than at boot: the process is
+   * up well before the load balancer sends anyone to it, and a clock running
+   * through that gap is the one recovery stopped. See `pauseOpenQuestion`.
+   */
+  resumePausedQuestion(now = Date.now()): void {
+    if (triviaStateOf(this.state)?.paused === undefined) return;
+    this.apply({ type: "resumeQuestion" }, now);
+  }
+
   armQuestionTimer(now = Date.now()): void {
     const trivia = triviaStateOf(this.state);
     const want =

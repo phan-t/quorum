@@ -1003,7 +1003,10 @@ any session with more than fifteen people, which is what the playbook's
 
 **The server restarts mid-game.** Every state transition is persisted, so the
 service comes back with the session intact within about twenty seconds and
-every surface reconnects by itself. Answers that arrived in the gap are lost.
+every surface reconnects by itself. A trivia question that was open is paused
+rather than left to run out, and resumes with the time it had left when the
+first phone is back; a tap made during the gap is sent again by the phone once
+it reconnects. The arcade's rounds are not paused.
 
 **There is no re-ask. Not built.** This said the console offered one on the
 affected question; there is no such command, no event for it, and nothing that

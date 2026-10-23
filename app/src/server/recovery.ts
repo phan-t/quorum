@@ -594,6 +594,39 @@ export function markEveryoneDisconnected(state: SessionState, now: number): Sess
   );
 }
 
+/**
+ * The newest instant the rows prove the last process was alive at.
+ *
+ * A SIGTERM writes a final snapshot, so after a deploy this is the moment of
+ * shutdown. After a crash it is the last transition that reached the table,
+ * which is earlier than the crash — so a question paused from it gets back a
+ * little more time than it lost, never less. Null when the rows carry no clock.
+ */
+export function lastAliveAt(loaded: LoadedSession): number | null {
+  let at = loaded.snapshot?.writtenAt ?? null;
+  for (const e of loaded.events) {
+    if (Number.isFinite(e.at) && (at === null || e.at > at)) at = e.at;
+  }
+  return at;
+}
+
+/**
+ * Stop the clock on a question that was open when the process went away.
+ *
+ * Without this, recovery re-armed the question's own deadline, and a deadline
+ * that passed during the restart fired before a single phone was back — so a
+ * crash five seconds into a twenty-second question closed it on a room that
+ * never saw it again. Paused, it resumes with the time it had left when the
+ * first participant reconnects (`SessionRuntime.resumePausedQuestion`).
+ *
+ * Run through the reducer, as the disconnects are. A row with no clock to read
+ * is left as it was, and so is a question whose deadline had already passed.
+ */
+export function pauseOpenQuestion(state: SessionState, aliveAt: number | null): SessionState {
+  if (aliveAt === null) return state;
+  return replay(state, [{ event: { type: "pauseQuestion" as const }, at: aliveAt }]);
+}
+
 /** What the rows in the table say about their vintage, in one object. */
 export interface SnapshotCensus {
   /** Rows loaded, snapshot or not. */
@@ -846,7 +879,10 @@ export async function recoverSessions(
         );
       }
 
-      const state = markEveryoneDisconnected(built.state, now);
+      const state = markEveryoneDisconnected(
+        pauseOpenQuestion(built.state, lastAliveAt(session)),
+        now,
+      );
       const runtime = registry.restore(session, state);
 
       // Write the corrected state straight back. Until someone reconnects, the

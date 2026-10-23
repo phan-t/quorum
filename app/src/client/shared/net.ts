@@ -111,6 +111,17 @@ export class QuorumClient {
   #stateGraceTimer: ReturnType<typeof setTimeout> | null = null;
   #resyncPending = false;
   #cidSeq = 0;
+  /**
+   * The last trivia tap, kept until a `state` shows the server holding it or
+   * the question gone. A tap made while the socket was down went nowhere —
+   * `send` on a closed transport is a no-op — and one the server accepted
+   * just before it died may not have reached the table. Either way the phone
+   * showed "locked in" over an answer the room's score never saw.
+   */
+  #lastAnswer: { cid: string; index: number; text: string | null; choice: number } | null =
+    null;
+  /** Set by `welcome`: the next `state` decides whether the tap goes again. */
+  #resendAnswer = false;
 
   constructor(opts: QuorumClientOptions) {
     this.#opts = opts;
@@ -173,6 +184,10 @@ export class QuorumClient {
    */
   answer(index: number, choice: number): string {
     const cid = this.#nextCid();
+    // The question's text as well as its index: every sudden death is index
+    // -1, and a tap kept for one tiebreak must not land on the next.
+    const text = this.#state?.trivia?.text ?? null;
+    this.#lastAnswer = { cid, index, text, choice };
     this.#send({ t: "trivia.answer", cid, index, choice });
     return cid;
   }
@@ -404,6 +419,7 @@ export class QuorumClient {
         this.#startPings();
         // A reconnect starts from nothing: the deltas we missed are gone.
         this.#lastSeq = null;
+        this.#resendAnswer = true;
         this.#clearTimer("stateGrace");
         this.#stateGraceTimer = setTimeout(() => {
           if (this.#lastSeq === null) this.#requestResync();
@@ -426,6 +442,7 @@ export class QuorumClient {
         this.#lastSeq = msg.seq;
         this.#clearTimer("stateGrace");
         this.#state = msg.state;
+        this.#settleAnswer(msg.state);
         this.#opts.onState?.(msg.state);
         return;
       }
@@ -471,6 +488,38 @@ export class QuorumClient {
         this.#recordOffset(msg.t0, msg.t1);
         return;
       }
+    }
+  }
+
+  /**
+   * Forget the kept tap once the server has it or its question has gone, and
+   * send it again if this is the first state after a reconnect and the server
+   * still has the question open with nothing from us on it.
+   *
+   * Only after a reconnect. An ordinary broadcast can overtake the tap on its
+   * way in and still say `unanswered`; sending it again then would be a
+   * second frame for one press. After a reconnect the old socket is gone, so
+   * nothing of ours can still be in flight. The server refuses a duplicate
+   * anyway: one answer per question is its rule, not this file's.
+   */
+  #settleAnswer(state: RenderState): void {
+    const resend = this.#resendAnswer;
+    this.#resendAnswer = false;
+    const a = this.#lastAnswer;
+    if (a === null) return;
+    const t = state.trivia;
+    const pending =
+      t !== undefined &&
+      t.phase === "open" &&
+      t.index === a.index &&
+      (a.text === null || t.text === a.text) &&
+      state.triviaMine?.state === "unanswered";
+    if (!pending) {
+      this.#lastAnswer = null;
+      return;
+    }
+    if (resend) {
+      this.#send({ t: "trivia.answer", cid: a.cid, index: a.index, choice: a.choice });
     }
   }
 

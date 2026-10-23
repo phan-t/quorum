@@ -1336,6 +1336,9 @@ wss.on("connection", (socket: WebSocket, req: IncomingMessage) => {
         if (joined) {
           clearTimeout(helloTimer);
           const { runtime, client } = joined;
+          // Before the add, so the resumed question reaches everyone already
+          // here in the broadcast and this socket in its own state below.
+          if (client.role === "participant") runtime.resumePausedQuestion(now);
           runtime.clients.add(client);
           runtime.sendState(client, now);
           // The new client's own state already carries the roster; sending it

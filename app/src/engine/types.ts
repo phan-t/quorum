@@ -261,6 +261,20 @@ export interface TriviaState {
   readonly opensAt: number | null;
   readonly closesAt: number | null;
   /**
+   * The clock of a question the process went away in the middle of.
+   *
+   * Set by `pauseQuestion` at recovery and spent by `resumeQuestion` when the
+   * first phone comes back. While it is present the question is open with
+   * `closesAt` null, so nothing counts down and no timer is armed: the room
+   * cannot reach the process until the load balancer has seen it healthy, and
+   * a deadline that kept running through that gap would close the question on
+   * a room that never got back to it.
+   *
+   * Optional because a snapshot written before restarts paused anything does
+   * not have it, and absent is exactly what those rows mean.
+   */
+  readonly paused?: { readonly elapsedMs: number; readonly remainingMs: number };
+  /**
    * Questions held back for sudden death, in the order they will be asked.
    *
    * Separate from `questions` because SCORING.md's sudden death "scores
@@ -1222,6 +1236,14 @@ export type Event =
   | { type: "answerQuestion"; pid: ParticipantId; choice: number; ms: number }
   /** Host closing early, or the server's timer firing. Same event either way. */
   | { type: "closeQuestion" }
+  /**
+   * Recovery stopping the clock on an open question, at the instant the last
+   * process was last known to be alive. Never logged: like the disconnects
+   * recovery applies, it is a fact about the restart, not about the game.
+   */
+  | { type: "pauseQuestion" }
+  /** The first phone back after a restart starts the paused clock again. */
+  | { type: "resumeQuestion" }
   | { type: "revealQuestion" }
   | { type: "nextQuestion" }
   /**
