@@ -34,8 +34,8 @@ make 300, and nothing else adds to a total. The service applies those rules
 without changing them.
 
 **Seal and reveal** is a state rather than a display toggle. While a session
-is sealed, no surface shows cumulative standings. Not the Desktop, not a
-phone, not a running total, until the host reveals them.
+is sealed, the Desktop, the phones, and every running total hide the
+cumulative standings until the host reveals them.
 
 **The content** is the material these sessions already used. A question set
 is drawn at random from the shared bank,
@@ -63,7 +63,7 @@ exist before the first deploy.
 
 [Business Source License 1.1](LICENSE). Run it for your own team's events.
 You may not offer it to other people as a hosted service. On 18 September
-2030 it becomes Mozilla Public License 2.0 and those restrictions fall away.
+2030 it becomes Mozilla Public License 2.0 and those restrictions end.
 
 ---
 
