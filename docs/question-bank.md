@@ -1,34 +1,32 @@
-# Question bank — HashiCorp trivia (+ a little IBM)
+# Question bank: HashiCorp trivia, with a little IBM
 
-32 questions, weighted heavily toward **HashiCorp history and products**. Run
-**20 to 24**. Suggested set at the bottom.
+The bank has 32 questions, weighted heavily towards **HashiCorp history and
+products**. Run **20 to 24** of them. A suggested set is at the bottom.
 
-This is the writing surface; it is not what the service reads. Quorum loads
+Questions are drafted in this file, but the service does not read it. Quorum loads
 JSON: every event draws 20 questions at random from the shared bank,
 `config/event.example/trivia-questions.json`, and shuffles in any extras from
 `config/events/<event>/additional-trivia-questions.json`. The format is
 documented in
 [`config/README.md`](../config/README.md) and
-[SPEC.md](../SPEC.md#question-file). Swapping a question in means editing the
-JSON, not this file.
+[SPEC.md](../SPEC.md#question-file). To swap a question in, edit the JSON.
 
-Correct answer in **bold**. `T` = suggested time limit, in seconds.
+The correct answer is in **bold**, and `T` is the suggested time limit in seconds.
 
-> Questions that turn on dates, names or branding were checked against
+> Questions that turn on dates, names, or branding were checked against
 > sources on **19 September 2026** and are marked **✅ Verified** with what
 > confirmed them. Re-check if this bank is reused for a later event.
 
 > **Two of the three verified questions are in the shipped set, and the
-> verification paid for itself on one of them.** D4 and E4 are both in
-> `config/event.example/trivia-questions.json`; D4 went into that file dated
-> "in 2023", and the note under D4 below is what caught it. A8 is still
-> bank-only, so verifying it protects a *future* swap rather than the next
-> game. If you swap it in, the JSON is what the service reads — edit that, not
-> this.
+> check caught an error in one of them.** D4 and E4 are both in
+> `config/event.example/trivia-questions.json`. D4 went into that file dated
+> "in 2023", and the note under D4 below caught it. A8 is still bank-only, so
+> its verification matters for a *future* swap and not for the next game. If
+> you swap it in, edit the JSON, because that is what the service reads.
 
 ---
 
-## Round A — HashiCorp history (8)
+## Round A: HashiCorp history (8)
 
 **A1.** In what year was HashiCorp founded? `T20`
 A) 2008 B) 2010 C) **2012** D) 2015
@@ -59,12 +57,12 @@ A) HASH B) **HCP** C) HSHC D) TFRM
 
 > *Confirmed 19 Sep 2026: trading opened 9 Dec 2021 and the IPO closed
 > 13 Dec 2021, ticker `HCP` on the Nasdaq Global Select Market. The listing
-> ended when IBM completed the acquisition. `HCP` is a nice answer precisely
-> because it collides with HashiCorp Cloud Platform.*
+> ended when IBM completed the acquisition. `HCP` makes a good answer because
+> it is also the abbreviation for HashiCorp Cloud Platform.*
 
 ---
 
-## Round B — Name that product (8)
+## Round B: Name that product (8)
 
 **B1.** Secrets management, encryption as a service, dynamic credentials? `T20`
 A) Consul B) Boundary C) **Vault** D) Nomad
@@ -95,7 +93,7 @@ A) Vault Sentinel B) **Vault Radar** C) Consul Watch D) Vault Scout
 
 ---
 
-## Round C — Product deep cuts (8)
+## Round C: Product deep cuts (8)
 
 **C1.** Which Terraform command previews changes without applying them? `T20`
 A) terraform preview B) **terraform plan** C) terraform dry-run D) terraform diff
@@ -130,7 +128,7 @@ D) Merkle partitioning
 
 ---
 
-## Round D — Licensing & brand (4)
+## Round D: Licensing and brand (4)
 
 **D1.** In 2023 HashiCorp changed its source licence from MPL 2.0 to which
 licence? `T20`
@@ -146,12 +144,12 @@ A) Vault B) Consul C) **Terraform** D) Nomad
 A) Terraform Enterprise B) **HCP Terraform** C) Terraform One D) HashiCorp Terraform
 
 > *Confirmed 19 Sep 2026: renamed to HCP Terraform on 22 Apr 2024; the
-> product itself did not change. Terraform Enterprise remains a separate
-> product, which is what makes A a fair distractor rather than a trick.*
+> product itself did not change. Terraform Enterprise is still a separate
+> product, so A is a fair distractor.*
 
 ---
 
-## Round E — IBM (4, deliberately light)
+## Round E: IBM (4, deliberately light)
 
 **E1.** IBM's long-standing nickname? `T10`
 A) Big Iron B) **Big Blue** C) The Blue Giant D) Blue Sky
@@ -167,12 +165,12 @@ HashiCorp? `T20`
 A) 2023 B) 2024 C) **2025** D) 2026
 
 > *Confirmed 19 Sep 2026: announced 24 Apr 2024, closed 27 Feb 2025 at
-> $6.4bn. The gap is the question — B is what most of the room will pick,
-> because the announcement is the part they remember.*
+> $6.4bn. The question tests the gap between those two dates. Most of the
+> room will pick B, because they remember the announcement.*
 
 ---
 
-## Round F — APJ spares & sudden death (not in the main 20)
+## Round F: APJ spares and sudden death (not in the main 20)
 
 **F1.** Which is the world's southernmost capital city? `T20`
 A) Canberra B) **Wellington** C) Hobart D) Christchurch
@@ -193,111 +191,115 @@ A) Japan B) Australia C) India D) **All of these**
 
 ## The 20 to run
 
-Weighted to HashiCorp history and products, IBM kept as seasoning:
+This set is weighted to HashiCorp history and products, with two IBM questions:
 
 | Round | Take | Why |
 | --- | --- | --- |
-| **A** — history | A1, A2, A3, A5, A6, A7 (6) | Warm-up; everyone scores on A1–A3 |
-| **B** — name that product | all 8 | The core of the round |
-| **C** — deep cuts | C1, C3, C5, C7 (4) | Where the field separates |
-| **E** — IBM | E1, E2 (2) | Light touch, keeps it fun |
+| **A**: history | A1, A2, A3, A5, A6, A7 (6) | Warm-up; everyone scores on A1–A3 |
+| **B**: name that product | all 8 | Most of the set's product questions |
+| **C**: deep cuts | C1, C3, C5, C7 (4) | Spreads out the scores |
+| **E**: IBM | E1, E2 (2) | Two light questions to keep it fun |
 
 That is **20**, and it is no longer what
 `config/event.example/trivia-questions.json` contains. The committed example is
-**24 scored questions plus four tiebreakers**, and the difference between the
-two is the one thing worth carrying away from this table: it drops six of
-Round B's eight and five of Round C's, because a room of solutions architects
-answers "which product does secrets management" before the timer has finished
-drawing itself, and a free mark early is worse than a free mark late — speed
-weighting and the streak bonus both compound, so the openers decide the game.
-What survives from those two rounds is what is not sight-reading: B7 and B8 for
-Sentinel and Vault Radar, C5, C7 and C8 for dynamic secrets, Raft and Shamir.
-D1/D2 are in, because the licence argument is one this audience enjoys having.
-Take this table as the shape and read the JSON for what will actually be
-asked.
+**24 scored questions plus four tiebreakers**. The most important difference
+is that it drops six of Round B's eight questions and five of Round C's,
+because a room of solutions architects answers "which product does secrets
+management" before the timer has finished drawing itself. A free mark early is
+worse than a free mark late, because speed weighting and the streak bonus both
+compound, so the opening questions decide the game. The questions kept from
+those two rounds are the ones the room can't answer on sight: B7 and B8 for
+Sentinel and Vault Radar, and C5, C7, and C8 for dynamic secrets, Raft, and
+Shamir. D1 and D2 are in, because this audience enjoys the licence argument.
+Use this table for the shape of the set, and read the JSON for the questions
+that will be asked.
 
-Ordering, in the example and in anything built from it: open warm, **announce**
-a short block of on-sight questions where the streaks build, put the hard ones
-in the middle where the field separates, and close on something the whole mixed
-room can get. Never open on a deep cut and never close on one either.
+Order the example, and anything built from it, like this: open with easy
+questions, **announce** a short block of questions the room can answer on sight
+so the streaks build, put the hard ones in the middle to spread out the scores,
+and close on something the whole mixed room can answer. Don't open or close on
+a deep cut.
 
-**Round F is in the JSON**, as four questions flagged `"tiebreak": true` — F1
-to F4. A flagged question is lifted out of the scored set and into the pool
-sudden death draws on, so those four cost the game nothing in length. Without
-them the engine falls back to a built-in pool, which used to ask C7's Raft
-question again — a tie settled by two people racing to retype an answer they
-heard twenty minutes earlier — and is general knowledge now for exactly that
-reason. Round F is still the better answer, because a tiebreaker written by
+**Round F is in the JSON** as F1 to F4, four questions flagged
+`"tiebreak": true`. A flagged question is lifted out of the scored set and into
+the pool sudden death draws on, so those four don't make the game any longer.
+Without them the engine falls back to a built-in pool. That pool used to ask
+C7's Raft question again, which settled a tie by two people racing to retype an
+answer they had heard twenty minutes earlier, so it now asks general knowledge
+questions. Round F is still the better choice, because a tiebreaker written by
 whoever wrote the set is verified in the same pass as the set. Their
-`timeLimitSec` is this bank's suggestion and nothing more: sudden death has no
-clock, because it ends when someone is right rather than when time runs out, so
-the reducer never reads the field on a flagged question.
+`timeLimitSec` is only this bank's suggestion. Sudden death has no clock,
+because it ends when someone answers correctly, so the reducer never reads the
+field on a flagged question.
 
 ---
 
-## Round S — the "someone we're celebrating" round *(template)*
+## Round S: the "someone we're celebrating" round *(template)*
 
-A reusable pattern for farewells, work anniversaries and milestones. Five
-questions about one person, dropped in as the **second-to-last** block of the
-quiz — late enough that everyone has warmed up, early enough that you still
-close on a question everyone can answer.
+This is a reusable pattern for farewells, work anniversaries, and milestones.
+It is five questions about one person, dropped in as the **second-to-last**
+block of the quiz. By then everyone has warmed up, and a question everyone can
+answer is still left to close on.
 
-It works because the person being celebrated plays too, and watching the team
-guess wrong about them is the joke.
+It works because the person being celebrated plays too, and the room enjoys
+watching the team guess wrong about them.
 
 ### How to fill it
 
-Ask the person a week ahead. Copy-paste this, DM it, ten minutes of their time.
+Ask the person a week ahead. Copy the message below and send it as a DM, which
+takes about ten minutes of their time.
 Ask early in their day so they have the evening to think, and tell them they
 will see every question before anyone else does.
 
-> Hey — we're doing five quiz questions about you at Friday's huddle, right
-> before the send-off. It's a gift, not a roast, and you get to approve all five
-> before anyone sees them. You're playing too, and if you win the round we'll
+> Hey, we're doing five quiz questions about you at Friday's huddle, right
+> before the send-off. It's meant as a gift rather than a roast, and you get to
+> approve all five before anyone sees them. You're playing too, and if you win the round we'll
 > make a thing of it.
 >
 > Could you answer any six or seven of these? Short answers are perfect.
 >
 > 1. Which city were you living in before you joined HashiCorp?
-> 2. What was your first-ever job — the one before the career started?
-> 3. What's the order you get every single time — coffee, lunch, whatever it is?
+> 2. What was your first-ever job, before the career started?
+> 3. What do you order every single time, whether it's coffee, lunch, or
+>    something else?
 > 4. Go-to karaoke song, or the one you'd refuse to sing?
 > 5. Which airport have you passed through most, and roughly how many times?
 > 6. Tell me about something that went sideways on a customer visit or a demo,
 >    and what happened next.
 > 7. Give me three true things about you most of the team wouldn't know, and one
 >    believable thing that is completely false.
-> 8. Roughly how many [customer workshops / flights / certifications / demos]
+> 8. Roughly how many [customer workshops, flights, certifications, or demos]
 >    have you done since joining?
 > 9. Anything that is off-limits? I'd rather ask now.
 >
-> Also — anything you *want* the team to know before you go? I'll find a place
-> for it.
+> Also, is there anything you *want* the team to know before you go? I'll find a
+> place for it.
 
 If they are slow to reply, ask two people who have worked with them longest and
 have the person approve the result. Do not skip the approval step.
 
-The good questions are specific and slightly absurd. The bad ones are either
-guessable from their LinkedIn or so obscure that nobody scores.
+Good questions are specific and slightly absurd. Avoid anything guessable from
+their LinkedIn, or so obscure that nobody scores.
 
-Aim for: two everyone will get, two that split the room, one nobody gets.
+Aim for two questions everyone will get, two that split the room, and one nobody
+gets.
 
 ### Writing the wrong answers
 
-This is the part that decides whether the round works, and it is harder than
-picking the questions.
+The wrong answers decide whether the round works, and they are harder to write
+than the questions.
 
 - **Make every option survivable if read aloud as true.** Someone will pick
   each one, and the person hears all four.
 - **No joke option.** A silly fourth answer is eliminated instantly and turns a
   four-way question into a three-way one.
-- **Same shape and length across all four** — the long one is always the real
-  one, and people know it.
+- **Same shape and length across all four.** People know that the long one is
+  always the real one.
 - **For a "how many" question, bracket the truth.** If the real number is 40,
-  offer 15 / 40 / 75 / 120, not 5 / 40 / 45 / 50. Nobody should get it by
-  reasoning.
-- **For the "NOT true" question, three true and one false**, and the false one
-  must be the sort of thing that *could* be true of them.
+  offer 15, 40, 75, and 120 rather than 5, 40, 45, and 50, because nobody should
+  be able to reason their way to the answer.
+- **For the "NOT true" question, write three true options and one false**, and
+  the false one must be the sort of thing that *could* be true of them.
 
 ```
 S1. Which city did ______ live in before joining HashiCorp?
@@ -318,23 +320,23 @@ S5. How many ______________ has ______ done since joining?
 
 ### Rules
 
-- **Clear every question with the person first.** All five, no surprises. A
-  farewell round is a gift, not a roast, and you will not be able to read the
-  room over video if one lands badly.
-- **Nothing about performance, pay, or why they are leaving.** Nothing they
-  flagged as off-limits. If a question needs a caveat before you read it, cut
-  it.
-- Give S3 a 30-second timer — "which is NOT true" always needs longer than you
-  think.
-- The person being celebrated plays along. If they win the round, that is the
-  best possible outcome — let it happen and make a thing of it.
+- **Clear every question with the person first.** Show them all five so that
+  nothing surprises them. A farewell round should feel like a gift, and over
+  video you will not be able to tell whether a question has upset someone.
+- **Nothing about performance, pay, or why they are leaving.** Leave out
+  anything they flagged as off-limits too. If a question needs a caveat before
+  you read it, cut it.
+- Give S3 a 30-second timer, because a "which is NOT true" question always takes
+  longer to answer than you expect.
+- The person being celebrated plays along. If they win the round, let it happen
+  and celebrate it, because that is the best outcome the round can have.
 
 ### Scoring
 
 Round S counts toward the trivia total like any other question. It is five
-questions about someone the whole room knows, so it compresses the scores
-slightly — that is fine, and it keeps more people in contention going into the
-last activity.
+questions about someone the whole room knows, so it narrows the gaps between
+scores slightly. That is fine, because it keeps more people in contention going
+into the last activity.
 
 ### Into the question file
 
@@ -355,17 +357,18 @@ Each question looks like any other:
 }
 ```
 
-`correct` is the answer's **letter**, not its position — neither 0-based nor
-1-based, so there is no off-by-one to get wrong. Unknown keys are refused
+`correct` is the answer's **letter** rather than a 0-based or 1-based
+position, so there is no off-by-one to get wrong. Unknown keys are refused
 rather than ignored, so a misspelled `timelimitSec` fails the upload instead of
-quietly becoming a different timer in front of the room.
+being dropped and leaving the question on a different timer in front of the
+room.
 
 A round built this way names a real person, which is why the file it goes in is
 gitignored and why only the example set is committed. The reasoning is in
-[`config/README.md`](../config/README.md); the short version is that this
-repository is public and a question set is content about the people in the
+[`config/README.md`](../config/README.md), and it comes down to this: the
+repository is public, and a question set is content about the people in the
 room.
 
-Place the five so that **at least one easy question still follows them**: the
-quiz should close on something everyone can answer, not on the hardest question
-about one person.
+Place the five so that **at least one easy question still follows them**. The
+quiz should then close on something everyone can answer instead of the hardest
+question about one person.
